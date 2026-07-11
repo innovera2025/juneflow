@@ -26,7 +26,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
-| P0-BE-01 | backend | ready | PLAN.md §5 (โครง monorepo) + Manifest กลุ่ม 5 | — | CI: lint+typecheck+build ทุก workspace | 3 ชม. |
+| P0-BE-01 | backend | review | PLAN.md §5 (โครง monorepo) + Manifest กลุ่ม 5 | — | CI: lint+typecheck+build ทุก workspace | 3 ชม. |
 | P0-BE-02 | backend | done | ก๊อป `docs/extract/` (Cowork pack 8 ไฟล์ ← sacred) + `docs/handoff/` (design_handoff_juneflow ทั้งชุด) ตามกลุ่ม 5 | P0-BE-01 | inventory ครบ: extract 8 ไฟล์ + handoff ทั้งชุด (byte-identical กับต้นทาง) | 1 ชม. |
 | P0-BE-03 | backend | done | `scripts/copy-references` — ก๊อป `pototype/gallery/g1–g5` ทั้งหมด **106 .jpg** (ดู B-001) + `pototype/shots/` 22 .png → `tests/visual/reference/` | P0-BE-01 | จำนวนไฟล์ตรง 106 + 22 · ห้ามแก้ไฟล์ต้นทาง | 1 ชม. |
 | P0-BE-04 | backend | ready | `packages/tokens` — tokens.css/tokens.json (ธีม fiori จาก `docs/handoff/`) + pipeline + gen Flutter ThemeData (PLAN.md §5, กลุ่ม 5) | P0-BE-01, P0-BE-02 | CI + output gen ตรงค่า token ต้นทาง (ห้าม hardcode) | 3 ชม. |
