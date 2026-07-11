@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Juneflow — Data Dictionary</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0}body{font-family:Sarabun,sans-serif;background:#F5F6F7;color:#223548;padding:32px;font-size:13px;line-height:1.6}
+.wrap{max-width:1020px;margin:0 auto}
+h1{font-size:24px;margin-bottom:4px}.sub{color:#556B82;margin-bottom:24px}
+section{background:#fff;border:1px solid #D9DCDF;border-radius:6px;padding:20px 24px;margin-bottom:16px}
+h2{font-size:15.5px;color:#0A6ED1;margin-bottom:2px}
+.rel{font-size:11.5px;color:#556B82;margin-bottom:10px;font-family:"IBM Plex Sans",Sarabun}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#FAFBFC;border-bottom:2px solid #D9DCDF;text-align:left;padding:6px 9px;color:#556B82;font-size:10.5px}
+td{border-bottom:1px solid #ECEEF0;padding:6px 9px;vertical-align:top}
+td:first-child{font-family:"IBM Plex Sans";font-weight:600;color:#0A6ED1;white-space:nowrap}
+td:nth-child(2){color:#8FA0B2;white-space:nowrap;font-family:"IBM Plex Sans";font-size:11px}
+.grp{font-size:12px;font-weight:800;color:#8FA0B2;text-transform:uppercase;letter-spacing:.06em;margin:26px 0 10px}
+@media print{body{background:#fff;padding:0}section{border:none;page-break-inside:avoid}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>Data Dictionary</h1>
+<div class="sub">Entity หลัก + ฟิลด์สำคัญ + ความสัมพันธ์ · ใช้ออกแบบฐานข้อมูล production · (id ทุกตารางเป็น PK, *_id = FK)</div>
+
+<div class="grp">Platform / Tenant</div>
+<section><h2>Company (Tenant)</h2><div class="rel">1 Company → N Project, N User, 1 Subscription · หลายบริษัทในระบบเดียว (multi-tenant)</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>id</td><td>uuid</td><td></td></tr><tr><td>name / tax_id / address</td><td>text</td><td>ข้อมูลนิติบุคคล (ใช้ออก e-Tax)</td></tr>
+<tr><td>subscription_id</td><td>fk</td><td>แพ็กเกจที่ใช้อยู่</td></tr><tr><td>status</td><td>enum</td><td>active | suspended</td></tr></table></section>
+
+<section><h2>Package / Subscription</h2><div class="rel">Package (S/M/L/Full) → N Subscription · เจ้าของระบบแก้ Package ได้</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>Package.size,name,price_m,price_y</td><td>text/num</td><td>S=2900 M=7900 L=14900 Full=ติดต่อ</td></tr>
+<tr><td>Package.limits</td><td>json</td><td>{projects, users, storage_gb, ai_per_month} · -1 = ไม่จำกัด</td></tr>
+<tr><td>Package.menus</td><td>string[]</td><td>nav id ที่ปล่อย (46 เมนู) + sub_rules (ptype→Full, aiqto→M+)</td></tr>
+<tr><td>Subscription.company_id,package_id,cycle,renew_at,status</td><td>—</td><td>active | expiring | overdue | cancelled</td></tr>
+<tr><td>PlatformInvoice.subscription_id,amount,status</td><td>—</td><td>paid | pending | overdue (→ ทวงถาม)</td></tr>
+<tr><td>AiUsage.company_id,month,used</td><td>—</td><td>ตัดโควต้า AI QTO รายเดือน</td></tr></table></section>
+
+<section><h2>User / Role</h2><div class="rel">User ∈ Company · Role กำหนดสิทธิ์ + ขั้นอนุมัติ (matrix)</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>email,name,role_id,status</td><td>—</td><td>active | blocked (admin บล็อก/รีเซ็ตรหัสได้)</td></tr>
+<tr><td>Role.approval_limits</td><td>json</td><td>เพดานอนุมัติต่อชนิดเอกสาร</td></tr></table></section>
+
+<div class="grp">โครงการ / Master</div>
+<section><h2>Project · ProjectType</h2><div class="rel">Company → N Project · Project ∈ 1 ProjectType (กำหนด WBS + โมดูล) · hierarchy: Project → Phase → Block → Unit (label ตาม type)</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>Project.name,type,budget,status</td><td>—</td><td>type: realestate | solar | civil | service</td></tr>
+<tr><td>ProjectType.hierarchy</td><td>string[]</td><td>เช่น [ไซต์, โซน/Array, String, Inverter]</td></tr>
+<tr><td>ProjectType.modules</td><td>json</td><td>เมนูที่เปิดต่อ type (ซ้อนกับ package)</td></tr>
+<tr><td>Phase/Block/Unit</td><td>tree</td><td>parent_id + model_id (แบบบ้าน) + สถานะขาย</td></tr>
+<tr><td>CostCenter.code,name,project_id</td><td>—</td><td>ผูกทุกเอกสารต้นทุน (รวมงานสำรวจที่ดิน)</td></tr>
+<tr><td>Vendor / Customer</td><td>—</td><td>master แยกชัด: vendor(ผู้ขาย|ผู้รับเหมา flag) · customer (ผู้ซื้อ/ลูกค้า PM) — บัญชี AP/AR ดึงจากที่นี่</td></tr></table></section>
+
+<div class="grp">BOQ / จัดซื้อ</div>
+<section><h2>BOQ (Doc → Group → Item) · BOM</h2><div class="rel">Project → N BOQDoc · BOQDoc → N Group → N Item · Item ← BOM template ได้ · Revise = เวอร์ชันใหม่ทั้ง doc</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>BOQDoc.no,name,scope,version,status</td><td>—</td><td>draft | pending | approved(ล็อก) | revise</td></tr>
+<tr><td>BOQItem.code,name,cat,qty,unit,price,cc_id</td><td>—</td><td>cat: M วัสดุ | L ค่าแรง | S เหมา · remain_qty ตัดเมื่อเปิด PR</td></tr>
+<tr><td>BOQItem.element_id</td><td>fk?</td><td>traceability ไป CAD/BIM element (AI QTO)</td></tr>
+<tr><td>CBSBudget.group_id,budget,used,committed</td><td>—</td><td>Budget Control รายหมวด + ไฟเตือนเกินงบ</td></tr></table></section>
+
+<section><h2>PR · PO/WO · GR</h2><div class="rel">PR → N รายการ (จาก BOQ) · PR อนุมัติ → PO(วัสดุ)/WO(เหมา) · PO → N GR · WO → N WorkPeriod</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>PR.no,type,project_id,need_date,status,approval_step</td><td>—</td><td>type: material | subcon | expense | advance</td></tr>
+<tr><td>PO.vendor_id,total,vat,credit_term</td><td>—</td><td>+ VariationOrder (dir add|cut, amount, reason)</td></tr>
+<tr><td>GR.po_id,received,rejected,photos[]</td><td>—</td><td>ตีกลับ → DefectReport + แจ้งผู้ขาย</td></tr></table></section>
+
+<div class="grp">ผู้รับเหมา / ตรวจรับ</div>
+<section><h2>SubconContract · WorkPeriod · Acceptance/Defect</h2><div class="rel">Vendor(subcon) → N Contract · Contract → N WorkPeriod (เกณฑ์ %|ระยะทาง|milestone) → 1 Acceptance → N Defect</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>Contract.no,value,retention_pct,start,end</td><td>—</td><td>เอกสารสัญญา+PO แนบเข้า DMS</td></tr>
+<tr><td>WorkPeriod.seq,basis,target,pct,amount,status</td><td>—</td><td>basis: percent | distance(m) | milestone · status: pending|delivered|inspecting|passed|rejected|paid</td></tr>
+<tr><td>Acceptance.inspector,photos[],docs[],signed_at</td><td>—</td><td>โฟร์แมนตรวจผ่าน mobile</td></tr>
+<tr><td>Defect.item,severity,before/after_photo,due,status</td><td>—</td><td>open → fixing → recheck → closed</td></tr></table></section>
+
+<div class="grp">PM (CMMS)</div>
+<section><h2>PMContract · PMAsset · PMWorkOrder</h2><div class="rel">Project → N PMContract → N PMAsset · แผน → auto-gen PMWorkOrder → Checklist rows · ใบเสนอราคาอะไหล่ → ลูกค้าอนุมัติ (LINE)</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>PMContract.mode,visits_per_year,sla,value,end</td><td>—</td><td>mode: MA เงื่อนไข | per-visit (หารครั้งลงปฏิทิน)</td></tr>
+<tr><td>PMAsset.kind,site,cycle,next_due</td><td>—</td><td>type-aware (ลิฟต์/อินเวอร์เตอร์/เครน/...)</td></tr>
+<tr><td>PMWO.tech,checkin_gps,items[{label,result,before,after}],cause,fix,advice,customer_sign</td><td>json</td><td>result: normal | adjust | repair · ปิดงาน → ใบรับรอง → LINE</td></tr>
+<tr><td>ChecklistTemplate.kind,items[]</td><td>—</td><td>ตั้งค่ากลาง เลือกใส่ตอนสร้างใบงาน</td></tr></table></section>
+
+<div class="grp">การเงิน-บัญชี</div>
+<section><h2>AP/AR · GL · Bank · FA · e-Tax</h2><div class="rel">ทุกเอกสารเงิน → GLPosting → JV (double entry) · Invoice → eTaxQueue · PV หัก WHT → ออก 50 ทวิ</div>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>APBilling / PV</td><td>—</td><td>3-way match (po,gr,inv) · wht_pct, net · batch_id (Export to Bank)</td></tr>
+<tr><td>ARInvoice / RV</td><td>—</td><td>credit_term, vat, etax_status: queued|sent|rejected</td></tr>
+<tr><td>JV.lines[{account_id,dr,cr,cc_id,project_id}]</td><td>json</td><td>งบทดลอง/งบการเงิน/P&L โครงการ/กระแสเงินสด ได้จาก JV รวม</td></tr>
+<tr><td>GLAccount (COA)</td><td>tree</td><td>ผังบัญชีมาตรฐาน + map ต่อชนิดเอกสาร</td></tr>
+<tr><td>Cheque / BankStatement / Reconcile</td><td>—</td><td>นำเข้า statement → จับคู่อัตโนมัติ/มือ → ปิดงวดล็อก</td></tr>
+<tr><td>FixedAsset.cost,life_years,cc_id,depr_method</td><td>—</td><td>ค่าเสื่อมรายเดือน → JV อัตโนมัติ</td></tr>
+<tr><td>Labor: Worker/Attendance/Payroll · OpexBudget(dept,year,months[])</td><td>—</td><td>ค่าแรง → ลงต้นทุนโครงการ · OPEX เทียบหลายปี</td></tr></table></section>
+
+<div class="grp">อื่นๆ</div>
+<section><h2>LandPlot · SalesUnit · Document (DMS) · Notification · AuditLog</h2>
+<table><tr><th>ฟิลด์</th><th>ชนิด</th><th>คำอธิบาย</th></tr>
+<tr><td>LandPlot.deed_no,area(rai-ngan-wa),gps,price_per_rai,stage,tenure</td><td>—</td><td>stage 7 ขั้น pipeline · DD checklist json</td></tr>
+<tr><td>SalesUnit.unit_id,customer_id,stage,booking,contract,down[],loan,transfer</td><td>—</td><td>ผูก AR + ตรวจรับบ้าน (Defect)</td></tr>
+<tr><td>Document.cat,project_id,version,expiry,link_module</td><td>—</td><td>ทุกโมดูลแนบไฟล์เข้า DMS อัตโนมัติ · เตือนหมดอายุ 60 วัน</td></tr>
+<tr><td>Notification.user_id,type,ref,read</td><td>—</td><td>ศูนย์แจ้งเตือน + Mobile + LINE</td></tr>
+<tr><td>AuditLog.user,action,entity,before/after,ip,at</td><td>json</td><td>ทุก create/update/approve/void</td></tr></table></section>
+
+</div></body>
+</html>

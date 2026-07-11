@@ -1,0 +1,24 @@
+{
+  "name": "@juneflow/notifications",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NotificationAdapter compliance interface + line/email/webpush adapters (skeleton + fake, mock-first). Credentials via env only (P0-INT-04) - never committed.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adapters/line": "./src/adapters/line.ts",
+    "./adapters/email": "./src/adapters/email.ts",
+    "./adapters/webpush": "./src/adapters/webpush.ts"
+  },
+  "scripts": {
+    "build": "echo 'TODO(P0-BE-01): build wired by monorepo tooling (pnpm workspaces + Turborepo)'",
+    "lint": "echo 'TODO(P0-BE-01): lint wired by monorepo tooling'",
+    "typecheck": "echo 'TODO(P0-BE-01): typecheck wired by monorepo tooling'",
+    "test": "echo 'TODO(P0-INT-03): unit tests for NotificationAdapter interface + fake adapters (gate G3)'"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

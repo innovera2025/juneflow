@@ -1,0 +1,14 @@
+{
+  "name": "@juneflow/contracts",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Juneflow API contract - openapi.yaml (SACRED after merge) + TS/Dart client codegen. FE/Mobile generate clients from here; hand-written models are forbidden (PLAN.md section 5).",
+  "scripts": {
+    "gen:ts": "mkdir -p src/generated && openapi-typescript openapi.yaml -o src/generated/types.ts",
+    "gen:dart": "echo 'TODO(P0-MOB-03): Dart client codegen from openapi.yaml is owned by the mobile zone (see TASKS.md P0-MOB-03)' && exit 0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.5.2"
+  }
+}

@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.turbo/
+
+# Test artifacts (generated at run time)
+coverage/
+playwright-report/
+test-results/
+
+# Environment files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# OS / logs
+.DS_Store
+*.log
+
+# Read-only reference sources — NOT tracked (Wei delta 11 ก.ค. 2569, B-004):
+# the repo-internal sources are docs/handoff + docs/extract only
+pototype/
+design_handoff_juneflow/
+juneflow-extract/
+
+# NOTE (intentional — do NOT add ignore rules for these):
+# - tests/visual/reference/  -> visual gate reference images MUST be tracked
+# - docs/                    -> copied extract/handoff docs MUST be tracked

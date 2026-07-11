@@ -1,0 +1,115 @@
+# infra/docker-compose.yml — Juneflow dev stack
+# Phase 0 milestone (PLAN.md §5/§7 + Manifest group 5): a single `docker compose up`
+# yields the full running system (pg16 + redis + api + web + worker) ALREADY SEEDED
+# ("up เดียว+seed"). Task: TASKS.md P0-DEV-01 (depends on P0-BE-10 seed, P0-BE-13 api skeleton).
+#
+# Secrets rule (infra/CLAUDE.md): no secrets in this repo — everything enters via
+# infra/.env (git-ignored) or host env. Values below are dev-only defaults.
+
+name: juneflow
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-juneflow}
+      POSTGRES_USER: ${POSTGRES_USER:-juneflow}
+      # Dev-only default password — real value must come from infra/.env, never committed.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-juneflow-dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-juneflow} -d ${POSTGRES_DB:-juneflow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot migrate + seed. Runs to completion then exits 0; api/worker wait for it.
+  # This is what guarantees "docker compose up" alone produces a seeded, clickable
+  # system comparable against pototype/gallery (Manifest group 5 / PLAN.md §7 Phase 0).
+  migrate-seed:
+    build:
+      context: ../apps/api
+      # TODO(P0-DEV-01): Dockerfile does not exist yet (arrives with P0-BE-13).
+      # NOTE: pnpm-workspace deps may force the build context up to the repo root —
+      # resolve when writing the Dockerfile; keep this compose contract stable.
+    image: juneflow-api:dev
+    env_file:
+      - path: ./.env
+        required: false # TODO(P0-DEV-01): create infra/.env locally (never commit it)
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://juneflow:juneflow-dev@postgres:5432/juneflow}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # TODO(P0-BE-10): implement `db:migrate-and-seed` in packages/db — Drizzle migrations
+    # + seed from docs/extract/MOCK-DATA.md §summary. Must be idempotent: data persists,
+    # no reseed on every restart (PLAN.md §0 rule 3 — reseed-on-reload is a mock mechanism).
+    command: ["pnpm", "run", "db:migrate-and-seed"]
+    restart: "no"
+
+  api:
+    build:
+      context: ../apps/api
+    image: juneflow-api:dev
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://juneflow:juneflow-dev@postgres:5432/juneflow}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate-seed:
+        condition: service_completed_successfully
+    # TODO(P0-BE-13): Fastify app skeleton provides the image CMD + /health endpoint;
+    # wire a container healthcheck against it here in P0-DEV-01.
+
+  # BullMQ worker — same image as api, different command (PLAN.md §5: async jobs
+  # export / e-Tax / notification / PM schedule gen).
+  worker:
+    image: juneflow-api:dev
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://juneflow:juneflow-dev@postgres:5432/juneflow}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    depends_on:
+      redis:
+        condition: service_started
+      migrate-seed:
+        condition: service_completed_successfully
+    # TODO(P0-BE-13): implement the BullMQ worker entrypoint (`pnpm run worker`).
+    command: ["pnpm", "run", "worker"]
+
+  web:
+    build:
+      context: ../apps/web
+      # TODO(P0-DEV-01): Dockerfile arrives with P0-WEB-01 (React 18 + Vite build);
+      # confirm the container port below once it exists.
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pgdata:

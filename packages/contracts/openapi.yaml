@@ -1,0 +1,288 @@
+# =============================================================================
+# SACRED FILE — changes require Wei approval via BLOCKERS.md
+# (PLAN.md section 8/10: OpenAPI contract change goes through Wei ONLY — even
+#  the contract owner (Backend/Platform zone) needs approval before merging.)
+# =============================================================================
+# Single source of the API contract (PLAN.md section 5): FE/Mobile generate
+# clients from this file — hand-written models are forbidden.
+#
+# Derived from: docs/handoff/api-contract.md
+#   (until P0-BE-02 is done, read design_handoff_juneflow/api-contract.md)
+#
+# Contract conventions (api-contract.md):
+#   - REST · JSON · prefix /api/v1
+#   - every request carries Authorization: Bearer <jwt>; the JWT carries
+#     company_id = tenant scope
+#   - standard resource pattern for every resource:
+#       GET /x?filter&page · GET /x/:id · POST /x · PUT /x/:id
+#   - status changes go through action endpoints ONLY
+#     (POST /x/:id/approve) — never via direct PUT of a status field
+#   - every mutation writes AuditLog automatically (middleware)
+#   - attachments: POST /files (multipart) first, then pass file_id —
+#     files enter DMS automatically with link_module
+#   - all exports are async jobs: POST /exports {type,params} →
+#     GET /exports/:id (url when done)
+#   - quota middleware (menus/projects/users/storage/AI per package) →
+#     402 QUOTA_EXCEEDED + upgrade_url
+#
+# TODO(P0-BE-12): backend agent completes ALL endpoints per api-contract.md —
+#   Auth & Tenant · Platform Admin · Master · BOQ/Procurement (incl. AI QTO) ·
+#   Subcon/Acceptance · PM (CMMS) · Finance-Accounting (AP/AR/GL/Bank/FA/e-Tax/
+#   Labor/OPEX) · Land/Sales · DMS/Notifications/AuditLog/Reports ·
+#   Files (presigned) · Exports (async) · LINE webhook (/line/webhook).
+#   The 3 paths below are representative pattern examples only.
+
+openapi: 3.1.0
+
+info:
+  title: Juneflow API
+  version: 0.1.0
+  description: >-
+    Construction ERP + Subscription SaaS (multi-tenant).
+    REST, JSON, prefix /api/v1. Every request carries
+    "Authorization: Bearer <jwt>"; the JWT carries company_id (tenant scope).
+    Status changes go through action endpoints only, never direct PUT.
+
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: master
+    description: Master data (projects, project types, vendors, customers, cost centers, doc numbering)
+  - name: boq
+    description: BOQ / procurement (BOQ docs, PR, PO/WO, GR, AI QTO)
+
+paths:
+  # --- Representative example 1: standard resource pattern (collection) ------
+  /projects:
+    get:
+      tags: [master]
+      summary: List projects (GET /x?filter&page pattern)
+      operationId: listProjects
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "TODO(P0-BE-12): finalize filter params per api-contract.md"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: >-
+            Project list. TODO(P0-BE-12): finalize the list/pagination envelope
+            (contract change — requires Wei approval).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create project (POST /x pattern)
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created (AuditLog written by middleware).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          $ref: "#/components/responses/QuotaExceeded"
+
+  # --- Representative example 2: standard resource pattern (single item) -----
+  /projects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [master]
+      summary: Get project by id (GET /x/:id pattern)
+      operationId: getProject
+      responses:
+        "200":
+          description: Project (tenant-scoped by company_id from JWT).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [master]
+      summary: Update project (PUT /x/:id pattern — never changes status)
+      description: >-
+        Status transitions are NOT allowed through this endpoint —
+        use action endpoints (see /boq/{id}/approve example).
+      operationId: updateProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "200":
+          description: Updated (AuditLog written by middleware).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- Representative example 3: action endpoint (status transition) ---------
+  /boq/{id}/approve:
+    post:
+      tags: [boq]
+      summary: Approve BOQ doc (POST /x/:id/approve action-endpoint pattern)
+      description: >-
+        Status changes go through action endpoints only
+        (api-contract.md: POST /boq/:id/submit | /approve | /revise (v+1)).
+        Approve locks the BOQ doc (status draft|pending|approved(locked)|revise).
+      operationId: approveBoq
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: >-
+            BOQ doc approved and locked. TODO(P0-BE-12): finalize response
+            schema per data-dictionary BOQDoc.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT carries company_id = tenant scope (api-contract.md).
+
+  responses:
+    Unauthorized:
+      description: Missing/invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found within the tenant scope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    QuotaExceeded:
+      description: >-
+        Package/AI quota exceeded (quota middleware per
+        docs/extract/PACKAGE-RULES.md) — always code QUOTA_EXCEEDED with
+        upgrade_url (PLAN.md section 5).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/QuotaExceededError"
+
+  schemas:
+    Error:
+      type: object
+      description: >-
+        Standard error envelope. TODO(P0-BE-12): finalize exact envelope shape
+        (contract change — requires Wei approval).
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    QuotaExceededError:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          required: [upgrade_url]
+          properties:
+            code:
+              type: string
+              enum: [QUOTA_EXCEEDED]
+            upgrade_url:
+              type: string
+              format: uri
+
+    Project:
+      type: object
+      description: >-
+        Minimal placeholder per data-dictionary Project
+        (name, type, budget, status). TODO(P0-BE-12): finalize fields per
+        docs/handoff/data-dictionary.html + erd.html.
+      required: [id, name, type, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [realestate, solar, civil, service]
+        budget:
+          type: number
+        currency_code:
+          type: string
+          description: Every money value carries currency_code (PLAN.md section 4).
+        status:
+          type: string
+
+    ProjectInput:
+      type: object
+      description: "TODO(P0-BE-12): finalize input fields per data-dictionary."
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [realestate, solar, civil, service]
+        budget:
+          type: number
+        currency_code:
+          type: string

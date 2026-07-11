@@ -1,0 +1,292 @@
+# Juneflow CI — Bootstrap Manifest v2 group 4.3 + PLAN.md §9/§10
+#
+# Stage order mirrors the 5 verification gates (PLAN.md §9):
+#   lint+typecheck -> migration check -> contract tests -> unit -> E2E (Playwright) -> visual gate
+#
+# Scaffold tolerance: every stage guards its steps with hashFiles() and
+# `pnpm run --if-present` so the pipeline is GREEN from day one, before
+# P0-BE-01 lands. As each workspace/script appears, its stage starts running
+# for real without touching this file.
+#
+# Branch flow (PLAN.md §10): feature -> dev (auto-merge when CI is green)
+#                            -> main (Wei promotes MANUALLY, alone).
+# main is LOCKED: no automation in this workflow (or anywhere else) pushes to
+# main — enforce with GitHub branch protection on main. Only Wei promotes
+# dev -> main.
+#
+# NOTE: this file is a sacred file after merge (PLAN.md §10) — changes only
+# via an approved entry in BLOCKERS.md.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - "feature/**"
+  pull_request:
+    branches:
+      - dev
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with root package.json "engines.node" (>=22).
+  NODE_VERSION: "22"
+  # Keep in sync with root package.json "packageManager" (pnpm@11.5.0) —
+  # pnpm/action-setup@v4 hard-errors when this conflicts with that field.
+  PNPM_VERSION: "11.5.0"
+
+jobs:
+  lint-typecheck:
+    name: "Stage 1 — lint + typecheck"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pnpm
+        if: hashFiles('package.json') != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Set up Node
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || '' }}
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+      - name: Lint
+        if: hashFiles('package.json') != ''
+        run: pnpm run --if-present lint
+      - name: Typecheck
+        if: hashFiles('package.json') != ''
+        run: pnpm run --if-present typecheck
+      - name: Pre-scaffold pass
+        if: hashFiles('package.json') == ''
+        run: echo "No package.json yet (P0-BE-01 pending) — stage passes by design so CI is green from day one."
+
+  migration-check:
+    name: "Stage 2 — migration check"
+    needs: lint-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pnpm
+        if: hashFiles('package.json') != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Set up Node
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || '' }}
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+      - name: Drizzle migration check
+        # packages/db must expose a "migration:check" script (P0-BE-06);
+        # --if-present keeps this stage green until it exists.
+        if: hashFiles('packages/db/package.json') != ''
+        run: pnpm --dir packages/db run --if-present migration:check
+      - name: Pre-scaffold pass
+        if: hashFiles('packages/db/package.json') == ''
+        run: echo "packages/db not scaffolded yet — stage passes by design."
+
+  contract-tests:
+    name: "Stage 3 — contract tests"
+    needs: migration-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pnpm
+        if: hashFiles('package.json') != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Set up Node
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || '' }}
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+      - name: Contract tests (generated from packages/contracts/openapi.yaml)
+        if: hashFiles('packages/contracts/openapi.yaml') != '' && hashFiles('package.json') != ''
+        run: pnpm run --if-present test:contract
+      - name: Pre-scaffold pass
+        if: hashFiles('packages/contracts/openapi.yaml') == ''
+        run: echo "packages/contracts/openapi.yaml not present yet (P0-BE-12 pending) — stage passes by design."
+
+  unit-tests:
+    name: "Stage 4 — unit business logic"
+    needs: contract-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pnpm
+        if: hashFiles('package.json') != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Set up Node
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || '' }}
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+      - name: Unit tests (posting rules · BOQ remain · retention · approval matrix · quota · 4-basis work periods)
+        if: hashFiles('package.json') != ''
+        run: pnpm run --if-present test:unit
+      - name: Pre-scaffold pass
+        if: hashFiles('package.json') == ''
+        run: echo "No package.json yet — stage passes by design."
+
+  e2e:
+    name: "Stage 5 — E2E (Playwright)"
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pnpm
+        if: hashFiles('package.json') != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Set up Node
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || '' }}
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+      - name: Start dev stack (docker compose)
+        if: hashFiles('infra/docker-compose.yml') != '' && hashFiles('tests/e2e/**') != ''
+        run: docker compose -f infra/docker-compose.yml up -d --wait
+      - name: Install Playwright browsers
+        if: hashFiles('tests/e2e/**') != '' && hashFiles('package.json') != ''
+        run: pnpm exec playwright install --with-deps chromium
+      - name: E2E tests (state machine per docs/handoff/flows.html)
+        if: hashFiles('tests/e2e/**') != '' && hashFiles('package.json') != ''
+        run: pnpm run --if-present test:e2e
+      - name: Stop dev stack
+        if: always() && hashFiles('infra/docker-compose.yml') != ''
+        run: docker compose -f infra/docker-compose.yml down -v || true
+      - name: Pre-scaffold pass
+        if: hashFiles('tests/e2e/**') == ''
+        run: echo "tests/e2e not present yet (P0-QA-03 pending) — stage passes by design."
+
+  visual-gate:
+    name: "Stage 6 — visual gate"
+    needs: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pnpm
+        if: hashFiles('package.json') != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Set up Node
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || '' }}
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+      - name: Visual gate (screenshots vs tests/visual/reference — PLAN.md §0)
+        if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
+        run: pnpm run --if-present test:visual
+      - name: Pre-scaffold pass
+        if: hashFiles('tests/visual/**') == ''
+        run: echo "tests/visual not present yet (P0-BE-03 / P0-QA-04 pending) — stage passes by design."
+
+  auto-merge-to-dev:
+    name: "Auto-merge feature -> dev (CI green)"
+    # Runs ONLY on pushes to feature/* branches after every stage above is green.
+    # PLAN.md §10 review flow: feature -> dev (auto when CI green) -> main (Wei only).
+    # main is locked: this job merges into dev ONLY and never pushes to main —
+    # dev -> main promotion is done manually by Wei (branch protection on main).
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+    needs: visual-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge green feature branch into dev (gh CLI)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+          # Bootstrap case: create dev from this green feature commit if dev does not exist yet.
+          if ! git ls-remote --exit-code --heads origin dev >/dev/null 2>&1; then
+            git push origin "HEAD:refs/heads/dev"
+            echo "dev branch did not exist — created from ${BRANCH}."
+            exit 0
+          fi
+          git fetch origin dev
+          if [ "$(git rev-list --count origin/dev..HEAD)" = "0" ]; then
+            echo "No commits ahead of dev — nothing to merge."
+            exit 0
+          fi
+          # Reuse an open PR if one exists, otherwise create it, then merge.
+          PR_NUMBER="$(gh pr list --base dev --head "${BRANCH}" --state open --json number --jq '.[0].number' || true)"
+          if [ -z "${PR_NUMBER}" ] || [ "${PR_NUMBER}" = "null" ]; then
+            gh pr create --base dev --head "${BRANCH}" \
+              --title "auto-merge: ${BRANCH} -> dev (CI green)" \
+              --body "Automated merge per PLAN.md §10 (feature -> dev when CI is green). main is promoted manually by Wei only."
+            PR_NUMBER="$(gh pr list --base dev --head "${BRANCH}" --state open --json number --jq '.[0].number')"
+          fi
+          gh pr merge "${PR_NUMBER}" --merge --delete-branch=false

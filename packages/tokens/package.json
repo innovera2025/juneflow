@@ -1,0 +1,22 @@
+{
+  "name": "@juneflow/tokens",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Juneflow design tokens (fiori theme from design_handoff) - single source of truth for colors/fonts/spacing/radius. Never hardcode values.",
+  "type": "module",
+  "exports": {
+    "./src/tokens.css": "./src/tokens.css",
+    "./src/tokens.json": "./src/tokens.json"
+  },
+  "files": [
+    "src",
+    "scripts"
+  ],
+  "scripts": {
+    "gen:flutter": "tsx scripts/gen-flutter-theme.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

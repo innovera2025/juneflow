@@ -1,0 +1,22 @@
+{
+  "name": "@juneflow/tax-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TaxEngine compliance interface + thailand implementation (skeleton + fake, mock-first). Credentials via env only (P0-INT-04) - never committed.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./thailand": "./src/thailand/index.ts"
+  },
+  "scripts": {
+    "build": "echo 'TODO(P0-BE-01): build wired by monorepo tooling (pnpm workspaces + Turborepo)'",
+    "lint": "echo 'TODO(P0-BE-01): lint wired by monorepo tooling'",
+    "typecheck": "echo 'TODO(P0-BE-01): typecheck wired by monorepo tooling'",
+    "test": "echo 'TODO(P0-INT-01): unit tests for TaxEngine interface + fake adapter (gate G3)'"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

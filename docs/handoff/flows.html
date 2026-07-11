@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Juneflow — Process Flows & Approval Matrix</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0}body{font-family:Sarabun,sans-serif;background:#F5F6F7;color:#223548;padding:32px;font-size:13.5px;line-height:1.65}
+.wrap{max-width:980px;margin:0 auto}
+h1{font-size:24px;margin-bottom:4px}.sub{color:#556B82;margin-bottom:26px}
+section{background:#fff;border:1px solid #D9DCDF;border-radius:6px;padding:22px 26px;margin-bottom:18px}
+h2{font-size:16.5px;margin-bottom:4px;color:#0A6ED1}
+h2 .code{font-size:11px;background:#E3F0FB;color:#0A6ED1;border-radius:4px;padding:2px 8px;vertical-align:2px;margin-right:8px;font-family:"IBM Plex Sans"}
+.desc{color:#556B82;font-size:12.5px;margin-bottom:14px}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 14px}
+.st{background:#F5F6F7;border:1px solid #C2C8CE;border-radius:4px;padding:6px 12px;font-weight:700;font-size:12px;white-space:nowrap}
+.st.ok{background:#EBF5EF;border-color:#107E3E;color:#107E3E}.st.warn{background:#FDF1E7;border-color:#E9730C;color:#E9730C}
+.st.bad{background:#FBEAEA;border-color:#BB0000;color:#BB0000}.st.brand{background:#E3F0FB;border-color:#0A6ED1;color:#0A6ED1}
+.ar{color:#8FA0B2;font-weight:800}
+ul{padding-left:20px;font-size:12.5px;color:#38506B}li{margin:3px 0}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+th{background:#FAFBFC;border-bottom:2px solid #D9DCDF;text-align:left;padding:7px 10px;color:#556B82;font-size:11px}
+td{border-bottom:1px solid #ECEEF0;padding:7px 10px}
+.num{font-family:"IBM Plex Sans";font-variant-numeric:tabular-nums}
+b.k{color:#0A6ED1}
+@media print{body{background:#fff;padding:0}section{border:none;page-break-inside:avoid}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>Process Flows & State Machines</h1>
+<div class="sub">Juneflow Construction ERP · 7 กระบวนการหลัก + Approval Matrix · อ้างอิงพฤติกรรมจริงจาก prototype (5 ก.ค. 2569)</div>
+
+<section><h2><span class="code">FLOW-A</span>จัดซื้อ: BOQ → PR → PO/WO → GR → AP → จ่ายเงิน</h2>
+<div class="desc">เส้นหลักของต้นทุนโครงการ ทุกเอกสารอ้างอิงกันเป็นลูกโซ่ (traceability) และตัดยอดคงเหลือ BOQ</div>
+<div class="flow"><span class="st brand">BOQ อนุมัติ (ล็อก)</span><span class="ar">→</span><span class="st">เลือกรายการ → สร้าง PR</span><span class="ar">→</span><span class="st warn">PR รออนุมัติ (ตาม matrix)</span><span class="ar">→</span><span class="st ok">อนุมัติ</span><span class="ar">→</span><span class="st">เปิด PO (วัสดุ) / WO (จ้างเหมา)</span><span class="ar">→</span><span class="st">GR รับของ (เต็ม/บางส่วน/ตีกลับ)</span><span class="ar">→</span><span class="st">AP ตั้งหนี้ (3-way match PO+GR+INV)</span><span class="ar">→</span><span class="st warn">PV รออนุมัติ</span><span class="ar">→</span><span class="st ok">จ่าย / Export to Bank</span></div>
+<ul>
+<li><b class="k">กติกา:</b> BOQ ที่อนุมัติแล้วแก้ไม่ได้ ต้องเปิด <b>Revise v(n+1)</b> แล้วอนุมัติใหม่ · รายการที่เปิด PR แล้วถูก mark ตัดยอดคงเหลือ</li>
+<li><b class="k">PR แยกชนิด:</b> Material→PR ปกติ · Subcon/Labor→PR-Subcon (แยกใบอัตโนมัติ) · ราคาเกิน BOQ ต้องแนบเหตุผล</li>
+<li><b class="k">GR ตีกลับ:</b> สร้างรายงานของเสียหาย + รูป → เข้า DMS + ศูนย์ตรวจรับ → ผู้ขายส่งใหม่</li>
+<li><b class="k">VO (งานเพิ่ม-ลด):</b> อ้างสัญญา/PO เดิม → อนุมัติ → ปรับมูลค่าสัญญา</li>
+<li>สถานะ PR/PO/PV: <span class="num">draft → pending(ขั้น 1..n) → approved | rejected → closed/paid</span></li>
+</ul></section>
+
+<section><h2><span class="code">FLOW-B</span>งวดงานผู้รับเหมา + ศูนย์ตรวจรับ (Acceptance & Defect Loop)</h2>
+<div class="desc">รับงานได้ 3 เกณฑ์: % ความคืบหน้า · ระยะทาง (เช่น วางท่อ 100 ม./งวด) · Milestone — และงานตรวจรับทุกชนิด (GR/งวด/บ้านลูกค้า) รวมที่ศูนย์ตรวจรับ</div>
+<div class="flow"><span class="st">งวดถึงเกณฑ์ (%/ระยะ/milestone)</span><span class="ar">→</span><span class="st">ผู้รับเหมาส่งมอบ + เอกสาร/รูป (เข้า DMS)</span><span class="ar">→</span><span class="st warn">นัดตรวจ (โฟร์แมน mobile)</span><span class="ar">→</span><span class="st ok">ผ่าน → อนุมัติจ่ายงวด → AP</span></div>
+<div class="flow"><span class="ar">↘</span><span class="st bad">ตีกลับ + Defect List (รายข้อ+รูปก่อน/หลัง)</span><span class="ar">→</span><span class="st">ผู้รับเหมาแก้ไข (กำหนดเวลา)</span><span class="ar">→</span><span class="st warn">ตรวจซ้ำ</span><span class="ar">→</span><span class="st ok">ผ่าน (Defect ปิด, เอกสารอัปเวอร์ชัน)</span></div>
+<ul>
+<li>หัก <b class="k">Retention</b> ตามสัญญา (เช่น 5%) ทุกงวด → คืนเมื่อครบประกันผลงาน</li>
+<li>งานตีกลับแจ้งเตือน: ศูนย์แจ้งเตือน + Mobile โฟร์แมน + Dashboard ผู้บริหาร + Audit Log</li>
+</ul></section>
+
+<section><h2><span class="code">FLOW-C</span>PM · บำรุงรักษา (CMMS)</h2>
+<div class="flow"><span class="st">โครงการ</span><span class="ar">→</span><span class="st">สัญญา PM (MA ตามเงื่อนไข | รายครั้ง n ครั้ง/ปี)</span><span class="ar">→</span><span class="st brand">แผน PM (รายครั้ง auto-gen ลงปฏิทิน)</span><span class="ar">→</span><span class="st">ใบงาน PM</span><span class="ar">→</span><span class="st">ช่าง check-in GPS</span><span class="ar">→</span><span class="st">Checklist (รูปก่อน→ผล Normal/ปรับตั้ง/เปลี่ยน-ซ่อม→รูป/วิดีโอหลัง)</span><span class="ar">→</span><span class="st ok">ปิดงาน + ลายเซ็นลูกค้า</span><span class="ar">→</span><span class="st">ใบรับรองผล → LINE ลูกค้า</span></div>
+<ul>
+<li>หนึ่งโครงการมี<b class="k">หลายสัญญา</b>ได้ · สร้างสัญญา = เลือกโครงการก่อนเสมอ (หรือเพิ่มโครงการใหม่ manual)</li>
+<li>พบอะไหล่ต้องเปลี่ยน → ใบเสนอราคา → ลูกค้าอนุมัติ/ปฏิเสธผ่าน LINE OA → ทำงานต่อ</li>
+<li>Checklist templates ตั้งค่าได้ (ต่อชนิดอุปกรณ์) เลือกใส่ตอนสร้างใบงาน · สัญญาใกล้หมดอายุ → แจ้งต่ออายุ</li>
+<li>สถานะใบงาน: <span class="num">open → inprogress → done | overdue</span></li>
+</ul></section>
+
+<section><h2><span class="code">FLOW-D</span>งานสำรวจ & จัดหาที่ดิน</h2>
+<div class="flow"><span class="st">จัดหาแปลง</span><span class="ar">→</span><span class="st">สำรวจ-รังวัด (+Cost Center บันทึกค่าใช้จ่าย)</span><span class="ar">→</span><span class="st">Feasibility (อสังหาฯ=ยูนิต · โซลาร์=MWp/ROI)</span><span class="ar">→</span><span class="st warn">Due Diligence 7 ข้อ (ผ่าน/ติดปัญหา/รอ)</span><span class="ar">→</span><span class="st">เจรจา</span><span class="ar">→</span><span class="st">ซื้อ (มัดจำ→นัดโอนกรมที่ดิน) | เช่า (25-30 ปี + escalation + จดทะเบียน>3ปี)</span><span class="ar">→</span><span class="st ok">ปิดดีล/โอน → Land Bank</span></div></section>
+
+<section><h2><span class="code">FLOW-E</span>ขาย-CRM → โอน → After-Sales (อสังหาฯ)</h2>
+<div class="flow"><span class="st">Lead/Walk-in</span><span class="ar">→</span><span class="st">นัดชม</span><span class="ar">→</span><span class="st brand">จอง (เงินจอง)</span><span class="ar">→</span><span class="st">สัญญาจะซื้อจะขาย</span><span class="ar">→</span><span class="st">ผ่อนดาวน์รายงวด</span><span class="ar">→</span><span class="st">ยื่นกู้/อนุมัติสินเชื่อ</span><span class="ar">→</span><span class="st warn">ตรวจรับบ้าน (Defect loop เดียวกับ FLOW-B)</span><span class="ar">→</span><span class="st ok">โอนกรรมสิทธิ์ → รับรู้รายได้</span><span class="ar">→</span><span class="st">After-sales แจ้งซ่อม (LINE)</span></div>
+<ul><li>สถานะยูนิต: <span class="num">ว่าง → จอง → สัญญา → โอนแล้ว</span> · การเงินผูก AR อัตโนมัติ (เงินจอง/ดาวน์/ยอดโอน)</li></ul></section>
+
+<section><h2><span class="code">FLOW-F</span>บัญชี: GL Posting → ปิดงวด + e-Tax</h2>
+<div class="flow"><span class="st">เอกสารต้นทาง (PV/RV/GR/ค่าเสื่อม/ค่าแรง/ปันส่วน)</span><span class="ar">→</span><span class="st warn">GL Posting Inbox (ตรวจ+post, gen JV อัตโนมัติ)</span><span class="ar">→</span><span class="st">งบทดลอง / งบการเงิน / P&L รายโครงการ / กระแสเงินสด</span><span class="ar">→</span><span class="st">กระทบยอดธนาคาร (นำเข้า statement+จับคู่)</span><span class="ar">→</span><span class="st ok">ปิดงวด (ล็อกย้อนหลัง)</span></div>
+<ul>
+<li><b class="k">e-Tax Invoice:</b> ออกใบกำกับ → เข้าคิว e-Tax → ส่งสรรพากร (mock) → สถานะ ส่งแล้ว/ตีกลับ</li>
+<li>รับรู้รายได้ (Revenue Recognition): % of completion + WIP ต่อโครงการ · ภาษี: ภ.พ.30, ภ.ง.ด.3/53 + 50 ทวิอัตโนมัติจาก PV ที่หัก WHT</li>
+</ul></section>
+
+<section><h2><span class="code">FLOW-G</span>Subscription Platform (เจ้าของระบบ ↔ ลูกค้า)</h2>
+<div class="flow"><span class="st">ลูกค้าสมัคร/ทดลองใช้</span><span class="ar">→</span><span class="st brand">เลือกแพ็กเกจ S/M/L/Full</span><span class="ar">→</span><span class="st">ระบบเปิดเมนู+โควต้าตามแพ็กเกจ (sidebar กรองอัตโนมัติ)</span><span class="ar">→</span><span class="st">ออกบิลรายเดือน/ปี</span><span class="ar">→</span><span class="st warn">ค้างชำระ → ทวงถาม → ระงับ</span><span class="ar">→</span><span class="st ok">ต่ออายุ/อัปเกรด</span></div>
+<ul>
+<li>เจ้าของระบบตั้งแพ็กเกจเอง: ราคา โควต้า (โครงการ/ผู้ใช้/พื้นที่/AI ต่อเดือน) + <b class="k">ติ๊กเลือกเมนูที่ปล่อยรายเมนู</b> จากโครงเมนูจริง</li>
+<li>กติกาพิเศษ: Dashboard + "แพ็กเกจของฉัน" เห็นเสมอ · Project Type เฉพาะ Full · AI QTO เฉพาะ M ขึ้นไป · เครดิต AI หมด → modal อัปเกรด</li>
+<li>Admin คุมรายบริษัท: เปลี่ยนแพ็กเกจ/seat, บล็อก user, รีเซ็ตรหัสผ่าน, ระงับการใช้งาน</li>
+</ul></section>
+
+<section><h2><span class="code">MATRIX</span>Approval Matrix (ขั้นอนุมัติตามมูลค่า)</h2>
+<table>
+<tr><th>เอกสาร</th><th>ขั้น 1</th><th>ขั้น 2</th><th>ขั้น 3</th><th>หมายเหตุ</th></tr>
+<tr><td>PR ใบขอซื้อ</td><td>หน.จัดซื้อ (ทุกใบ)</td><td>ผจก.โครงการ &gt; <span class="num">500,000</span></td><td>MD &gt; <span class="num">2,000,000</span></td><td>ราคาเกิน BOQ ต้องแนบเหตุผล</td></tr>
+<tr><td>PO / WO</td><td>หน.จัดซื้อ</td><td>ผจก.โครงการ &gt; <span class="num">1,000,000</span></td><td>MD &gt; <span class="num">5,000,000</span></td><td>ผูกงวดงาน+retention ตอนเปิด WO</td></tr>
+<tr><td>PV ใบสำคัญจ่าย</td><td>บัญชี</td><td>ผจก.การเงิน &gt; <span class="num">500,000</span></td><td>MD &gt; <span class="num">2,000,000</span></td><td>ผ่าน 3-way match ก่อน</td></tr>
+<tr><td>BOQ / Revise</td><td>ผู้ประมาณราคา (ส่ง)</td><td>ผจก.โครงการ</td><td>MD (ทุก revise)</td><td>เทียบ diff v เดิมก่อนอนุมัติ</td></tr>
+<tr><td>VO งานเพิ่ม-ลด</td><td>ผจก.โครงการ</td><td>MD &gt; <span class="num">500,000</span></td><td>—</td><td>ปรับมูลค่าสัญญาอัตโนมัติ</td></tr>
+<tr><td>รับงวดงาน (ตรวจรับ)</td><td>โฟร์แมน (ตรวจหน้างาน)</td><td>ผจก.โครงการ (อนุมัติจ่าย)</td><td>—</td><td>Defect ทั้งหมดต้องปิดก่อน</td></tr>
+<tr><td>ปิดงวดบัญชี</td><td>สมุห์บัญชี</td><td>ผจก.การเงิน</td><td>—</td><td>กระทบยอดธนาคารครบก่อน</td></tr>
+</table></section>
+
+</div></body>
+</html>

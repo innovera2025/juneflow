@@ -1,0 +1,23 @@
+{
+  "name": "juneflow",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Juneflow - Construction ERP + Subscription SaaS (multi-tenant). See PLAN.md and CLAUDE.md.",
+  "packageManager": "pnpm@11.5.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "seed": "bash scripts/seed.sh",
+    "copy-references": "bash scripts/copy-references.sh"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  }
+}
