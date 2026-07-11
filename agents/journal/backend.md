@@ -21,3 +21,15 @@
 - ทำอะไร: bootstrap ไฟล์สถานะ loop ตาม Manifest v2 กลุ่ม 3 (`TASKS.md` / `BLOCKERS.md` / `REVIEW-QUEUE.md` / journal 6 ใบ) · แตก task Phase 0 ลง `TASKS.md` — เขต backend มี 15 task (P0-BE-01 ถึง P0-BE-15) สถานะ `ready` ครบ
 - ตัดสินใจอะไร: ไม่มีการตัดสินใจเชิง design/spec — ความขัดแย้งที่พบถูกยกเข้า `BLOCKERS.md` ทั้งหมด (B-001, B-002)
 - เจออะไร: gallery จริงมี 106 .jpg ขณะที่ manifest ระบุ 102 → B-001 (ไม่ block งาน) · โครง `packages/integrations/CLAUDE.md` vs 3 แพ็กเกจแยกตามกลุ่ม 5 → B-002 (ไม่ block งาน) · Phase 0 = Backend เดี่ยว — เริ่มที่ P0-BE-01 (monorepo scaffold) ก่อนเสมอ เพราะเป็น dependency ของเกือบทุก task
+- 2026-07-11T18:20:03Z loop round ended (agent: backend)
+
+## 2026-07-12 01:20 · loop-runner · รอบที่ 1/10 · task: P0-BE-01
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-01 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.5477825000000003 (สะสม $2.5478/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-11T18:21:53Z loop round ended (agent: backend)
+
+## 2026-07-12 01:21 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต backend — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $3.4381/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
