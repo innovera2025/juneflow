@@ -22,5 +22,6 @@
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
 | P0-QA-01 | qa · visual-gate | `feature/qa` @ `006fbf0` | — (งาน index ไม่มีจอ · หลักฐาน: `tests/visual/reference-index.md` 128 แถว = 106 .jpg + 22 .png · นับไฟล์ตรงเกณฑ์ B-001) | 2026-07-12 |
+| P0-QA-05 | qa · unit G3 | `feature/qa` @ `b81528c` | — (test spec ไม่มีจอ · หลักฐาน: `tests/unit/` 6 ไฟล์ · `vitest run unit` = 48 tests เขียว · expected ถอดจาก spec ล้วน · posting account mapping/approval thresholds ค้าง Open Q #3/#2 ทำ `describe.todo` ไม่เดา) | 2026-07-12 |
 
 > หมายเหตุ: ยังไม่ push→dev ในรอบนี้ (ตามคำสั่งรอบ commit+review) · ด่าน 4.5 diff-reviewer + auto-merge dev เหลือให้ loop-runner/รอบถัดไปก่อน Wei promote
