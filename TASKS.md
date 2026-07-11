@@ -67,7 +67,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
-| P0-QA-01 | qa | ready | ตรวจ `tests/visual/reference/` ครบ (106 .jpg + 22 .png — ดู B-001) + จัดทำ index ภาพ→จอ/route จาก `docs/extract/NAV-ROUTES.md` → `tests/visual/reference-index.md` | P0-BE-03 | จำนวนไฟล์ตรง + index ครอบคลุมทุกภาพ | 2 ชม. |
+| P0-QA-01 | qa | review | ตรวจ `tests/visual/reference/` ครบ (106 .jpg + 22 .png — ดู B-001) + จัดทำ index ภาพ→จอ/route จาก `docs/extract/NAV-ROUTES.md` → `tests/visual/reference-index.md` | P0-BE-03 | จำนวนไฟล์ตรง + index ครอบคลุมทุกภาพ | 2 ชม. |
 | P0-QA-02 | qa | ready | contract test harness (`tests/contract/`) — generate จาก `openapi.yaml` · **expected จาก contract เท่านั้น ห้ามอ่าน implementation ก่อน** (กลุ่ม 2.4) | P0-BE-12 | G2 harness รันได้กับ dev API | 3 ชม. |
 | P0-QA-03 | qa | ready | Playwright E2E harness (`tests/e2e/`) + smoke test (login → shell load) ตาม state machine ใน `docs/handoff/flows.html` | P0-DEV-01 | G4 smoke ผ่านบน compose dev | 3 ชม. |
 | P0-QA-04 | qa | ready | visual gate harness — screenshot compare กับ `tests/visual/reference/` ตามเกณฑ์ PLAN.md §0 (ต่างได้เฉพาะตัวเลขข้อมูลจาก seed + สิ่งที่ Wei อนุมัติผ่าน BLOCKERS) | P0-QA-01 | G5 harness รันได้ + รายงาน diff อ่านได้ | 3 ชม. |
