@@ -6,7 +6,10 @@ import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
   dialect: "postgresql",
-  schema: "./src/schema/index.ts",
+  // Point drizzle-kit at the per-group table files directly (not the index.ts
+  // barrel): the barrel uses NodeNext ".js" import specifiers for tsc, which
+  // drizzle-kit's CJS loader cannot resolve. Add each new group's file here.
+  schema: ["./src/schema/platform.ts"],
   out: "./drizzle",
   dbCredentials: {
     url:
