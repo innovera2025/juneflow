@@ -29,3 +29,6 @@ juneflow-extract/
 # NOTE (intentional — do NOT add ignore rules for these):
 # - tests/visual/reference/  -> visual gate reference images MUST be tracked
 # - docs/                    -> copied extract/handoff docs MUST be tracked
+
+# Agent worktrees (one zone = one worktree - PLAN.md §8)
+.worktrees/
