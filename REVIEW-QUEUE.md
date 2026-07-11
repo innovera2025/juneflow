@@ -21,4 +21,5 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-| P0-INT-05 | tax-engine | commit on `feature/integrations` (docs: `packages/tax-engine/docs/tax-forms-map.md`) | — (docs-only · หลักฐาน gate = coverage checklist ครบ 3 ฟอร์ม A/B/C + shared primitives, เทียบ `pototype/tax-forms.jsx` L1–727) | 2026-07-12 |
+| P0-INT-05 | tax-engine | merged to dev `394eb18` (docs: `packages/tax-engine/docs/tax-forms-map.md`) — **ด่าน 4.5 PASS** (8/8 + fidelity spot-check ~40 จุด · notes: ป้ายย่อ 3 จุดใน map ให้ยึด .jsx เป็นแหล่งจริง · promptpayId render เสมอ · B-007) | — (docs-only · หลักฐาน gate = coverage checklist ครบ 3 ฟอร์ม A/B/C + shared primitives, เทียบ `pototype/tax-forms.jsx` L1–727) | 2026-07-12 |
+| P0-BE-01 | monorepo scaffold + CI tooling (platform) | merged to dev (branch `feature/backend`) — **ด่าน 4.5 PASS** (reviewer รัน gates ซ้ำเอง: lint+typecheck 11/11 · build 5/5 · note: 3 แพ็กเกจเขต integrations ยังเป็น placeholder echo — เจ้าของคือ P0-INT-01/02/03) | — (ไม่มีจอ) · หลักฐาน gate: `pnpm run lint` ✓ · `pnpm run typecheck` ✓ · `pnpm run build` ✓ ครบ 10 workspaces (dev green from day one) | 2026-07-12 |
