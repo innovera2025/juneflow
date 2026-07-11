@@ -4,7 +4,8 @@
   "private": true,
   "description": "QA zone harness: contract (G2) / e2e (G4) / visual (G5) gates per PLAN.md section 9. Scripts are guarded to pass green while no tests exist yet (P0-QA-02/03/04).",
   "scripts": {
-    "test": "pnpm run test:contract && pnpm run test:e2e && pnpm run test:visual",
+    "test": "pnpm run test:unit && pnpm run test:contract && pnpm run test:e2e && pnpm run test:visual",
+    "test:unit": "vitest run unit --passWithNoTests",
     "test:contract": "vitest run contract --passWithNoTests",
     "test:e2e": "playwright test --config e2e/playwright.config.ts --pass-with-no-tests",
     "test:visual": "playwright test --config visual/playwright.visual.config.ts --pass-with-no-tests"
