@@ -10,7 +10,8 @@
     ".": "./src/index.ts",
     "./adapters/line": "./src/adapters/line.ts",
     "./adapters/email": "./src/adapters/email.ts",
-    "./adapters/webpush": "./src/adapters/webpush.ts"
+    "./adapters/webpush": "./src/adapters/webpush.ts",
+    "./config": "./src/config.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",
