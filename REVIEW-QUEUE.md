@@ -21,5 +21,4 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-
-*(ว่าง — ยังไม่มีงานเขียวบน dev รอ promote)*
+| P0-BE-01 | monorepo scaffold + CI tooling (platform) | feature/backend @ HEAD (ยังไม่ push — รอ diff-reviewer/loop-runner) | — (ไม่มีจอ) · หลักฐาน gate: `pnpm run lint` ✓ · `pnpm run typecheck` ✓ · `pnpm run build` ✓ ครบ 10 workspaces (dev green from day one) | 2026-07-12 |

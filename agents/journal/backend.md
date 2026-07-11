@@ -10,6 +10,12 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-12 · รอบที่ 1 · task: P0-BE-01
+
+- ทำอะไร: หยิบ P0-BE-01 (monorepo scaffold + CI lint+typecheck+build ทุก workspace) ซึ่งเป็น ready task เดียวในเขต backend ที่ dependency ครบ (ว่าง) — task อื่นทุกตัวมี P0-BE-01 เป็น dep ที่ยังไม่ done. ตรวจพบว่าโครง scaffold ถูกวางไว้แล้วโดย foundation commit (0b66192) และ CI green-from-day-one อยู่แล้ว. รันด่านจริงทั้ง 3: `pnpm run lint` / `typecheck` / `build` → เขียวครบ 10 workspaces. ปิดช่องว่างในเขตตัวเอง: `packages/db` มี TS source จริง (schema/index.ts + seed/index.ts) แต่ยังไม่ถูก wire เข้า CI — เพิ่ม `packages/db/tsconfig.json` (extends tsconfig.base) + สคริปต์ `typecheck`/`lint` = `tsc --noEmit` (ตาม convention ของ apps/api). รันซ้ำ: lint 5/5 ✓, typecheck 6/6 ✓, build 5/5 ✓.
+- ตัดสินใจอะไร: ทำเฉพาะในเขต writable ของตัวเอง (apps/api · packages/db · packages/contracts) — แตะแค่ `packages/db` (tsconfig + package.json scripts). ไม่แตะ root config/sacred files. packages/contracts ยังไม่มี TS source (รอ codegen P0-BE-12) จึงยังไม่ wire typecheck. ไม่ตัดสินความขัดแย้ง design/spec.
+- เจออะไร (handoff): 3 แพ็กเกจเขต integrations (`packages/tax-engine` · `packages/bank-file` · `packages/notifications`) ยังมีสคริปต์ placeholder ที่ label ว่า `TODO(P0-BE-01): ... wired by monorepo tooling` สำหรับ lint/typecheck/build — placeholder echo success จึง CI เขียว แต่ไฟล์เหล่านี้อยู่ **นอกเขต writable** ของ backend agent รอบนี้ (เขต integrations, มี task ของตัวเอง P0-INT-01/02/03). ปล่อยไว้ให้เจ้าของเขตแทนที่ด้วย tooling จริงในงานของตน. → ฝากให้ Wei ยืนยันความเป็นเจ้าของ tooling wiring ของ 3 แพ็กเกจนั้นตอน review (label เป็น P0-BE-01 แต่ไฟล์อยู่คนละเขต). งานรอบนี้ไม่ได้ push (รอ diff-reviewer/loop-runner ตาม PLAN.md §10 ด่าน 4.5).
+
 ## 2026-07-06 · bootstrap · task: —
 
 - ทำอะไร: bootstrap ไฟล์สถานะ loop ตาม Manifest v2 กลุ่ม 3 (`TASKS.md` / `BLOCKERS.md` / `REVIEW-QUEUE.md` / journal 6 ใบ) · แตก task Phase 0 ลง `TASKS.md` — เขต backend มี 15 task (P0-BE-01 ถึง P0-BE-15) สถานะ `ready` ครบ
