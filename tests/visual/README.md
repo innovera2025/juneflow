@@ -15,11 +15,16 @@
 - **ห้ามแก้/ลบ/เขียนทับไฟล์ใดๆ ใน `reference/`** — ไฟล์ต้นทางใน `pototype/` ก็ห้ามแตะเช่นกัน
 - index ภาพ→จอ/route (จาก `docs/extract/NAV-ROUTES.md`) อยู่ที่ `tests/visual/reference-index.md` — P0-QA-01
 
-## สถานะ
+## สถานะ (P0-QA-04 — harness implemented)
 
-- **TODO(P0-QA-04):** implement screenshot-comparison specs + รายงาน diff ที่อ่านได้ (รอ P0-QA-01) — หมายเหตุ: `toHaveScreenshot()` เทียบ .png เท่านั้น แต่ reference จาก gallery เป็น .jpg 106 ไฟล์ → ขั้น comparison ต้องรองรับ jpg (แปลงตอนรัน หรือ custom matcher) โดย**ห้ามแตะไฟล์ต้นฉบับใน `reference/`**
-- config: `playwright.visual.config.ts` — snapshot expectations ชี้ที่ `reference/`
-- รัน: `pnpm --filter @juneflow/tests test:visual` — ตอนนี้ยังไม่มี test = ผ่านเขียวด้วย `--pass-with-no-tests` (ตั้งใจ ให้ CI เขียวระหว่าง scaffold)
+- **harness:** `visual-gate.spec.ts` + `lib/compare.ts` (jpg-aware compare) + `lib/report.ts` (readable diff report) · config: `playwright.visual.config.ts`
+- **รองรับ jpg โดยไม่แตะ reference:** `toHaveScreenshot()` เทียบ .png เท่านั้น แต่ 106/128 reference เป็น .jpg → `lib/compare.ts` decode ทั้ง jpg + png ด้วย chromium ที่ Playwright ใช้อยู่แล้ว (ไม่เพิ่ม native dep) แล้ว pixel-diff ในเบราว์เซอร์ · **อ่านไฟล์ `reference/` อย่างเดียว ห้ามเขียนทับ**
+- **สองโหมด:**
+  - `self-check` — รันได้ทันที ไม่ต้องมีแอป: พิสูจน์ pipeline (decode → diff → report) กับ reference จริง (identical=PASS 0 diff · perturbed=FAIL · size mismatch=auto-FAIL) — นี่คือหลักฐาน "G5 harness รันได้ + รายงาน diff อ่านได้" ก่อน apps/web จะมี
+  - `capture` — screenshot จริงเทียบ reference ตาม `screens.manifest.json` (ยังว่างจนกว่าจอ apps/web จะมา · map route→ref อยู่ที่ `reference-index.md`) · **skip** (ไม่ fail) เมื่อ manifest ว่าง หรือ `VISUAL_BASE_URL` ไม่ถึง → gate เขียวระหว่าง scaffold
+- **รายงาน diff:** `.results/visual-report.md` + `.results/visual-report.json` + `.results/diff/*.png` (gitignored — ไม่อยู่ใน `reference/`)
+- **threshold เริ่ม strict** (`VISUAL_MAX_DIFF_PIXEL_RATIO=0`, `VISUAL_CHANNEL_THRESHOLD=0`) — การผ่อน threshold สำหรับ jpg lossy ของจอจริง = คำตัดสินของ Wei/BLOCKERS ไม่ใช่ default เงียบ ๆ (skill `visual-gate` กฎเหล็ก)
+- **รัน:** `pnpm --filter @juneflow/tests test:visual`
 
 ## Gate ที่เกี่ยวข้อง (PLAN.md §9)
 

@@ -18,23 +18,24 @@
 // below. Any NEW conflict -> BLOCKERS.md, never decide locally.
 //
 // =============================================================================
-// TODO(P0-BE-06) - group: Platform / Tenant (data-dictionary "Platform / Tenant")
+// DONE(P0-BE-06) - group: Platform / Tenant (data-dictionary "Platform / Tenant")
+//                  -> implemented in ./platform.ts, re-exported below.
 // =============================================================================
-// [ ] company            - (Tenant) name / tax_id / address (juristic info for
+// [x] company            - (Tenant) name / tax_id / address (juristic info for
 //                          e-Tax), subscription_id, status: active | suspended
-// [ ] package            - size S/M/L/Full, name, price_m, price_y
+// [x] package            - size S/M/L/Full, name, price_m, price_y
 //                          (S=2900 M=7900 L=14900 Full=contact),
 //                          limits json {projects, users, storage_gb, ai_per_month}
 //                          (-1 = unlimited; key names per decision C5:
 //                          storage_gb / ai_per_month, NOT storage / ai),
 //                          menus string[] (46 nav ids) + sub_rules
 //                          (ptype -> Full, aiqto -> M+)
-// [ ] subscription       - company_id, package_id, cycle, renew_at,
+// [x] subscription       - company_id, package_id, cycle, renew_at,
 //                          status: active | expiring | overdue | cancelled
-// [ ] platform_invoice   - subscription_id, amount, status: paid | pending | overdue
-// [ ] ai_usage           - company_id, month, used (monthly AI QTO quota cut)
-// [ ] user               - email, name, role_id, status: active | blocked
-// [ ] role               - approval_limits json (approval cap per doc type);
+// [x] platform_invoice   - subscription_id, amount, status: paid | pending | overdue
+// [x] ai_usage           - company_id, month, used (monthly AI QTO quota cut)
+// [x] user               - email, name, role_id, status: active | blocked
+// [x] role               - approval_limits json (approval cap per doc type);
 //                          perms matrix -> Appendix B item 13 below
 // [ ] better-auth tables - session/account/etc., self-hosted in our Postgres
 //                          (P0-BE-11, PLAN.md Appendix A - no hosted auth)
@@ -158,7 +159,7 @@
 // [ ] 13. Role.perms matrix - 11 modules x 5 permissions
 // [ ] 14. Multi-company group - COMPANIES + docPrefix
 //
-// Table definitions land here per task; re-export from this file so
+// Table definitions land in per-group files; re-export from this file so
 // drizzle.config.ts and @juneflow/api see one schema root.
 
-export {};
+export * from "./platform.js";
