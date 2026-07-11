@@ -9,7 +9,13 @@ export default defineConfig({
   // Point drizzle-kit at the per-group table files directly (not the index.ts
   // barrel): the barrel uses NodeNext ".js" import specifiers for tsc, which
   // drizzle-kit's CJS loader cannot resolve. Add each new group's file here.
-  schema: ["./src/schema/platform.ts"],
+  schema: [
+    "./src/schema/platform.ts",
+    "./src/schema/project.ts",
+    "./src/schema/boq.ts",
+    "./src/schema/subcon.ts",
+    "./src/schema/pm.ts",
+  ],
   out: "./drizzle",
   dbCredentials: {
     url:

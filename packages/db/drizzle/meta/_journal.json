@@ -8,6 +8,13 @@
       "when": 1783796058040,
       "tag": "0000_flashy_eddie_brock",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783798809031,
+      "tag": "0001_acoustic_zuras",
+      "breakpoints": true
     }
   ]
 }

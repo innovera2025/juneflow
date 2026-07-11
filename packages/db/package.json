@@ -9,7 +9,7 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "generate": "drizzle-kit generate",
+    "generate": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate",
     "migrate": "drizzle-kit migrate",
     "migration:check": "drizzle-kit check",
     "seed": "tsx src/seed/index.ts",

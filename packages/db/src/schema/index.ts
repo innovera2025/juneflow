@@ -41,8 +41,11 @@
 //                          (P0-BE-11, PLAN.md Appendix A - no hosted auth)
 //
 // =============================================================================
-// TODO(P0-BE-07) - groups: Project/Master + BOQ/Procurement + Subcon/Acceptance
-//                  + PM (CMMS) (decisions C2, C3 land here per TASKS.md)
+// DONE(P0-BE-07) - groups: Project/Master + BOQ/Procurement + Subcon/Acceptance
+//                  + PM (CMMS) (decisions C2, C3 applied) -> implemented in
+//                  ./project.ts, ./boq.ts, ./subcon.ts, ./pm.ts; re-exported
+//                  below. (checkboxes below kept as the extracted dictionary
+//                  spec that was implemented.)
 // =============================================================================
 // -- data-dictionary "โครงการ / Master" --
 // [ ] project            - name, type: realestate | solar | civil | service,
@@ -163,3 +166,7 @@
 // drizzle.config.ts and @juneflow/api see one schema root.
 
 export * from "./platform.js";
+export * from "./project.js";
+export * from "./boq.js";
+export * from "./subcon.js";
+export * from "./pm.js";
