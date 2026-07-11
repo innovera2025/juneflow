@@ -10,7 +10,18 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
-## 2026-07-12 · รอบที่ 2 · task: P0-BE-06
+## 2026-07-12 · รอบที่ 4 · task: P0-BE-04
+
+- ทำอะไร: สแกน TASKS.md เขต backend หา ready task ที่ dep ครบ + อยู่ใน writable zonePaths จริง — **ไม่มีเลย**. Dep-eligible ready = P0-BE-04 (`packages/tokens`), P0-BE-05 (`packages/i18n`), P0-BE-15 (`scripts/`) แต่ทั้งสามอยู่นอก `zonePaths.backend` (`apps/api`/`packages/db`/`packages/contracts`). In-zone ทั้งหมดติด: P0-BE-07/08/09/11/13/14 dep chain จาก P0-BE-06 ที่ยัง `review` (commit `6e9b42e` บน feature/backend แต่ **ยังไม่ merge เข้า dev** → B-008 ยังไม่นับ done) · P0-BE-12 = blocked (B-009). **ไม่ได้แตะโค้ดใดๆ** — เจอ blocker ก่อน.
+- ตัดสินใจอะไร: ไม่ตัดสินความขัดแย้ง zone เอง. ยืนยันด้วยหลักฐาน 3 แหล่ง: **PLAN.md §8** (Backend/Platform zone = `apps/api` + `packages/db` เท่านั้น ไม่รวม tokens/i18n) · `scripts/loop-config.json` (`zonePaths.backend` ไม่รวม tokens/i18n — diff-reviewer ด่าน 4.5 บังคับจากไฟล์นี้) · ตรวจครบทุกเขต = **ไม่มีเขตใดเป็นเจ้าของ `packages/tokens`/`packages/i18n`**. ขัดกับ TASKS.md header ("แพ็กเกจ platform: contracts/tokens/i18n") ที่จัด P0-BE-04/05 เป็น backend → เป็น spec conflict + out-of-zone ตาม PLAN.md §10 STUCK. ประเด็นนี้ถูกฝากใน journal รอบ 2+3 แล้วแต่ยังไม่เป็น blocker ทางการ → เปิด **B-011** (3 ตัวเลือก, แนะนำ ก = เพิ่ม tokens/i18n เข้า zonePaths.backend · P0-BE-15 ควรย้ายเป็นเขต devops) → เปลี่ยน P0-BE-04 เป็น `blocked` แล้วหยุดรอบ (ไม่หยิบ task ใหม่). ไม่ commit โค้ด (ไม่มี diff โค้ด — แก้เฉพาะ loop-bookkeeping: BLOCKERS/TASKS/journal).
+- เจออะไร (handoff): **คิว ready เขต backend ที่ทำได้จริง = 0** จนกว่า Wei จะทำอย่างน้อยหนึ่งใน: (1) promote/merge P0-BE-06 → done เพื่อปลด P0-BE-07/08/11 (in-zone, ทำได้ทันที) · (2) ตอบ B-011 เพิ่ม tokens/i18n เข้า zonePaths เพื่อปลด P0-BE-04/05 · (3) ตอบ B-009 ปลด P0-BE-12. ขาดทั้งสาม รอบถัดไปจะจบด้วย no-task. หมายเหตุ id: BLOCKERS.md บน dev ใช้ถึง B-010 แล้ว จึงใช้ B-011 (BLOCKERS.md บน feature/backend ยังมีถึง B-009 — orchestrator ควร reconcile ตอน merge). P0-BE-05/P0-BE-15 ยังสถานะ `ready` แต่ครอบด้วย B-011 เดียวกัน — อย่าหยิบซ้ำจนกว่า B-011 ตอบ.
+
+## 2026-07-12 · รอบที่ 3 · task: P0-BE-12
+
+- ทำอะไร: หยิบ P0-BE-12 (`packages/contracts` — openapi.yaml + codegen TS) — เป็น ready task เดียวในเขต backend รอบนี้ที่ dep (P0-BE-01, P0-BE-02) done ครบ **และ** อยู่ใน writable zonePaths จริง (P0-BE-04 tokens / P0-BE-05 i18n อยู่นอก zonePaths backend ตาม loop-config → ข้าม · P0-BE-07/08/11 dep P0-BE-06 ยัง `review` ไม่ `done` → ข้าม · P0-BE-15 อยู่ `scripts/` = นอก zone → ข้าม). อ่าน spec: `packages/contracts/openapi.yaml` (ปัจจุบัน) + `docs/handoff/api-contract.md`. **ไม่ได้แก้โค้ดใดๆ** — เจอ blocker ก่อนแตะไฟล์.
+- ตัดสินใจอะไร: ไม่ตัดสินความขัดแย้ง/ไม่ bypass hook. P0-BE-12 core deliverable = "complete ALL endpoints per api-contract.md" ลงใน `openapi.yaml` แต่ไฟล์นั้นเป็น sacred (hook `protect-files.sh` บล็อกไม่มีเงื่อนไข) → ต้องแตะ sacred file = STUCK ตาม PLAN.md §10. เปิด **B-009** (คำถาม + 3 ตัวเลือก เสนอ ก = Wei อนุมัติ `SACRED_OVERRIDE=wei-approved:B-009` ตามแพทเทิร์น B-004 · ตรงเจตนา TASKS.md "sacred หลัง merge") → เปลี่ยน P0-BE-12 เป็น `blocked` แล้วหยุดรอบ (ไม่หยิบ task ใหม่). ไม่ commit (ไม่มี diff โค้ด).
+- เจออะไร (handoff): (1) `openapi.yaml` ที่ committed ใน foundation (0b66192) เป็น scaffold 3 endpoint + marker `TODO(P0-BE-12)` ในไฟล์เอง สั่งให้ backend agent complete — แต่ hook ห้ามแก้ = catch-22 ที่ต้อง Wei ปลด (B-009). (2) **คิว ready เขต backend ที่ทำได้จริงตอนนี้ = 0**: เหลือ P0-BE-07/08/09/10/11/13/14 (ล้วน dep chain จาก P0-BE-06 ที่ยัง `review`), P0-BE-04/05 (นอก zonePaths), P0-BE-12 (blocked=B-009), P0-BE-15 (นอก zone). → ต้องรอ Wei (ก) promote P0-BE-06 → done ปลด BE-07/08/11 (ข) ตอบ B-009 ปลด BE-12 (ค) ยืนยัน zonePaths backend ครอบ tokens/i18n หรือไม่ (ฝากไว้รอบ 2 แล้ว). ขาดข้อใดข้อหนึ่ง เขตนี้จะจบลูปด้วย no-task รอบถัดไป.
+
 
 - ทำอะไร: หยิบ P0-BE-06 (`packages/db` — schema กลุ่ม Platform/Tenant) — เป็น ready task ในเขต backend ที่ dep (P0-BE-01) done แล้ว และอยู่ใน writable zone จริง (P0-BE-04 tokens / P0-BE-05 i18n อยู่ใน `packages/tokens`/`packages/i18n` = นอก zonePaths ของ backend agent ตาม loop-config → ข้าม). อ่าน `docs/handoff/data-dictionary.html` ส่วน "Platform / Tenant" แล้ว implement 7 entity เป็น Drizzle schema ที่ `packages/db/src/schema/platform.ts`: company, package, subscription, platform_invoice, ai_usage, role, user. Re-export ผ่าน barrel `index.ts` (NodeNext `.js`), เพิ่มสคริปต์ `migration:check` = `drizzle-kit check` (ตรงกับ CI Stage 2 ที่ระบุ P0-BE-06 ต้องมีสคริปต์นี้ · ไม่ต้องใช้ DB), gen migration `0000_flashy_eddie_brock.sql` (7 tables). Gates: typecheck 6/6 ✓, lint ✓, `drizzle-kit check` "Everything's fine" ✓ → เขียว. ด่าน 4.5 diff-reviewer = **PASS**. commit `d2a65cf` → สถานะ review + แถว REVIEW-QUEUE.
 - ตัดสินใจอะไร: (เขตตัวเอง ไม่ใช่ design/spec) (1) circular FK company.subscription_id ↔ subscription.company_id: ใช้ `AnyPgColumn` ตัด type-cycle + drizzle gen ADD CONSTRAINT หลัง CREATE ครบทุกตาราง (insert-order ปลอดภัย). (2) drizzle.config `schema` ชี้ไฟล์กลุ่มตรงๆ (`["./src/schema/platform.ts"]`) แทน barrel — เพราะ CJS loader ของ drizzle-kit resolve `./platform.js` ไม่ได้ (ชนกับ NodeNext ของ tsc) → **P0-BE-07/08/09 ต้อง append ไฟล์กลุ่มใหม่ใน array นี้ทุกครั้ง**. (3) currency_code default `THB` บนคอลัมน์เงิน (package price, platform_invoice amount) ตาม PLAN §4. ไม่มีการตัดสินความขัดแย้ง design/spec — ช่องว่าง dictionary (cycle=monthly|yearly ตาม price_m/y, price nullable สำหรับ Full=ติดต่อ, email unique ต่อ company) เป็นการเติมให้สอดคล้อง ไม่ขัดแย้ง จึงไม่ต้องเปิด BLOCKERS.
@@ -39,3 +50,27 @@
 - ทำอะไร: รอบที่ 2/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต backend — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $3.4381/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-11T18:59:36Z loop round ended (agent: backend)
+
+## 2026-07-12 01:59 · loop-runner · รอบที่ 1/10 · task: P0-BE-06
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-06 → สถานะ review · ค่าใช้จ่ายรอบนี้ $4.310838250000001 (สะสม $4.3108/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-11T19:03:47Z loop round ended (agent: backend)
+
+## 2026-07-12 02:03 · loop-runner · รอบที่ 2/10 · task: P0-BE-12
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-12 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $1.7604905 (สะสม $6.0713/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-11T19:08:48Z loop round ended (agent: backend)
+
+## 2026-07-12 02:08 · loop-runner · รอบที่ 3/10 · task: P0-BE-04
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-04 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $1.7153444999999998 (สะสม $7.7866/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-11T19:10:53Z loop round ended (agent: backend)
+
+## 2026-07-12 02:10 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 4/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต backend — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $8.5246/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
