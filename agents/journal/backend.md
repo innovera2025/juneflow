@@ -16,6 +16,12 @@
 - ตัดสินใจอะไร (เขตตัวเอง ไม่ใช่ design/spec): (1) **C9 JV lines เป็นตาราง `jv_line` จริง** (ไม่ใช่ json) — shape `{account_id,dr,cr,cc_id,project_id}` ตาม dictionary แต่ normalize เป็น row เพื่อให้ DR=CR นับ/บังคับได้ (P0-QA-06 assert JV ≥14 lines สมดุล) + ตรงกฎ §0#3 (real FK ไม่ใช่ name-text). (2) **C4** `etax_status` enum = `queued|sent|rejected|void` (superset ตามคำตัดสิน) บน `ar_invoice`. (3) **GLPosting ไม่แยกตาราง** — dictionary rel "ทุกเอกสารเงิน→GLPosting→JV" เป็น *process*; โมเดลเป็น `jv.source_doc` (polymorphic "table:uuid") ตาม erd (`source_doc`) แทน. (4) เพิ่ม `accounting_period` (period-lock) รองรับ JV/BankStatement/Reconcile "ปิดงวดล็อก" (dictionary กล่าวถึงแต่ไม่มี entity แยก — เป็นการเติมให้ครบตาม flows ของ dictionary ไม่ใช่ conflict). (5) `land_plot.area_sqm` เก็บ **ตร.ม.** ตาม PLAN §4 (dictionary เขียน rai-ngan-wa = display only). (6) `worker` แยกจาก `user` (labor master ≠ auth). (7) status/stage/tenure/method/depr_method ที่ dictionary ไม่ enumerate → `text` ไม่เดา enum (แพทเทิร์นเดียวกับ P0-BE-07). (8) `pv.batch_id` = uuid ไม่มี FK (bank-export batch grouping; bank file สร้างที่ `@juneflow/bank-file`) — uuid จริงไม่ใช่ name-text. **ไม่มีการตัดสินความขัดแย้งนอก ภาคผนวก C.**
 - เจออะไร (handoff): (1) **G1 ยังไม่ FULL** — P0-BE-09 (ภาคผนวก B 14 รายการ) เหลือ retention ledger/RevRec-WIP/AR CreditNote/PettyCash/Inventory/Lead/ServiceTicket/Solar/Timeline/OrgStructure/DocNumbering/BidComparison/Role.perms/Multi-company; dep = 06+07+08 → **07 ต้อง done ก่อน 09 หยิบได้** (07 ยัง review). (2) แพทเทิร์นไฟล์กลุ่มใหม่ยังเหมือนเดิม (import `.js` NodeNext → path ใน `drizzle.config.ts` → re-export index → `pnpm run generate` gen 0002 ถัดไป; อย่าแก้ 0000/0001 sacred หลัง merge). (3) `audit_log` schema ตรง shape ที่ `apps/api/src/plugins/audit-log.ts` เขียน ({user,action,entity,before/after,ip,at}) → พร้อมให้ P0-BE-13 implement middleware. (4) P0-BE-10 (seed) จะ map mock→jv_line สมดุล + normalize FK; `land_plot.area_sqm` ต้องแปลง rai→m² ตอน seed. (5) คิว ready เขต backend หลังรอบนี้ = 5 (P0-BE-09/10/11/13/14) ≥5 ✓ แต่ 09/10 ติด dep chain (รอ 07/08 done) · P0-BE-11 (auth, dep 06 done) หยิบได้ทันที.
 
+## 2026-07-12 · orchestrator/ด่าน 4.5 · task: P0-BE-07 + P0-BE-08 → REWORK
+
+- ทำอะไร: diff-reviewer ตัดสิน **FAIL ทั้งสอง task** — ไม่ merge เข้า dev · TASKS กลับ `ready` พร้อม rework note · แถว REVIEW-QUEUE ถูกถอน · schema/migration ยังอยู่บน branch แก้ต่อได้ (0001/0002 ยังไม่ merge = ไม่ sacred)
+- ตัดสินใจอะไร: — (คำตัดสินของ diff-reviewer ตาม §10 ด่าน 4.5)
+- เจออะไร (สิ่งที่ต้องแก้): (1) BE-07: `PMQuote` ถูกตัดออกโดยตัดสินเอง — erd.html มี entity เต็ม และ PLAN §6 นับ erd เป็น base → เพิ่ม `pm_quote` หรือเปิด blocker ห้ามตัดเงียบ (2) BE-08: `sales_unit.contract` ถูกเว้นโดยอ้าง [TBD-MVP] = ต้องห้าม (PLAN §2/§11) + spec-comment ใน index.ts ถูกแก้กลบ — เพิ่มคอลัมน์ (ชนิดถาม **B-013**) + คืน comment (3) fidelity อื่นผ่านหมด: C2/C3/C4/C9 ตรง, sacred 0000 ไม่ถูกแตะ, gates เขียว — งานเหลือน้อย แก้ 2 จุดจบ (4) reviewer apply 0001+0002 ลง DB @5433 แล้ว — ถ้า regen migration ต้อง reset DB ก่อนรัน gate ใหม่ (5) งบเขต backend คืนนี้เกินเพดานแล้ว (~$24/$20) — rework เริ่มคืนถัดไปหรือเมื่อ Wei สั่ง
+
 ## 2026-07-12 · รอบที่ 5 · task: P0-BE-07
 
 - ทำอะไร: หยิบ P0-BE-07 (`packages/db` — schema กลุ่มโครงการ/Master + BOQ/จัดซื้อ + ผู้รับเหมา/ตรวจรับ + PM CMMS) — เป็น ready task เขต backend ที่ dep (P0-BE-06) **done แล้ว** (merged เข้า dev ตั้งแต่รอบก่อน ปลด catch-22 ในรอบ 4). อ่าน spec: `docs/handoff/data-dictionary.html` (4 กลุ่ม) + `erd.html` (relationships/type_id/tree). Implement เป็น 4 ไฟล์กลุ่ม `project.ts`/`boq.ts`/`subcon.ts`/`pm.ts` (27 ตาราง, 10 enums) re-export ผ่าน barrel `index.ts`. gen migration `0001_acoustic_zuras.sql`. Gates: turbo typecheck 6/6 ✓ · lint 5/5 ✓ · `drizzle-kit check` "Everything's fine" ✓ → เขียว. **ด่าน 4.5 diff-reviewer = PASS** (fidelity vs dictionary/erd · C2/C3 ตรง · §4 ครบ · sacred/zone ✓). commit `d4e4040` → สถานะ `review` + แถว REVIEW-QUEUE.
@@ -92,3 +98,14 @@
 - ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-07 → สถานะ review · ค่าใช้จ่ายรอบนี้ $6.374965499999998 (สะสม $6.3750/เพดาน $8)
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: git progress: yes
+- 2026-07-11T19:56:52Z loop round ended (agent: backend)
+
+## 2026-07-12 02:56 · loop-runner · รอบที่ 2/4 · task: P0-BE-08
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-08 → สถานะ review · ค่าใช้จ่ายรอบนี้ $5.571637249999999 (สะสม $11.9466/เพดาน $8)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+
+## 2026-07-12 02:56 · loop-runner · หยุดที่เพดานงบ
+- ทำอะไร: หยุดลูปก่อนรอบที่ 3: งบสะสม $11.9466 ถึงเพดาน $8 (guardrail ตาม PLAN.md §10)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: task ล่าสุด: P0-BE-08 · รันใหม่ได้ในรอบคืนถัดไป
