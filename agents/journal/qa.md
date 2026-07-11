@@ -10,6 +10,12 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-12 · orchestrator/ด่าน 4.5 · task: P0-QA-06 → REWORK
+
+- ทำอะไร: diff-reviewer ตัดสิน **FAIL** เฉพาะ P0-QA-06 (QA-01/05 PASS และ merge เข้า dev แล้ว) — สอง commit ของ QA-06 (`4ad56a5` `9cf0e56`) ไม่ถูก merge · TASKS.md กลับเป็น `ready` พร้อม rework note · แถว REVIEW-QUEUE ถูกถอน
+- ตัดสินใจอะไร: — (คำตัดสินเป็นของ diff-reviewer ตาม PLAN.md §10 ด่าน 4.5)
+- เจออะไร (สิ่งที่รอบ rework ต้องแก้): (1) `tests/seed/seed-counts.spec.ts:38` Package expected 3 จาก SUB_PACKAGES — **ขัด C1** (mock ค้างเวอร์ชัน) ต้องเป็น 4 ตาม PKG_STORE/PACKAGE-RULES §1 (2) `seed-counts.spec.ts:156-159` + README ล็อก JV lines = 0 — **ขัด C9** seed ต้องสร้าง lines สมดุล DR=CR (JV 7 ใบ → ≥14 lines) — ย้ายออกจากกลุ่ม expected-0 (3) `Unit` 84 vs 0 — เปิดเป็น **B-009** ใน BLOCKERS.md แล้ว ให้ทำ assertion เป็น todo ผูก B-009 แทนการล็อกค่า · โค้ดยังอยู่บน feature/qa แก้ต่อจากไฟล์เดิมได้เลย
+
 ## 2026-07-12 · รอบที่ 3 · task: P0-QA-06
 
 - ทำอะไร: สร้าง **seed fixture assertions (expected-first)** ที่ `tests/seed/` — `seed-counts.spec.ts` + `README.md`. ถอด **จำนวน record ต่อ entity** จาก `docs/extract/MOCK-DATA.md` §"สรุปสำหรับทำ seed data" ทุกบรรทัดเป็นค่าคาดหวังตรง ๆ 100%: 7 กลุ่ม Juneflow (Platform · Master · BOQ/จัดซื้อ · ผู้รับเหมา · PM · การเงิน-บัญชี · ที่ดิน/ขาย/อื่นๆ) แต่ละ entry มี `{entity, expected, group, source(.jsx const), sub?}` + citation ต้นทาง · Notification 3 ชุด [5,7,10] · entity ที่ dictionary มีแต่ไม่มี record 9 ตัว (AiUsage/Acceptance/Defect/Attendance/Payroll/SalesUnit/Cheque/JV lines/Unit) = expected 0. เพิ่ม script `test:seed` (`vitest run seed`) ใน `tests/package.json` + ผูกเข้า aggregate `test`. **`vitest run seed` = เขียว: 90 tests ผ่านหมด** (fixture-consistency: จำนวนเต็มไม่ติดลบ · ไม่ซ้ำ · ครบ 7 กลุ่ม · มี citation ทุก entry). เทียบกับ record ที่ seed จริงผลิต = `describe.todo` (รันเมื่อ P0-BE-10 done). Gate ของ task = "assertions ตรง §สรุป 100%" → **GREEN**. commit test `4ad56a5` บน `feature/qa`, task → `review`, เพิ่มแถว REVIEW-QUEUE.
