@@ -15,6 +15,13 @@
       "when": 1783798809031,
       "tag": "0001_acoustic_zuras",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783799517445,
+      "tag": "0002_true_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

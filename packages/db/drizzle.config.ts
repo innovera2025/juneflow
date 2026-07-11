@@ -15,6 +15,8 @@ export default defineConfig({
     "./src/schema/boq.ts",
     "./src/schema/subcon.ts",
     "./src/schema/pm.ts",
+    "./src/schema/finance.ts",
+    "./src/schema/misc.ts",
   ],
   out: "./drizzle",
   dbCredentials: {
