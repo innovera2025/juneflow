@@ -12,6 +12,11 @@
  *
  * §0 กฎข้อ 5: wat/ ("บุญบัญชี") เป็นคนละผลิตภัณฑ์ — ไม่ seed เข้า Juneflow db;
  *   บันทึกไว้ใน WAT_COUNTS เพื่อความครบถ้วนของ §สรุป แต่ไม่นับเป็น expected ของ seed Juneflow
+ *
+ * REWORK (ด่าน 4.5 FAIL 12 ก.ค. — ภาคผนวก C ชี้ขาด, §สรุป เป็น mock ค้างเวอร์ชัน):
+ *   • C1: Package = 4 (PKG_STORE S/M/L/Full) ไม่ใช่ 3 (SUB_PACKAGES stale)
+ *   • C9: JV lines ต้องสมดุล DR=CR (JV 7 ใบ → ≥14 บรรทัด) — ย้ายออกจากกลุ่ม expected-0
+ *   • B-009: Unit/SalesUnit (generate 84 vs persist ตาม §0 กฎ 3) ยังไม่ตัดสิน → it.todo ผูก B-009
  */
 import { describe, it, expect } from 'vitest';
 
@@ -35,7 +40,7 @@ export interface SeedCount {
 const PLATFORM: SeedCount[] = [
   { entity: 'Company (บริษัทในเครือ)', expected: 3, group: 'Platform', source: 'company-accept.jsx COMPANIES' },
   { entity: 'Tenant/Subscriber', expected: 9, group: 'Platform', source: 'subscription-admin.jsx SUBSCRIBERS' },
-  { entity: 'Package', expected: 3, group: 'Platform', source: 'subscription.jsx SUB_PACKAGES' },
+  { entity: 'Package', expected: 4, group: 'Platform', source: 'pkg-builder.jsx PKG_STORE.seed (S/M/L/Full)', note: 'C1 (ภาคผนวก C): ใช้ 4 ระดับตาม PKG_STORE + PACKAGE-RULES §1 — SUB_PACKAGES=3 เป็น mock ค้างเวอร์ชัน · จอ sub.plans render 4 การ์ด' },
   { entity: 'Platform Invoice', expected: 5, group: 'Platform', source: 'subscription-admin.jsx inv' },
   { entity: 'Subscription Invoice (tenant)', expected: 3, group: 'Platform', source: 'subscription.jsx SUB_INVOICES' },
   { entity: 'User', expected: 12, group: 'Platform', source: 'subscription-admin.jsx COMPANY_USERS["T-1001"]' },
@@ -106,7 +111,7 @@ const FINANCE: SeedCount[] = [
   { entity: 'AR Invoice', expected: 6, group: 'การเงิน-บัญชี', source: 'ar' },
   { entity: 'ลูกหนี้', expected: 5, group: 'การเงิน-บัญชี', source: 'ar' },
   { entity: 'ใบลดหนี้', expected: 3, group: 'การเงิน-บัญชี', source: 'ar' },
-  { entity: 'JV', expected: 7, group: 'การเงิน-บัญชี', source: 'gl', note: '§สรุป: ไม่มีบรรทัด DR/CR (JV lines = 0)' },
+  { entity: 'JV', expected: 7, group: 'การเงิน-บัญชี', source: 'gl JV_LIST', note: 'C9 (ภาคผนวก C): mock JV_LIST.lines เป็นแค่จำนวนบรรทัด — seed สร้าง lines สมดุล DR=CR (≥14 บรรทัด) · ดู describe "JV lines" (ห้ามล็อก 0)' },
   { entity: 'Posting inbox', expected: 7, group: 'การเงิน-บัญชี', source: 'gl' },
   { entity: 'งบทดลอง (trial balance)', expected: 14, group: 'การเงิน-บัญชี', source: 'gl' },
   { entity: 'COA', expected: 23, group: 'การเงิน-บัญชี', source: 'gl', sub: { class: 5 } },
@@ -152,11 +157,27 @@ const NOTIFICATION_SETS = [5, 7, 10];
 
 // ---------------------------------------------------------------------------
 // entity ใน dictionary ที่ไม่มี mock record เลย (§สรุป ท้าย) → expected 0
+//   หมายเหตุ rework (ด่าน 4.5 FAIL 12 ก.ค.): เดิมกลุ่มนี้มี 9 รายการ — ถอด 3 ตัวออก:
+//   • 'JV lines (DR/CR)' → ย้ายไป C9 (seed สร้าง lines สมดุล DR=CR ≥14 บรรทัด ห้ามล็อก 0)
+//   • 'Unit' / 'SalesUnit' → ย้ายไป B-009 pending (84 generate vs persist ยังไม่ตัดสิน)
+//   เหลือ 6 ตัวที่ §สรุป ยืนยัน 0 โดยไม่ขัด C-decision / §0 กฎ 3
 // ---------------------------------------------------------------------------
 const NO_RECORD_ENTITIES = [
-  'AiUsage', 'Acceptance', 'Defect', 'Attendance', 'Payroll',
-  'SalesUnit', 'Cheque', 'JV lines (DR/CR)', 'Unit',
+  'AiUsage', 'Acceptance', 'Defect', 'Attendance', 'Payroll', 'Cheque',
 ];
+
+// JV lines (ภาคผนวก C9) — mock JV_LIST.lines เป็นแค่ "จำนวนบรรทัด" ไม่มี DR/CR จริง;
+//   C9 สั่ง seed สร้าง lines สมดุล DR=CR จากยอด mock → ห้ามล็อก 0
+//   JV 7 ใบ · ทุกใบมีอย่างน้อย 1 DR + 1 CR → รวม ≥ 14 บรรทัด
+const JV_BOOK_COUNT = 7;                                        // §สรุป: JV 7 ใบ
+const JV_MIN_LINES_PER_BOOK = 2;                               // ≥1 DR + ≥1 CR ต่อใบ
+const JV_MIN_TOTAL_LINES = JV_BOOK_COUNT * JV_MIN_LINES_PER_BOOK; // ≥14
+
+// Unit / SalesUnit (B-009 — รอ Wei ตอบ) — sales-process.jsx `units` generate 84 (code+status)
+//   ทุก reload; §สรุป บอก "ไม่มี record" แต่ §0 กฎ 3 สั่ง seed ต้อง persist
+//   (regenerate ทุก reload = กลไก mock ห้ามลอก) → ห้ามล็อกค่า (84 หรือ 0) เอง
+//   assertion เป็น it.todo ผูก B-009 จนกว่า Wei จะตอบ (84 | 0+runtime | Wei กำหนด)
+const B009_PENDING_ENTITIES = ['Unit', 'SalesUnit']; // ชุด 84 ยูนิตเดียวกัน
 
 // wat/ ("บุญบัญชี") — คนละผลิตภัณฑ์ (§0 กฎข้อ 5) · ไม่ seed เข้า Juneflow db
 // เก็บไว้เพื่อความครบถ้วนของ §สรุป เท่านั้น — ไม่ assert เป็น expected ของ seed Juneflow
@@ -208,10 +229,40 @@ describe('Seed fixture — entity ไม่มี record (expected 0)', () => {
   it.each(NO_RECORD_ENTITIES)('%s → 0 record', (name) => {
     expect(typeof name).toBe('string');
   });
-  it('มี 9 entity ไม่มี record ตาม §สรุป', () => {
-    expect(NO_RECORD_ENTITIES.length).toBe(9);
-    expect(new Set(NO_RECORD_ENTITIES).size).toBe(9);
+  it('มี 6 entity ไม่มี record (9 เดิม − JV lines − Unit − SalesUnit → ย้ายไป C9/B-009)', () => {
+    expect(NO_RECORD_ENTITIES.length).toBe(6);
+    expect(new Set(NO_RECORD_ENTITIES).size).toBe(6);
   });
+  it('JV lines / Unit / SalesUnit ไม่อยู่ในกลุ่ม expected-0 อีกต่อไป', () => {
+    for (const moved of ['JV lines (DR/CR)', 'Unit', 'SalesUnit']) {
+      expect(NO_RECORD_ENTITIES).not.toContain(moved);
+    }
+  });
+});
+
+describe('Seed fixture — JV lines สมดุล DR=CR (ภาคผนวก C9)', () => {
+  it('JV 7 ใบ · ทุกใบ ≥2 บรรทัด → รวม ≥14 บรรทัด (ห้ามล็อก 0)', () => {
+    expect(JV_BOOK_COUNT).toBe(7);
+    expect(JV_MIN_LINES_PER_BOOK).toBeGreaterThanOrEqual(2);
+    expect(JV_MIN_TOTAL_LINES).toBeGreaterThanOrEqual(14);
+    expect(JV_MIN_TOTAL_LINES).toBe(14);
+  });
+  it('invariant: ทุก JV book ต้อง ΣDR = ΣCR (สร้างจากยอด mock)', () => {
+    // ชุดบรรทัดตัวอย่างที่สมดุล — spec invariant เท่านั้น ไม่ผูก account จริง (Open Q #3)
+    const sampleBook = [{ dr: 1000, cr: 0 }, { dr: 0, cr: 1000 }];
+    const sumDr = sampleBook.reduce((a, l) => a + l.dr, 0);
+    const sumCr = sampleBook.reduce((a, l) => a + l.cr, 0);
+    expect(sumDr).toBe(sumCr);
+    expect(sampleBook.length).toBeGreaterThanOrEqual(JV_MIN_LINES_PER_BOOK);
+  });
+});
+
+describe('Seed fixture — Unit/SalesUnit persistence (B-009 pending)', () => {
+  it('บันทึกว่า Unit/SalesUnit ค้างคำตัดสิน B-009 — ไม่ล็อกค่า', () => {
+    expect(B009_PENDING_ENTITIES).toEqual(['Unit', 'SalesUnit']);
+  });
+  it.todo('Unit persist count = ? (รอ B-009: 84 ตาม generator | 0 + backend generate runtime | Wei กำหนด)');
+  it.todo('SalesUnit persist count = ? (รอ B-009 — ผูกชุด 84 ยูนิตเดียวกัน `units` sales-process.jsx:24)');
 });
 
 describe('wat/ — คนละผลิตภัณฑ์ (§0 กฎ 5, ไม่ seed เข้า Juneflow)', () => {
@@ -223,7 +274,9 @@ describe('wat/ — คนละผลิตภัณฑ์ (§0 กฎ 5, ไม
 // --- hookup เข้า seed จริง (รันเมื่อ P0-BE-10 done) --------------------------
 describe.todo('Seed fixture — against real seed (P0-BE-10)', () => {
   // it.each(SEED_COUNTS): const n = await countRows(entityTable(c.entity));
-  //   expect(n).toBe(c.expected)
+  //   expect(n).toBe(c.expected)   // Package ต้อง = 4 (C1)
   // it.each(NO_RECORD_ENTITIES): expect(await countRows(table)).toBe(0)
+  // C9 JV lines: for each JV book → lines.length ≥ 2 · ΣDR = ΣCR · total lines ≥ 14
+  // B-009 Unit/SalesUnit: assert เมื่อ Wei ตอบ (ยังห้ามล็อกค่า)
   // wat/ tables ต้องไม่อยู่ใน Juneflow schema เลย (§0 กฎ 5)
 });
