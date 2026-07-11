@@ -67,20 +67,20 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
-| P0-QA-01 | qa | ready | ตรวจ `tests/visual/reference/` ครบ (106 .jpg + 22 .png — ดู B-001) + จัดทำ index ภาพ→จอ/route จาก `docs/extract/NAV-ROUTES.md` → `tests/visual/reference-index.md` | P0-BE-03 | จำนวนไฟล์ตรง + index ครอบคลุมทุกภาพ | 2 ชม. |
+| P0-QA-01 | qa | done | ตรวจ `tests/visual/reference/` ครบ (106 .jpg + 22 .png — ดู B-001) + จัดทำ index ภาพ→จอ/route จาก `docs/extract/NAV-ROUTES.md` → `tests/visual/reference-index.md` | P0-BE-03 | จำนวนไฟล์ตรง + index ครอบคลุมทุกภาพ | 2 ชม. |
 | P0-QA-02 | qa | ready | contract test harness (`tests/contract/`) — generate จาก `openapi.yaml` · **expected จาก contract เท่านั้น ห้ามอ่าน implementation ก่อน** (กลุ่ม 2.4) | P0-BE-12 | G2 harness รันได้กับ dev API | 3 ชม. |
 | P0-QA-03 | qa | ready | Playwright E2E harness (`tests/e2e/`) + smoke test (login → shell load) ตาม state machine ใน `docs/handoff/flows.html` | P0-DEV-01 | G4 smoke ผ่านบน compose dev | 3 ชม. |
 | P0-QA-04 | qa | ready | visual gate harness — screenshot compare กับ `tests/visual/reference/` ตามเกณฑ์ PLAN.md §0 (ต่างได้เฉพาะตัวเลขข้อมูลจาก seed + สิ่งที่ Wei อนุมัติผ่าน BLOCKERS) | P0-QA-01 | G5 harness รันได้ + รายงาน diff อ่านได้ | 3 ชม. |
-| P0-QA-05 | qa | ready | unit business-logic test spec (expected-first) สำหรับ G3: posting rules · ตัด remain BOQ · retention · approval matrix · quota · งวดงาน 4 basis (C2 รวม `unit`) — เขียนจาก `docs/handoff/flows.html` + `docs/extract/PACKAGE-RULES.md` + `docs/extract/PROJECT-TYPES.md` + dictionary · **ห้ามอ่าน implementation ก่อนเขียน expected** | — | spec review โดย Wei (ยังไม่รันกับโค้ด) | 3 ชม. |
-| P0-QA-06 | qa | ready | seed fixture assertions จาก `docs/extract/MOCK-DATA.md` §สรุป — จำนวน record ต่อ entity เป็น expected (รันจริงเมื่อ P0-BE-10 done) | — | assertions ตรง §สรุป 100% | 2 ชม. |
+| P0-QA-05 | qa | done | unit business-logic test spec (expected-first) สำหรับ G3: posting rules · ตัด remain BOQ · retention · approval matrix · quota · งวดงาน 4 basis (C2 รวม `unit`) — เขียนจาก `docs/handoff/flows.html` + `docs/extract/PACKAGE-RULES.md` + `docs/extract/PROJECT-TYPES.md` + dictionary · **ห้ามอ่าน implementation ก่อนเขียน expected** | — | spec review โดย Wei (ยังไม่รันกับโค้ด) | 3 ชม. |
+| P0-QA-06 | qa | ready | seed fixture assertions จาก `docs/extract/MOCK-DATA.md` §สรุป — จำนวน record ต่อ entity เป็น expected (รันจริงเมื่อ P0-BE-10 done) · **REWORK — ด่าน 4.5 FAIL 12 ก.ค.:** (1) Package expected = 4 ตาม C1/PKG_STORE (ห้ามใช้ SUB_PACKAGES=3) (2) JV lines ห้ามล็อก 0 — C9 ให้ seed สร้าง lines สมดุล DR=CR (JV 7 ใบ ≥14 lines) (3) Unit 84 vs 0 ห้ามตัดสินเอง → เปิด blocker (ร่างใน REVIEW-QUEUE/journal) · โค้ดเดิมอยู่บน feature/qa แก้ต่อจากตรงนั้น | — | assertions ตรง §สรุป 100% | 2 ชม. |
 
 ## เขต integrations — `packages/tax-engine` · `packages/bank-file` · `packages/notifications`
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
-| P0-INT-01 | integrations | ready | interface `TaxEngine` + impl `thailand` (skeleton + fake ตามกลุ่ม 5) — mock-first (กลุ่ม 2.5, PLAN.md §4) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
-| P0-INT-02 | integrations | ready | interface `BankFileFormatter` + impl `kbank-direct` (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 2 ชม. |
-| P0-INT-03 | integrations | ready | interface `NotificationAdapter` + adapters line/email/webpush (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
+| P0-INT-01 | integrations | done | interface `TaxEngine` + impl `thailand` (skeleton + fake ตามกลุ่ม 5) — mock-first (กลุ่ม 2.5, PLAN.md §4) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
+| P0-INT-02 | integrations | done | interface `BankFileFormatter` + impl `kbank-direct` (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 2 ชม. |
+| P0-INT-03 | integrations | done | interface `NotificationAdapter` + adapters line/email/webpush (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
 | P0-INT-04 | integrations | ready | credentials ผ่าน env — convention + `.env.example` ทั้ง 3 แพ็กเกจ (**ห้าม secrets ใน repo**) (กลุ่ม 2.5/2.6) | P0-INT-01, P0-INT-02, P0-INT-03 | scan ไม่พบ secret ใน repo + config โหลดจาก env ผ่าน | 2 ชม. |
 | P0-INT-05 | integrations | done | field inventory ฟอร์มภาษีไทยจาก `pototype/tax-forms.jsx` → `packages/tax-engine/docs/tax-forms-map.md` (เตรียม Phase 3 — ฟอร์มต้อง render ตรง tax-forms.jsx / accurate to RD originals) | — | ครอบคลุมทุกฟอร์มใน tax-forms.jsx · review โดย Wei | 3 ชม. |
 
@@ -90,6 +90,6 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 |---|---|---|---|---|---|---|
 | P0-DEV-01 | devops | ready | `infra/docker-compose.yml` (dev) — pg16 + redis + api + web + worker · **`docker compose up` เดียวได้ระบบ + seed** (Manifest กลุ่ม 5 ข้อกำหนด Phase 0) | P0-BE-10, P0-BE-13 | compose up สำเร็จรอบเดียว + seed ครบ + คลิกเทียบ gallery ได้ | 3 ชม. |
 | P0-DEV-02 | devops | blocked | `.github/workflows/ci.yml` ตามกลุ่ม 4.3 — stages: lint+typecheck → migration check → contract → unit → E2E → visual · เขียว auto-merge feature→dev · main ล็อกให้ Wei · **sacred หลัง merge** | P0-BE-01 | pipeline รันผ่านบน branch ทดสอบ | 3 ชม. |
-| P0-DEV-03 | devops | blocked | `.github/CODEOWNERS` ตามกลุ่ม 4.4 — ล็อกเขตต่อ agent + sacred files (OpenAPI · merged migrations · CLAUDE.md ทุกใบ · CI config · secrets · `docs/extract/*` · i18n-full.json) | P0-BE-01 | ครอบคลุม sacred ครบตาม PLAN.md §10 | 1 ชม. |
+| P0-DEV-03 | devops | done | `.github/CODEOWNERS` ตามกลุ่ม 4.4 — ล็อกเขตต่อ agent + sacred files (OpenAPI · merged migrations · CLAUDE.md ทุกใบ · CI config · secrets · `docs/extract/*` · i18n-full.json) | P0-BE-01 | ครอบคลุม sacred ครบตาม PLAN.md §10 | 1 ชม. |
 | P0-DEV-04 | devops | ready | branch policy + runbook — dev auto-merge เมื่อ CI เขียว · main = Wei promote คนเดียว · runbook: deploy dev / promote main / restore DB → `infra/runbook.md` (กลุ่ม 2.6) | P0-DEV-02 | review โดย Wei + ทดสอบ flow feature→dev จริง 1 รอบ | 2 ชม. |
 | P0-DEV-05 | devops | ready | infra prod compose skeleton (VPS Singapore ตามภาคผนวก A) — env จาก host **ห้าม secrets ใน repo** | P0-DEV-01 | config validate ผ่าน + scan ไม่พบ secret | 3 ชม. |
