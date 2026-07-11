@@ -26,7 +26,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
-| P0-BE-01 | backend | ready | PLAN.md §5 (โครง monorepo) + Manifest กลุ่ม 5 | — | CI: lint+typecheck+build ทุก workspace | 3 ชม. |
+| P0-BE-01 | backend | done | PLAN.md §5 (โครง monorepo) + Manifest กลุ่ม 5 | — | CI: lint+typecheck+build ทุก workspace | 3 ชม. |
 | P0-BE-02 | backend | done | ก๊อป `docs/extract/` (Cowork pack 8 ไฟล์ ← sacred) + `docs/handoff/` (design_handoff_juneflow ทั้งชุด) ตามกลุ่ม 5 | P0-BE-01 | inventory ครบ: extract 8 ไฟล์ + handoff ทั้งชุด (byte-identical กับต้นทาง) | 1 ชม. |
 | P0-BE-03 | backend | done | `scripts/copy-references` — ก๊อป `pototype/gallery/g1–g5` ทั้งหมด **106 .jpg** (ดู B-001) + `pototype/shots/` 22 .png → `tests/visual/reference/` | P0-BE-01 | จำนวนไฟล์ตรง 106 + 22 · ห้ามแก้ไฟล์ต้นทาง | 1 ชม. |
 | P0-BE-04 | backend | ready | `packages/tokens` — tokens.css/tokens.json (ธีม fiori จาก `docs/handoff/`) + pipeline + gen Flutter ThemeData (PLAN.md §5, กลุ่ม 5) | P0-BE-01, P0-BE-02 | CI + output gen ตรงค่า token ต้นทาง (ห้าม hardcode) | 3 ชม. |
@@ -82,7 +82,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P0-INT-02 | integrations | ready | interface `BankFileFormatter` + impl `kbank-direct` (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 2 ชม. |
 | P0-INT-03 | integrations | ready | interface `NotificationAdapter` + adapters line/email/webpush (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
 | P0-INT-04 | integrations | ready | credentials ผ่าน env — convention + `.env.example` ทั้ง 3 แพ็กเกจ (**ห้าม secrets ใน repo**) (กลุ่ม 2.5/2.6) | P0-INT-01, P0-INT-02, P0-INT-03 | scan ไม่พบ secret ใน repo + config โหลดจาก env ผ่าน | 2 ชม. |
-| P0-INT-05 | integrations | ready | field inventory ฟอร์มภาษีไทยจาก `pototype/tax-forms.jsx` → `packages/tax-engine/docs/tax-forms-map.md` (เตรียม Phase 3 — ฟอร์มต้อง render ตรง tax-forms.jsx / accurate to RD originals) | — | ครอบคลุมทุกฟอร์มใน tax-forms.jsx · review โดย Wei | 3 ชม. |
+| P0-INT-05 | integrations | done | field inventory ฟอร์มภาษีไทยจาก `pototype/tax-forms.jsx` → `packages/tax-engine/docs/tax-forms-map.md` (เตรียม Phase 3 — ฟอร์มต้อง render ตรง tax-forms.jsx / accurate to RD originals) | — | ครอบคลุมทุกฟอร์มใน tax-forms.jsx · review โดย Wei | 3 ชม. |
 
 ## เขต devops — `infra/` (+ `.github/` ตามกลุ่ม 4)
 
