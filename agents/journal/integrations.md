@@ -21,3 +21,15 @@
 - ทำอะไร: bootstrap ไฟล์สถานะ loop ตาม Manifest v2 กลุ่ม 3 · เขต integrations มี 5 task ใน `TASKS.md` (P0-INT-01 ถึง P0-INT-05) สถานะ `ready` — P0-INT-05 (tax forms field inventory) เริ่มได้ทันทีโดยไม่รอเขตอื่น
 - ตัดสินใจอะไร: ไม่มีการตัดสินใจเชิง design/spec — ความขัดแย้งถูกยกเข้า `BLOCKERS.md` (B-001, B-002)
 - เจออะไร: โครงโฟลเดอร์เขตนี้ยังมีประเด็นเปิด → **B-002** (`packages/integrations/CLAUDE.md` ตามกลุ่ม 2 vs 3 แพ็กเกจแยกตามกลุ่ม 5 — รอ Wei เลือก ก/ข/ค แต่ไม่ block งาน skeleton) · หลักเขต (กลุ่ม 2.5): ทุกตัว implement interface กลาง · mock-first (fake adapter e-Tax/KBANK/LINE) · credentials ผ่าน env · agent เขตนี้เข้าทีมเต็มรูป Phase 3 (PLAN.md §7)
+- 2026-07-11T18:19:32Z loop round ended (agent: integrations)
+
+## 2026-07-12 01:19 · loop-runner · รอบที่ 1/10 · task: P0-INT-05
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-INT-05 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.2198479999999994 (สะสม $2.2198/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-11T18:20:12Z loop round ended (agent: integrations)
+
+## 2026-07-12 01:20 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต integrations — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $2.7538/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
