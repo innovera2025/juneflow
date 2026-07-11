@@ -21,5 +21,4 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-
-*(ว่าง — ยังไม่มีงานเขียวบน dev รอ promote)*
+| P0-INT-05 | tax-engine | commit on `feature/integrations` (docs: `packages/tax-engine/docs/tax-forms-map.md`) | — (docs-only · หลักฐาน gate = coverage checklist ครบ 3 ฟอร์ม A/B/C + shared primitives, เทียบ `pototype/tax-forms.jsx` L1–727) | 2026-07-12 |
