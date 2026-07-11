@@ -8,7 +8,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./kbank-direct": "./src/kbank-direct/index.ts"
+    "./kbank-direct": "./src/kbank-direct/index.ts",
+    "./config": "./src/config.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",

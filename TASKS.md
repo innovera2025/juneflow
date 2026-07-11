@@ -81,7 +81,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P0-INT-01 | integrations | done | interface `TaxEngine` + impl `thailand` (skeleton + fake ตามกลุ่ม 5) — mock-first (กลุ่ม 2.5, PLAN.md §4) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
 | P0-INT-02 | integrations | done | interface `BankFileFormatter` + impl `kbank-direct` (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 2 ชม. |
 | P0-INT-03 | integrations | done | interface `NotificationAdapter` + adapters line/email/webpush (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
-| P0-INT-04 | integrations | ready | credentials ผ่าน env — convention + `.env.example` ทั้ง 3 แพ็กเกจ (**ห้าม secrets ใน repo**) (กลุ่ม 2.5/2.6) | P0-INT-01, P0-INT-02, P0-INT-03 | scan ไม่พบ secret ใน repo + config โหลดจาก env ผ่าน | 2 ชม. |
+| P0-INT-04 | integrations | review | credentials ผ่าน env — convention + `.env.example` ทั้ง 3 แพ็กเกจ (**ห้าม secrets ใน repo**) (กลุ่ม 2.5/2.6) | P0-INT-01, P0-INT-02, P0-INT-03 | scan ไม่พบ secret ใน repo + config โหลดจาก env ผ่าน | 2 ชม. |
 | P0-INT-05 | integrations | done | field inventory ฟอร์มภาษีไทยจาก `pototype/tax-forms.jsx` → `packages/tax-engine/docs/tax-forms-map.md` (เตรียม Phase 3 — ฟอร์มต้อง render ตรง tax-forms.jsx / accurate to RD originals) | — | ครอบคลุมทุกฟอร์มใน tax-forms.jsx · review โดย Wei | 3 ชม. |
 
 ## เขต devops — `infra/` (+ `.github/` ตามกลุ่ม 4)
