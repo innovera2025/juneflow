@@ -78,7 +78,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
-| P0-INT-01 | integrations | ready | interface `TaxEngine` + impl `thailand` (skeleton + fake ตามกลุ่ม 5) — mock-first (กลุ่ม 2.5, PLAN.md §4) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
+| P0-INT-01 | integrations | review | interface `TaxEngine` + impl `thailand` (skeleton + fake ตามกลุ่ม 5) — mock-first (กลุ่ม 2.5, PLAN.md §4) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
 | P0-INT-02 | integrations | ready | interface `BankFileFormatter` + impl `kbank-direct` (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 2 ชม. |
 | P0-INT-03 | integrations | ready | interface `NotificationAdapter` + adapters line/email/webpush (skeleton + fake ตามกลุ่ม 5) | P0-BE-01 | CI + G3 (unit interface + fake adapter) | 3 ชม. |
 | P0-INT-04 | integrations | ready | credentials ผ่าน env — convention + `.env.example` ทั้ง 3 แพ็กเกจ (**ห้าม secrets ใน repo**) (กลุ่ม 2.5/2.6) | P0-INT-01, P0-INT-02, P0-INT-03 | scan ไม่พบ secret ใน repo + config โหลดจาก env ผ่าน | 2 ชม. |
