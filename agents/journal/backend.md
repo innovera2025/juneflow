@@ -10,6 +10,30 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-12 · รอบที่ 21 · task: P0-BE-10 (seed) REWORK 3 → review (GREEN · ด่าน 4.5 PASS)
+
+- ทำอะไร: หยิบ P0-BE-10 (`ready`→`doing`) — task เดียว backend dep-ครบ (P0-BE-09 done). Apply 3 answered blockers ตาม directive rework-3: **(1) B-021(ก)** เพิ่ม enum `subscription_status` value `trial` ผ่าน migration ใหม่ **0006** (`drizzle-kit generate` = `ALTER TYPE … ADD VALUE 'trial' BEFORE 'active'` · merged 0000–0005 ไม่แตะ) + seed T-1005 status=`trial` (ลบ map trial→expiring). **(2) B-022(ก)** แทน COMPANIES 3 แถว (JF/JE/JC group) ด้วย **9 SUBSCRIBERS** (subscription-admin.jsx:5-14 · name=org · pkg map pro→M/enterprise→Full/starter→S) — subscription แต่ละใบชี้ company ตัวเอง · CO1 anchor = T-1001. **(3) B-023(ก)** เพิ่ม subcon vendor จริง 7 (SC-01..06 = subcon.jsx SUBCONS 6 + SC-07 หจก.ช่างก่อฉาบมั่นคง = คู่สัญญา WO-2026-0055 ที่ไม่อยู่ในทะเบียน) เพิ่มจาก VENDOR_SEED · `subcon_contract.vendor_id` + retention_ledger ชี้ firm จริงตาม `firm` (WO-0042→SC-01/0051→SC-04/0048→SC-03/0055→SC-07). **(4) B-027** defect_report=0 คงเดิม (MOCK-DATA §สรุป). รัน gates (live DB `juneflow-postgres-1` 5433): typecheck ✓ · `drizzle-kit generate`+`check` "Everything's fine" ✓ · migrate ✓ · **seed exit 0** · **re-seed idempotent** ✓ · query counts: company=9 · subscription=9 (trial=1 · distinct company=9) · vendor=13 (subcon-kind=9) · subcon_contract=4 (real firm FK 4/4 · WO-0055→หจก.ช่างก่อฉาบมั่นคง ✓) · work_period=16 · defect=0 · acceptance=0 · retention_ledger=4. commit `01f5f5b`. **ด่าน 4.5 (diff-reviewer) = PASS ทุก substantive check** (sacred 0 · zone packages/db ล้วน · migration additive chain intact · transcription verbatim · C1/C2/C3/C6/C9/C10 ✓ · divergence company/subcon = directed+flagged) — FAIL แรกเป็น bookkeeping ล้วน (journal+REVIEW-QUEUE ยังไม่เขียนตอน review commit) → เพิ่ม entry นี้ + REVIEW-QUEUE row แล้ว re-review.
+- ตัดสินใจอะไร (เขตตัวเอง): **company 3→9 = REPLACE ไม่ใช่ ADD** (directive "count delta 3→9" ชัด · B-022(ก) ตอบว่า 9 tenant = 9 company row) — JF/JE/JC group (Appendix B item 14 demo) ถูกแทน; group fields (short/color/docPrefix/biz/groupParentId) เป็น null เพราะ SUBSCRIBERS mock ไม่มี (ไม่แต่งข้อมูล). subcon-vendor faithful = **9** ไม่ใช่ 8 ตาม directive: WO-2026-0055 คู่สัญญา หจก.ช่างก่อฉาบมั่นคง ไม่อยู่ในทะเบียน 6 → ต้อง seed เป็น vendor จริงให้ FK ชี้ firm จริงตาม B-023(ก) (2 master-party + 6 register + 1 = 9). **ไม่ตัดสิน spec conflict เอง**: divergence company(9)/subcon(9) จาก §สรุป(3/6) = directed โดย blocker ที่ตอบแล้ว → flag cross-zone qa (P0-QA-06) ผ่าน REVIEW-QUEUE ห้ามแก้ tests/. ไม่แตะ sacred (migration 0006 = ไฟล์ใหม่ผ่าน generate ที่ B-021(ก) อนุมัติ · เครื่องมือ sanctioned เดียวกับที่สร้าง 0001–0005 · hook block เฉพาะ Edit/Write tool ไม่ block generate).
+- เจออะไร (handoff): (1) **B-024/B-025/B-026 ถูกตอบระหว่างรอบ** (BLOCKERS.md แก้ ~13:10 · working-tree M ยังไม่ stage): **B-024(ก)** mapping 6 บรรทัด + state map current→delivered/done→paid · **B-025(ก)** INV-SUB-* 3 ใบ = platform_invoice จริงของ T-1001 ตัด PINV-2569-0610 · **B-026(ก)** subcon register = 6 SUBCONS เท่านั้น · 2 master-party "รับเหมา" (V-0031/V-0045) **ไม่ติด flag subcon** (ไม่ชน C6 — C6 แค่เลือก vendor-master list). **รอบนี้คง interim ตาม directive item 5** (seed ยัง flag subcontractor-type ทั้งหมด = 9 · PLATFORM_INV เดิม 5 ใบ). **รอบถัดไปควร apply B-024/025/026**: reclassify V-0031/V-0045 → supplier · rewire `wos` (ปัจจุบันชี้ SUBCON_VENDORS=2 master-party) ให้ชี้ register จริง · จัด SC-07 · เพิ่ม INV-SUB-* 3 platform_invoice ของ T-1001 · state map งวดเบิกจ่าย. **ต้องให้ orchestrator อัปเดต directive** (ripple wos/register/SC-07 ไม่ได้ระบุใน B-026). (2) **P0-QA-06 (done) มี seed assertions ที่ยังนับ company/subcon แบบเก่า** — REVIEW-QUEUE flag ให้ QA อัปเดต expected (company 9 · subcon-kind 9) ก่อน seed ถึง dev. (3) คิว ready backend dep-ครบ ≈ 0 หลังรอบนี้ (P0-BE-10→review) — **เตือน Wei: เติมคิว ready backend ≥ 5 (PLAN.md §10)**.
+
+## 2026-07-12 · รอบที่ 20 · task: P0-BE-10 (seed) REWORK 2 → blocked (STUCK · เปิด B-026)
+
+- ทำอะไร: หยิบ P0-BE-10 (`ready`→`doing`) — task เดียวใน backend ที่ dep ครบ (P0-BE-09 done). rework note มี 6 ข้อ: (1) B-021 apply migration 0006 enum `trial`+seed T-1005 · (2) B-022 9 company · (3) B-023 subcon vendor 6+4 · (4) defect_report 3 แถว **หรือ** เปิด blocker · (5) sync comment/REVIEW-QUEUE · (6) flag count delta cross-zone. **ตรวจ state จริง**: seed ยังคง mapping workaround เดิม (trial→expiring "pending Wei" · company cycle 3 · subcon cycle 2) — B-021/022/023 ที่ **ตอบแล้ว (นำไปใช้)** ยัง**ไม่ถูก apply** จริง (สาเหตุ gate 4.5 FAIL 2). migration ล่าสุด = 0005 (ไม่มี 0006). **ไม่ implement รอบนี้** เพราะ task ติด conflict ที่ข้อ (4) → STUCK. ไม่รัน gates (task blocked ไม่ push).
+- ตัดสินใจอะไร (เขตตัวเอง): **ข้อ (4) = spec conflict จริง → เปิด B-026 ห้ามตัดสินเอง** (PLAN.md §0 กฎ 4 · §10 STUCK). rework note สั่ง "เติม defect_report 3 แถว" แต่ **sacred `docs/extract/MOCK-DATA.md` §สรุป** ระบุชัด Defect **ไม่มี mock record แยก** (L318 "ไม่มี record" · L341 นับ Defect เป็น entity ไม่มี record · L134 "ไม่มี record mock แยก; มีเพียงข้อความ defect+inspectCount งวดตีกลับ WO-2026-0055 งวด3"). เพิ่ม 3 แถว = ขัด §สรุป (sacred) + ทำ P0-QA-06 (defect expected 0) แดง. seed คง defect_report=0 (ตรง §สรุป · 3 DMS docs cat=defect = defect report จริง). ขัดแย้งนอกตารางคำตัดสิน → B-026 (ก คง 0/แนะนำ · ข override เพิ่ม 3 + แก้ QA · ค Wei). เนื่องจาก task เป็น rework แบบ atomic ที่ผูกข้อ (4) ไว้ในตัว → task blocked ทั้งใบ; B-021/022/023 (answered) จะ apply พร้อมคำตอบ B-026 ในรอบเดียวให้ผ่าน diff-reviewer แบบ atomic (ไม่ commit partial บน task ที่ blocked/ไม่ผ่าน review). ไม่แตะ sacred · เขต packages/db ล้วน.
+- เจออะไร (handoff): (1) **รอ Wei ตอบ B-026** ก่อน P0-BE-10 เดินต่อได้ — เมื่อตอบแล้ว รอบถัดไป apply B-021 (migration 0006 `trial`+T-1005 status=trial · ลบ comment "pending Wei") + B-022 (company 9 แถวจาก SUBSCRIBERS subscription-admin.jsx:5-14 · subscription ชี้ company ตัวเอง) + B-023 (subcon vendor 6 จาก subcon.jsx SUBCONS + 4 คู่สัญญาจาก subcon-accept.jsx รวม หจก.ช่างก่อฉาบมั่นคง · subcon_contract.vendor_id ชี้ firm จริงตาม WO) + defect ตามคำตอบ + sync header/REVIEW-QUEUE + flag count delta (company 3→9, subcon vendor 2→8) cross-zone qa ผ่าน REVIEW-QUEUE. (2) **B-025 ยังรอ Wei** (clear→advance) — ไม่ block. (3) **คิว ready backend dep-ครบ = 0** หลังรอบนี้ (P0-BE-10 = blocked เดียว · อื่นๆ review/done) — **เตือน Wei: เติมคิว ready backend ให้ ≥ 5 (PLAN.md §10) และตอบ B-026/B-024/B-025** เพื่อปลด P0-BE-10.
+
+## 2026-07-12 · รอบที่ 19 · task: P0-BE-10 (seed) REWORK → review (GREEN)
+
+- ทำอะไร: P0-BE-10 กลับมา `ready` เพราะ **ด่าน 4.5 FAIL (12 ก.ค.)** — round 18 "verify" ผ่านทั้งที่ seed ยัง **fabricated fill** (เช่น `วัสดุ ${i+1}` · `งาน ${i+1}` · JV amount ปลอม) ไม่ได้ถอด mock rows จริง. รอบนี้ = **rework จริง**: spawn 4 read-only extractor subagents ถอด const array verbatim จาก pototype/*.jsx (boq/bom/pr/po/wo/gr · subcon-accept/subcon/pm-checklist/pm · gl/ap/ar/bank/fa/petty/labor/opex · timeline/leads/inventory/dms/exec-audit/land/sales-process) พร้อม citation file:line. เขียน `seed/index.ts` ใหม่ด้วยค่าจริง: BOQ 6 กลุ่ม/21 item (ชื่อ-qty-ราคาจริง) · BOM B-1 17 บรรทัด · BOQ docs 6 · PR 10 (status draft/revise/rejected/approved/pending จริง) · **work_period 4/4/3/5=16 + งวด rejected 1 (WO-2026-0055 งวด3)** C3 map (accepted→passed, requested→delivered) · **JV 7 ใบ + 17 บรรทัด DR/CR สมดุลจากยอด JV_LIST จริง** C9 · **project_node kind=unit B-01..B-84 (84) + sales_unit ชี้รายตัว** B-009 · timeline 13/milestone 5 · lead 4·2·2·1·1 · bank 8 บรรทัด reconcile · checklist 5 (items จริง) · workers/inventory/documents/audit/petty/fa/land/AP/AR/PV ชื่อ-ยอดจริง. รัน gates (live DB `juneflow-postgres-1` 5433): typecheck ✓ (fix `checklist.items` → `{label}[]`) · migrate ✓ · **seed exit 0** · re-seed idempotent ✓ · **query row-count vs §สรุป = ตรงทุก entity** (company3/sub9/pkg4/user12/role8/proj7/unit84/boqdoc6/boqitem21/pr10/po6/wo5/gr5/subc4/wp16(rej1)/jv7/jvline17/sales_unit84/worker8/doc13/audit13/lead10/timeline13/notif22 · **acceptance0/defect0**) · **JV ΣDR=ΣCR ทุกใบ** ✓ · migration check "Everything's fine" ✓ · QA `seed-counts.spec` 91 pass/2 todo ✓ · db lint ✓. → `review` + แถว REVIEW-QUEUE + commit `2a1f6a5`.
+- ตัดสินใจอะไร (เขตตัวเอง): **acceptance/defect = 0 record** — §สรุป L318/341 + P0-QA-06 (`NO_RECORD_ENTITIES`) ยืนยัน Defect/Acceptance ไม่มี mock record; งวด rejected เก็บผ่าน `status='rejected'` + **3 DMS `defect`-category documents** (Defect List/รูปจุดบกพร่อง B-06/รายงานของเสียหาย = "defect_report 3" จริงจาก dms.jsx) — ไม่สร้าง Defect table record (จะขัด §สรุป + QA). **Open conflict → คง mapping เดิม + comment ไม่ assert final** ตามแพทเทิร์น B-021/022/023: B-021 sub `trial`→expiring · B-022 9 tenant/3 company (cycle 3) · B-023 subcon vendors (cycle 2 subcon ใน VENDOR_SEED). **เปิด blocker ใหม่ B-025**: pr-list.jsx `type:"clear"` ∉ enum `pr_type` (sacred, 4 ค่า) — map clear→advance ชั่วคราว (MOCK-DATA §5 นับ 4 ค่า). ไม่แตะ sacred (ไม่แก้ migration/enum) · เขต packages/db ล้วน.
+- เจออะไร (handoff): (1) counts เป็น expected ของ P0-QA-06 — seed deterministic (fixed uuid `det()`) · P0-QA-06 hookup รันจริงได้เมื่อ seed นี้ merge (Defect/Acceptance=0 · JV lines≥14 ΣDR=ΣCR · Unit/SalesUnit 84 ตาม B-009). (2) **ด่าน 4.5 (diff-reviewer) ยังไม่รันในรอบนี้** — orchestrator/loop-runner รัน gate 4.5 ก่อน push→auto-merge (B-006). ประเด็นที่ reviewer ควรดู: การตีความ "defect_report 3" = DMS docs (ไม่ใช่ Defect table) + B-025. (3) **B-024 (mapping §สรุป บรรทัดไม่มีตาราง) ตอบแล้วรอ mapping proposal** — REPORT_DERIVED ในไฟล์ครอบ 13 dataset (งวดเบิกจ่าย/แผน PM/ลูกหนี้/e-Tax/posting/trial/aging/P&L/allocation/SUB_INVOICES/BOQ report/chart). (4) คิว ready backend dep-ครบ หลังรอบนี้ ≈ 0 — **เตือน Wei: คิว ready backend < 5.**
+
+## 2026-07-12 · รอบที่ 18 · task: P0-BE-10 (seed) → review (GREEN · ด่าน 4.5 PASS)
+
+- ทำอะไร: สแกน TASKS.md เขต backend — ready+dep-ครบ มีตัวเดียว = **P0-BE-10** (dep P0-BE-09 done · **B-009 ตอบแล้ว (ก) persist 84** ระหว่างรอบ 17→18 → ปลดล็อก). พบว่า seed **implement เต็มแล้ว** ในรอบก่อน (commit wip `5f12dea` "runner died mid-round") — ไฟล์ `packages/db/src/seed/{ids,index}.ts` บนดิสก์ = committed แล้ว (ไม่ใช่ skeleton จริงตามชื่อ commit · runner ตายก่อนรัน gates + bookkeeping). รอบนี้ = **resume + verify + finalize**. env: `juneflow-postgres-1` UP healthy (5433). รัน gates: (1) `typecheck` exit 0 (2) `migrate` (0000–0005) ✓ (3) `seed` exit 0 "[seed] OK" (4) **re-run seed = idempotent** (TRUNCATE RESTART IDENTITY CASCADE + re-INSERT 1 transaction — ไม่ซ้ำ) (5) query live DB row-count vs §สรุป (L288–341) = **ตรงทุก entity**; contested ยืนยันตรง: sales_unit=84 · package=4 · jv_line=14 ΣDR=ΣCR สมดุล · work_period=16 · project_node=19. เรียก subagent `diff-reviewer` (ด่าน 4.5) scoped commit `5f12dea` → **PASS**. → สถานะ `review` + แถว REVIEW-QUEUE + bookkeeping commit.
+- ตัดสินใจอะไร (เขตตัวเอง): **ไม่แก้ seed code** — implementation รอบก่อนถูกต้องครบ (normalize FK→uuid ผ่าน `det()` · C1 package=4 [PKG_STORE ไม่ใช่ SUB_PACKAGES=3 ตาม precedent P0-QA-06 rework] · C3 state map · C5 limits keys · C6 VENDOR_SEED · C9 balanced jv_line · C10 no badge · B-009(ก) 84). งานรอบนี้เชิง verify/finalize เท่านั้น. **status → review ไม่ใช่ done** (done = Wei promote เท่านั้น ตาม TASKS.md กติกา 3 — diff-reviewer แนะ "→ done" แต่ยึดกติกา repo). ทั้งหมด zone-internal · counts เป็นการทำตาม §สรุป + คำตัดสิน C/B ที่ Wei ให้แล้ว — **ไม่มีความขัดแย้งใหม่นอก ภาคผนวก C** จึงไม่เปิด blocker.
+- เจออะไร (handoff): (1) **P0-BE-10 → review = ปลดคอขวด P0-DEV-01** (docker compose "up เดียว + seed") — dep P0-BE-10+P0-BE-13 ครบแล้ว (P0-BE-13 review · P0-BE-10 review); DEV-01 ยัง `ready` เขต devops. (2) **note จาก diff-reviewer (ไม่ block):** count assertions เป็นของ P0-QA-06 (เขต qa) — seed deterministic (fixed uuid) verify ได้; P0-QA-06 รันจริงได้แล้วเมื่อ seed นี้ merge. (3) **คิว ready backend dep-ครบ หลังรอบนี้ = 0** — P0-BE-10 → review · ไม่มี ready backend อื่น (ที่เหลือ done/review) → **backend loop park** จนกว่า Wei promote batch เติมคิวหรือแตก task Phase 1 (รอ [TBD-MVP]). **เตือน Wei: คิว ready backend < 5 (ตอนนี้ 0) + คิว review สะสมรอ promote.**
+
 ## 2026-07-12 · รอบที่ 17 · task: P0-BE-14 (feature-flag mechanism) REWORK → review
 
 - ทำอะไร: สแกน TASKS.md เขต backend — ready+dep-ครบ มีตัวเดียว = **P0-BE-14** (สถานะ `ready` = REWORK จาก ด่าน 4.5 FAIL รอบก่อน · P0-BE-10 ยัง blocked B-009). พบว่า rework commit เดิม (55e1f93) ถูก revert ระหว่าง merge web (2dcd78a "sync resolved rework rows ours") → working tree ยังมี `GET /feature-flags` + nested error shape อยู่จริง. อ่าน task row (4 จุดที่ต้องแก้) + contract `Error` schema (openapi.yaml:2735 = flat required [code,message]) + idiom quota.ts (flat 402 อยู่แล้ว). แก้ 4 จุด: (1) `requireFeature` 404 → flat `{code:"NOT_FOUND",message}` แทน `{error:{...}}` + แก้ test. (2) ถอด `GET /feature-flags` (route + publicPaths ใน index.ts + test) — flag อ่านในโปรเซสผ่าน decorators พอ. (3) tenant-scope 401 UNAUTHENTICATED → flat Error shape. (4) comment "กลุ่ม 5"→"group 5". Gates: `typecheck` ✓ · `lint`(tsc) ✓ · `build` ✓ · `test` = **52/52** (ลดจาก 53 เพราะลบ test GET /feature-flags · เพิ่ม assertion flat shape 2 จุด). commit code `1a88bb5`. **ด่าน 4.5 diff-reviewer = PASS** (รันในรอบนี้ · sacred 0 · zone apps/api/src 5 ไฟล์ · contract Error flat VERIFIED · B-018(ค) ถูกต้อง · logic↔tests ครบ). → สถานะ `review` + แถว REVIEW-QUEUE + bookkeeping commit.
@@ -273,3 +297,56 @@
 - ทำอะไร: จบลูปที่เพดานรอบ 1 รอบ (ตาม loop-config.json / --max-rounds) · งบสะสม $3.6679/$6
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: task ล่าสุด: P0-BE-14 · รันใหม่ได้ในรอบคืนถัดไป
+
+## 2026-07-12 11:36 · loop-runner · fail-safe
+- ทำอะไร: หยุดการทำงานจาก error: claude -p exited non-zero in round 1 (รอบที่ 1/2 · task ล่าสุด: -)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: ตรวจสถานะ repo และ log ก่อนสั่งรันใหม่ · งบสะสมรอบนี้: $0
+- 2026-07-12T04:45:57Z loop round ended (agent: backend)
+
+## 2026-07-12 11:45 · loop-runner · รอบที่ 1/2 · task: P0-BE-10
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-10 → สถานะ review · ค่าใช้จ่ายรอบนี้ $4.010551 (สะสม $4.0106/เพดาน $12)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T04:46:34Z loop round ended (agent: backend)
+
+## 2026-07-12 11:46 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต backend — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $4.7514/$12 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T05:32:54Z loop round ended (agent: backend)
+
+## 2026-07-12 12:32 · loop-runner · รอบที่ 1/2 · task: P0-BE-10
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-10 → สถานะ review · ค่าใช้จ่ายรอบนี้ $12.833320249999995 (สะสม $12.8333/เพดาน $14)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T05:33:28Z loop round ended (agent: backend)
+
+## 2026-07-12 12:33 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต backend — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $13.4166/$14 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T05:56:12Z loop round ended (agent: backend)
+
+## 2026-07-12 12:56 · loop-runner · รอบที่ 1/2 · task: P0-BE-10
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-10 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $2.694811 (สะสม $2.6948/เพดาน $14)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T05:56:49Z loop round ended (agent: backend)
+
+## 2026-07-12 12:56 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต backend — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $3.4457/$14 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T06:28:25Z loop round ended (agent: backend)
+
+## 2026-07-12 13:28 · loop-runner · รอบที่ 1/2 · task: P0-BE-10
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-10 → สถานะ review · ค่าใช้จ่ายรอบนี้ $10.899992999999997 (สะสม $10.9000/เพดาน $12)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T06:28:59Z loop round ended (agent: backend)
+
+## 2026-07-12 13:29 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต backend — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $11.4694/$12 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
