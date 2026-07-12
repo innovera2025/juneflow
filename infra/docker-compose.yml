@@ -9,6 +9,16 @@
 #
 # Secrets rule (infra/CLAUDE.md): no secrets in this repo — everything enters via
 # infra/.env (git-ignored) or host env. Values below are dev-only defaults.
+#
+# Intra-stack DB/Redis URLs are DERIVED from the POSTGRES_* vars (same source of
+# truth as the postgres service) with the internal service host/port pinned
+# (`postgres:5432`, `redis:6379`). They deliberately do NOT fall through to a bare
+# `${DATABASE_URL}`/`${REDIS_URL}`: a dev/CI host commonly exports DATABASE_URL
+# pointing at a host-local Postgres (e.g. 127.0.0.1:5433), and `${DATABASE_URL:-…}`
+# would let that host value override the in-network target and break `docker
+# compose up` (services can't reach a host loopback port from inside the stack).
+# Password still comes from POSTGRES_PASSWORD (infra/.env), so the secrets rule holds.
+# For a real external DB, edit these here or use infra/docker-compose.prod.yml.
 
 name: juneflow
 
@@ -61,7 +71,7 @@ services:
       - path: ./.env
         required: false # create infra/.env locally (never commit it)
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://juneflow:juneflow-dev@postgres:5432/juneflow}
+      DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,8 +88,8 @@ services:
       - path: ./.env
         required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://juneflow:juneflow-dev@postgres:5432/juneflow}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
+      REDIS_URL: redis://redis:6379
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
@@ -108,8 +118,8 @@ services:
       - path: ./.env
         required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://juneflow:juneflow-dev@postgres:5432/juneflow}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
+      REDIS_URL: redis://redis:6379
     depends_on:
       redis:
         condition: service_started
