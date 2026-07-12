@@ -11,9 +11,14 @@
 
 ## สถานะ
 
-- **TODO(P0-QA-03):** smoke test แรก (login → shell load) ตาม state machine ใน `docs/handoff/flows.html` — รันบน compose dev (รอ P0-DEV-01)
-- config: `playwright.config.ts` — base URL ชี้ dev stack ผ่าน env `E2E_BASE_URL`
-- รัน: `pnpm --filter @juneflow/tests test:e2e` — ตอนนี้ยังไม่มี test = ผ่านเขียวด้วย `--pass-with-no-tests` (ตั้งใจ ให้ CI เขียวระหว่าง scaffold)
+- **P0-QA-03 (re-scope B-034):** `smoke.spec.ts` = **reachability smoke จริงบน compose dev** ผ่าน G4 —
+  web GET `/` = 200 + Playwright โหลด document ได้ · api `/health` = 200 `{ ok: true }`
+  (surface จาก `infra/docker-compose.yml`: web `$WEB_PORT`/5173 · api `$API_PORT`/3000)
+- **TODO Phase 1 (P0-WEB-05 / B-020):** smoke "login → shell load" เต็มตาม `extra-screens.jsx` (`ScreenLogin`)
+  + app shell + state machine ใน `docs/handoff/flows.html` — ลงเป็น `test.fixme` (todo ที่ยังไม่รัน)
+  เพราะ apps/web ยัง render แค่ `Placeholder` (ไม่มี login form/shell) · **ห้าม fabricate flow ที่ยังไม่มีจอ** (PLAN §0 กฎ 1+4)
+- config: `playwright.config.ts` — base URL ชี้ dev stack ผ่าน env `E2E_BASE_URL` · api ผ่าน `E2E_API_URL`
+- รัน: `pnpm --filter @juneflow/tests test:e2e` (ต้องมี compose dev up)
 
 ## Gate ที่เกี่ยวข้อง (PLAN.md §9)
 
