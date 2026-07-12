@@ -159,12 +159,13 @@ juneflow/
 
 | ตำแหน่ง | เขต (zone) | หมายเหตุ |
 |---|---|---|
-| Backend/Platform | `apps/api` + `packages/db` | **เจ้าของ OpenAPI คนเดียว** |
+| Backend | `apps/api` + `packages/db` + `packages/contracts` | **เจ้าของ OpenAPI คนเดียว** |
 | Frontend Web | `apps/web` | Design Fidelity เข้มสุดในเขตนี้ |
 | Mobile | `apps/mobile` | Flutter |
 | QA | `tests/` | เขียน expected จาก spec ห้ามอ่าน implementation ก่อน |
 | Integrations | `packages/tax-engine` · `packages/bank-file` · `packages/notifications` | mock-first |
-| DevOps | `infra/` | หมุนเวียน |
+| DevOps | `infra/` · `scripts/` · `.github/` | หมุนเวียน · CI/compose/loop infra |
+| **Platform** (เขตที่ 7 — B-032) | root build/CI config (`package.json` · `turbo.json` · `tsconfig.base.json` · `pnpm-workspace.yaml` · `pnpm-lock.yaml` · `.dockerignore`) + `packages/tokens` + `packages/i18n` | เจ้าของ monorepo tooling ที่ไม่มี app zone ใดครอบ — ปลดปม docker build + CI test scripts + tokens/i18n (แทนที่ B-011) |
 
 - ห้ามข้ามเขต — งานนอกเขตตัวเอง = เขียน BLOCKERS.md
 - **Contract change (OpenAPI) ผ่าน Wei เท่านั้น** — แม้แต่เจ้าของ contract ก็ต้องได้รับอนุมัติก่อน merge การเปลี่ยน contract
