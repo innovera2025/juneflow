@@ -3,6 +3,10 @@
 # yields the full running system (pg16 + redis + api + web + worker) ALREADY SEEDED
 # ("up เดียว+seed"). Task: TASKS.md P0-DEV-01 (depends on P0-BE-10 seed, P0-BE-13 api skeleton).
 #
+# Build contexts are the MONOREPO ROOT (`..`) with an explicit `dockerfile:` — the
+# apps/api and apps/web Dockerfiles both do a workspace-wide `pnpm install`, so they
+# MUST see the whole repo (pnpm-lock.yaml + every package), not just their own dir.
+#
 # Secrets rule (infra/CLAUDE.md): no secrets in this repo — everything enters via
 # infra/.env (git-ignored) or host env. Values below are dev-only defaults.
 
@@ -39,30 +43,36 @@ services:
   # One-shot migrate + seed. Runs to completion then exits 0; api/worker wait for it.
   # This is what guarantees "docker compose up" alone produces a seeded, clickable
   # system comparable against pototype/gallery (Manifest group 5 / PLAN.md §7 Phase 0).
+  #
+  # Uses the api Dockerfile `build` target (not `runtime`): migrate needs drizzle-kit
+  # and seed needs tsx + packages/db source — both are devDeps present only in the
+  # build stage (the runtime stage is a `pnpm deploy --prod` that strips them).
+  # packages/db exposes `migrate` (drizzle-kit migrate) and `seed` (tsx src/seed);
+  # both read DATABASE_URL from env (packages/db/drizzle.config.ts + seed/index.ts).
+  # Seed is idempotent: one TRUNCATE+INSERT transaction, so data persists and counts
+  # stay 1:1 on restart — no reseed-on-reload (PLAN.md §0 rule 3).
   migrate-seed:
     build:
-      context: ../apps/api
-      # TODO(P0-DEV-01): Dockerfile does not exist yet (arrives with P0-BE-13).
-      # NOTE: pnpm-workspace deps may force the build context up to the repo root —
-      # resolve when writing the Dockerfile; keep this compose contract stable.
-    image: juneflow-api:dev
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      target: build
+    image: juneflow-api-build:dev
     env_file:
       - path: ./.env
-        required: false # TODO(P0-DEV-01): create infra/.env locally (never commit it)
+        required: false # create infra/.env locally (never commit it)
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://juneflow:juneflow-dev@postgres:5432/juneflow}
     depends_on:
       postgres:
         condition: service_healthy
-    # TODO(P0-BE-10): implement `db:migrate-and-seed` in packages/db — Drizzle migrations
-    # + seed from docs/extract/MOCK-DATA.md §summary. Must be idempotent: data persists,
-    # no reseed on every restart (PLAN.md §0 rule 3 — reseed-on-reload is a mock mechanism).
-    command: ["pnpm", "run", "db:migrate-and-seed"]
+    command:
+      ["sh", "-c", "pnpm --filter @juneflow/db migrate && pnpm --filter @juneflow/db seed"]
     restart: "no"
 
   api:
     build:
-      context: ../apps/api
+      context: ..
+      dockerfile: apps/api/Dockerfile
     image: juneflow-api:dev
     env_file:
       - path: ./.env
@@ -79,11 +89,19 @@ services:
         condition: service_started
       migrate-seed:
         condition: service_completed_successfully
-    # TODO(P0-BE-13): Fastify app skeleton provides the image CMD + /health endpoint;
-    # wire a container healthcheck against it here in P0-DEV-01.
+    # /health endpoint from the Fastify skeleton (apps/api/src/index.ts:72). node:22
+    # ships a global fetch, so no extra probe binary is needed in the runtime image.
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   # BullMQ worker — same image as api, different command (PLAN.md §5: async jobs
-  # export / e-Tax / notification / PM schedule gen).
+  # export / e-Tax / notification / PM schedule gen). The api Dockerfile documents
+  # this exact override: worker CMD = ["node", "dist/worker.js"].
   worker:
     image: juneflow-api:dev
     env_file:
@@ -97,14 +115,14 @@ services:
         condition: service_started
       migrate-seed:
         condition: service_completed_successfully
-    # TODO(P0-BE-13): implement the BullMQ worker entrypoint (`pnpm run worker`).
-    command: ["pnpm", "run", "worker"]
+      api:
+        condition: service_started
+    command: ["node", "dist/worker.js"]
 
   web:
     build:
-      context: ../apps/web
-      # TODO(P0-DEV-01): Dockerfile arrives with P0-WEB-01 (React 18 + Vite build);
-      # confirm the container port below once it exists.
+      context: ..
+      dockerfile: apps/web/Dockerfile
     ports:
       - "${WEB_PORT:-5173}:80"
     depends_on:
