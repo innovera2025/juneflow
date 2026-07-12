@@ -135,8 +135,10 @@
 // [x] land_plot          - deed_no, area (STORE m2 per PLAN.md section 4;
 //                          rai-ngan-wa at display), gps, price_per_rai, stage
 //                          (7-step pipeline), tenure, DD checklist json
-// [x] sales_unit         - unit_id, customer_id, stage, booking, down[], loan,
-//                          transfer (ties AR + house acceptance Defect)
+// [x] sales_unit         - unit_id, customer_id, stage, booking, contract,
+//                          down[], loan, transfer (contract = contract-signing
+//                          milestone payment, money per C/B-013; ties AR + house
+//                          acceptance Defect)
 // [x] document           - (DMS) cat, project_id, version, expiry, link_module
 //                          (every module auto-attaches; 60-day expiry warning)
 // [x] notification       - user_id, type, ref, read (center + Mobile + LINE)

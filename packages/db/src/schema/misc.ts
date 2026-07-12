@@ -67,10 +67,13 @@ export const landPlots = pgTable("land_plot", {
 /**
  * SalesUnit — the booking->transfer sales lifecycle of a project unit, tying AR
  * to house acceptance (data-dictionary "ผูก AR + ตรวจรับบ้าน (Defect)"; erd.html
- * "unit_id, customer_id, stage, down[], loan"). unit_id -> project_node (the
- * sold unit); customer_id -> customer. booking / loan are money -> currency_code;
- * down[] is the down-payment installment schedule JSON. transfer_at records the
- * ownership-transfer date. stage not enumerated -> free text.
+ * "unit_id, customer_id, stage, booking, contract, down[], loan"). unit_id ->
+ * project_node (the sold unit); customer_id -> customer. booking / contract /
+ * loan are money -> currency_code (contract is the contract-signing milestone
+ * payment — numeric money like booking/down/loan per PLAN.md Appendix C decision
+ * B-013(ก), not a document reference). down[] is the down-payment installment
+ * schedule JSON. transfer_at records the ownership-transfer date. stage not
+ * enumerated -> free text.
  */
 export const salesUnits = pgTable("sales_unit", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -85,6 +88,7 @@ export const salesUnits = pgTable("sales_unit", {
   }),
   stage: text("stage"),
   booking: numeric("booking", { precision: 16, scale: 2 }),
+  contract: numeric("contract", { precision: 16, scale: 2 }),
   loan: numeric("loan", { precision: 16, scale: 2 }),
   currencyCode: text("currency_code").notNull().default("THB"),
   down: jsonb("down").$type<unknown[]>().notNull().default([]),
