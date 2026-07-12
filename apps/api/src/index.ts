@@ -15,18 +15,22 @@
 //                 AuditLog row), quota mechanism + guaranteed 402 QUOTA_EXCEEDED
 //                 + upgrade_url, POST /files presigned skeleton (fake R2 in dev),
 //                 BullMQ worker skeleton (src/worker.ts), health endpoint.
+// DONE(P0-BE-14): feature-flag mechanism (src/plugins/feature-flags.ts) hides
+//                 unfinished modules so dev stays green / always demoable. Flags
+//                 default via DEFAULT_FEATURE_FLAGS and are overridable by env;
+//                 GET /feature-flags reports the enabled set for the shell, and
+//                 requireFeature(flag) 404s a hidden module on future routes.
 // TODO(later):    auth + resource routes per packages/contracts/openapi.yaml,
 //                 mount the better-auth HTTP handler, and swap the unlimited
 //                 quota resolver for a subscription-backed one once usage
 //                 counting exists.
-// TODO(P0-BE-14): feature-flag mechanism to hide unfinished modules
-//                 (dev stays green / always demoable).
 
 import Fastify from "fastify";
 import { createDb } from "@juneflow/db/client";
-import { registerTenantScope } from "./plugins/tenant-scope.js";
+import { registerTenantScope, DEFAULT_PUBLIC_PATHS } from "./plugins/tenant-scope.js";
 import { registerAuditLog, createDbAuditSink } from "./plugins/audit-log.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "./plugins/quota.js";
+import { FeatureFlags, registerFeatureFlags } from "./plugins/feature-flags.js";
 import { registerFilesRoute, createFakeR2Storage } from "./routes/files.js";
 import { resolveTenantFromAuth } from "./auth.js";
 
@@ -41,7 +45,14 @@ const db = createDb();
 await registerTenantScope(app, {
   db,
   resolveCompanyId: (request) => resolveTenantFromAuth(request),
+  // /feature-flags is read pre-auth so the shell can hide unfinished modules.
+  publicPaths: [...DEFAULT_PUBLIC_PATHS, "/feature-flags"],
 });
+
+// Feature flags: hide modules that are not finished yet so dev stays green /
+// demoable. Defaults come from DEFAULT_FEATURE_FLAGS; env (FEATURE_<FLAG> /
+// FEATURE_FLAGS) can reveal an in-progress module without a code change.
+await registerFeatureFlags(app, new FeatureFlags());
 
 // Every successful mutation writes an AuditLog row (single choke point).
 // resolveUserId stays null until the better-auth session exposes the acting
