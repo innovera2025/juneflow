@@ -6,22 +6,41 @@
 // run is ONE transaction that TRUNCATEs every table first, then re-INSERTs, so
 // counts stay 1:1 (QA asserts them — P0-QA-06).
 //
+// Fidelity: transaction rows are transcribed VERBATIM from the source .jsx
+// (cited file:line per constant) — names, quantities, amounts, statuses are the
+// real mock values, not fabricated fill. Only the mock's presentational/mechanism
+// bits (name-text FKs, Thai-BE date strings, hardcoded NAV badges) are dropped.
+//
 // Decision mappings applied at seed time (PLAN.md Appendix C / P0-BE-10 rules):
 //   - rule 1  name-text FKs normalized to real uuid FKs via fixed ids (see ids.ts);
 //             parents inserted before children, wired by uuid.
 //   - C3      WorkPeriod mock states → dictionary state machine:
-//             requested → delivered, accepted → passed (work_period.status).
+//             accepted → passed, requested → delivered, rejected/pending kept.
+//             Period counts per contract = 4/4/3/5 (subcon-accept.jsx SUBC_CONTRACTS).
 //   - C6      Vendor uses master-party.jsx VENDOR_SEED (6), not the boq.jsx dup.
-//   - C9      JV mock has no DR/CR lines — only a line count. We emit balanced
-//             jv_line rows (≥1 DR + ≥1 CR per book, ΣDR = ΣCR). ≥14 total.
+//   - C9      JV mock JV_LIST has no DR/CR lines — only a per-book line count.
+//             We emit balanced jv_line rows using the REAL JV amounts (ΣDR=ΣCR per
+//             book); total lines = 2+2+2+3+2+2+4 = 17 (matches JV_LIST.lines).
 //   - C10     NAV badge numbers are runtime query counts — NEVER seeded.
-//   - B-009   84 sales_unit rows persisted (sales-process.jsx generator).
+//   - B-009   84 sales_unit rows persisted, each pointing to its own project_node
+//             kind='unit' (codes B-01..B-84, sales-process.jsx generator).
 //
-// Report-derived §สรุป datasets that have NO table are intentionally SKIPPED
-// (documented in REPORT_DERIVED below): trial balance, posting inbox, aging
-// AP/AR, project P&L, cost allocation (ปันส่วน), MRR/OPEX/cashflow charts,
-// SUB_INVOICES tenant view, linked-docs/BOQ balance/archive UI datasets, and the
-// NO_RECORD entities (ai_usage, acceptance, defect, attendance, payroll, cheque).
+// OPEN CONFLICTS — real mock value collides with a MERGED (sacred) migration enum
+// or with the authoritative §สรุป. Per PLAN.md §0 rule 4 we keep the safe existing
+// mapping + a blocker reference and do NOT decide finally here:
+//   - B-021   subscription mock status `trial` ∉ subscription_status enum → mapped
+//             to `expiring` (existing) pending Wei.
+//   - B-022   SUBSCRIBERS has 9 tenant org-names but COMPANIES has 3 — subscriptions
+//             cycle over the 3 real companies (existing) pending Wei.
+//   - B-023   subcon.jsx SUBCONS (6) / SUBC_CONTRACTS vendors differ from VENDOR_SEED —
+//             subcon FKs cycle the 2 subcon vendors of VENDOR_SEED (existing) pending Wei.
+//   - B-025   pr-list.jsx PR-2026-0411 type `clear` ∉ pr_type enum → mapped to
+//             `advance` (clearing an advance) pending Wei.
+//
+// Report-derived §สรุป datasets that have NO backing table are intentionally
+// SKIPPED (documented in REPORT_DERIVED below). Acceptance/Defect stay 0 records
+// per §สรุป line 318/341 + P0-QA-06 (the rejected work period's defect is captured
+// by the 3 DMS `defect`-category documents — the real "defect reports").
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
@@ -34,7 +53,7 @@ import { det } from "./ids.js";
 // ---------------------------------------------------------------------------
 
 /** money → fixed 2-decimal string (drizzle numeric maps to string). */
-const m = (n: number): string => n.toFixed(2);
+const m = (n: number): string => Math.abs(n).toFixed(2);
 
 /** parse a leading integer out of a mock running-number string, fallback 1. */
 const runInt = (s: string): number => {
@@ -59,10 +78,14 @@ const REPORT_DERIVED = [
   "posting inbox (gl.jsx POST_INBOX 7) — queue view over source money docs",
   "aging AP/AR (accounting-extra AGING_AP/AR 5+5) — report over ap_billing/ar_invoice",
   "project P&L (accounting-extra2 PROJPL_SEED 5) — report over jv_line/project",
+  "ลูกหนี้รายลูกค้า (finance.jsx AR_CUSTOMERS 5) — report view over ar_invoice",
   "cost allocation ปันส่วน (petty-alloc ALLOC_CAT 6) — report over petty_cash_txn",
   "SUB_INVOICES (subscription.jsx 3) — tenant view of platform_invoice/subscription",
+  "งวดเบิกจ่าย (subcon.jsx PROGRESS_PAYMENTS 5) — payment view over work_period",
   "BOQ balance/archive/รออนุมัติ/AI-QTO/linked-docs — UI/report datasets over boq_*",
   "MRR/OPEX-monthly/cashflow chart series — chart data, not entity records",
+  "e-Tax queue (etax.jsx ETAX_SEED 6) — status view over ar_invoice.etax_status",
+  "แผน PM (pm2.jsx PM_PLAN_ITEMS 6) — calendar view over pm_asset.next_due",
   "NO_RECORD: ai_usage, acceptance, defect, attendance, payroll, cheque (expected 0)",
 ];
 
@@ -86,9 +109,10 @@ const PACKAGES = [
   { key: "Full", size: "Full" as const, name: "Enterprise", priceM: null, priceY: null, limits: { projects: -1, users: -1, storage_gb: 1000, ai_per_month: -1 }, menus: ["*"], subRules: { "master.ptype": "Full", "boq.aiqto": "M" } },
 ] as const;
 
-// subscription-admin.jsx:5 SUBSCRIBERS (9) — company/package cycled per spec.
+// subscription-admin.jsx:5 SUBSCRIBERS (9). B-022: 9 tenant org-names but only 3
+// COMPANIES → cycle companyId over the 3 real companies (existing) pending Wei.
 const SUB_CYCLES = ["yearly", "yearly", "monthly", "monthly", "yearly", "monthly", "yearly", "yearly", "monthly"] as const;
-// mock statuses active/trial/overdue/cancelled → enum (trial→expiring).
+// B-021: mock status `trial` ∉ subscription_status enum → mapped to `expiring`.
 const SUB_STATUS = ["active", "active", "active", "active", "expiring", "overdue", "active", "active", "cancelled"] as const;
 
 // subscription-admin.jsx:194 inv (5 platform invoices)
@@ -247,6 +271,387 @@ const COA_SEED = [
   { code: "5200", name: "ดอกเบี้ยจ่าย" },
 ];
 
+// boq-list.jsx:7 docs (6 BOQDoc) — transcribed verbatim (no/name/scope/version/status)
+const BOQ_DOCS = [
+  { no: "BOQ-2026-B-02", name: "ทาวน์โฮม Block B (4 ห้องนอน)", scope: "B-Type1 · 84 ยูนิต", ver: 3, status: "approved" as const },
+  { no: "BOQ-2026-C-01", name: "ทาวน์โฮม Block C (4 ห้องนอน)", scope: "C-Type1 · 72 ยูนิต", ver: 2, status: "approved" as const },
+  { no: "BOQ-2026-B-03", name: "Block B — ฉบับเพิ่มหมวดไฟฟ้า", scope: "B-Type1 · งานเพิ่ม", ver: 4, status: "revise" as const },
+  { no: "BOQ-2026-D-01", name: "บ้านแฝด Block D", scope: "D-Type1 · 36 ยูนิต", ver: 1, status: "pending" as const },
+  { no: "BOQ-2026-A-01", name: "บ้านเดี่ยว Block A", scope: "A-Type1 · 48 ยูนิต", ver: 5, status: "approved" as const },
+  { no: "BOQ-2026-B-04", name: "Block B — สเปกพิเศษ B-12 (upgrade)", scope: "B-12 รายยูนิต", ver: 1, status: "draft" as const },
+];
+
+// boq.jsx:317 INITIAL_GROUPS (6 BOQ work groups)
+const BOQ_GROUPS = [
+  "01 งานเตรียม + Site Work",
+  "02 งานโครงสร้าง",
+  "03 งานสถาปัตยกรรม",
+  "04 งานระบบไฟฟ้า",
+  "05 งานประปา/สุขาภิบาล",
+  "06 งานเก็บงาน + ตกแต่ง",
+];
+
+// boq.jsx:326 INITIAL_ROWS_BY_GROUP (21 BOQItem rows across the 6 groups)
+// g = group index; cat M/L/S; qty/unit/price verbatim.
+const BOQ_ITEMS: { g: number; code: string; cat: "M" | "L" | "S"; name: string; qty: number; unit: string; price: number }[] = [
+  { g: 0, code: "SITE-001", cat: "S", name: "ปรับเกรด + เคลียร์พื้นที่", qty: 1, unit: "เหมา", price: 280000 },
+  { g: 0, code: "SITE-002", cat: "L", name: "ค่าแรงรังวัด + ปักหมุด", qty: 15, unit: "วัน-คน", price: 850 },
+  { g: 0, code: "SITE-003", cat: "M", name: "เสาเข็มชั่วคราว + รั้ว Site", qty: 1, unit: "ชุด", price: 184375 },
+  { g: 1, code: "MAT-CEM-001", cat: "M", name: "ปูนซีเมนต์ปอร์ตแลนด์ ตราเสือ", qty: 4800, unit: "ถุง", price: 168.5 },
+  { g: 1, code: "MAT-CEM-002", cat: "M", name: "ปูนทรายฉาบ MORTAR", qty: 1240, unit: "ถุง", price: 142 },
+  { g: 1, code: "MAT-STL-024", cat: "M", name: "เหล็กเส้นกลม SR24 ขนาด 12mm × 10m", qty: 2160, unit: "เส้น", price: 425 },
+  { g: 1, code: "MAT-STL-036", cat: "M", name: "เหล็กเส้นข้ออ้อย SD40 ขนาด 16mm", qty: 1280, unit: "เส้น", price: 685 },
+  { g: 1, code: "SUB-STR-001", cat: "S", name: "งานเหมาเทคอนกรีตเสา-คาน-พื้น", qty: 1, unit: "เหมา", price: 1840000 },
+  { g: 1, code: "SUB-STR-002", cat: "S", name: "งานเหมาผูกเหล็กเสริมเสา-คาน", qty: 1, unit: "เหมา", price: 320000 },
+  { g: 1, code: "LAB-STR-001", cat: "L", name: "ค่าแรงช่างเทคอนกรีต", qty: 48, unit: "วัน-คน", price: 850 },
+  { g: 1, code: "LAB-STR-002", cat: "L", name: "ค่าแรงผูกเหล็ก", qty: 24, unit: "วัน-คน", price: 720 },
+  { g: 2, code: "MAT-TILE-60A", cat: "M", name: "กระเบื้องปูพื้น 60×60 (Type-A)", qty: 4200, unit: "ตร.ม.", price: 302 },
+  { g: 2, code: "MAT-PAINT-PR", cat: "M", name: "สีทาภายใน Premium", qty: 640, unit: "แกลลอน", price: 302.5 },
+  { g: 2, code: "SUB-ARC-001", cat: "S", name: "งานเหมาทาสีภายใน + ภายนอก", qty: 1, unit: "เหมา", price: 480000 },
+  { g: 3, code: "SUB-ELE-001", cat: "S", name: "งานติดตั้งระบบไฟฟ้า + สื่อสาร", qty: 1, unit: "เหมา", price: 1840000 },
+  { g: 3, code: "LAB-ELE-001", cat: "L", name: "ค่าแรงเดินสายไฟ + ติดตั้งดวงไฟ", qty: 240, unit: "วัน-คน", price: 700 },
+  { g: 3, code: "MAT-WIRE-22", cat: "M", name: "สาย VCT 2.5mm × 100m", qty: 24, unit: "ม้วน", price: 7000 },
+  { g: 4, code: "SUB-PLB-001", cat: "S", name: "ระบบประปา + สุขภัณฑ์", qty: 1, unit: "เหมา", price: 985000 },
+  { g: 4, code: "MAT-PLB-018", cat: "M", name: "สุขภัณฑ์ครบชุด · มาตรฐาน", qty: 84, unit: "ชุด", price: 18500 },
+  { g: 5, code: "MAT-FIN-001", cat: "M", name: "วัสดุเก็บงาน + ขอบประตู", qty: 1, unit: "ชุดต่อหลัง", price: 4800 },
+  { g: 5, code: "LAB-FIN-001", cat: "L", name: "ค่าแรงเก็บงาน + ทำความสะอาด", qty: 192, unit: "วัน-คน", price: 600 },
+];
+
+// bom.jsx:22 BOM_MODELS (4) + :30 BOM_LINES["B-1"] (17 lines, only B-1 has lines)
+const BOM_MODELS = ["B-1", "A-1", "C-1", "D-1"];
+const BOM_LINES_B1 = [
+  { cat: "M", code: "01-001", name: "เสาเข็มเจาะ Ø35 ซม.", detail: "ลึก 21 ม. · รวมเหล็กเสริม", unit: "ต้น", qty: 18, price: 4200 },
+  { cat: "M", code: "02-002", name: "คอนกรีตผสมเสร็จ 240 ksc", detail: "งานโครงสร้าง · ปั๊ม", unit: "ลบ.ม.", qty: 42, price: 2150 },
+  { cat: "M", code: "02-014", name: "เหล็กเส้น SD40 DB12", detail: "เสา-คาน-พื้น", unit: "เส้น", qty: 320, price: 248 },
+  { cat: "M", code: "03-101", name: "อิฐมวลเบา Q-CON 7.5 ซม.", detail: "ผนังภายใน-ภายนอก", unit: "ก้อน", qty: 2800, price: 28 },
+  { cat: "M", code: "03-120", name: "ปูนก่อ-ฉาบสำเร็จรูป", detail: "ก่อ + ฉาบ", unit: "ถุง", qty: 240, price: 115 },
+  { cat: "M", code: "06-040", name: "กระเบื้องปูพื้น 60×60", detail: "เกรด A · ในบ้าน", unit: "ตร.ม.", qty: 165, price: 320 },
+  { cat: "M", code: "07-010", name: "กระเบื้องหลังคา CPAC", detail: "พร้อมครอบ-อุปกรณ์", unit: "แผ่น", qty: 480, price: 95 },
+  { cat: "M", code: "08-021", name: "ประตู-หน้าต่าง UPVC", detail: "พร้อมมุ้งลวด-กระจก", unit: "ชุด", qty: 14, price: 8500 },
+  { cat: "M", code: "09-055", name: "สุขภัณฑ์ COTTO ชุดห้องน้ำ", detail: "ชักโครก+อ่าง+ก๊อก", unit: "ชุด", qty: 3, price: 18500 },
+  { cat: "M", code: "10-030", name: "สายไฟ-อุปกรณ์ไฟฟ้า", detail: "เหมารวมทั้งหลัง", unit: "เหมา", qty: 1, price: 145000 },
+  { cat: "S", code: "S-01", name: "งานโครงสร้าง (เหมาค่าแรง)", detail: "เสาเข็ม-ฐานราก-โครงสร้าง", unit: "เหมา", qty: 1, price: 420000 },
+  { cat: "S", code: "S-02", name: "งานระบบประปา-สุขาภิบาล", detail: "เดินท่อ-ติดตั้ง", unit: "เหมา", qty: 1, price: 165000 },
+  { cat: "S", code: "S-03", name: "งานระบบไฟฟ้า (ติดตั้ง)", detail: "เดินสาย-ตู้ควบคุม", unit: "เหมา", qty: 1, price: 135000 },
+  { cat: "S", code: "S-04", name: "งานทาสี", detail: "ภายใน-ภายนอก 2 เที่ยว", unit: "ตร.ม.", qty: 720, price: 180 },
+  { cat: "L", code: "L-01", name: "ค่าแรงก่อ-ฉาบ", detail: "ผนังทั้งหลัง", unit: "ตร.ม.", qty: 720, price: 220 },
+  { cat: "L", code: "L-02", name: "ค่าแรงปูกระเบื้อง", detail: "พื้น-ผนังห้องน้ำ", unit: "ตร.ม.", qty: 285, price: 280 },
+  { cat: "L", code: "L-03", name: "ค่าแรงทั่วไป-ทำความสะอาด", detail: "ตลอดงาน + ส่งมอบ", unit: "เหมา", qty: 1, price: 85000 },
+];
+
+// pr-list.jsx:11 PR_ROWS (10). type `clear` → `advance` (B-025). status is free text.
+const PR_ROWS = [
+  { no: "PR-2026-0418", type: "material", status: "pending", step: 2 },
+  { no: "PR-2026-0417", type: "expense", status: "pending", step: 1 },
+  { no: "PR-2026-0416", type: "material", status: "revise", step: 2 },
+  { no: "PR-2026-0415", type: "subcon", status: "approved", step: 3 },
+  { no: "PR-2026-0414", type: "material", status: "approved", step: 3 },
+  { no: "PR-2026-0413", type: "advance", status: "approved", step: 2 },
+  { no: "PR-2026-0412", type: "material", status: "pending", step: 2 },
+  { no: "PR-2026-0411", type: "advance", status: "approved", step: 2 }, // mock `clear` → advance (B-025)
+  { no: "PR-2026-0410", type: "subcon", status: "draft", step: 0 },
+  { no: "PR-2026-0409", type: "expense", status: "rejected", step: 1 },
+] as const;
+
+// po-wo.jsx:3 PO_ROWS (6) — real totals (vendorId cycles suppliers; no "no" column).
+const PO_TOTALS = [1268000, 902475, 612400, 96800, 268000, 1840000];
+// po-wo.jsx:272 WO_ROWS (5) — real values.
+const WO_VALUES = [2150000, 845000, 2840000, 985000, 425000];
+// gr.jsx:3 GR_ROWS (5) received %/amount; :11 RETURN_ROWS handled via rejected qty.
+const GR_RECEIVED = [320, 240, 120, 92, 920];
+
+// subcon-accept.jsx:8 SUBC_CONTRACTS (4 contracts / 16 periods = 4/4/3/5).
+// C3 state map: accepted→passed, requested→delivered, rejected/pending kept.
+type WP = { pct: number; target: number; amount: number; status: "passed" | "delivered" | "pending" | "rejected" };
+const SUBC_CONTRACTS: {
+  no: string; basis: "percent" | "distance" | "milestone" | "unit";
+  value: number; retentionPct: string; periods: WP[];
+}[] = [
+  {
+    no: "WO-2026-0042", basis: "percent", value: 2150000, retentionPct: "10.000",
+    periods: [
+      { pct: 20, target: 20, amount: 430000, status: "passed" },
+      { pct: 30, target: 30, amount: 645000, status: "passed" },
+      { pct: 25, target: 25, amount: 537500, status: "delivered" },  // requested→delivered
+      { pct: 25, target: 25, amount: 537500, status: "pending" },
+    ],
+  },
+  {
+    no: "WO-2026-0051", basis: "distance", value: 1750000, retentionPct: "5.000",
+    periods: [
+      { pct: 0, target: 100, amount: 100000, status: "passed" },
+      { pct: 0, target: 100, amount: 100000, status: "passed" },
+      { pct: 0, target: 100, amount: 100000, status: "passed" },
+      { pct: 0, target: 50, amount: 50000, status: "delivered" },   // requested→delivered
+    ],
+  },
+  {
+    no: "WO-2026-0048", basis: "milestone", value: 1240000, retentionPct: "10.000",
+    periods: [
+      { pct: 0, target: 0, amount: 480000, status: "passed" },
+      { pct: 0, target: 0, amount: 420000, status: "pending" },
+      { pct: 0, target: 0, amount: 340000, status: "pending" },
+    ],
+  },
+  {
+    no: "WO-2026-0055", basis: "unit", value: 1800000, retentionPct: "5.000",
+    periods: [
+      { pct: 0, target: 2, amount: 360000, status: "passed" },
+      { pct: 0, target: 2, amount: 360000, status: "passed" },
+      { pct: 0, target: 2, amount: 360000, status: "rejected" },    // งวด 3 ตีกลับ (defect ↓)
+      { pct: 0, target: 2, amount: 360000, status: "pending" },
+      { pct: 0, target: 2, amount: 360000, status: "pending" },
+    ],
+  },
+];
+
+// gl.jsx:7 JV_LIST (7). no/desc/source real. C9: mock has only a line COUNT, so we
+// emit balanced DR/CR lines from the REAL amount. lineCount matches JV_LIST.lines
+// (2,2,2,3,2,2,4 → 17 total). dr/cr are [accountCode, amount] pairs, ΣDR=ΣCR.
+const JV_BOOKS: {
+  no: string; source: string; memo: string; status: string;
+  lines: { acct: string; dr: number; cr: number }[];
+}[] = [
+  { no: "JV-2026-0418", source: "REM", memo: "รับชำระเงินค่าบ้าน B-08 (โอนกรรมสิทธิ์)", status: "approved",
+    lines: [{ acct: "1020", dr: 2148000, cr: 0 }, { acct: "1030", dr: 0, cr: 2148000 }] },
+  { no: "JV-2026-0417", source: "Manual", memo: "บันทึก WHT 3% สำหรับ INV-CPC-2026-0118", status: "approved",
+    lines: [{ acct: "2010", dr: 8040, cr: 0 }, { acct: "2050", dr: 0, cr: 8040 }] },
+  { no: "JV-2026-0416", source: "GR auto", memo: "รับสินค้าตาม GR-2026-0148 (สี TOA)", status: "approved",
+    lines: [{ acct: "5020", dr: 90466, cr: 0 }, { acct: "2010", dr: 0, cr: 90466 }] },
+  { no: "JV-2026-0415", source: "Allocate", memo: "ปันส่วนต้นทุน Block B (เหล็กเสริม)", status: "approved",
+    lines: [{ acct: "5020", dr: 100000, cr: 0 }, { acct: "5030", dr: 119200, cr: 0 }, { acct: "1140", dr: 0, cr: 219200 }] },
+  { no: "JV-2026-0414", source: "FA auto", memo: "ค่าเสื่อมราคาเครื่องผสมปูน เดือน พ.ค.", status: "approved",
+    lines: [{ acct: "5100", dr: 4167, cr: 0 }, { acct: "1210", dr: 0, cr: 4167 }] },
+  { no: "JV-2026-0413", source: "Petty", memo: "จ่ายค่าใช้จ่าย Petty (PT-2026-0145)", status: "approved",
+    lines: [{ acct: "5100", dr: 8400, cr: 0 }, { acct: "1010", dr: 0, cr: 8400 }] },
+  { no: "JV-2026-0412", source: "Manual", memo: "ปรับปรุง Accrued Expense พ.ค.", status: "pending",
+    lines: [{ acct: "5100", dr: 92250, cr: 0 }, { acct: "5200", dr: 92250, cr: 0 }, { acct: "2010", dr: 0, cr: 92250 }, { acct: "2040", dr: 0, cr: 92250 }] },
+];
+
+// bank.jsx:84 STMT (8 reconcile lines). matched = ref string or null.
+const BANK_STMT = [
+  { date: "25 พ.ค.", desc: "FT TXN 25052569-08123 → ซีแพคฯ", v: -894205.61, matched: "PV-2026-0183" },
+  { date: "25 พ.ค.", desc: "RCV ค่าบ้าน B-08 คุณภัทร์รดา", v: 2148000, matched: "RV-2026-0093" },
+  { date: "24 พ.ค.", desc: "FT TXN 24052569-08120 → TOA", v: -93896, matched: "PV-2026-0182" },
+  { date: "24 พ.ค.", desc: "DEP โอน คุณวรรณา ค่าบ้าน B-12", v: 728000, matched: "RV-2026-0092" },
+  { date: "23 พ.ค.", desc: "RCV Retention คืน จากผู้รับเหมา", v: 84500, matched: "RV-2026-0090" },
+  { date: "22 พ.ค.", desc: "FT 22052569 OUT (รายการไม่ทราบ)", v: -15240, matched: null },
+  { date: "21 พ.ค.", desc: "เช็ค CH-040126 ขึ้นเงิน", v: -184500, matched: "CH-040126" },
+  { date: "20 พ.ค.", desc: "ค่าธรรมเนียมธนาคาร พ.ค.", v: -350, matched: null },
+];
+
+// fa.jsx:3 ASSETS (8 FixedAsset) — name/cost/lifeY/method verbatim.
+const FA_ASSETS = [
+  { name: "ที่ดิน · โครงการราชพฤกษ์ เฟส 1+2", cost: 60000000, lifeY: 0, method: "ไม่คิดค่าเสื่อม" },
+  { name: "อาคารสำนักงานขายราชพฤกษ์", cost: 8400000, lifeY: 20, method: "เส้นตรง" },
+  { name: "เครื่องผสมปูน 350L · Mixer-001", cost: 180000, lifeY: 5, method: "เส้นตรง" },
+  { name: "เครื่องผสมปูน 350L · Mixer-002", cost: 180000, lifeY: 5, method: "เส้นตรง" },
+  { name: "รถ Toyota Hilux 4WD (เลขที่ 5)", cost: 1240000, lifeY: 5, method: "เส้นตรง" },
+  { name: "เครื่องคอมพิวเตอร์ Workstation", cost: 84000, lifeY: 3, method: "เส้นตรง" },
+  { name: "นั่งร้านเหล็ก ชุดใหญ่ × 24 ชุด", cost: 480000, lifeY: 5, method: "เส้นตรง" },
+  { name: "รถบรรทุก 6 ล้อ Hino (เก่า)", cost: 1840000, lifeY: 5, method: "เส้นตรง" },
+];
+
+// labor.jsx:6 WORKERS_SEED (8) — name/wage (schema carries name + day_rate only).
+const WORKERS_SEED = [
+  { name: "สมหมาย พลดี", wage: 450 }, { name: "บุญมี แข็งขัน", wage: 420 },
+  { name: "สาย คำมูล", wage: 380 }, { name: "ประสงค์ ใจเย็น", wage: 450 },
+  { name: "อ่อนสา แสงดี", wage: 430 }, { name: "วิชัย ทองแท้", wage: 520 },
+  { name: "คำปุน สีดา", wage: 480 }, { name: "นารี บุญส่ง", wage: 400 },
+];
+
+// petty-alloc.jsx:3 PETTY_TX (6). type ∈ {claim,clear,topup}. value = abs mock v.
+const PETTY_TX = [
+  { no: "PT-2026-0148", type: "claim" as const, l: "ค่าน้ำดื่ม + อาหารทีมงาน Site B", v: 3200, status: "pending", cat: "Welfare", ref: "PR-2026-0417" },
+  { no: "PT-2026-0147", type: "claim" as const, l: "ค่าน้ำมัน + ทางด่วน ไปทดสอบดิน", v: 1850, status: "approved", cat: "Transport", ref: null },
+  { no: "PT-2026-0146", type: "clear" as const, l: "เคลียร์เงินทดรอง PR-2026-0413", v: 22200, status: "approved", cat: "Advance", ref: "PR-2026-0413" },
+  { no: "PT-2026-0145", type: "claim" as const, l: "ค่าซ่อมรถบรรทุก (เปลี่ยนยาง 2 เส้น)", v: 8400, status: "approved", cat: "Vehicle", ref: null },
+  { no: "PT-2026-0144", type: "topup" as const, l: "เติมเงินกองทุน Petty (โอนจาก Bank)", v: 50000, status: "approved", cat: "Top-up", ref: null },
+  { no: "PT-2026-0143", type: "claim" as const, l: "ค่าถ่ายเอกสาร + อุปกรณ์สำนักงาน", v: 680, status: "approved", cat: "Office", ref: null },
+];
+
+// pm.jsx:61 PM_CONTRACTS (5) — no/scope/value/status verbatim.
+const PM_CONTRACTS = [
+  { no: "MT-2569-018", scope: "ลิฟต์โดยสาร 2 ชุด (MAXTECH)", value: 144000, mode: "MA" as const, status: "active" },
+  { no: "FIRE-2569-02", scope: "ระบบดับเพลิง + ปั๊มดับเพลิง", value: 96000, mode: "per_visit" as const, status: "expiring" },
+  { no: "GEN-2569-04", scope: "Genset Cummins 500kVA", value: 60000, mode: "MA" as const, status: "active" },
+  { no: "AC-2569-09", scope: "Chiller + AHU/FCU", value: 210000, mode: "MA" as const, status: "active" },
+  { no: "OM-2569-01", scope: "O&M โรงไฟฟ้า 8MW เต็มระบบ", value: 2400000, mode: "MA" as const, status: "active" },
+];
+
+// pm-checklist.jsx:6 PM_CHECKLIST_TEMPLATES (5) — kind + real items[].
+const CHECKLIST_TEMPLATES = [
+  { kind: "ลิฟต์", name: "ลิฟต์โดยสาร (MAXTECH)", items: ["ตรวจระบบเบรกและมอเตอร์ฉุดลาก", "ตรวจสลิง/ลวดสลิงและความตึง", "ทดสอบปุ่มฉุกเฉิน + อินเตอร์คอม", "ตรวจประตูชั้น-ประตูลิฟต์ + เซนเซอร์", "ทดสอบระบบจอดชั้นเรียบ (Leveling)", "ตรวจระบบไฟส่องสว่างในห้องโดยสาร"] },
+  { kind: "ระบบดับเพลิง", name: "ระบบดับเพลิง + ปั๊ม", items: ["ทดสอบปั๊มดับเพลิง (Jockey/Main)", "ตรวจแรงดันระบบท่อ + วาล์ว", "ทดสอบสัญญาณแจ้งเหตุ + Detector", "ตรวจถังดับเพลิงและหัวจ่าย"] },
+  { kind: "Genset", name: "เครื่องกำเนิดไฟฟ้า (Genset)", items: ["ตรวจระดับน้ำมันเครื่อง + น้ำหล่อเย็น", "ทดสอบ Start/Transfer (ATS)", "ตรวจแบตเตอรี่ + เครื่องชาร์จ", "ตรวจรอยรั่ว + ระบบไอเสีย"] },
+  { kind: "อินเวอร์เตอร์", name: "อินเวอร์เตอร์ / โซลาร์", items: ["ตรวจค่า Performance / Error log", "ทำความสะอาดแผง + ตรวจการบังเงา", "ตรวจขั้วต่อ DC/AC + Torque", "วัดค่าฉนวน (Insulation) + กราวด์"] },
+  { kind: "ทั่วไป", name: "ทั่วไป (Generic)", items: ["ตรวจสภาพทั่วไปและทำความสะอาด", "ตรวจระบบไฟฟ้า/การเชื่อมต่อ", "ทดสอบการทำงาน + วัดค่าพารามิเตอร์", "หล่อลื่น/เปลี่ยนอะไหล่สิ้นเปลือง"] },
+];
+
+// timeline.jsx:238 TIMELINE_TASKS (5 groups / 13 tasks). g = group index.
+const TL_GROUPS = ["01 งานเตรียม + Site Work", "02 งานโครงสร้าง", "03 งานสถาปัตยกรรม", "04 งานระบบไฟฟ้า + ประปา", "05 ส่งมอบ + Handover"];
+const TL_TASKS: { g: number; label: string; status: string; pct: number }[] = [
+  { g: 0, label: "เคลียร์พื้นที่ + ปักหมุด", status: "done", pct: 100 },
+  { g: 0, label: "ระบบไฟฟ้า/น้ำชั่วคราว", status: "done", pct: 100 },
+  { g: 1, label: "งานฐานราก B-1 ถึง B-24", status: "done", pct: 100 },
+  { g: 1, label: "งานเสา-คาน ชั้น 1 B-1..B-12", status: "done", pct: 100 },
+  { g: 1, label: "งานเสา-คาน ชั้น 2 B-1..B-12", status: "ongoing", pct: 92 },
+  { g: 1, label: "งานเสา-คาน B-13..B-24", status: "ongoing", pct: 38 },
+  { g: 2, label: "งานก่ออิฐ-ฉาบ Block B (รวม)", status: "soon", pct: 0 },
+  { g: 2, label: "งานกระเบื้องพื้น Block B", status: "future", pct: 0 },
+  { g: 2, label: "งานสีภายใน + ภายนอก", status: "future", pct: 0 },
+  { g: 3, label: "ระบบไฟฟ้าหลัก Block B", status: "ongoing", pct: 78 },
+  { g: 3, label: "ระบบประปา-สุขาภิบาล Block B", status: "ongoing", pct: 45 },
+  { g: 4, label: "ตรวจรับ + เก็บงาน (B-1..B-12)", status: "future", pct: 0 },
+  { g: 4, label: "ส่งมอบลูกค้า + เริ่ม Warranty", status: "future", pct: 0 },
+];
+
+// timeline.jsx:264 MILESTONES (5)
+const MILESTONES = [
+  { l: "เริ่มก่อสร้าง", day: 0, status: "done" },
+  { l: "ครบฐานราก B-Block", day: 40, status: "done" },
+  { l: "โครงสร้างชั้น 2 เสร็จ", day: 95, status: "ongoing" },
+  { l: "ส่งมอบลอตแรก B-1..B-12", day: 195, status: "soon" },
+  { l: "ปิดโครงการ Block B", day: 240, status: "future" },
+];
+
+// sales-crm.jsx:191 LEADS_BY_STAGE (10 = lead 4 / visit 2 / quote 2 / booking 1 / contract 1)
+const LEADS: { name: string; phone: string; source: string; interest: string; stage: "lead" | "visit" | "quote" | "booking" | "contract"; hot: boolean; note: string; days: number }[] = [
+  { name: "คุณวีระชัย ใจกล้า", phone: "081-234-5678", source: "Facebook Ads", interest: "Block B · 3 ห้องนอน", stage: "lead", hot: false, note: "สอบถามราคาเริ่ม + ดาวน์ขั้นต่ำ", days: 0 },
+  { name: "คุณมาลี พรหมศักดิ์", phone: "086-789-0123", source: "Walk-in", interest: "Block A · บ้านเดี่ยว", stage: "lead", hot: true, note: "พร้อมเงินสด · ขอนัดชมห้องตัวอย่าง", days: 1 },
+  { name: "คุณสุรชัย ทองศรี", phone: "095-456-7890", source: "Line OA", interest: "Block C · 4 ห้องนอน", stage: "lead", hot: false, note: "ขอข้อมูลโปรโมชั่นเดือนนี้", days: 2 },
+  { name: "คุณเปรมจิต สุขใจ", phone: "083-321-8765", source: "Referral", interest: "Block B · ทาวน์โฮม", stage: "lead", hot: false, note: "เพื่อนแนะนำ · ยังไม่ตอบ", days: 5 },
+  { name: "คุณวิทยา แสงดาว", phone: "081-555-1234", source: "Facebook", interest: "Block B-08", stage: "visit", hot: true, note: "นัดดูบ้านตัวอย่าง · มากับครอบครัว", days: 0 },
+  { name: "คุณอาภา ดารารัตน์", phone: "098-765-4321", source: "Walk-in", interest: "Block A-25", stage: "visit", hot: false, note: "นัดดู Phase 1 + คุยเรื่องสินเชื่อ", days: 0 },
+  { name: "คุณภาคิน รุ่งโรจน์", phone: "081-888-2222", source: "Walk-in", interest: "B-15 · QO-0184", stage: "quote", hot: true, note: "QO รออนุมัติของลูกค้า · ขอลดมุ้งกันยุง", days: 0 },
+  { name: "คุณจินตนา ผ่องใส", phone: "086-444-5555", source: "Line OA", interest: "A-08 · QO-0183", stage: "quote", hot: false, note: "เปรียบเทียบกับโครงการคู่แข่ง", days: 0 },
+  { name: "คุณวรรณา ศรีจันทร์", phone: "081-234-9999", source: "Walk-in", interest: "B-12 · จอง", stage: "booking", hot: true, note: "จองแล้ว · ทำสัญญาเดือนนี้", days: 0 },
+  { name: "คุณสมพร เพชรไทย", phone: "086-111-2222", source: "Referral", interest: "B-13 · CT-0084", stage: "contract", hot: true, note: "ทำสัญญาแล้ว · เริ่มผ่อนดาวน์", days: 0 },
+];
+
+// sales-service.jsx:3 SERVICE_TICKETS (7)
+const SERVICE_TICKETS = [
+  { no: "SR-2026-0048", channel: "LINE", category: "ระบบประปา", title: "ก๊อกน้ำห้องครัวรั่วซึม ฐานก๊อก", prio: "high", status: "scheduled" },
+  { no: "SR-2026-0047", channel: "App", category: "ระบบไฟฟ้า", title: "เบรกเกอร์ตัดบ่อย ห้องนอน 2", prio: "high", status: "fixing" },
+  { no: "SR-2026-0046", channel: "โทร", category: "หน้าต่าง", title: "บานเลื่อนหน้าต่างฝืด เปิดปิดยาก", prio: "normal", status: "received" },
+  { no: "SR-2026-0045", channel: "LINE", category: "ทาสี", title: "สีลอกบริเวณกันสาดด้านหน้า", prio: "normal", status: "fixed" },
+  { no: "SR-2026-0044", channel: "App", category: "ระบบประปา", title: "ชักโครกชั้นบนน้ำไหลตลอด", prio: "normal", status: "fixed" },
+  { no: "SR-2026-0043", channel: "Walk-in", category: "พื้น", title: "กระเบื้องห้องน้ำชั้นล่างแตก", prio: "low", status: "closed" },
+  { no: "SR-2026-0042", channel: "LINE", category: "ระบบแอร์", title: "แอร์ห้องนอนใหญ่ไม่เย็น", prio: "high", status: "closed" },
+];
+
+// inventory.jsx:3 ITEMS (8)
+const INV_ITEMS = [
+  { code: "MAT-CEM-001", cat: "Material", name: "ปูนซีเมนต์ปอร์ตแลนด์ ตราเสือ", unit: "ถุง", price: 168.5, stock: 1240, low: 200, status: "ok" },
+  { code: "MAT-STL-024", cat: "Material", name: "เหล็กเส้นกลม SR24 12mm × 10m", unit: "เส้น", price: 425, stock: 1080, low: 300, status: "ok" },
+  { code: "MAT-STL-036", cat: "Material", name: "เหล็กเส้นข้ออ้อย SD40 16mm", unit: "เส้น", price: 685, stock: 220, low: 300, status: "low" },
+  { code: "MAT-TILE-60A", cat: "Material", name: "กระเบื้องปูพื้น 60×60 (Type-A)", unit: "ตร.ม.", price: 302, stock: 4200, low: 500, status: "ok" },
+  { code: "MAT-PAINT-PR", cat: "Material", name: "สีทาภายใน Premium (5L)", unit: "แกลลอน", price: 302.5, stock: 8, low: 50, status: "crit" },
+  { code: "MAT-WIRE-25", cat: "Material", name: "สาย VCT 2.5mm × 100m", unit: "ม้วน", price: 7000, stock: 46, low: 24, status: "ok" },
+  { code: "TOOL-MIX-001", cat: "Tool", name: "เครื่องผสมปูน 350L (เครื่องที่ 1)", unit: "เครื่อง", price: 0, stock: 3, low: 1, status: "ok" },
+  { code: "MAT-FORM-12", cat: "Material", name: "ไม้แบบหล่อ 1.2×2.4m", unit: "แผ่น", price: 480, stock: 124, low: 100, status: "ok" },
+];
+
+// inventory.jsx:114 WH (5)
+const WAREHOUSES = [
+  { name: "คลังกลาง · ราชพฤกษ์", loc: "ราชพฤกษ์ · นนทบุรี" },
+  { name: "คลัง Block A", loc: "ไซต์ Block A" },
+  { name: "คลัง Block B", loc: "ไซต์ Block B" },
+  { name: "เครื่องมือ-Site", loc: "ไซต์ก่อสร้าง" },
+  { name: "คลัง Block C", loc: "ไซต์ Block C" },
+];
+
+// inventory.jsx:206 TRANSFERS (4)
+const INV_TRANSFERS = [
+  { no: "TR-2026-0084", from: 0, to: 2, value: 184500, status: "approved" },
+  { no: "TR-2026-0083", from: 0, to: 1, value: 22400, status: "pending" },
+  { no: "TR-2026-0082", from: 2, to: 0, value: 25500, status: "approved" },
+  { no: "TR-2026-0081", from: 0, to: 3, value: 0, status: "approved" },
+];
+
+// inventory.jsx:262 ISSUES (4)
+const INV_ISSUES = [
+  { no: "IS-2026-0218", wh: 2, value: 24000, status: "approved" },
+  { no: "IS-2026-0217", wh: 2, value: 17000, status: "approved" },
+  { no: "IS-2026-0216", wh: 1, value: 2400, status: "pending" },
+  { no: "IS-2026-0215", wh: 2, value: 16800, status: "approved" },
+];
+
+// dms.jsx:14 DMS_SEED (13). The 3 `defect`-cat docs are the real "defect reports"
+// for WO-2026-0055 งวด 3 (P0-BE-10 rework item 5 — Defect table stays 0 per §สรุป).
+const DMS_SEED = [
+  { name: "สัญญาจ้างเหมา WO-2569-012 (ทีมสมชาย).pdf", cat: "contract" },
+  { name: "สัญญา PM ลิฟต์ MT-2569-018.pdf", cat: "contract" },
+  { name: "สัญญาเช่าที่ดินโซลาร์ 27 ปี (สระบุรี).pdf", cat: "contract" },
+  { name: "แบบสถาปัตย์ Block B Rev.C.dwg", cat: "drawing" },
+  { name: "โมเดล BIM อาคาร A (IFC).ifc", cat: "drawing" },
+  { name: "ใบอนุญาตก่อสร้าง อ.1 เฟส 2.pdf", cat: "permit" },
+  { name: "ใบอนุญาตจัดสรร (คค.) บางบัวทอง.pdf", cat: "permit" },
+  { name: "งบการเงินสอบทาน Q2-2569.xlsx", cat: "finance" },
+  { name: "โฉนด 11902 ราชพฤกษ์ เฟส 4 (สแกน).pdf", cat: "land" },
+  { name: "ภาพความคืบหน้า Block B - มิ.ย. 69 (86 รูป).zip", cat: "photo" },
+  { name: "Defect List งวด 3 · WO-2026-0055 (ก่ออิฐ-ฉาบ).pdf", cat: "defect" },
+  { name: "รูปจุดบกพร่อง B-06 ก่อน-หลังแก้ (12 รูป).zip", cat: "defect" },
+  { name: "รายงานของเสียหาย GR-2569-0448 (อิฐมวลเบา).pdf", cat: "defect" },
+];
+
+// exec-audit.jsx:162 AUDIT_ENTRIES (13). act is free text; obj/detail verbatim.
+const AUDIT_ENTRIES = [
+  { act: "approve", obj: "WO-2026-0055 · งวด 3 (ตรวจครั้งที่ 2)", detail: "ตรวจรับผ่านหลังแก้ Defect · ออก GR + ตั้งหนี้ AP 342,000 ฿ (หักประกัน 18,000)" },
+  { act: "approve", obj: "GR-2569-0455 · เหล็ก SD40 24 ตัน", detail: "ตรวจนับ-รับของผ่านมือถือ · สต๊อกเข้าคลัง Block B" },
+  { act: "edit", obj: "WO-2026-0055 · งวด 3", detail: "ตีกลับงวดงาน · บันทึก Defect: ฉาบผนัง B-06 เป็นคลื่น + ขอบวงกบไม่เรียบ" },
+  { act: "approve", obj: "BOQ-2026-B-02 v4", detail: "อนุมัติ BOQ Revise · 12.4 ลบ." },
+  { act: "create", obj: "ถอด BOQ จาก A-model.ifc", detail: "สร้าง 18 รายการ · 4.85 ลบ." },
+  { act: "create", obj: "PMWO-2569-0312", detail: "สร้างใบงาน PM ลิฟต์ MX-1000" },
+  { act: "approve", obj: "PR-2026-0418", detail: "อนุมัติ PR วัสดุ · 1.84 ลบ." },
+  { act: "edit", obj: "MT-2569-018", detail: "แก้ไขมูลค่าสัญญา → 199,000" },
+  { act: "post", obj: "AP-2026-0291", detail: "ตั้งหนี้จากสัญญา PM · 96,000" },
+  { act: "edit", obj: "L-071", detail: "เลื่อนสถานะ → Due Diligence" },
+  { act: "delete", obj: "AC-2569-09 (ร่าง)", detail: "ลบร่างสัญญาซ้ำ" },
+  { act: "sync", obj: "SAP REM", detail: "ซิงก์ข้อมูลโครงการ 7 รายการ" },
+  { act: "create", obj: "สัญญาขาย A-12", detail: "ทำสัญญาขายยูนิต · 3.2 ลบ." },
+];
+
+// land.jsx:17 LAND_PLOTS (8). area rai-ngan-wa → m² (1 rai=1600, 1 ngan=400, 1 wa=4).
+const LAND_PLOTS = [
+  { deed: "โฉนด 24517", rai: 18, ngan: 2, wa: 40, gps: "13.9182, 100.4023", pricePerRai: 4200000, stage: "nego", tenure: "negotiate", proj: "bbt" },
+  { deed: "โฉนด 11902", rai: 24, ngan: 0, wa: 0, gps: "13.8076, 100.4519", pricePerRai: 6800000, stage: "dd", tenure: "buy", proj: "rjp" },
+  { deed: "นส.3ก 442", rai: 120, ngan: 1, wa: 0, gps: "14.7541, 100.7218", pricePerRai: 850000, stage: "feas", tenure: "lease", proj: "slr" },
+  { deed: "โฉนด 33415", rai: 8, ngan: 3, wa: 12, gps: "14.0712, 100.6201", pricePerRai: 9500000, stage: "survey", tenure: "buy", proj: "phk" },
+  { deed: "นส.3ก 7781", rai: 240, ngan: 0, wa: 0, gps: "14.8893, 101.1402", pricePerRai: 620000, stage: "source", tenure: "lease", proj: null },
+  { deed: "โฉนด 24518", rai: 15, ngan: 0, wa: 0, gps: "13.9201, 100.4055", pricePerRai: 4350000, stage: "deal", tenure: "buy", proj: "bbt" },
+  { deed: "โฉนด 11888", rai: 32, ngan: 1, wa: 20, gps: "13.8061, 100.4490", pricePerRai: 6500000, stage: "close", tenure: "buy", proj: "rjp" },
+  { deed: "นส.3ก 451", rai: 95, ngan: 2, wa: 0, gps: "14.7588, 100.7301", pricePerRai: 880000, stage: "source", tenure: "lease", proj: "slr" },
+];
+
+// ap.jsx:3 AP_BILL (5) / :160 PV_LIST (4) / ar.jsx:7 AR_INV (6) / accounting-extra2 ARCN_SEED (3)
+const AP_BILL = [
+  { no: "AP-2026-0184", inv: "INV-CPC-118", amount: 920000, vat: 60187, status: "approved" },
+  { no: "AP-2026-0183", inv: "INV-TOA-042", amount: 96800, vat: 6334, status: "approved" },
+  { no: "AP-2026-0182", inv: "INV-FI-271", amount: 415400, vat: 27184, status: "approved" },
+  { no: "AP-2026-0181", inv: "INV-TST-028", amount: 268000, vat: 17542, status: "approved" },
+  { no: "AP-2026-0180", inv: "—", amount: 645000, vat: 42196, status: "pending" },
+];
+const PV_LIST = [
+  { net: 561154, wht: 19350 }, { net: 892400, wht: 27600 }, { net: 93896, wht: 2904 }, { net: 402938, wht: 12462 },
+];
+const AR_INV = [
+  { no: "INV-2026-0418", amount: 728000, vat: 0 }, { no: "INV-2026-0417", amount: 485000, vat: 0 },
+  { no: "INV-2026-0416", amount: 2148000, vat: 0 }, { no: "INV-2026-0415", amount: 824000, vat: 0 },
+  { no: "INV-2026-0414", amount: 485000, vat: 0 }, { no: "INV-2026-0413", amount: 184000, vat: 12880 },
+];
+const ARCN_SEED = [
+  { no: "CN-2569-008", reason: "คืนเงินจอง - ยกเลิกสัญญา", amount: 200000, status: "approved" },
+  { no: "CN-2569-009", reason: "งานลด (Variation Order)", amount: 340000, status: "pending" },
+  { no: "CN-2569-010", reason: "ส่วนลด ณ วันโอน", amount: 150000, status: "draft" },
+];
+
+// sales-process.jsx:24 units generator — codes B-01..B-84, status by zero-based i:
+//   i<48 soldBuilt · 48-56 sold · 57-61 booked · 62-67 built · else empty.
+const unitCode = (i: number): string => `B-${String(i + 1).padStart(2, "0")}`;
+const unitStage = (i: number): string =>
+  i < 48 ? "soldBuilt" : i < 57 ? "sold" : i < 62 ? "booked" : i < 68 ? "built" : "empty";
+
 // ---------------------------------------------------------------------------
 // seed
 // ---------------------------------------------------------------------------
@@ -340,7 +745,7 @@ async function seed(): Promise<void> {
         MODELS.map((mo) => ({ id: det(`model:${mo.key}`), companyId: CO1, name: mo.name, area: mo.area })),
       );
 
-      // project_node: 16 phase nodes (kind='phase') + 3 block nodes (kind='block').
+      // project_node tree: 16 phase nodes + 3 block nodes + 84 unit nodes (B-01..B-84).
       const nodeRows: (typeof schema.projectNodes.$inferInsert)[] = [];
       for (const p of PROJECTS) {
         for (const ph of p.phases) {
@@ -356,6 +761,14 @@ async function seed(): Promise<void> {
           // blocks live under เฟส 2 (Block B+C) of ราชพฤกษ์
           parentId: det("node:rjp:p2"), modelId: det(`model:${b.modelKey}`),
           kind: "block", name: b.name, saleStatus: null,
+        });
+      }
+      // 84 unit leaf nodes under Block B (B-009: persist the sales-process generator).
+      for (let i = 0; i < 84; i++) {
+        nodeRows.push({
+          id: det(`unitnode:${i}`), projectId: det("project:rjp"),
+          parentId: det("block:B"), modelId: det("model:B-1"),
+          kind: "unit", name: unitCode(i), saleStatus: unitStage(i),
         });
       }
       await tx.insert(schema.projectNodes).values(nodeRows);
@@ -399,55 +812,45 @@ async function seed(): Promise<void> {
       );
 
       // === BOQ / procurement ==============================================
+      // BOM: 4 models; B-1 carries its 17 real BOM_LINES, the rest empty (mock only has B-1).
       await tx.insert(schema.boms).values(
-        MODELS.slice(0, 4).map((mo) => ({ id: det(`bom:${mo.key}`), companyId: CO1, unitType: mo.key, items: [] })),
-      );
-
-      await tx.insert(schema.boqDocs).values(
-        Array.from({ length: 6 }, (_, i) => ({
-          id: det(`boqdoc:${i}`), projectId: det("project:rjp"),
-          no: `BOQ-2569-${String(i + 1).padStart(3, "0")}`, name: `BOQ งานหลัก ชุดที่ ${i + 1}`,
-          scope: "งานโครงสร้าง + สถาปัตย์", version: 1,
-          status: (i === 0 ? "approved" : i === 1 ? "pending" : "draft") as "approved" | "pending" | "draft",
+        BOM_MODELS.map((code) => ({
+          id: det(`bom:${code}`), companyId: CO1, unitType: code,
+          items: code === "B-1" ? BOM_LINES_B1 : [],
         })),
       );
 
-      const BOQ_GROUP_NAMES = ["งานโครงสร้าง", "งานสถาปัตยกรรม", "งานระบบไฟฟ้า", "งานระบบสุขาภิบาล", "งานตกแต่งภายใน", "งานภายนอก/ภูมิทัศน์"];
-      await tx.insert(schema.boqGroups).values(
-        BOQ_GROUP_NAMES.map((name, i) => ({ id: det(`boqgrp:${i}`), boqId: det("boqdoc:0"), name, seq: i + 1 })),
+      await tx.insert(schema.boqDocs).values(
+        BOQ_DOCS.map((d, i) => ({
+          id: det(`boqdoc:${i}`), projectId: det("project:rjp"),
+          no: d.no, name: d.name, scope: d.scope, version: d.ver, status: d.status,
+        })),
       );
 
-      // 21 BOQ items distributed [4,4,4,3,3,3] across the 6 groups.
-      const perGroup = [4, 4, 4, 3, 3, 3];
-      const CATS = ["M", "L", "S"] as const;
-      const boqItemRows: (typeof schema.boqItems.$inferInsert)[] = [];
-      let bi = 0;
-      perGroup.forEach((count, g) => {
-        for (let k = 0; k < count; k++) {
-          boqItemRows.push({
-            id: det(`boqitem:${bi}`), groupId: det(`boqgrp:${g}`),
-            code: `IT-${String(bi + 1).padStart(3, "0")}`, name: `${at(BOQ_GROUP_NAMES, g)} รายการ ${k + 1}`,
-            cat: at(CATS, bi), qty: m(10 + bi), unit: "หน่วย", price: m(1000 + bi * 250),
-            ccId: det(`cc:${at(CC_SEED, bi).code}`), remainQty: m(10 + bi),
-          });
-          bi++;
-        }
-      });
-      await tx.insert(schema.boqItems).values(boqItemRows);
+      await tx.insert(schema.boqGroups).values(
+        BOQ_GROUPS.map((name, i) => ({ id: det(`boqgrp:${i}`), boqId: det("boqdoc:0"), name, seq: i + 1 })),
+      );
+
+      await tx.insert(schema.boqItems).values(
+        BOQ_ITEMS.map((it, i) => ({
+          id: det(`boqitem:${i}`), groupId: det(`boqgrp:${it.g}`),
+          code: it.code, name: it.name, cat: it.cat, qty: m(it.qty), unit: it.unit, price: m(it.price),
+          ccId: det(`cc:${at(CC_SEED, i).code}`), remainQty: m(it.qty),
+        })),
+      );
 
       await tx.insert(schema.cbsBudgets).values(
-        BOQ_GROUP_NAMES.map((_, i) => ({
+        BOQ_GROUPS.map((_, i) => ({
           id: det(`cbs:${i}`), groupId: det(`boqgrp:${i}`),
           budget: m(1_000_000 * (i + 1)), used: m(200_000 * (i + 1)), committed: m(100_000 * (i + 1)),
         })),
       );
 
-      const PR_TYPES = ["material", "subcon", "expense", "advance"] as const;
       await tx.insert(schema.prs).values(
-        Array.from({ length: 10 }, (_, i) => ({
+        PR_ROWS.map((p, i) => ({
           id: det(`pr:${i}`), projectId: det("project:rjp"),
-          no: `PR-2569-${String(i + 1).padStart(4, "0")}`, type: at(PR_TYPES, i),
-          needDate: "2026-08-15", status: i < 3 ? "approved" : "pending", approvalStep: (i % 3) + 1,
+          no: p.no, type: p.type as "material" | "subcon" | "expense" | "advance",
+          needDate: null, status: p.status, approvalStep: p.step,
         })),
       );
 
@@ -458,71 +861,68 @@ async function seed(): Promise<void> {
       );
 
       await tx.insert(schema.pos).values(
-        Array.from({ length: 6 }, (_, i) => ({
+        PO_TOTALS.map((total, i) => ({
           id: det(`po:${i}`), prId: det(`pr:${i}`), vendorId: at(SUPPLIER_VENDORS, i),
-          total: m(500_000 + i * 100_000), vat: m((500_000 + i * 100_000) * 0.07), creditTerm: 30,
+          total: m(total), vat: m(total * 0.07), creditTerm: 30,
         })),
       );
 
       await tx.insert(schema.wos).values(
-        Array.from({ length: 5 }, (_, i) => ({
+        WO_VALUES.map((value, i) => ({
           id: det(`wo:${i}`), prId: det(`pr:${i + 1}`), vendorId: at(SUBCON_VENDORS, i),
-          value: m(800_000 + i * 120_000),
+          value: m(value),
         })),
       );
 
       await tx.insert(schema.grs).values(
-        Array.from({ length: 5 }, (_, i) => ({
-          id: det(`gr:${i}`), poId: det(`po:${i}`), received: m(100 - i * 5), rejected: m(i), photos: [],
+        GR_RECEIVED.map((received, i) => ({
+          id: det(`gr:${i}`), poId: det(`po:${i}`), received: m(received), rejected: m(i), photos: [],
         })),
       );
 
-      await tx.insert(schema.variationOrders).values(
-        Array.from({ length: 2 }, (_, i) => ({
-          id: det(`vo:${i}`), poId: det(`po:${i}`), dir: (i === 0 ? "add" : "cut") as "add" | "cut",
-          amount: m(50_000 * (i + 1)), reason: i === 0 ? "เพิ่มงานนอกสัญญา" : "ลดขอบเขตงาน",
-        })),
-      );
+      await tx.insert(schema.variationOrders).values([
+        { id: det("vo:0"), poId: det("po:0"), dir: "add" as const, amount: m(148000), reason: "เพิ่มผนังเสริมเหล็ก B-15 ตามคำขอลูกค้า" },
+        { id: det("vo:1"), poId: det("po:1"), dir: "cut" as const, amount: m(68000), reason: "ลดงานเทพื้น Roof Deck (ใช้ Pre-cast)" },
+      ]);
 
       // === Subcon =========================================================
+      // B-023: subcon.jsx has a 6-row registry distinct from VENDOR_SEED — vendorId
+      // cycles the 2 subcon vendors of VENDOR_SEED (existing mapping) pending Wei.
       await tx.insert(schema.subconContracts).values(
-        Array.from({ length: 4 }, (_, i) => ({
+        SUBC_CONTRACTS.map((c, i) => ({
           id: det(`subc:${i}`), vendorId: at(SUBCON_VENDORS, i), projectId: det("project:rjp"),
-          no: `SC-2569-${String(i + 1).padStart(3, "0")}`, value: m(2_000_000 + i * 500_000),
-          retentionPct: "5.000", start: "2026-01-15", end: "2026-12-31",
+          no: c.no, value: m(c.value), retentionPct: c.retentionPct, start: "2026-01-15", end: "2026-12-31",
         })),
       );
 
-      // 16 work periods (4 per contract). C3: mock states mapped to state machine
-      // (accepted→passed, requested→delivered); the rest use valid machine states.
-      const WP_BASIS = ["percent", "distance", "milestone", "unit"] as const;
-      const WP_STATUS = ["passed", "passed", "delivered", "pending"] as const; // accepted,accepted,requested,pending
+      // 16 work periods: 4/4/3/5 per contract (subcon-accept.jsx). C3 state map applied.
       const wpRows: (typeof schema.workPeriods.$inferInsert)[] = [];
-      for (let c = 0; c < 4; c++) {
-        for (let s = 0; s < 4; s++) {
+      SUBC_CONTRACTS.forEach((c, ci) => {
+        c.periods.forEach((p, si) => {
           wpRows.push({
-            id: det(`wp:${c}:${s}`), contractId: det(`subc:${c}`), seq: s + 1,
-            basis: at(WP_BASIS, c), target: m(100), pct: m(25 * (s + 1)),
-            amount: m(500_000), status: at(WP_STATUS, s),
+            id: det(`wp:${ci}:${si}`), contractId: det(`subc:${ci}`), seq: si + 1,
+            basis: c.basis, target: m(p.target), pct: m(p.pct), amount: m(p.amount), status: p.status,
           });
-        }
-      }
+        });
+      });
       await tx.insert(schema.workPeriods).values(wpRows);
+      // NOTE: acceptance/defect stay 0 records (§สรุป line 318/341 + P0-QA-06). The
+      // WO-2026-0055 งวด 3 rejection is captured by status='rejected' above and by the
+      // 3 DMS `defect`-category documents (the real "defect reports").
 
       // === PM =============================================================
       await tx.insert(schema.pmContracts).values(
-        Array.from({ length: 5 }, (_, i) => ({
+        PM_CONTRACTS.map((c, i) => ({
           id: det(`pmc:${i}`), projectId: det(`project:${at(PROJECTS, i).key}`),
           customerId: det(`customer:${at(CUSTOMER_SEED, i).code}`),
-          mode: (i % 2 === 0 ? "MA" : "per_visit") as "MA" | "per_visit",
-          visitsPerYear: 4, sla: "24 ชม.", value: m(300_000 + i * 50_000), end: "2027-01-31",
+          mode: c.mode, visitsPerYear: 4, sla: "24 ชม.", value: m(c.value), end: "2027-01-31",
         })),
       );
 
-      const CK_KINDS = ["lift", "inverter", "crane", "hvac", "generator"];
       await tx.insert(schema.checklistTemplates).values(
-        Array.from({ length: 5 }, (_, i) => ({
-          id: det(`cktpl:${i}`), companyId: CO1, kind: at(CK_KINDS, i), items: [],
+        CHECKLIST_TEMPLATES.map((c, i) => ({
+          id: det(`cktpl:${i}`), companyId: CO1, kind: c.kind,
+          items: c.items.map((label) => ({ label })),
         })),
       );
 
@@ -543,36 +943,34 @@ async function seed(): Promise<void> {
 
       // === Finance ========================================================
       await tx.insert(schema.apBillings).values(
-        Array.from({ length: 5 }, (_, i) => ({
+        AP_BILL.map((a, i) => ({
           id: det(`ap:${i}`), companyId: CO1, vendorId: at(SUPPLIER_VENDORS, i),
-          poId: det(`po:${i}`), grId: det(`gr:${i}`), invoiceNo: `INV-V-${1000 + i}`,
-          dueDate: "2026-08-30", amount: m(400_000 + i * 50_000), vat: m((400_000 + i * 50_000) * 0.07),
-          status: "pending",
+          poId: det(`po:${i}`), grId: det(`gr:${i}`), invoiceNo: a.inv,
+          dueDate: null, amount: m(a.amount), vat: m(a.vat), status: a.status,
         })),
       );
 
       await tx.insert(schema.pvs).values(
-        Array.from({ length: 4 }, (_, i) => ({
+        PV_LIST.map((pv, i) => ({
           id: det(`pv:${i}`), companyId: CO1, billingIds: [det(`ap:${i}`)],
-          whtPct: "3.00", net: m(388_000 + i * 48_500), status: "draft",
+          whtPct: "3.00", net: m(pv.net), status: "approved",
         })),
       );
 
       const ETAX = ["queued", "sent", "rejected", "void"] as const;
       await tx.insert(schema.arInvoices).values(
-        Array.from({ length: 6 }, (_, i) => ({
+        AR_INV.map((ar, i) => ({
           id: det(`ar:${i}`), companyId: CO1, customerId: det(`customer:${at(CUSTOMER_SEED, i).code}`),
-          projectId: det(`project:${at(PROJECTS, i).key}`), no: `AR-2569-${String(i + 1).padStart(4, "0")}`,
-          amount: m(1_000_000 + i * 200_000), vat: m((1_000_000 + i * 200_000) * 0.07), creditTerm: 30,
-          etaxStatus: at(ETAX, i),
+          projectId: det(`project:${at(PROJECTS, i).key}`), no: ar.no,
+          amount: m(ar.amount), vat: m(ar.vat), creditTerm: 30, etaxStatus: at(ETAX, i),
         })),
       );
 
       await tx.insert(schema.arCreditNotes).values(
-        Array.from({ length: 3 }, (_, i) => ({
-          id: det(`arcn:${i}`), companyId: CO1, no: `CN-2569-${String(i + 1).padStart(3, "0")}`,
+        ARCN_SEED.map((cn, i) => ({
+          id: det(`arcn:${i}`), companyId: CO1, no: cn.no,
           customerId: det(`customer:${at(CUSTOMER_SEED, i).code}`), refInvoiceId: det(`ar:${i}`),
-          reason: "ปรับลดยอด", amount: m(50_000 * (i + 1)), status: "issued", noteDate: "2026-07-01",
+          reason: cn.reason, amount: m(cn.amount), status: cn.status, noteDate: null,
         })),
       );
 
@@ -581,54 +979,52 @@ async function seed(): Promise<void> {
       );
 
       await tx.insert(schema.jvs).values(
-        Array.from({ length: 7 }, (_, i) => ({
-          id: det(`jv:${i}`), companyId: CO1, no: `JV-2569-${String(i + 1).padStart(4, "0")}`,
-          sourceDoc: `ap_billing:${det(`ap:${i % 5}`)}`, memo: `บันทึกบัญชีอัตโนมัติ ชุดที่ ${i + 1}`,
+        JV_BOOKS.map((jv, i) => ({
+          id: det(`jv:${i}`), companyId: CO1, no: jv.no,
+          sourceDoc: jv.source, memo: jv.memo,
         })),
       );
 
-      // C9: balanced jv_line — every book gets 1 DR + 1 CR with equal amount.
-      // DR = expense (5020 ต้นทุนวัสดุ), CR = payable (2010 เจ้าหนี้การค้า).
-      const CC0 = at(CC_SEED, 0).code;
+      // C9: balanced jv_line from the REAL JV amounts (ΣDR = ΣCR per book, 17 total).
       const jvLineRows: (typeof schema.jvLines.$inferInsert)[] = [];
-      for (let i = 0; i < 7; i++) {
-        const amt = m(100_000 + i * 25_000);
-        jvLineRows.push({
-          id: det(`jvl:${i}:dr`), jvId: det(`jv:${i}`), accountId: det("gl:5020"),
-          dr: amt, cr: m(0), ccId: det(`cc:${CC0}`), projectId: det("project:rjp"),
+      JV_BOOKS.forEach((jv, i) => {
+        jv.lines.forEach((ln, k) => {
+          jvLineRows.push({
+            id: det(`jvl:${i}:${k}`), jvId: det(`jv:${i}`), accountId: det(`gl:${ln.acct}`),
+            dr: m(ln.dr), cr: m(ln.cr), ccId: det(`cc:${at(CC_SEED, 1).code}`), projectId: det("project:rjp"),
+          });
         });
-        jvLineRows.push({
-          id: det(`jvl:${i}:cr`), jvId: det(`jv:${i}`), accountId: det("gl:2010"),
-          dr: m(0), cr: amt, ccId: det(`cc:${CC0}`), projectId: det("project:rjp"),
-        });
-      }
+      });
       await tx.insert(schema.jvLines).values(jvLineRows);
 
+      // bank: 8 statement rows, each carrying its real reconcile line (bank.jsx STMT).
       await tx.insert(schema.bankStatements).values(
-        Array.from({ length: 8 }, (_, i) => ({
-          id: det(`bank:${i}`), companyId: CO1, period: `2569-${String((i % 12) + 1).padStart(2, "0")}`,
-          lines: [], locked: i < 2,
+        BANK_STMT.map((s, i) => ({
+          id: det(`bank:${i}`), companyId: CO1, period: "2569-05",
+          lines: [{ date: s.date, desc: s.desc, amount: s.v, matched: s.matched }],
+          locked: false,
         })),
       );
 
       await tx.insert(schema.fixedAssets).values(
-        Array.from({ length: 8 }, (_, i) => ({
-          id: det(`fa:${i}`), companyId: CO1, name: `สินทรัพย์ถาวร ${i + 1}`, cost: m(200_000 + i * 80_000),
-          lifeYears: 5 + (i % 3) * 5, ccId: det(`cc:${at(CC_SEED, i).code}`), deprMethod: "straight-line",
+        FA_ASSETS.map((a, i) => ({
+          id: det(`fa:${i}`), companyId: CO1, name: a.name, cost: m(a.cost),
+          lifeYears: a.lifeY, ccId: det(`cc:${at(CC_SEED, i).code}`), deprMethod: a.method,
         })),
       );
 
       await tx.insert(schema.workers).values(
-        Array.from({ length: 8 }, (_, i) => ({
-          id: det(`worker:${i}`), companyId: CO1, name: `คนงาน ${i + 1}`, dayRate: m(450 + i * 30),
+        WORKERS_SEED.map((w, i) => ({
+          id: det(`worker:${i}`), companyId: CO1, name: w.name, dayRate: m(w.wage),
         })),
       );
 
-      const OPEX_DEPTS = ["ก่อสร้าง", "จัดซื้อ", "ขาย-การตลาด", "บัญชี-การเงิน", "บริหาร", "IT"];
+      const OPEX_DEPTS = ["ฝ่ายขาย & การตลาด", "ฝ่ายบริหาร", "ฝ่ายวิศวกรรม & ไซต์ (ส่วนกลาง)", "ฝ่ายบัญชี & การเงิน", "ฝ่ายบุคคล (HR)", "ฝ่าย IT & ระบบ"];
+      const OPEX_BUDGET = [18000000, 12000000, 9600000, 6000000, 5400000, 4800000];
       await tx.insert(schema.opexBudgets).values(
         OPEX_DEPTS.map((dept, i) => ({
           id: det(`opex:${i}`), companyId: CO1, dept, year: 2569,
-          months: Array.from({ length: 12 }, (_, mo) => 100_000 + mo * 5_000 + i * 10_000),
+          months: Array.from({ length: 12 }, () => Math.round(at(OPEX_BUDGET, i) / 12)),
         })),
       );
 
@@ -637,7 +1033,7 @@ async function seed(): Promise<void> {
           id: det(`ret:${i}`), companyId: CO1, woId: det(`wo:${i}`),
           vendorId: at(SUBCON_VENDORS, i), contractId: det(`subc:${i}`),
           scope: `งานงวดที่ ${i + 1}`, rate: "5.00", withheld: m(40_000 * (i + 1)), returned: m(0),
-          dueDate: "2027-01-31", status: "held",
+          dueDate: null, status: "held",
         })),
       );
 
@@ -658,40 +1054,37 @@ async function seed(): Promise<void> {
       );
 
       await tx.insert(schema.pettyCashTxns).values(
-        Array.from({ length: 6 }, (_, i) => ({
-          id: det(`petty:${i}`), companyId: CO1, no: `PT-2569-${String(i + 1).padStart(4, "0")}`,
-          type: at(["claim", "clear", "topup"] as const, i), label: `รายการเงินสดย่อย ${i + 1}`,
-          value: m(2_000 + i * 500), byUserId: det(`user:${i % 12}`), txnDate: "2026-07-05",
-          status: "approved", cat: "ค่าเดินทาง", ref: `REF-${i + 1}`, ccId: det(`cc:${at(CC_SEED, i).code}`),
+        PETTY_TX.map((p, i) => ({
+          id: det(`petty:${i}`), companyId: CO1, no: p.no, type: p.type, label: p.l,
+          value: m(p.v), byUserId: det(`user:${i % 12}`), txnDate: null,
+          status: p.status, cat: p.cat, ref: p.ref, ccId: det(`cc:${at(CC_SEED, i).code}`),
         })),
       );
 
       // === Land / Sales / Solar / Inventory / DMS / etc. ==================
-      const LAND_STAGES = ["สำรวจ", "เจรจา", "ตรวจสอบ", "ทำสัญญา", "โอน", "จดจำนอง", "พัฒนา"];
       await tx.insert(schema.landPlots).values(
-        Array.from({ length: 8 }, (_, i) => ({
-          id: det(`land:${i}`), companyId: CO1, projectId: i < 4 ? det("project:rjp") : null,
-          deedNo: `นส.3ก-${1000 + i}`, areaSqm: m(1600 + i * 400), gps: `13.${700 + i},100.${500 + i}`,
-          pricePerRai: m(2_000_000 + i * 100_000), stage: at(LAND_STAGES, i), tenure: "โฉนด", ddChecklist: {},
+        LAND_PLOTS.map((p, i) => ({
+          id: det(`land:${i}`), companyId: CO1, projectId: p.proj ? det(`project:${p.proj}`) : null,
+          deedNo: p.deed, areaSqm: m(p.rai * 1600 + p.ngan * 400 + p.wa * 4), gps: p.gps,
+          pricePerRai: m(p.pricePerRai), stage: p.stage, tenure: p.tenure, ddChecklist: {},
         })),
       );
 
-      const LEAD_STAGES = ["lead", "visit", "quote", "booking", "contract"] as const;
       await tx.insert(schema.leads).values(
-        Array.from({ length: 10 }, (_, i) => ({
-          id: det(`lead:${i}`), companyId: CO1, name: `ผู้สนใจ ${i + 1}`, phone: `08${i}-000-0000`,
-          source: "Facebook", interest: "ทาวน์โฮม", stage: at(LEAD_STAGES, i), hot: i % 3 === 0,
-          lastContactAt: "2026-07-01", note: "สนใจโครงการ", ownerUserId: det(`user:${i % 12}`), days: i + 1,
+        LEADS.map((l, i) => ({
+          id: det(`lead:${i}`), companyId: CO1, name: l.name, phone: l.phone,
+          source: l.source, interest: l.interest, stage: l.stage, hot: l.hot,
+          lastContactAt: null, note: l.note, ownerUserId: det(`user:${i % 12}`), days: l.days,
         })),
       );
 
       await tx.insert(schema.serviceTickets).values(
-        Array.from({ length: 7 }, (_, i) => ({
-          id: det(`svc:${i}`), companyId: CO1, no: `ST-2569-${String(i + 1).padStart(4, "0")}`,
+        SERVICE_TICKETS.map((t, i) => ({
+          id: det(`svc:${i}`), companyId: CO1, no: t.no,
           unitId: det("block:B"), customerId: det(`customer:${at(CUSTOMER_SEED, i).code}`),
-          channel: "LINE", category: "ซ่อมทั่วไป", title: `แจ้งซ่อม ${i + 1}`, priority: i % 2 === 0 ? "สูง" : "ปกติ",
-          status: "open", assigneeUserId: det(`user:${i % 12}`), openedDate: "2026-07-03", scheduledDate: "2026-07-10",
-          warranty: i % 2 === 0,
+          channel: t.channel, category: t.category, title: t.title, priority: t.prio,
+          status: t.status, assigneeUserId: det(`user:${i % 12}`), openedDate: null, scheduledDate: null,
+          warranty: true,
         })),
       );
 
@@ -728,7 +1121,7 @@ async function seed(): Promise<void> {
       await tx.insert(schema.solarPermitSteps).values(
         PERMIT_STEPS.map((name, i) => ({
           id: det(`permit:${i}`), companyId: CO1, projectId: det("project:slr"), name,
-          org: "กกพ.", status: i < 3 ? "done" : "pending", stepDate: "2026-06-01",
+          org: "กกพ.", status: i < 3 ? "done" : "pending", stepDate: null,
         })),
       );
 
@@ -738,73 +1131,65 @@ async function seed(): Promise<void> {
         Array.from({ length: 4 }, (_, i) => ({
           id: det(`warr:${i}`), companyId: CO1, projectId: det("project:slr"),
           item: at(WARR_ITEMS, i), brand: at(WARR_BRANDS, i),
-          qty: 100 + i * 10, perf: m(90 + i), prodDate: "2025-01-01", expiryDate: "2050-01-01", status: "active",
+          qty: 100 + i * 10, perf: m(90 + i), prodDate: null, expiryDate: null, status: "active",
         })),
       );
 
       await tx.insert(schema.warehouses).values(
-        Array.from({ length: 5 }, (_, i) => ({
-          id: det(`wh:${i}`), companyId: CO1, name: `คลัง ${i + 1}`, location: `สาขา ${i + 1}`,
-        })),
+        WAREHOUSES.map((w, i) => ({ id: det(`wh:${i}`), companyId: CO1, name: w.name, location: w.loc })),
       );
 
       await tx.insert(schema.inventoryItems).values(
-        Array.from({ length: 8 }, (_, i) => ({
+        INV_ITEMS.map((it, i) => ({
           id: det(`item:${i}`), companyId: CO1, warehouseId: det(`wh:${i % 5}`),
-          code: `MAT-${String(i + 1).padStart(3, "0")}`, cat: "วัสดุก่อสร้าง", name: `วัสดุ ${i + 1}`, unit: "หน่วย",
-          price: m(100 + i * 20), stock: m(500 - i * 10), lowPoint: m(50), status: "ok",
+          code: it.code, cat: it.cat, name: it.name, unit: it.unit,
+          price: m(it.price), stock: m(it.stock), lowPoint: m(it.low), status: it.status,
         })),
       );
 
       await tx.insert(schema.stockTransfers).values(
-        Array.from({ length: 4 }, (_, i) => ({
-          id: det(`tr:${i}`), companyId: CO1, no: `TR-2569-${String(i + 1).padStart(4, "0")}`,
-          fromWarehouseId: det(`wh:${i % 5}`), toWarehouseId: det(`wh:${(i + 1) % 5}`), qty: m(20 + i * 5),
-          value: m(5_000 + i * 1_000), transferDate: "2026-07-02", byUserId: det(`user:${i % 12}`), status: "done",
+        INV_TRANSFERS.map((t, i) => ({
+          id: det(`tr:${i}`), companyId: CO1, no: t.no,
+          fromWarehouseId: det(`wh:${t.from}`), toWarehouseId: det(`wh:${t.to}`), qty: m(0),
+          value: m(t.value), transferDate: null, byUserId: det(`user:${i % 12}`), status: t.status,
         })),
       );
 
       await tx.insert(schema.materialIssues).values(
-        Array.from({ length: 4 }, (_, i) => ({
-          id: det(`iss:${i}`), companyId: CO1, no: `IS-2569-${String(i + 1).padStart(4, "0")}`,
-          projectId: det(`project:${at(PROJECTS, i).key}`), fromWarehouseId: det(`wh:${i % 5}`),
-          value: m(8_000 + i * 2_000), issueDate: "2026-07-04", byUserId: det(`user:${i % 12}`), status: "done",
+        INV_ISSUES.map((s, i) => ({
+          id: det(`iss:${i}`), companyId: CO1, no: s.no,
+          projectId: det(`project:${at(PROJECTS, i).key}`), fromWarehouseId: det(`wh:${s.wh}`),
+          value: m(s.value), issueDate: null, byUserId: det(`user:${i % 12}`), status: s.status,
         })),
       );
 
       await tx.insert(schema.documents).values(
-        Array.from({ length: 13 }, (_, i) => ({
+        DMS_SEED.map((d, i) => ({
           id: det(`doc:${i}`), companyId: CO1, projectId: det(`project:${at(PROJECTS, i).key}`),
-          cat: "สัญญา", version: 1, expiry: "2027-01-01", linkModule: `boq:${det(`boqdoc:${i % 6}`)}`,
+          cat: d.cat, version: 1, expiry: null, linkModule: `dms:${det(`doc:${i}`)}`,
           url: `r2://documents/doc-${i + 1}.pdf`,
         })),
       );
 
-      const AUDIT_ACTIONS = ["create", "update", "approve", "void"] as const;
       await tx.insert(schema.auditLogs).values(
-        Array.from({ length: 13 }, (_, i) => ({
+        AUDIT_ENTRIES.map((a, i) => ({
           id: det(`audit:${i}`), companyId: CO1, userId: det(`user:${i % 12}`),
-          action: at(AUDIT_ACTIONS, i), entity: `pr:${det(`pr:${i % 10}`)}`,
-          before: null, after: { note: `การกระทำ ${i + 1}` }, ip: `10.0.0.${i + 1}`,
+          action: a.act, entity: a.obj, before: null, after: { detail: a.detail }, ip: null,
         })),
       );
 
-      // timeline: 13 tasks across 5 group labels.
-      const TL_GROUPS = ["งานเตรียมพื้นที่", "งานโครงสร้าง", "งานสถาปัตย์", "งานระบบ", "งานส่งมอบ"];
       await tx.insert(schema.timelineTasks).values(
-        Array.from({ length: 13 }, (_, i) => ({
-          id: det(`tl:${i}`), companyId: CO1, projectId: det("project:rjp"), groupLabel: at(TL_GROUPS, i),
-          label: `งาน ${i + 1}`, planStart: "2026-01-01", planEnd: "2026-03-01",
-          actualStart: "2026-01-05", actualEnd: i < 8 ? "2026-03-10" : null,
-          status: i < 8 ? "done" : "in-progress", pct: m(i < 8 ? 100 : 40), late: i % 4 === 0,
+        TL_TASKS.map((t, i) => ({
+          id: det(`tl:${i}`), companyId: CO1, projectId: det("project:rjp"), groupLabel: at(TL_GROUPS, t.g),
+          label: t.label, planStart: null, planEnd: null, actualStart: null, actualEnd: null,
+          status: t.status, pct: m(t.pct), late: false,
         })),
       );
 
-      const MS_LABELS = ["เริ่มโครงการ", "โครงสร้างเสร็จ", "สถาปัตย์เสร็จ", "ระบบเสร็จ", "ส่งมอบ"];
       await tx.insert(schema.milestones).values(
-        Array.from({ length: 5 }, (_, i) => ({
+        MILESTONES.map((ms, i) => ({
           id: det(`ms:${i}`), companyId: CO1, projectId: det("project:rjp"),
-          label: at(MS_LABELS, i), day: (i + 1) * 60, milestoneDate: "2026-06-01", status: i < 2 ? "done" : "pending",
+          label: ms.l, day: ms.day, milestoneDate: null, status: ms.status,
         })),
       );
 
@@ -817,16 +1202,13 @@ async function seed(): Promise<void> {
         })),
       );
 
-      // sales_unit: 84 (B-009 answered ก). sales-process.jsx generator status map:
-      // 0-47 soldBuilt · 48-56 sold · 57-61 booked · 62-67 built · 68-83 empty.
-      const unitStage = (i: number): string =>
-        i < 48 ? "soldBuilt" : i < 57 ? "sold" : i < 62 ? "booked" : i < 68 ? "built" : "empty";
+      // sales_unit: 84 (B-009 answered ก). Each points to its own project_node unit.
       await tx.insert(schema.salesUnits).values(
         Array.from({ length: 84 }, (_, i) => {
           const stage = unitStage(i);
           const sold = stage !== "empty" && stage !== "built";
           return {
-            id: det(`sunit:${i}`), companyId: CO1, unitId: det("block:B"),
+            id: det(`sunit:${i}`), companyId: CO1, unitId: det(`unitnode:${i}`),
             customerId: sold ? det(`customer:${at(CUSTOMER_SEED, i).code}`) : null,
             stage, booking: sold ? m(50_000) : null, contract: sold ? m(4_850_000) : null,
             loan: sold ? m(4_000_000) : null, down: [], transferAt: stage === "soldBuilt" ? "2026-06-15" : null,
