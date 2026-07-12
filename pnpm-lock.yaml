@@ -17,6 +17,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@juneflow/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       better-auth:
         specifier: ^1.2.8
         version: 1.6.23(drizzle-orm@0.38.4(@types/pg@8.20.0)(@types/react@18.3.31)(kysely@0.29.3)(pg@8.22.0)(react@18.3.1))(pg@8.22.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(vitest@3.2.7(@types/node@22.20.1))
@@ -51,6 +54,9 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.1)
 
   apps/web:
     dependencies:
