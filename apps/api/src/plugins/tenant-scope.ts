@@ -82,7 +82,8 @@ export async function registerTenantScope(
       const companyId = await options.resolveCompanyId(request);
       if (!companyId) {
         await reply.code(401).send({
-          error: { code: "UNAUTHENTICATED", message: "Missing tenant context" },
+          code: "UNAUTHENTICATED",
+          message: "Missing tenant context",
         });
         return reply; // stop the chain; no handler runs without a tenant.
       }
