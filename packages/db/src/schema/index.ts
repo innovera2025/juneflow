@@ -41,8 +41,11 @@
 //                          (P0-BE-11, PLAN.md Appendix A - no hosted auth)
 //
 // =============================================================================
-// TODO(P0-BE-07) - groups: Project/Master + BOQ/Procurement + Subcon/Acceptance
-//                  + PM (CMMS) (decisions C2, C3 land here per TASKS.md)
+// DONE(P0-BE-07) - groups: Project/Master + BOQ/Procurement + Subcon/Acceptance
+//                  + PM (CMMS) (decisions C2, C3 applied) -> implemented in
+//                  ./project.ts, ./boq.ts, ./subcon.ts, ./pm.ts; re-exported
+//                  below. (checkboxes below kept as the extracted dictionary
+//                  spec that was implemented.)
 // =============================================================================
 // -- data-dictionary "โครงการ / Master" --
 // [ ] project            - name, type: realestate | solar | civil | service,
@@ -97,43 +100,52 @@
 //                          (result: normal | adjust | repair), cause, fix,
 //                          advice, customer_sign (close -> certificate -> LINE)
 // [ ] checklist_template - kind, items[] (central config, picked at WO creation)
+// [ ] pm_quote           - wo_id, parts[], decision (spare-parts quote off a WO
+//                          -> customer LINE approval; erd.html entity, dictionary
+//                          rel line; added in P0-BE-07 rework, see backend journal)
 //
 // =============================================================================
-// TODO(P0-BE-08) - groups: Finance-Accounting / Subscription + "อื่นๆ"
-//                  (decisions C4, C5, C9 land here per TASKS.md)
+// DONE(P0-BE-08) - groups: Finance-Accounting + "อื่นๆ" (decisions C4, C9
+//                  applied) -> implemented in ./finance.ts, ./misc.ts;
+//                  re-exported below. Subscription entities (package /
+//                  subscription / platform_invoice / ai_usage; decision C5) were
+//                  already landed by P0-BE-06 in ./platform.ts.
 // =============================================================================
 // -- data-dictionary "การเงิน-บัญชี" --
-// [ ] ap_billing         - 3-way match (po, gr, inv)
-// [ ] pv                 - wht_pct, net (WHT withheld -> issue 50 tawi),
+// [x] gl_account         - COA tree: standard chart + mapping per doc type
+// [x] accounting_period  - period(lock) for JV / bank statement close
+// [x] ap_billing         - 3-way match (po, gr, inv)
+// [x] pv                 - wht_pct, net (WHT withheld -> issue 50 tawi),
 //                          batch_id (Export to Bank)
-// [ ] ar_invoice         - credit_term, vat, etax_status - C4: superset
+// [x] ar_invoice         - credit_term, vat, etax_status - C4: superset
 //                          queued -> sent | rejected + void (UI per pototype)
-// [ ] rv                 - receipt voucher against AR invoice
-// [ ] jv                 - lines[{account_id, dr, cr, cc_id, project_id}] -
-//                          C9 shape per dictionary; every money doc ->
-//                          GLPosting -> JV (double entry); trial balance /
-//                          statements / project P&L / cashflow derive from JV
-// [ ] gl_account         - COA tree: standard chart + mapping per doc type
-// [ ] cheque             - bank side documents
-// [ ] bank_statement     - import statement -> auto/manual match
-// [ ] reconcile          - close period locks back-posting
-// [ ] fixed_asset        - cost, life_years, cc_id, depr_method (monthly
+// [x] rv                 - receipt voucher against AR invoice
+// [x] jv + jv_line       - lines[{account_id, dr, cr, cc_id, project_id}] -
+//                          C9: real JVLine rows (not JSON) so DR=CR is countable;
+//                          every money doc -> GLPosting (JV.source_doc) -> JV
+//                          (double entry); trial balance / statements / project
+//                          P&L / cashflow derive from JV
+// [x] cheque             - bank side documents
+// [x] bank_statement     - import statement -> auto/manual match
+// [x] reconcile          - close period locks back-posting
+// [x] fixed_asset        - cost, life_years, cc_id, depr_method (monthly
 //                          depreciation -> auto JV)
-// [ ] worker             - labor master (labor cost -> project cost)
-// [ ] attendance         - labor time records
-// [ ] payroll            - labor payout
-// [ ] opex_budget        - dept, year, months[] (OPEX multi-year compare)
+// [x] worker             - labor master (labor cost -> project cost)
+// [x] attendance         - labor time records
+// [x] payroll            - labor payout
+// [x] opex_budget        - dept, year, months[] (OPEX multi-year compare)
 // -- data-dictionary "อื่นๆ" --
-// [ ] land_plot          - deed_no, area (STORE m2 per PLAN.md section 4;
+// [x] land_plot          - deed_no, area (STORE m2 per PLAN.md section 4;
 //                          rai-ngan-wa at display), gps, price_per_rai, stage
 //                          (7-step pipeline), tenure, DD checklist json
-// [ ] sales_unit         - unit_id, customer_id, stage, booking, contract,
-//                          down[], loan, transfer (ties AR + house acceptance
-//                          Defect)
-// [ ] document           - (DMS) cat, project_id, version, expiry, link_module
+// [x] sales_unit         - unit_id, customer_id, stage, booking, contract,
+//                          down[], loan, transfer (contract = contract-signing
+//                          milestone payment, money per C/B-013; ties AR + house
+//                          acceptance Defect)
+// [x] document           - (DMS) cat, project_id, version, expiry, link_module
 //                          (every module auto-attaches; 60-day expiry warning)
-// [ ] notification       - user_id, type, ref, read (center + Mobile + LINE)
-// [ ] audit_log          - user, action, entity, before/after, ip, at
+// [x] notification       - user_id, type, ref, read (center + Mobile + LINE)
+// [x] audit_log          - user, action, entity, before/after, ip, at
 //                          (every create/update/approve/void - written by
 //                          middleware, see apps/api/src/plugins/audit-log.ts)
 //
@@ -163,3 +175,9 @@
 // drizzle.config.ts and @juneflow/api see one schema root.
 
 export * from "./platform.js";
+export * from "./project.js";
+export * from "./boq.js";
+export * from "./subcon.js";
+export * from "./pm.js";
+export * from "./finance.js";
+export * from "./misc.js";

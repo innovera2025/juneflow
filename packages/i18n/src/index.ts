@@ -21,7 +21,7 @@
  *   "แสดง X จาก Y รายการ") live in the prototype i18n code, not in i18n-full.json - port them
  *   with the web i18n wiring.
  */
-import i18nFull from "./i18n-full.json";
+import i18nFull from "./i18n-full.json" with { type: "json" };
 
 /** Supported language codes (LANGS in prototype i18n.jsx). "ar" is RTL. */
 export type LangCode = "th" | "zh" | "en" | "ar";
