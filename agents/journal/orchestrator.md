@@ -1,5 +1,11 @@
 # Journal — Orchestrator (Fable 5 main session — ไม่ใช่เขต zone)
 
+## 2026-07-12 · 🎉 COMPOSE MILESTONE ACHIEVED · ~21:15
+
+- ทำอะไร: ปิด Phase 0 compose milestone หลัง Wei ตัดสิน root-file ownership → สร้างเขต **platform (ที่ 7, B-032)** ครอบ root build/CI + tokens/i18n · chain: platform (P0-FIX-01 root test scripts + P0-PLAT-01 .dockerignore/docker-buildable + P0-PLAT-02) → P0-FIX-07 (web Dockerfile node:20→22) → P0-FIX-08 (B-033: packages/db build→dist + conditional exports + api Dockerfile build db) · **verified end-to-end เอง:** `docker compose up --build` → api/pg/redis healthy + web/worker up + migrate-seed Exited(0) "migrations applied + seed OK" + seed ใน DB (company=9/sales_unit=84/jv_line=17) + `curl /health` = HTTP 200 {ok:true}
+- ตัดสินใจอะไร: verify milestone เองแทนปล่อย loop (เร็ว+ประหยัด+เห็นกับตา — DEV-01 loop exit เพราะ task ยัง blocked ในกระดาน) · gate ของ DEV-01 = การรัน compose จริง (infra ต้องพิสูจน์ได้ ไม่ fabricate) · merge feature/devops (infra config, non-sacred) พร้อมหลักฐาน live
+- เจออะไร: 4 build blocker ของ compose ถูกปิดทีละชั้น (3 root-side โดย platform · web node20 · db raw-.ts) — ปมรากคือ zone ownership ที่ Wei ตัดสิน · **สถานะ:** 43/42+ done · B-030/B-033 ปิด · เหลือ QA-03/DEV-05 (optional, ปลดจาก DEV-01) · P0-FIX-03/04/05 follow-up · Phase 1: WEB-05(B-020)/MOB-04(B-015) · งบรวม ~$1,150 · main = Phase 0 squash (นาย promote แล้ว) · compose ทิ้งไว้ให้ Wei คลิก (`docker compose down` เมื่อเลิก)
+
 > บันทึกปฏิบัติการของ orchestrator นอกเหนือจากรอบ loop ปกติ · entry ใหม่อยู่บนสุด
 > ไฟล์นี้สร้างภายใต้ B-006 เพื่อไม่ให้ log ของ orchestrator ชน journal ประจำเขตตอน merge
 
