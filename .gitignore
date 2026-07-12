@@ -32,3 +32,10 @@ juneflow-extract/
 
 # Agent worktrees (one zone = one worktree - PLAN.md §8)
 .worktrees/
+
+# Investor decks + deck assets + stray dup (B-006 exclusions — never track; found in dev via P0-MOB-01 merge contamination 12 ก.ค.)
+*.pptx
+*.pdf
+/clear_layout_assets/
+/deck_assets_glam/
+BLOCKERS 2.md
