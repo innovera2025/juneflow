@@ -1,0 +1,1 @@
+ALTER TYPE "public"."subscription_status" ADD VALUE 'trial' BEFORE 'active';

@@ -85,6 +85,9 @@ export const subscriptionCycle = pgEnum("subscription_cycle", [
   "yearly",
 ]);
 export const subscriptionStatus = pgEnum("subscription_status", [
+  // `trial` = the 14-day free-trial state (subscription-admin.jsx T-1005 "ทดลอง").
+  // Added in migration 0006 per B-021(ก); it precedes the paid lifecycle.
+  "trial",
   "active",
   "expiring",
   "overdue",
@@ -168,7 +171,8 @@ export const companies = pgTable("company", {
 /**
  * Subscription — a company's active package with billing cycle + renewal.
  * data-dictionary: company_id, package_id, cycle, renew_at, status
- * (active | expiring | overdue | cancelled). cycle: monthly | yearly (price_m /
+ * (trial | active | expiring | overdue | cancelled — `trial` added by B-021(ก)).
+ * cycle: monthly | yearly (price_m /
  * price_y on Package).
  */
 export const subscriptions = pgTable("subscription", {

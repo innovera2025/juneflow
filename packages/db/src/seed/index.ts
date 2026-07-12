@@ -25,17 +25,31 @@
 //   - B-009   84 sales_unit rows persisted, each pointing to its own project_node
 //             kind='unit' (codes B-01..B-84, sales-process.jsx generator).
 //
-// OPEN CONFLICTS — real mock value collides with a MERGED (sacred) migration enum
-// or with the authoritative §สรุป. Per PLAN.md §0 rule 4 we keep the safe existing
-// mapping + a blocker reference and do NOT decide finally here:
-//   - B-021   subscription mock status `trial` ∉ subscription_status enum → mapped
-//             to `expiring` (existing) pending Wei.
-//   - B-022   SUBSCRIBERS has 9 tenant org-names but COMPANIES has 3 — subscriptions
-//             cycle over the 3 real companies (existing) pending Wei.
-//   - B-023   subcon.jsx SUBCONS (6) / SUBC_CONTRACTS vendors differ from VENDOR_SEED —
-//             subcon FKs cycle the 2 subcon vendors of VENDOR_SEED (existing) pending Wei.
+// ANSWERED BLOCKERS applied this round (Wei ตอบ 12 ก.ค. — TASKS.md P0-BE-10 rework-3):
+//   - B-021(ก) subscription mock status `trial` → real enum value `trial` added in
+//             migration 0006; T-1005 seeded status=`trial` (no longer mapped to expiring).
+//   - B-022(ก) the 9 SUBSCRIBERS become 9 real company rows (name = org); each
+//             subscription points to its OWN company. This REPLACES the previous 3
+//             affiliated-group companies (company-accept.jsx COMPANIES) — company row
+//             count 3→9. Cross-zone delta flagged to QA (P0-QA-06) via REVIEW-QUEUE.
+//   - B-023(ก) subcon.jsx SUBCONS (6) + the unique subcon-accept counterparty
+//             (หจก.ช่างก่อฉาบมั่นคง, WO-2026-0055) are seeded as real subcon vendors
+//             (kind=subcon), ADDED to the 2 master-party subcons → 9 subcon vendors.
+//             Each subcon_contract.vendor_id points to its real firm (name match).
+//             subcon-vendor delta 2→9 flagged to QA (P0-QA-06) via REVIEW-QUEUE.
+//
+// INTERIM (kept this round per P0-BE-10 rework-3 directive item 5 — safe mapping +
+// blocker reference; PLAN.md §0 rule 4):
 //   - B-025   pr-list.jsx PR-2026-0411 type `clear` ∉ pr_type enum → mapped to
-//             `advance` (clearing an advance) pending Wei.
+//             `advance` (clearing an advance). NOTE: B-025 was answered mid-round
+//             (ก: keep INV-SUB-* 3 as T-1001's real platform_invoice, drop PINV-0610);
+//             that platform_invoice rework is DEFERRED to a follow-up round.
+//   - B-026   subcon register: this round still flags every subcontractor-type vendor
+//             as kind=subcon (9). B-026 was answered mid-round (ก: register = only the
+//             6 subcon.jsx SUBCONS; the 2 master-party "รับเหมา" must NOT be subcon —
+//             no C6 conflict, C6 only picks the vendor-master list). Applying it
+//             (reclassify V-0031/V-0045 → supplier, rewire `wos`, place SC-07) is
+//             DEFERRED to a follow-up round — see agents/journal/backend.md.
 //
 // Report-derived §สรุป datasets that have NO backing table are intentionally
 // SKIPPED (documented in REPORT_DERIVED below). Acceptance/Defect stay 0 records
@@ -93,11 +107,21 @@ const REPORT_DERIVED = [
 // static mock data (transcribed from pototype/*.jsx, cited by file:line)
 // ---------------------------------------------------------------------------
 
-// company-accept.jsx:6 COMPANIES (Appendix B item 14 — multi-company group)
-const COMPANIES = [
-  { key: "JF", name: "บจก. จูนโฟลว์ ดีเวลลอปเมนท์", short: "JF", taxId: "0-1055-61012-34-5", color: "#0B2A4A", docPrefix: "JF", biz: "พัฒนาอสังหาริมทรัพย์" },
-  { key: "JE", name: "บจก. จูนโฟลว์ เอ็นเนอร์ยี", short: "JE", taxId: "0-1055-64067-89-0", color: "#B45309", docPrefix: "JE", biz: "โรงไฟฟ้าพลังงานแสงอาทิตย์" },
-  { key: "JC", name: "บจก. จูนโฟลว์ คอนสตรัคชั่น", short: "JC", taxId: "0-1055-58033-22-1", color: "#0F766E", docPrefix: "JC", biz: "รับเหมาก่อสร้าง & บริการ" },
+// subscription-admin.jsx:5 SUBSCRIBERS (9). B-022(ก): every tenant org is a real
+// company row (name = org), each subscription pointing to its OWN company. The main
+// tenant (T-1001 — its 12 COMPANY_USERS + every company-scoped record below hang
+// here) anchors CO1. pkg→package key: pro=M, enterprise=Full, starter=S. The mock
+// carries no tax_id / short / color / doc_prefix / biz for subscribers → null.
+const SUBSCRIBERS = [
+  { key: "T-1001", org: "บจก. รุ่งเรืองก่อสร้าง", pkg: "M" as const },
+  { key: "T-1002", org: "บมจ. สยามพร็อพเพอร์ตี้", pkg: "Full" as const },
+  { key: "T-1003", org: "หจก. ช่างไทยวิศวกรรม", pkg: "S" as const },
+  { key: "T-1004", org: "บจก. กรีนโซลาร์ เอนเนอร์ยี", pkg: "M" as const },
+  { key: "T-1005", org: "บจก. เมโทรดีเวลอปเมนท์", pkg: "M" as const },
+  { key: "T-1006", org: "หจก. บ้านสวยการช่าง", pkg: "S" as const },
+  { key: "T-1007", org: "บจก. นนทบุรีโยธาการ", pkg: "M" as const },
+  { key: "T-1008", org: "บจก. ภูเก็ตวิลล่า กรุ๊ป", pkg: "Full" as const },
+  { key: "T-1009", org: "หจก. อีสานคอนสตรัคชั่น", pkg: "S" as const },
 ] as const;
 
 // pkg-builder / subscription.jsx — decision C1: 4 tiers S/M/L/Full
@@ -109,11 +133,11 @@ const PACKAGES = [
   { key: "Full", size: "Full" as const, name: "Enterprise", priceM: null, priceY: null, limits: { projects: -1, users: -1, storage_gb: 1000, ai_per_month: -1 }, menus: ["*"], subRules: { "master.ptype": "Full", "boq.aiqto": "M" } },
 ] as const;
 
-// subscription-admin.jsx:5 SUBSCRIBERS (9). B-022: 9 tenant org-names but only 3
-// COMPANIES → cycle companyId over the 3 real companies (existing) pending Wei.
+// subscription-admin.jsx:5 SUBSCRIBERS (9) — cycle/status transcribed verbatim,
+// index-aligned to SUBSCRIBERS above.
 const SUB_CYCLES = ["yearly", "yearly", "monthly", "monthly", "yearly", "monthly", "yearly", "yearly", "monthly"] as const;
-// B-021: mock status `trial` ∉ subscription_status enum → mapped to `expiring`.
-const SUB_STATUS = ["active", "active", "active", "active", "expiring", "overdue", "active", "active", "cancelled"] as const;
+// B-021(ก): T-1005 (index 4) status `trial` is now a real enum value (migration 0006).
+const SUB_STATUS = ["active", "active", "active", "active", "trial", "overdue", "active", "active", "cancelled"] as const;
 
 // subscription-admin.jsx:194 inv (5 platform invoices)
 const PLATFORM_INV = [
@@ -216,6 +240,20 @@ const VENDOR_SEED = [
   { code: "V-0052", name: "บมจ. แม็กซ์เทค เซอร์วิส", type: "บริการ", taxId: "0107536000999", term: 30 },
   { code: "V-0061", name: "บจก. หัวเว่ย เทคโนโลยี", type: "วัสดุ", taxId: "0105556778899", term: 0 },
 ];
+
+// subcon.jsx:3 SUBCONS (6 register) + subcon-accept.jsx unique counterparty
+// (SC-07 หจก.ช่างก่อฉาบมั่นคง, WO-2026-0055 — not in the register). B-023(ก): seeded
+// as real subcon vendors (kind=subcon), ADDED to the 2 master-party subcons. `type`
+// = ชนิดงาน kept for reference; the mock has no tax_id / credit_term → null.
+const SUBCON_FIRMS = [
+  { code: "SC-01", name: "บจก. รุ่งเรืองก่อสร้าง", type: "งานโครงสร้าง" },
+  { code: "SC-02", name: "หจก. ช่างไทยพัฒนา", type: "งานสถาปัตยกรรม" },
+  { code: "SC-03", name: "บจก. ไฟฟ้าอินเตอร์", type: "งานระบบไฟฟ้า" },
+  { code: "SC-04", name: "บจก. ประปาไทย เซอร์วิส", type: "งานประปา-สุขาภิบาล" },
+  { code: "SC-05", name: "หจก. งานสีบุญลือ", type: "งานสี + เก็บงาน" },
+  { code: "SC-06", name: "บจก. ภูมิทัศน์การ์เด้น", type: "Landscape" },
+  { code: "SC-07", name: "หจก. ช่างก่อฉาบมั่นคง", type: "งานก่ออิฐ-ฉาบปูน" },
+] as const;
 
 // master-party.jsx:18 CUSTOMER_SEED (6)
 const CUSTOMER_SEED = [
@@ -363,12 +401,15 @@ const GR_RECEIVED = [320, 240, 120, 92, 920];
 // subcon-accept.jsx:8 SUBC_CONTRACTS (4 contracts / 16 periods = 4/4/3/5).
 // C3 state map: accepted→passed, requested→delivered, rejected/pending kept.
 type WP = { pct: number; target: number; amount: number; status: "passed" | "delivered" | "pending" | "rejected" };
+// B-023(ก): `firm` is the real subcon vendor code each contract is signed with
+// (subcon-accept.jsx `subcon` name → SUBCON_FIRMS code). WO-2026-0055's counterparty
+// หจก.ช่างก่อฉาบมั่นคง is NOT in the subcon.jsx register, so it is SC-07 (added below).
 const SUBC_CONTRACTS: {
-  no: string; basis: "percent" | "distance" | "milestone" | "unit";
+  no: string; firm: string; basis: "percent" | "distance" | "milestone" | "unit";
   value: number; retentionPct: string; periods: WP[];
 }[] = [
   {
-    no: "WO-2026-0042", basis: "percent", value: 2150000, retentionPct: "10.000",
+    no: "WO-2026-0042", firm: "SC-01", basis: "percent", value: 2150000, retentionPct: "10.000",
     periods: [
       { pct: 20, target: 20, amount: 430000, status: "passed" },
       { pct: 30, target: 30, amount: 645000, status: "passed" },
@@ -377,7 +418,7 @@ const SUBC_CONTRACTS: {
     ],
   },
   {
-    no: "WO-2026-0051", basis: "distance", value: 1750000, retentionPct: "5.000",
+    no: "WO-2026-0051", firm: "SC-04", basis: "distance", value: 1750000, retentionPct: "5.000",
     periods: [
       { pct: 0, target: 100, amount: 100000, status: "passed" },
       { pct: 0, target: 100, amount: 100000, status: "passed" },
@@ -386,7 +427,7 @@ const SUBC_CONTRACTS: {
     ],
   },
   {
-    no: "WO-2026-0048", basis: "milestone", value: 1240000, retentionPct: "10.000",
+    no: "WO-2026-0048", firm: "SC-03", basis: "milestone", value: 1240000, retentionPct: "10.000",
     periods: [
       { pct: 0, target: 0, amount: 480000, status: "passed" },
       { pct: 0, target: 0, amount: 420000, status: "pending" },
@@ -394,7 +435,7 @@ const SUBC_CONTRACTS: {
     ],
   },
   {
-    no: "WO-2026-0055", basis: "unit", value: 1800000, retentionPct: "5.000",
+    no: "WO-2026-0055", firm: "SC-07", basis: "unit", value: 1800000, retentionPct: "5.000",
     periods: [
       { pct: 0, target: 2, amount: 360000, status: "passed" },
       { pct: 0, target: 2, amount: 360000, status: "passed" },
@@ -686,20 +727,21 @@ async function seed(): Promise<void> {
         })),
       );
 
+      // B-022(ก): 9 tenant companies (name = org); no group parent / extra juristic
+      // fields in the SUBSCRIBERS mock (was: 3 affiliated-group companies).
       await tx.insert(schema.companies).values(
-        COMPANIES.map((c) => ({
-          id: det(`company:${c.key}`), name: c.name, taxId: c.taxId,
-          // JE/JC are affiliated under JF (the group head) — Appendix B item 14.
-          groupParentId: c.key === "JF" ? null : det("company:JF"),
-          short: c.short, color: c.color, docPrefix: c.docPrefix, biz: c.biz,
+        SUBSCRIBERS.map((s) => ({
+          id: det(`company:${s.key}`), name: s.org,
         })),
       );
-      const CO1 = det("company:JF"); // company#1 — every company-scoped record hangs here.
+      const CO1 = det("company:T-1001"); // main tenant — every company-scoped record hangs here.
 
+      // Each subscription points to its OWN company (B-022(ก)); package per the real
+      // SUBSCRIBERS pkg tier (pro=M / enterprise=Full / starter=S).
       await tx.insert(schema.subscriptions).values(
-        SUB_CYCLES.map((cycle, i) => ({
-          id: det(`sub:${i}`), companyId: det(`company:${at(COMPANIES, i).key}`),
-          packageId: det(`package:${at(PACKAGES, i).key}`), cycle, status: at(SUB_STATUS, i),
+        SUBSCRIBERS.map((s, i) => ({
+          id: det(`sub:${i}`), companyId: det(`company:${s.key}`),
+          packageId: det(`package:${s.pkg}`), cycle: at(SUB_CYCLES, i), status: at(SUB_STATUS, i),
         })),
       );
 
@@ -777,13 +819,18 @@ async function seed(): Promise<void> {
         CC_SEED.map((c) => ({ id: det(`cc:${c.code}`), projectId: det("project:rjp"), code: c.code, name: c.name })),
       );
 
-      await tx.insert(schema.vendors).values(
-        VENDOR_SEED.map((v) => ({
+      // B-023(ก): master-party VENDOR_SEED (6) + the 7 real subcon firms (SUBCON_FIRMS).
+      await tx.insert(schema.vendors).values([
+        ...VENDOR_SEED.map((v) => ({
           id: det(`vendor:${v.code}`), companyId: CO1, name: v.name, taxId: v.taxId,
           kind: (v.type === "รับเหมา" ? "subcon" : "supplier") as "subcon" | "supplier",
           creditTerm: v.term,
         })),
-      );
+        ...SUBCON_FIRMS.map((f) => ({
+          id: det(`vendor:${f.code}`), companyId: CO1, name: f.name, taxId: null,
+          kind: "subcon" as const, creditTerm: null,
+        })),
+      ]);
       const SUBCON_VENDORS = VENDOR_SEED.filter((v) => v.type === "รับเหมา").map((v) => det(`vendor:${v.code}`));
       const SUPPLIER_VENDORS = VENDOR_SEED.filter((v) => v.type !== "รับเหมา").map((v) => det(`vendor:${v.code}`));
 
@@ -886,11 +933,11 @@ async function seed(): Promise<void> {
       ]);
 
       // === Subcon =========================================================
-      // B-023: subcon.jsx has a 6-row registry distinct from VENDOR_SEED — vendorId
-      // cycles the 2 subcon vendors of VENDOR_SEED (existing mapping) pending Wei.
+      // B-023(ก): each contract's vendor_id points to its REAL subcon firm
+      // (SUBC_CONTRACTS.firm → SUBCON_FIRMS code), not a cycled placeholder.
       await tx.insert(schema.subconContracts).values(
         SUBC_CONTRACTS.map((c, i) => ({
-          id: det(`subc:${i}`), vendorId: at(SUBCON_VENDORS, i), projectId: det("project:rjp"),
+          id: det(`subc:${i}`), vendorId: det(`vendor:${c.firm}`), projectId: det("project:rjp"),
           no: c.no, value: m(c.value), retentionPct: c.retentionPct, start: "2026-01-15", end: "2026-12-31",
         })),
       );
@@ -1031,7 +1078,7 @@ async function seed(): Promise<void> {
       await tx.insert(schema.retentionLedgers).values(
         Array.from({ length: 4 }, (_, i) => ({
           id: det(`ret:${i}`), companyId: CO1, woId: det(`wo:${i}`),
-          vendorId: at(SUBCON_VENDORS, i), contractId: det(`subc:${i}`),
+          vendorId: det(`vendor:${at(SUBC_CONTRACTS, i).firm}`), contractId: det(`subc:${i}`),
           scope: `งานงวดที่ ${i + 1}`, rate: "5.00", withheld: m(40_000 * (i + 1)), returned: m(0),
           dueDate: null, status: "held",
         })),
