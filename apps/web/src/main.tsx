@@ -22,10 +22,11 @@ import "@juneflow/tokens/src/tokens.css";
 import { queryClient } from "./query-client";
 import { router } from "./router";
 
-// TODO(P0-WEB-02): build the route tree + route constants for all 44 menus, port order per
-//   docs/extract/NAV-ROUTES.md (default route = "dashboard"; routes missing a screen render the
-//   prototype Placeholder; decisions C7 = NAV-side labels / approve-BOQ label / add boq.bom label,
-//   C8 = gate subcon.* with module subcon). Placeholder screens stay hidden behind feature flags.
+// DONE(P0-WEB-02): route tree + route constants for all routes in docs/extract/NAV-ROUTES.md
+//   live in routes/registry.ts (structural: id/component/file/module gate) and router.tsx builds
+//   the tree from it (default route = "dashboard"; every screen behind a Phase-0 feature flag ->
+//   Placeholder until ported; C7 boq.bom is a first-class route, C8 subcon.* gated by module
+//   subcon). scripts/check-nav-parity.mjs proves 100% parity with NAV-ROUTES.md.
 // TODO(P0-WEB-03): i18n wiring - key-based t() from @juneflow/i18n (th/zh/en/ar + RTL for ar).
 //   Every visible string = key from i18n-full.json; missing key => write BLOCKERS.md, never invent.
 // TODO(P0-WEB-05): port the app shell 1:1 from pototype/chrome.jsx + shell.jsx (sidebar/topbar/menu);
