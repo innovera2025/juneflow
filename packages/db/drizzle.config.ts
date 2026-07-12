@@ -17,6 +17,7 @@ export default defineConfig({
     "./src/schema/pm.ts",
     "./src/schema/finance.ts",
     "./src/schema/misc.ts",
+    "./src/schema/extensions.ts",
   ],
   out: "./drizzle",
   dbCredentials: {

@@ -59,6 +59,21 @@ export type PackageSubRules = Record<string, string>;
  */
 export type ApprovalLimits = Record<string, number>;
 
+/**
+ * Role.perms — the permission matrix, PLAN.md Appendix B item 13 (P0-BE-09).
+ * master.jsx `ROLE_PRESETS.perms` = 11 modules x 5 permissions
+ * (ดู/สร้าง/แก้ไข/อนุมัติ/ยกเลิก). Stored as a map of module-id -> the 5 boolean
+ * flags so adding a module needs no migration.
+ */
+export interface RolePermFlags {
+  view: boolean;
+  create: boolean;
+  edit: boolean;
+  approve: boolean;
+  cancel: boolean;
+}
+export type RolePerms = Record<string, RolePermFlags>;
+
 // ---------------------------------------------------------------------------
 // Enums (status columns)
 // ---------------------------------------------------------------------------
@@ -116,6 +131,13 @@ export const packages = pgTable("package", {
  * subscription_id (current package), status.
  * subscription_id <-> subscription.company_id is a circular 1:1; both sides are
  * real FKs and subscription_id is nullable so a company can be created first.
+ *
+ * Appendix B item 14 — Multi-company group (company-accept.jsx `COMPANIES`:
+ * short, color, doc_prefix, biz). Affiliated companies "ในเครือ" are linked via
+ * the self-referential group_parent_id (the group head; null for a standalone /
+ * head company), enabling the cross-company approval inbox without changing the
+ * company_id tenant-scope key. doc_prefix is the per-company document-number
+ * prefix.
  */
 export const companies = pgTable("company", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -126,6 +148,14 @@ export const companies = pgTable("company", {
     (): AnyPgColumn => subscriptions.id,
     { onDelete: "set null" },
   ),
+  groupParentId: uuid("group_parent_id").references(
+    (): AnyPgColumn => companies.id,
+    { onDelete: "set null" },
+  ),
+  short: text("short"),
+  color: text("color"),
+  docPrefix: text("doc_prefix"),
+  biz: text("biz"),
   status: companyStatus("status").notNull().default("active"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
@@ -219,6 +249,8 @@ export const roles = pgTable("role", {
     .$type<ApprovalLimits>()
     .notNull()
     .default({}),
+  // Appendix B item 13 — 11-module x 5-permission matrix (master.jsx ROLE_PRESETS).
+  perms: jsonb("perms").$type<RolePerms>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
