@@ -17,8 +17,14 @@ WORKDIR /app
 FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile
+# Compile @juneflow/db to dist/ FIRST: the prod deploy packs it under
+# node_modules, where node refuses to type-strip raw .ts
+# (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). Its `default` export
+# condition resolves the compiled JS at runtime (P0-FIX-08 / B-033).
+RUN pnpm --filter @juneflow/db build
 RUN pnpm --filter @juneflow/api build
-# Self-contained production deploy of @juneflow/api (prod deps only)
+# Self-contained production deploy of @juneflow/api (prod deps only).
+# Includes @juneflow/db with its built dist/ so `node dist/index.js` boots.
 RUN pnpm --filter @juneflow/api deploy --prod /out
 
 # ---- runtime -----------------------------------------------------------------
