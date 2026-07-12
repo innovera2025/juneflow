@@ -11,6 +11,15 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-12 · รอบที่ 3 · task: P0-PLAT-02 → review (GREEN · tokens/i18n gates เขียว · ownership รับต่อ)
+
+- ทำอะไร: หยิบ P0-PLAT-02 (`ready`→`doing`→`review`) — task ready ตัวสุดท้ายในเขต platform (dep `—`). งาน = "tokens/i18n ownership (แทน B-011)": ตรวจ `packages/tokens` + `packages/i18n` build/typecheck/test เขียว + รับเป็นเจ้าของการเปลี่ยนแปลงต่อไป (BE-04/BE-05 ทำ implementation ไปแล้ว — platform ดูแลต่อ ตาม PLAN §8 B-032). **ไม่แตะ implementation** (verification-only) · **ไม่แตะ `i18n-full.json` (sacred)** — `git status` ยืนยัน `packages/i18n/src/i18n-full.json` ไม่อยู่ใน diff (untouched). รัน gates:
+  - **tokens:** `pnpm --filter @juneflow/tokens build` (gen Flutter ThemeData) ✓ · `typecheck` (tsc --noEmit) ✓ · `test` (vitest) = **6/6 pass**
+  - **i18n:** `typecheck` ✓ · `lint` (tsc --noEmit) ✓ · `test` (vitest) = **15/15 pass**
+  - **turbo pipeline (turbo.json ในเขต):** `turbo run build lint test --filter=@juneflow/tokens --filter=@juneflow/i18n` = **5/5 successful (FULL TURBO)** — พิสูจน์ทั้งสองแพ็กเกจเขียวผ่าน monorepo tooling ที่ platform เป็นเจ้าของ
+- ตัดสินใจอะไร (เขตตัวเอง): task นี้เป็น verification/ownership ล้วน — implementation เสร็จแล้ว (BE-04/05) และ ownership ถูกบันทึกใน PLAN §8 (B-032) อยู่แล้ว จึง**ไม่มี code diff** ที่ต้องเพิ่ม (เทียบ precedent P0-BE-15/P0-DEV-04 = done-on-arrival). ไม่มี spec/design conflict → ไม่เปิด BLOCKER. CODEOWNERS (`.github/`) เป็นเขต devops + sacred → ไม่แตะ (ownership ทาง process บันทึกใน PLAN แล้ว).
+- เจออะไร (handoff): (1) **คิว ready platform = 0 หลังรอบนี้** (PLAT-01/PLAT-02 → review · FIX-01 → review) — ต่ำกว่าเกณฑ์ ≥5 มาก (PLAN §10) · **เตือน Wei: เติมคิว platform** (P0-FIX-02..06 เป็นเขตอื่น backend/web/qa). (2) push→auto-merge dev + ด่าน 4.5 รันโดย loop-runner เมื่อมี remote (ตอนนี้ `git remote` ว่าง = local-only). (3) tokens/i18n เขียวสมบูรณ์ — platform รับ ownership แล้ว การเปลี่ยนแปลงต่อไปของสองแพ็กเกจนี้ผ่านเขต platform.
+
 ## 2026-07-12 · รอบที่ 2 · task: P0-PLAT-01 → review (GREEN · root-side ผ่าน · web bug 3 out-of-zone)
 
 - ทำอะไร: หยิบ P0-PLAT-01 (`ready`→`doing`→`review`) — เหลือ 2 ready platform (PLAT-01/PLAT-02, dep `—`). งาน = "root-side ของ B-030" ทำ `docker compose up` build ได้ โดยแก้เฉพาะ root files ในเขต. รัน `docker build -f apps/api/Dockerfile .` จริง iterate ปิดบั๊กทีละตัว:
@@ -31,5 +40,11 @@
 
 ## 2026-07-12 19:36 · loop-runner · รอบที่ 1/4 · task: P0-FIX-01
 - ทำอะไร: รัน claude headless 1 รอบ · task P0-FIX-01 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.528054 (สะสม $2.5281/เพดาน $16)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T12:51:09Z loop round ended (agent: platform)
+
+## 2026-07-12 19:51 · loop-runner · รอบที่ 2/4 · task: P0-PLAT-01
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-PLAT-01 → สถานะ review · ค่าใช้จ่ายรอบนี้ $4.390639999999999 (สะสม $6.9187/เพดาน $16)
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: git progress: yes
