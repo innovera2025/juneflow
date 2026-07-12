@@ -46,7 +46,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
-| P0-WEB-01 | web | ready | apps/web skeleton — React 18 + Vite + TS + TanStack Router/Query ผูก `packages/tokens` (**ห้าม hardcode ค่าใดๆ**) (PLAN.md §5, ภาคผนวก A) | P0-BE-01, P0-BE-04 | CI: lint+typecheck+build | 3 ชม. |
+| P0-WEB-01 | web | review | apps/web skeleton — React 18 + Vite + TS + TanStack Router/Query ผูก `packages/tokens` (**ห้าม hardcode ค่าใดๆ**) (PLAN.md §5, ภาคผนวก A) | P0-BE-01, P0-BE-04 | CI: lint+typecheck+build | 3 ชม. |
 | P0-WEB-02 | web | ready | route tree + route constants ครบ 44 เมนูจาก `docs/extract/NAV-ROUTES.md` (+C7: ป้ายฝั่ง NAV/"อนุมัติ BOQ"/boq.bom · C8: gate `subcon.*`) — จอ placeholder ซ่อนหลัง feature flag | P0-WEB-01 | route ตรง NAV-ROUTES 100% (ตรวจกับไฟล์ extract) | 3 ชม. |
 | P0-WEB-03 | web | ready | i18n wiring — `t()` key-based จาก `packages/i18n` · สลับ th/zh/en/ar+RTL ตาม pototype · ทุกข้อความ = key จาก i18n-full.json เท่านั้น (key ไม่มี → BLOCKERS) | P0-WEB-01, P0-BE-05 | G3 (loader/RTL) + ไม่มี string นอก i18n key | 3 ชม. |
 | P0-WEB-04 | web | ready | port-map inventory — ตาราง mapping `pototype/*.jsx` (ยกเว้นไฟล์ excluded ตาม PLAN.md §0 ข้อ 5) → โมดูล/route เป้าหมาย + ภาพอ้างอิง gallery ต่อจอ → เก็บที่ `apps/web/docs/port-map.md` · spec: pototype/ + `docs/extract/INVENTORY.md` + NAV-ROUTES.md | — | ครอบคลุมทุก .jsx ที่ไม่ถูก exclude · review โดย Wei | 3 ชม. |
