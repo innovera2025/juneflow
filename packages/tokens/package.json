@@ -13,10 +13,15 @@
     "scripts"
   ],
   "scripts": {
-    "gen:flutter": "tsx scripts/gen-flutter-theme.ts"
+    "gen:flutter": "tsx scripts/gen-flutter-theme.ts",
+    "build": "tsx scripts/gen-flutter-theme.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.0"
   }
 }
