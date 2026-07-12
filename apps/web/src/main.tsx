@@ -11,6 +11,7 @@
  *
  * P0-WEB-01 wires the skeleton: TanStack Query (query-client.ts) + TanStack Router (router.tsx),
  * both bound to the @juneflow/tokens fiori theme (no hardcoded design values). Later tasks fill it in.
+ * P0-WEB-06 adds the generated API client (api-client.ts) that Query queryFns call. Later tasks fill it in.
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -29,8 +30,9 @@ import { router } from "./router";
 //   Every visible string = key from i18n-full.json; missing key => write BLOCKERS.md, never invent.
 // TODO(P0-WEB-05): port the app shell 1:1 from pototype/chrome.jsx + shell.jsx (sidebar/topbar/menu);
 //   badges come from real queries (decision C10), labels from i18n keys. Must pass the visual gate (G5).
-// TODO(P0-WEB-06): API client generated from packages/contracts openapi.yaml only - never hand-write
-//   models or fetch calls; feed the generated client into the TanStack Query client (query-client.ts).
+// DONE(P0-WEB-06): API client generated from packages/contracts openapi.yaml (api-client.ts, via
+//   openapi-fetch typed by the generated `paths`) - no hand-written models/fetch; fed into TanStack
+//   Query through the `unwrap` adapter in query-client.ts.
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
