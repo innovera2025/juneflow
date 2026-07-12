@@ -6,14 +6,19 @@ publish_to: "none"
 version: 0.1.0
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
+  # Floor raised to 3.8.0 by P0-MOB-03: the API-client codegen stack
+  # (json_serializable/retrofit_generator) requires it. Host SDK is 3.12.x.
+  sdk: ">=3.8.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  # HTTP client used by the generated OpenAPI Dart client — TODO(P0-MOB-03):
-  # codegen from packages/contracts/openapi.yaml (never hand-write models).
+  # HTTP client that the GENERATED OpenAPI client (lib/api/**) runs on — retrofit
+  # builds on dio. Client is codegen'd from packages/contracts/openapi.yaml
+  # (P0-MOB-03); models are never hand-written (root CLAUDE.md).
   dio: ^5.4.0
+  retrofit: ^4.9.2
+  json_annotation: ^4.12.0
   # Offline-first local store + sync queue (PLAN.md Appendix A) — TODO(P0-MOB-05).
   # Offline level (a)/(b) is Open Question #5 (PLAN.md §11) — do not decide here.
   drift: ^2.18.0
@@ -24,7 +29,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-  # TODO(P0-MOB-05): add drift_dev + build_runner when the offline queue schema lands.
+  # API-client codegen (P0-MOB-03) — see tool/gen_api_client.sh.
+  retrofit_generator: ^10.2.7
+  json_serializable: ^6.14.0
+  build_runner: ^2.15.1
+  # TODO(P0-MOB-05): add drift_dev when the offline queue schema lands (build_runner already present).
 
 flutter:
   uses-material-design: true
