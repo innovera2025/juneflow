@@ -93,3 +93,12 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P0-DEV-03 | devops | done | `.github/CODEOWNERS` ตามกลุ่ม 4.4 — ล็อกเขตต่อ agent + sacred files (OpenAPI · merged migrations · CLAUDE.md ทุกใบ · CI config · secrets · `docs/extract/*` · i18n-full.json) | P0-BE-01 | ครอบคลุม sacred ครบตาม PLAN.md §10 | 1 ชม. |
 | P0-DEV-04 | devops | done | branch policy + runbook — dev auto-merge เมื่อ CI เขียว · main = Wei promote คนเดียว · runbook: deploy dev / promote main / restore DB → `infra/runbook.md` (กลุ่ม 2.6) | P0-DEV-02 | review โดย Wei + ทดสอบ flow feature→dev จริง 1 รอบ | 2 ชม. |
 | P0-DEV-05 | devops | ready | infra prod compose skeleton (VPS Singapore ตามภาคผนวก A) — env จาก host **ห้าม secrets ใน repo** | P0-DEV-01 | config validate ผ่าน + scan ไม่พบ secret | 3 ชม. |
+
+## เขต — Audit follow-ups (จาก 47-agent audit ของ Wei 12 ก.ค. · ผ่านแบบมีเงื่อนไข ทำก่อน milestone ที่ระบุ)
+
+| id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
+|---|---|---|---|---|---|---|
+| P0-FIX-01 | devops | ready | **BE-04 audit:** `ci.yml` เรียก `pnpm run --if-present test:unit/contract/e2e/visual` แต่ root package.json ไม่มีสคริปต์เหล่านี้ → CI test stage 4 ตัวเป็น no-op เงียบ · เพิ่มสคริปต์ root ที่ delegate ไป vitest/playwright จริง (root package.json ไม่ sacred · ห้ามแตะ ci.yml ที่ sacred) — **ต้องปิดก่อนเชื่อ remote CI** | — | สคริปต์รันชุด test จริง + CI stage ไม่ no-op | 2 ชม. |
+| P0-FIX-02 | backend | ready | **BE-09 audit:** (1) `doc_numbering` ประกาศ `unique(company,type)` ใน comment แต่ไม่มี constraint จริง → เพิ่ม unique constraint ผ่าน migration ใหม่ (2) FK 56 คอลัมน์ไม่มี index → เพิ่ม index บน FK ที่ query บ่อย · **หมายเหตุถึง BE-10 (seed): `solar_roi.cumulative` เป็นคอลัมน์จริงที่ seed ต้องเติม** | — | G1 + migration check + index มีจริง | 3 ชม. |
+| P0-FIX-03 | web | ready | **WEB-06 audit:** (1) ลบ comment เท็จ 2 จุดใน `api-client.ts` (อ้าง vite proxy ที่ยังไม่มี) (2) cookie auth ขัด contract ที่ประกาศ bearer JWT → **ต้องตัดสินก่อนจอ authenticated แรก — ดู B-028** | B-028 | CI + comment ตรงจริง + auth mode ตรง contract | 2 ชม. |
+| P0-FIX-04 | qa | ready | **QA-04 audit:** ช่องผ่านปลอมของ G5 — ภาพที่ขนาด**ใหญ่กว่า** reference PASS เงียบ (ขัด claim auto-FAIL) · แก้ `tests/visual/lib/compare.ts` (size-mismatch → FAIL ทุกทิศ) — **ก่อนจอจริง WEB-05** | — | G5 self-check: size-larger = FAIL | 1 ชม. |
