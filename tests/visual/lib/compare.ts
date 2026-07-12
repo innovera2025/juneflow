@@ -175,8 +175,13 @@ export async function compareImages(
   );
 
   const diffRatio = raw.totalPixels === 0 ? 0 : raw.diffPixels / raw.totalPixels;
+  // A dimension mismatch is an unconditional FAIL in EVERY direction (candidate
+  // larger, smaller, or off-shape) — a layout/size change is a real visual-gate
+  // failure per PLAN.md §0. This must not depend on diffRatio: when the candidate
+  // is larger than the reference the ref-sized diff loop never inspects the extra
+  // candidate area, so diffRatio can be 0 and would otherwise PASS silently.
   const verdict: DiffResult["verdict"] =
-    diffRatio > maxDiffPixelRatio ? "FAIL" : "PASS";
+    raw.dimensionMismatch || diffRatio > maxDiffPixelRatio ? "FAIL" : "PASS";
 
   let note = "";
   if (raw.dimensionMismatch) {

@@ -76,6 +76,37 @@ test.describe("visual gate · engine self-check (no app required)", () => {
     expect(r.verdict).toBe("FAIL");
     recordScreen({ ...r, screen: "self-check/size-mismatch", kind: "self-check" });
   });
+
+  test("a candidate LARGER than the reference auto-FAILs (no silent pass)", async ({ page }) => {
+    // Regression guard (P0-FIX-04 / QA-04 audit): the ref-sized diff loop never
+    // inspects the extra candidate area, so a larger candidate whose overlapping
+    // region matches produces diffPixels=0. It must still FAIL on dimension
+    // mismatch — a size change is a layout change per PLAN.md §0.
+    const bigger = await page.evaluate(async (src) => {
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = src;
+      });
+      const c = document.createElement("canvas");
+      // Larger in both dimensions; overlapping region is a pixel-perfect copy of
+      // the reference, so the ONLY signal is the dimension mismatch.
+      c.width = img.naturalWidth + 40;
+      c.height = img.naturalHeight + 40;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      return c.toDataURL("image/png");
+    }, fileToDataUrl(SELF_CHECK_REF));
+
+    const r = await compareImages(page, SELF_CHECK_REF, bigger, "self:size-larger");
+    expect(r.candDims.w).toBeGreaterThan(r.refDims.w);
+    expect(r.candDims.h).toBeGreaterThan(r.refDims.h);
+    expect(r.diffPixels).toBe(0); // overlapping region matches exactly — the trap
+    expect(r.dimensionMismatch).toBe(true);
+    expect(r.verdict).toBe("FAIL"); // ...yet it must NOT pass silently
+    recordScreen({ ...r, screen: "self-check/size-larger", kind: "self-check" });
+  });
 });
 
 // ---- capture mode: real screens vs reference (pending apps/web) ---------------
