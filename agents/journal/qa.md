@@ -10,6 +10,12 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-12 · รอบที่ 8 · task: P0-QA-03
+
+- ทำอะไร: หยิบ P0-QA-03 (Playwright E2E harness + smoke "login → shell load") — dep P0-DEV-01 = done ตาม TASKS.md จึงหยิบได้ตามกติกา. อ่าน spec: `docs/handoff/flows.html` (ไม่มี login flow), login spec จริงอยู่ที่ prototype `extra-screens.jsx:7-56` (`ScreenLogin`), `tests/e2e/{README,playwright.config.ts}` (scaffold เดิม + TODO P0-QA-03), และตรวจสิ่งที่ compose dev serve จริง: `apps/web/src/router.tsx` render แค่ `Placeholder` scaffold ทุก route (`<main data-route><code>routeId</code>screen pending port (P0-WEB-05+)</main>`). **ไม่ได้แตะโค้ด/gate** — พบว่า UI ปลายทางของ smoke ยังไม่มี → escalate. เปิด **B-034**, เปลี่ยน P0-QA-03 → `blocked`.
+- ตัดสินใจอะไร: **ไม่ตัดสิน scope เอง** (PLAN §0 กฎ 4). smoke "login → shell load" ทำ/ผ่าน G4 ไม่ได้เพราะ (1) ไม่มี login form ให้ขับ (login ยังไม่ถูก port) (2) ไม่มี app shell ให้ assert — P0-WEB-05 `blocked` อยู่ (B-020) (3) เขียน smoke ขับ placeholder แล้วเคลม login→shell = ประดิษฐ์ behavior นอก spec (ผิดกฎ 1) · ทำ `--pass-with-no-tests` เขียวปลอมก็ไม่ปิด G4 จริง. เสนอ Wei 4 ทาง (แนะนำ ข: แยก 3a harness/app-boot smoke ที่รันจริงได้ตอนนี้ + 3b login→shell หลัง P0-WEB-05/login port/compose api healthy).
+- เจออะไร: (1) dep graph ของ P0-QA-03 ระบุแค่ P0-DEV-01 แต่ smoke จริงต้องพึ่ง web login+shell UI (P0-WEB-05, blocked B-020) — dep ขาด. (2) P0-DEV-01 แม้ TASKS.md = done แต่ยังมีปม api runtime packaging ค้างต่อ B-033 (api container crash boot) → compose dev อาจยังไม่ healthy เต็ม. (3) **คิว ready เขต qa = ว่างจริง**หลังรอบนี้: P0-QA-03 → blocked · P0-FIX-06 รอ P0-FIX-05 (ready ไม่ done) · P0-FIX-03 เป็นเขต web — ต่ำกว่าเกณฑ์ ≥5 มาก. ต้องปลด B-020 (P0-WEB-05 shell) + เพิ่ม task port login + promote P0-FIX-05 เพื่อเปิดคิว qa รอบถัดไป.
+
 ## 2026-07-12 · รอบที่ 7 · task: P0-FIX-04
 
 - ทำอะไร: ปิดช่องผ่านปลอมของ **visual gate G5** (QA-04 audit) — แก้ `tests/visual/lib/compare.ts`: verdict เดิม (บรรทัด 178-179) ตัดสินจาก `diffRatio > maxDiffPixelRatio` เท่านั้น **ไม่เคยใช้ `dimensionMismatch`** ที่คำนวณไว้แล้ว → candidate ที่ขนาด**ใหญ่กว่า** reference ผ่านเงียบ: diff loop วนตามขนาด ref, `overlapW/H = min(ref,cand) = ref dims` เมื่อ cand ใหญ่กว่า → ทุก pixel ใน loop อยู่ใน overlap, พื้นที่ candidate ส่วนเกินไม่ถูกตรวจเลย → `diffPixels=0` → PASS ทั้งที่ note ประกาศ auto-FAIL. **fix**: `verdict = raw.dimensionMismatch || diffRatio > maxDiffPixelRatio ? "FAIL" : "PASS"` (+comment อธิบายกับดัก) — dimension mismatch = auto-FAIL ทุกทิศตาม PLAN.md §0. เพิ่ม regression test ใน `visual-gate.spec.ts` ("candidate LARGER auto-FAILs"): สร้าง candidate = ref + 40px ทั้งสองมิติ, overlap เป็น pixel-perfect copy → assert `candDims > refDims` + `diffPixels=0` (พิสูจน์กับดักมีจริง) + `dimensionMismatch=true` + `verdict="FAIL"` (พิสูจน์ปิดกับดัก). **Gate = "G5 self-check: size-larger = FAIL"**: `pnpm --filter @juneflow/tests test:visual` = **4 passed | 1 skipped** (identical=PASS · perturbed=FAIL · size-mismatch=FAIL · size-larger=FAIL ใหม่ · capture skip รอ apps/web) → **GREEN** · commit บน `feature/qa`, task → `review`, เพิ่มแถว REVIEW-QUEUE.
@@ -117,3 +123,15 @@
 - ทำอะไร: รอบที่ 2/3: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $2.9407/$14 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T14:47:41Z loop round ended (agent: qa)
+
+## 2026-07-12 21:47 · loop-runner · รอบที่ 1/2 · task: P0-QA-03
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-QA-03 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $2.0937040000000002 (สะสม $2.0937/เพดาน $10)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T14:48:10Z loop round ended (agent: qa)
+
+## 2026-07-12 21:48 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $2.6682/$10 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
