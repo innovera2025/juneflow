@@ -10,6 +10,12 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-12 · รอบที่ 9 · task: P0-BE-05
+
+- ทำอะไร: หยิบ P0-BE-05 (`packages/i18n` — loader key-based + unit tests) — ready · dep P0-BE-01/02 done · **B-011 ตอบ ก แล้ว** → `packages/i18n` เข้า zonePaths.backend (ยืนยันจาก zone paths ที่ orchestrator ส่งให้รอบนี้). พบว่า loader (`src/index.ts` — t/tn/tp/setLang/getLang/isRTL/dir/resolveEntry) ถูก implement ครบตั้งแต่ scaffold; เหลือ 2 อย่างตาม TODO: (1) wire แพ็กเกจเข้า CI (แพ็กเกจไม่มี tsconfig/scripts เลย → ไม่เคยถูก typecheck) (2) unit tests. Implement: เพิ่ม `tsconfig.json` (extends base เหมือน tax-engine) + scripts `lint`/`typecheck`/`test` + vitest `^3.2.0` devDep + `src/index.test.ts` (15 tests: dict/nav/phrases ครบ th/zh/en/ar + RTL + en-fallback + never-invent miss). Gate ครั้งแรกเผย latent error 2 จุด: (a) vitest ยังไม่ install → `pnpm install`; (b) **`src/index.ts` JSON import ต้อง `with { type: "json" }`** ใต้ NodeNext (ไม่เคยเจอเพราะไม่เคย typecheck) → แก้ 1 บรรทัด. Gates: `pnpm --filter @juneflow/i18n test` 15/15 ✓ · typecheck ✓ · lint ✓ · root `turbo typecheck` 8/8 · `test` 7/7 (i18n เข้าคิว) · `build` ✓ · `--frozen-lockfile` ✓ → เขียว. commit `8dbc6d1`. **ด่าน 4.5 diff-reviewer = PASS** (sacred i18n-full.json ไม่ถูกแตะ · zone เฉพาะ packages/i18n + lockfile importer · no invented translation · no DOM mock ported). → สถานะ `review` + แถว REVIEW-QUEUE.
+- ตัดสินใจอะไร (เขตตัวเอง ไม่ใช่ design/spec): (1) แก้ JSON import เป็น `with { type: "json" }` — เป็น build-correctness fix ตาม NodeNext ไม่ใช่การเปลี่ยน behavior/แปลใหม่ (ยังคง default import ของ sacred JSON เดิม). (2) ทดสอบ ar/RTL dict assertion อ้างค่า `i18nFull.dict['app.name'].ar` จาก source verbatim แทน re-type ข้อความ RTL — กันพิมพ์เพี้ยน + ไม่ละเมิดกฎ §0#2 (ห้ามแปลใหม่); ค่า en/zh/th เป็น literal ตรง source. (3) fallback en ทดสอบด้วย cast `'fr' as LangCode` (ไม่มี entry ใดใน JSON ที่ขาด lang จริง → ต้อง force resolve chain). **ไม่ตัดสินความขัดแย้งนอก ภาคผนวก C** — ไม่มี conflict เกิดขึ้น.
+- เจออะไร (handoff): (1) `packages/i18n` ถูก type-check/test ใน CI แล้วครั้งแรก (turbo typecheck 7→8, test 6→7) — P0-WEB-03 (i18n wiring) พร้อมใช้ t()/tn()/tp() ได้เลย · PHRASE_PATTERNS (regex สำหรับข้อความมีตัวเลข) ยังต้อง port ที่ web (อยู่ใน prototype ไม่ใช่ i18n-full.json — TODO ใน index.ts บันทึกไว้แล้ว). (2) turbo warn "no output files for @juneflow/i18n#test" = cosmetic (test task `outputs: coverage/**` แต่ไม่ gen coverage — เหมือน tax-engine/bank-file ทุกแพ็กเกจ). (3) คิว ready เขต backend หลังรอบนี้: P0-BE-04 (tokens — in-zone แล้วหลัง B-011 แต่ gen Flutter theme output ลง `apps/mobile/` = นอก zone, ต้องเช็คว่า gen เขียนที่ไหน) · P0-BE-11 (auth, dep 06 done — in-zone หยิบได้ทันที) · P0-BE-09/10/13/14 ติด dep chain (09/10 รอ 07+08 done; 13 รอ 11). **เตือน Wei:** in-zone ready ที่หยิบได้ทันทีเหลือ P0-BE-04/11 เท่านั้น — เติมคิวหรือ promote 06/07/08 เพื่อปลด 09/10/13.
+
 ## 2026-07-12 · รอบที่ 8 · task: P0-BE-07 (REWORK)
 
 - ทำอะไร: หยิบ P0-BE-07 rework (ready · dep P0-BE-06 done) — จุดเดียวที่ด่าน 4.5 FAIL 12 ก.ค. คือ `PMQuote` ถูกตัดออกโดยตัดสินเอง (silent local decision) ทั้งที่เป็น erd.html entity + PLAN §6 นับ erd เป็น base. Implement: เพิ่มตาราง `pm_quote` ใน `schema/pm.ts` ตาม erd `[pmq: id, wo_id, parts[], decision]` (ต่อจาก `pmWorkOrders` เพราะ `wo_id` FK → `pm_workorder` cascade) · fields: `parts` jsonb `PmQuotePartRow[]` (label/qty/price) default [] · `decision` text (ลูกค้าอนุมัติผ่าน LINE — erd ไม่ enumerate → text ไม่เดา enum ตามแพทเทิร์นกลุ่ม PM) · `currency_code` text notNull default THB (parts มี price = money → §4) · id/created_at/updated_at timestamptz UTC มาตรฐาน. อัปเดต header comment ของ pm.ts (เดิมเขียน "left out") + เพิ่มบรรทัด `pm_quote` ใน spec-comment ที่ `schema/index.ts`. gen `0004_chubby_siren.sql` = single `CREATE TABLE pm_quote` + 1 FK (ไม่แตะ 0000–0003). Gates: `typecheck` ✓ · `lint` ✓ · `generate` ✓ (pm_quote 7 cols/1 fk) · `drizzle-kit check` "Everything's fine" ✓ → เขียว. commit + เรียก diff-reviewer (ด่าน 4.5).
@@ -130,5 +136,11 @@
 
 ## 2026-07-12 07:50 · loop-runner · รอบที่ 1/10 · task: P0-BE-08
 - ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-08 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.954987750000001 (สะสม $2.9550/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T00:58:08Z loop round ended (agent: backend)
+
+## 2026-07-12 07:58 · loop-runner · รอบที่ 2/10 · task: P0-BE-07
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-07 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.6979367499999998 (สะสม $5.6529/เพดาน $20)
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: git progress: yes
