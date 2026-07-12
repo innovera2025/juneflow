@@ -33,3 +33,20 @@
 - ทำอะไร: รัน claude headless 1 รอบ · task P0-MOB-04 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $2.396243 (สะสม $2.3962/เพดาน $20)
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: git progress: yes
+- 2026-07-12T01:21:30Z loop round ended (agent: mobile)
+
+## 2026-07-12 08:21 · loop-runner · รอบที่ 2/10 · task: P0-MOB-01
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-MOB-01 → สถานะ review · ค่าใช้จ่ายรอบนี้ $3.1500837499999994 (สะสม $5.5463/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T01:22:07Z loop round ended (agent: mobile)
+
+## 2026-07-12 08:22 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 3/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต mobile — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $6.0468/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+
+## 2026-07-12 08:54 · loop-runner · fail-safe
+- ทำอะไร: หยุดการทำงานจาก error: tracked worktree is dirty at loop start — commit or stash changes first (clean-state requirement) (รอบที่ 1/10 · task ล่าสุด: -)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: ตรวจสถานะ repo และ log ก่อนสั่งรันใหม่ · งบสะสมรอบนี้: $0
