@@ -8,33 +8,29 @@
  * Screens must match the prototype 100% for everything the user sees/clicks/reads (PLAN.md section 0 rule 1).
  * Mock-only mechanisms must NOT be ported (rule 3): DOM MutationObserver translation, hardcoded NAV badges,
  * name-string FKs, reseed-on-reload.
+ *
+ * P0-WEB-01 wires the skeleton: TanStack Query (query-client.ts) + TanStack Router (router.tsx),
+ * both bound to the @juneflow/tokens fiori theme (no hardcoded design values). Later tasks fill it in.
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 // Fiori theme tokens - the only allowed source of colors/fonts/spacing/radius (never hardcode values).
 import "@juneflow/tokens/src/tokens.css";
+import { queryClient } from "./query-client";
+import { router } from "./router";
 
 // TODO(P0-WEB-02): build the route tree + route constants for all 44 menus, port order per
 //   docs/extract/NAV-ROUTES.md (default route = "dashboard"; routes missing a screen render the
-//   prototype Placeholder; decisions C7 = NAV-side labels / "อนุมัติ BOQ" / add boq.bom label,
+//   prototype Placeholder; decisions C7 = NAV-side labels / approve-BOQ label / add boq.bom label,
 //   C8 = gate subcon.* with module subcon). Placeholder screens stay hidden behind feature flags.
 // TODO(P0-WEB-03): i18n wiring - key-based t() from @juneflow/i18n (th/zh/en/ar + RTL for ar).
 //   Every visible string = key from i18n-full.json; missing key => write BLOCKERS.md, never invent.
 // TODO(P0-WEB-05): port the app shell 1:1 from pototype/chrome.jsx + shell.jsx (sidebar/topbar/menu);
 //   badges come from real queries (decision C10), labels from i18n keys. Must pass the visual gate (G5).
 // TODO(P0-WEB-06): API client generated from packages/contracts openapi.yaml only - never hand-write
-//   models or fetch calls; set up the TanStack Query client here.
-
-function PlaceholderShell() {
-  // Scaffold-only placeholder. Replaced by the chrome.jsx/shell.jsx port (P0-WEB-05).
-  // Visible text below is scaffold-only; real screens use i18n keys exclusively (P0-WEB-03).
-  return (
-    <main>
-      <h1>Juneflow</h1>
-      <p>TODO(P0-WEB-05): app shell port from pototype/chrome.jsx + shell.jsx</p>
-    </main>
-  );
-}
+//   models or fetch calls; feed the generated client into the TanStack Query client (query-client.ts).
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
@@ -43,6 +39,8 @@ if (!rootEl) {
 
 createRoot(rootEl).render(
   <StrictMode>
-    <PlaceholderShell />
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   </StrictMode>,
 );
