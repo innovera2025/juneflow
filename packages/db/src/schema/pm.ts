@@ -2,15 +2,18 @@
 //
 // Source of truth: docs/handoff/data-dictionary.html section "PM (CMMS)"
 // (+ erd.html "PM · บำรุงรักษา (CMMS)" band). Entities: PMContract, PMAsset,
-// PMWorkOrder, ChecklistTemplate.
+// PMWorkOrder, ChecklistTemplate, PMQuote.
 //
 // Structure: Project -> N PMContract -> N PMAsset; a maintenance plan auto-gens
 // PMWorkOrder rows whose checklist rows come from a ChecklistTemplate picked at
 // creation time (data-dictionary).
 //
-// PMQuote (spare-parts quote -> customer LINE approval) appears only in erd.html,
-// not in the data-dictionary base schema nor PLAN.md Appendix B, so it is left
-// out of this base group (recorded in the backend journal, not a conflict).
+// PMQuote (spare-parts quote off a work order -> customer LINE approval) is an
+// erd.html entity [pmq: id, wo_id, parts[], decision]; the data-dictionary "PM
+// (CMMS)" rel line also names it ("ใบเสนอราคาอะไหล่ -> ลูกค้าอนุมัติ (LINE)").
+// erd is a base-schema source (PLAN.md section 6), so it is included here.
+// (Added in the P0-BE-07 rework after diff-reviewer gate-4.5 FAIL on 2026-07-12
+// flagged that omitting it was a silent local decision - see backend journal.)
 //
 // Global-readiness hard rules (PLAN.md section 4): real uuid FKs, UTC
 // timestamps, money columns carry currency_code. Company scope flows through
@@ -45,6 +48,17 @@ export interface PmChecklistRow {
   result?: "normal" | "adjust" | "repair";
   before?: string;
   after?: string;
+}
+
+/**
+ * PMQuote.parts — spare-part lines on a maintenance quote (erd.html "parts[]").
+ * price is money and shares the quote's currency_code column (PLAN.md section 4:
+ * money carried on a jsonb line rides the row's currency_code).
+ */
+export interface PmQuotePartRow {
+  label: string;
+  qty?: number;
+  price?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +164,30 @@ export const pmWorkOrders = pgTable("pm_workorder", {
   fix: text("fix"),
   advice: text("advice"),
   customerSign: text("customer_sign"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * PMQuote — a spare-parts quote raised off a PM work order and sent to the
+ * customer for LINE approval (erd.html "pmq: id, wo_id, parts[], decision";
+ * data-dictionary "ใบเสนอราคาอะไหล่ -> ลูกค้าอนุมัติ (LINE)"). parts carry money
+ * -> currency_code on the row. decision is the customer's response; erd does not
+ * enumerate its values, so it stays free text (no guessed enum, matching the PM
+ * group's convention for non-enumerated states).
+ */
+export const pmQuotes = pgTable("pm_quote", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workOrderId: uuid("wo_id")
+    .notNull()
+    .references(() => pmWorkOrders.id, { onDelete: "cascade" }),
+  parts: jsonb("parts").$type<PmQuotePartRow[]>().notNull().default([]),
+  decision: text("decision"),
+  currencyCode: text("currency_code").notNull().default("THB"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

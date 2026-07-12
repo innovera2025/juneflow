@@ -100,6 +100,9 @@
 //                          (result: normal | adjust | repair), cause, fix,
 //                          advice, customer_sign (close -> certificate -> LINE)
 // [ ] checklist_template - kind, items[] (central config, picked at WO creation)
+// [ ] pm_quote           - wo_id, parts[], decision (spare-parts quote off a WO
+//                          -> customer LINE approval; erd.html entity, dictionary
+//                          rel line; added in P0-BE-07 rework, see backend journal)
 //
 // =============================================================================
 // DONE(P0-BE-08) - groups: Finance-Accounting + "อื่นๆ" (decisions C4, C9
