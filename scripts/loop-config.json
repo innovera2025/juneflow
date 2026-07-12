@@ -13,9 +13,7 @@
       "zonePaths": [
         "apps/api",
         "packages/db",
-        "packages/contracts",
-        "packages/tokens",
-        "packages/i18n"
+        "packages/contracts"
       ],
       "zoneClaudeMd": "apps/api/CLAUDE.md",
       "featureBranch": "feature/backend",
@@ -68,6 +66,23 @@
       ],
       "zoneClaudeMd": "infra/CLAUDE.md",
       "featureBranch": "feature/devops",
+      "maxRoundsPerNight": 10,
+      "budgetUsdPerNight": 20
+    },
+    "platform": {
+      "_comment": "Platform zone (7th, B-032): monorepo tooling + shared token/i18n packages that no app zone owns. Owns root build/CI config so docker build + CI test scripts + tokens/i18n have a home.",
+      "zonePaths": [
+        "package.json",
+        "turbo.json",
+        "tsconfig.base.json",
+        "pnpm-workspace.yaml",
+        "pnpm-lock.yaml",
+        ".dockerignore",
+        "packages/tokens",
+        "packages/i18n"
+      ],
+      "zoneClaudeMd": "CLAUDE.md",
+      "featureBranch": "feature/platform",
       "maxRoundsPerNight": 10,
       "budgetUsdPerNight": 20
     }
