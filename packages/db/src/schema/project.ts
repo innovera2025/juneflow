@@ -20,6 +20,7 @@
 import {
   pgEnum,
   pgTable,
+  index,
   text,
   uuid,
   integer,
@@ -103,7 +104,7 @@ export const projects = pgTable("project", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("project_company_idx").on(t.companyId)]);
 
 /**
  * Model — a house / building model (แบบบ้าน) referenced by sale units.
@@ -123,7 +124,7 @@ export const models = pgTable("model", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("model_company_idx").on(t.companyId)]);
 
 /**
  * ProjectNode — the Phase/Block/Unit hierarchy, one self-referential tree per
@@ -198,7 +199,7 @@ export const vendors = pgTable("vendor", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("vendor_company_idx").on(t.companyId)]);
 
 /**
  * Customer — buyer / PM customer master; AR pulls from here (data-dictionary
@@ -217,4 +218,4 @@ export const customers = pgTable("customer", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("customer_company_idx").on(t.companyId)]);
