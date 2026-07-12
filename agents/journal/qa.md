@@ -87,3 +87,15 @@
 - ทำอะไร: รอบที่ 3/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $7.5567/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T00:55:18Z loop round ended (agent: qa)
+
+## 2026-07-12 07:55 · loop-runner · รอบที่ 1/10 · task: P0-QA-02
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-QA-02 → สถานะ review · ค่าใช้จ่ายรอบนี้ $3.9997094999999985 (สะสม $3.9997/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T00:55:53Z loop round ended (agent: qa)
+
+## 2026-07-12 07:55 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $4.7105/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
