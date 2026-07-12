@@ -33,7 +33,9 @@ dev_dependencies:
   retrofit_generator: ^10.2.7
   json_serializable: ^6.14.0
   build_runner: ^2.15.1
-  # TODO(P0-MOB-05): add drift_dev when the offline queue schema lands (build_runner already present).
+  # Offline queue schema codegen (P0-MOB-05) — generates lib/offline/local_db.g.dart
+  # from the drift table definitions. Never hand-edit the .g.dart output.
+  drift_dev: ^2.18.0
 
 flutter:
   uses-material-design: true
