@@ -19,6 +19,7 @@
 import {
   pgEnum,
   pgTable,
+  index,
   text,
   uuid,
   integer,
@@ -192,7 +193,7 @@ export const subscriptions = pgTable("subscription", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("subscription_company_idx").on(t.companyId)]);
 
 /**
  * PlatformInvoice — billing document against a subscription (owner dunning).
@@ -261,7 +262,7 @@ export const roles = pgTable("role", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("role_company_idx").on(t.companyId)]);
 
 /**
  * User — a member of a company (multi-tenant: User ∈ Company).

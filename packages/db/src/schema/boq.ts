@@ -18,6 +18,7 @@
 import {
   pgEnum,
   pgTable,
+  index,
   text,
   uuid,
   integer,
@@ -88,7 +89,7 @@ export const boms = pgTable("bom", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("bom_company_idx").on(t.companyId)]);
 
 /**
  * BOQDoc — a bill of quantities document for a project. Revise = new version of

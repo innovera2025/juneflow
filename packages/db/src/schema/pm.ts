@@ -23,6 +23,7 @@
 import {
   pgEnum,
   pgTable,
+  index,
   text,
   uuid,
   integer,
@@ -141,7 +142,7 @@ export const checklistTemplates = pgTable("checklist_template", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("checklist_template_company_idx").on(t.companyId)]);
 
 /**
  * PMWorkOrder — a maintenance job on an asset: tech check-in (GPS), a filled
