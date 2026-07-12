@@ -69,11 +69,14 @@ export class TenantDb {
 
   /** UPDATE ... WHERE company_id = ? [AND extra]; company_id itself is immutable. */
   update<T extends TenantTable>(table: T, set: TenantUpdate<T>, where?: SQL) {
-    // The public `set` type forbids reassigning company_id; the cast only bridges
-    // Omit<…, "companyId"> back to drizzle's all-keys-optional set source.
+    // Fail-closed at runtime, mirroring insert(): the public `set` type forbids
+    // reassigning company_id, but a caller can still smuggle one in past the type
+    // (via `any`/cast/untyped JS). Strip it here so a row can never be moved to
+    // another tenant — the WHERE scope alone would not stop a SET company_id = X.
+    const { companyId: _immutable, ...safe } = set as Record<string, unknown>;
     return this.#db
       .update(table)
-      .set(set as PgUpdateSetSource<T>)
+      .set(safe as PgUpdateSetSource<T>)
       .where(this.#scope(table, where));
   }
 

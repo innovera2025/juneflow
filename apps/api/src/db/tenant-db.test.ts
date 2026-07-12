@@ -83,6 +83,24 @@ describe("update is always company_id-scoped", () => {
     expect(params).toContain(COMPANY);
     expect(params).toContain("a@b.co");
   });
+
+  // Security regression (Gate 4.5 FAIL, 12 ก.ค.): a hostile payload must not be
+  // able to reassign company_id via SET — otherwise a row escapes to OTHER's
+  // tenant even though the WHERE stays scoped to this tenant.
+  it("cannot reassign company_id — a smuggled SET company_id is stripped", () => {
+    const { sql, params } = tdb
+      // Cast past the type guard to simulate a hostile payload.
+      .update(users, { name: "B", companyId: OTHER } as never)
+      .toSQL();
+    // OTHER never reaches the query — not in SET, not anywhere.
+    expect(params).not.toContain(OTHER);
+    // The SET clause (between "set" and "where") must not touch company_id.
+    const setClause = sql.slice(sql.indexOf(" set ") + 5, sql.indexOf(" where "));
+    expect(setClause).not.toContain("company_id");
+    // company_id survives only as the WHERE scope predicate.
+    expect(sql).toContain('"company_id" = $');
+    expect(params).toContain(COMPANY);
+  });
 });
 
 describe("delete is always company_id-scoped", () => {
