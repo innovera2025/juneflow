@@ -1,6 +1,6 @@
 // Feature-flag mechanism (P0-BE-14).
 //
-// Purpose (Bootstrap Manifest กลุ่ม 5 Phase-0 requirement, PLAN.md §7):
+// Purpose (Bootstrap Manifest group 5 Phase-0 requirement, PLAN.md §7):
 //   Hide modules that are not finished yet so `dev` stays green and the stack is
 //   always demoable. A flag names a build-rollout capability (e.g. the deferred
 //   AI QTO engine, PLAN.md §12) — NOT a per-tenant/product entitlement and NOT
@@ -150,9 +150,10 @@ declare module "fastify" {
 }
 
 /**
- * Register the resolved flag set on the app + every request, and expose a
- * read-only `GET /feature-flags` (public — the shell reads it to hide unfinished
- * menus before auth). Returns { enabled } so a client only sees what is live.
+ * Register the resolved flag set on the app + every request so route guards and
+ * handlers can read it. No HTTP endpoint is exposed: `GET /feature-flags` is not
+ * in the contract (packages/contracts/openapi.yaml), so it is omitted here per
+ * decision B-018(ค) — nothing uncontracted is added by this zone.
  */
 export async function registerFeatureFlags(
   app: FastifyInstance,
@@ -160,8 +161,6 @@ export async function registerFeatureFlags(
 ): Promise<void> {
   app.decorate("features", features);
   app.decorateRequest("features", { getter: () => features });
-
-  app.get("/feature-flags", async () => ({ enabled: features.enabledFlags() }));
 }
 
 /**
@@ -171,9 +170,7 @@ export async function registerFeatureFlags(
 export function requireFeature(flag: string): preHandlerHookHandler {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     if (request.features.isEnabled(flag)) return;
-    await reply.code(404).send({
-      error: { code: "NOT_FOUND", message: "Not found" },
-    });
+    await reply.code(404).send({ code: "NOT_FOUND", message: "Not found" });
     return reply; // stop the chain; the handler never runs for a hidden module.
   };
 }

@@ -113,20 +113,11 @@ describe("registerFeatureFlags + requireFeature guard", () => {
     return app;
   };
 
-  it("GET /feature-flags returns the enabled set", async () => {
-    await build(new FeatureFlags({ defaults: { ai_qto: false, reports: true }, env: {} }));
-    const res = await app.inject({ method: "GET", url: "/feature-flags" });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ enabled: ["reports"] });
-  });
-
-  it("404s a disabled module (hidden == does not exist)", async () => {
+  it("404s a disabled module with the flat contract Error shape", async () => {
     await build(new FeatureFlags({ defaults: { ai_qto: false }, env: {} }));
     const res = await app.inject({ method: "GET", url: "/qto" });
     expect(res.statusCode).toBe(404);
-    expect(res.json()).toEqual({
-      error: { code: "NOT_FOUND", message: "Not found" },
-    });
+    expect(res.json()).toEqual({ code: "NOT_FOUND", message: "Not found" });
   });
 
   it("passes through when the module is enabled", async () => {

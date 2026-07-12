@@ -18,8 +18,8 @@
 // DONE(P0-BE-14): feature-flag mechanism (src/plugins/feature-flags.ts) hides
 //                 unfinished modules so dev stays green / always demoable. Flags
 //                 default via DEFAULT_FEATURE_FLAGS and are overridable by env;
-//                 GET /feature-flags reports the enabled set for the shell, and
 //                 requireFeature(flag) 404s a hidden module on future routes.
+//                 No GET /feature-flags endpoint — not in the contract, B-018(ค).
 // TODO(later):    auth + resource routes per packages/contracts/openapi.yaml,
 //                 mount the better-auth HTTP handler, and swap the unlimited
 //                 quota resolver for a subscription-backed one once usage
@@ -45,8 +45,7 @@ const db = createDb();
 await registerTenantScope(app, {
   db,
   resolveCompanyId: (request) => resolveTenantFromAuth(request),
-  // /feature-flags is read pre-auth so the shell can hide unfinished modules.
-  publicPaths: [...DEFAULT_PUBLIC_PATHS, "/feature-flags"],
+  publicPaths: DEFAULT_PUBLIC_PATHS,
 });
 
 // Feature flags: hide modules that are not finished yet so dev stays green /

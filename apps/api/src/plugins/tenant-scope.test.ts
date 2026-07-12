@@ -43,7 +43,8 @@ describe("protected routes fail closed", () => {
     const res = await (await buildApp(null)).inject({ url: "/projects" });
     expect(res.statusCode).toBe(401);
     expect(res.json()).toEqual({
-      error: { code: "UNAUTHENTICATED", message: "Missing tenant context" },
+      code: "UNAUTHENTICATED",
+      message: "Missing tenant context",
     });
   });
 
