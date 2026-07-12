@@ -60,6 +60,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@juneflow/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@juneflow/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
@@ -72,6 +75,9 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.58.0
         version: 1.170.17(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      openapi-fetch:
+        specifier: ^0.17.0
+        version: 0.17.0
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -94,6 +100,9 @@ importers:
       vite:
         specifier: ^5.4.6
         version: 5.4.21(@types/node@22.20.1)
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.1)
 
   packages/bank-file:
     devDependencies:
@@ -1848,6 +1857,12 @@ packages:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
     engines: {node: '>=14.0.0'}
 
+  openapi-fetch@0.17.0:
+    resolution: {integrity: sha512-PsbZR1wAPcG91eEthKhN+Zn92FMHxv+/faECIwjXdxfTODGSGegYv0sc1Olz+HYPvKOuoXfp+0pA2XVt2cI0Ig==}
+
+  openapi-typescript-helpers@0.1.0:
+    resolution: {integrity: sha512-OKTGPthhivLw/fHz6c3OPtg72vi86qaMlqbJuVJ23qOvQ+53uw1n7HdmkJFibloF7QEjDrDkzJiOJuockM/ljw==}
+
   openapi-typescript@7.13.0:
     resolution: {integrity: sha512-EFP392gcqXS7ntPvbhBzbF8TyBA+baIYEm791Hy5YkjDYKTnk/Tn5OQeKm5BIZvJihpp8Zzr4hzx0Irde1LNGQ==}
     hasBin: true
@@ -3547,6 +3562,12 @@ snapshots:
   node-releases@2.0.51: {}
 
   on-exit-leak-free@2.1.2: {}
+
+  openapi-fetch@0.17.0:
+    dependencies:
+      openapi-typescript-helpers: 0.1.0
+
+  openapi-typescript-helpers@0.1.0: {}
 
   openapi-typescript@7.13.0(typescript@5.9.3):
     dependencies:
