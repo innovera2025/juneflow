@@ -107,3 +107,14 @@
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $7.3861/$16 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
 - 2026-07-12T13:13:48Z loop round ended (agent: devops)
+- 2026-07-12T14:16:15Z loop round ended (agent: devops)
+
+## 2026-07-12 21:16 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 1/3: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต devops — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $1.5181/$16 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+
+## 2026-07-12 21:28 · loop-runner · fail-safe
+- ทำอะไร: หยุดการทำงานจาก error: tracked worktree is dirty at loop start — commit or stash changes first (clean-state requirement) (รอบที่ 1/3 · task ล่าสุด: -)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: ตรวจสถานะ repo และ log ก่อนสั่งรันใหม่ · งบสะสมรอบนี้: $0
