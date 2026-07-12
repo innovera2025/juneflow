@@ -58,10 +58,10 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
 | P0-MOB-01 | mobile | done | apps/mobile Flutter skeleton (โครงเท่านั้น ตามกลุ่ม 5 — จอเริ่ม Phase 4) | P0-BE-01 | `flutter analyze` + build ผ่าน | 2 ชม. |
-| P0-MOB-02 | mobile | review | theme จาก generated ThemeData ของ `packages/tokens` — **ห้ามแก้มือ** (กลุ่ม 2.3) | P0-MOB-01, P0-BE-04 | theme มาจาก gen เท่านั้น (ไม่มีค่า hardcode) | 2 ชม. |
-| P0-MOB-03 | mobile | review | Dart client codegen จาก `packages/contracts/openapi.yaml` (กลุ่ม 2.3 + PLAN.md §5) | P0-MOB-01, P0-BE-12 | codegen ผ่าน + compile ผ่าน | 3 ชม. |
+| P0-MOB-02 | mobile | done | theme จาก generated ThemeData ของ `packages/tokens` — **ห้ามแก้มือ** (กลุ่ม 2.3) | P0-MOB-01, P0-BE-04 | theme มาจาก gen เท่านั้น (ไม่มีค่า hardcode) | 2 ชม. |
+| P0-MOB-03 | mobile | done | Dart client codegen จาก `packages/contracts/openapi.yaml` (กลุ่ม 2.3 + PLAN.md §5) | P0-MOB-01, P0-BE-12 | codegen ผ่าน + compile ผ่าน | 3 ชม. |
 | P0-MOB-04 | mobile | blocked | mobile screen inventory — `pototype/mobile*.jsx` (31 จอ) → ตาราง widget mapping + ภาพอ้างอิง gallery mobile ต่อจอ → เก็บที่ `apps/mobile/docs/screen-map.md` (เตรียม Phase 4) · **blocked B-015**: source enumerate ได้ 26 จอ distinct (+1 host) ขัดกับ "31 จอ" ใน zone CLAUDE.md (sacred) — count/นิยาม "จอ" ต้อง Wei ตัดสิน | — | ครบ 31 จอ · review โดย Wei | 3 ชม. |
-| P0-MOB-05 | mobile | review | โครง offline queue interface (drift/SQLite + sync queue ตามภาคผนวก A) — **เฉพาะส่วนที่ไม่ขึ้นกับระดับ (ก)/(ข)** · ระดับ offline-first รอคำตอบ Open Q #5 (PLAN.md §11) — ถ้าชนทางเลือก → BLOCKERS **ห้ามตัดสินใจเอง** | P0-MOB-01 | `flutter analyze` + unit interface ผ่าน | 3 ชม. |
+| P0-MOB-05 | mobile | done | โครง offline queue interface (drift/SQLite + sync queue ตามภาคผนวก A) — **เฉพาะส่วนที่ไม่ขึ้นกับระดับ (ก)/(ข)** · ระดับ offline-first รอคำตอบ Open Q #5 (PLAN.md §11) — ถ้าชนทางเลือก → BLOCKERS **ห้ามตัดสินใจเอง** | P0-MOB-01 | `flutter analyze` + unit interface ผ่าน | 3 ชม. |
 
 ## เขต qa — `tests/`
 
