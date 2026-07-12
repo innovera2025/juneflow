@@ -11,6 +11,7 @@
  *
  * P0-WEB-01 wires the skeleton: TanStack Query (query-client.ts) + TanStack Router (router.tsx),
  * both bound to the @juneflow/tokens fiori theme (no hardcoded design values). Later tasks fill it in.
+ * P0-WEB-06 adds the generated API client (api-client.ts) that Query queryFns call. Later tasks fill it in.
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -20,17 +21,23 @@ import { RouterProvider } from "@tanstack/react-router";
 import "@juneflow/tokens/src/tokens.css";
 import { queryClient } from "./query-client";
 import { router } from "./router";
+import { I18nProvider } from "./i18n";
 
-// TODO(P0-WEB-02): build the route tree + route constants for all 44 menus, port order per
-//   docs/extract/NAV-ROUTES.md (default route = "dashboard"; routes missing a screen render the
-//   prototype Placeholder; decisions C7 = NAV-side labels / approve-BOQ label / add boq.bom label,
-//   C8 = gate subcon.* with module subcon). Placeholder screens stay hidden behind feature flags.
-// TODO(P0-WEB-03): i18n wiring - key-based t() from @juneflow/i18n (th/zh/en/ar + RTL for ar).
-//   Every visible string = key from i18n-full.json; missing key => write BLOCKERS.md, never invent.
+// DONE(P0-WEB-02): route tree + route constants for all routes in docs/extract/NAV-ROUTES.md
+//   live in routes/registry.ts (structural: id/component/file/module gate) and router.tsx builds
+//   the tree from it (default route = "dashboard"; every screen behind a Phase-0 feature flag ->
+//   Placeholder until ported; C7 boq.bom is a first-class route, C8 subcon.* gated by module
+//   subcon). scripts/check-nav-parity.mjs proves 100% parity with NAV-ROUTES.md.
+// DONE(P0-WEB-03): i18n wiring - <I18nProvider> (src/i18n/) exposes key-based t()/tn()/tp()
+//   from @juneflow/i18n and switches th/zh/en/ar + RTL (langStore mirrors the prototype:
+//   localStorage "juneflow-lang" + <html lang/dir>, minus the DOM MutationObserver mock).
+//   Every visible string = key from i18n-full.json. Dynamic number-bearing phrases
+//   (prototype PHRASE_PATTERNS) deferred -> BLOCKERS.md B-017 (no key in i18n-full.json).
 // TODO(P0-WEB-05): port the app shell 1:1 from pototype/chrome.jsx + shell.jsx (sidebar/topbar/menu);
 //   badges come from real queries (decision C10), labels from i18n keys. Must pass the visual gate (G5).
-// TODO(P0-WEB-06): API client generated from packages/contracts openapi.yaml only - never hand-write
-//   models or fetch calls; feed the generated client into the TanStack Query client (query-client.ts).
+// DONE(P0-WEB-06): API client generated from packages/contracts openapi.yaml (api-client.ts, via
+//   openapi-fetch typed by the generated `paths`) - no hand-written models/fetch; fed into TanStack
+//   Query through the `unwrap` adapter in query-client.ts.
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
@@ -39,8 +46,10 @@ if (!rootEl) {
 
 createRoot(rootEl).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </I18nProvider>
   </StrictMode>,
 );
