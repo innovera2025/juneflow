@@ -88,11 +88,12 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 
 | id | เขต | สถานะ | spec pointer | dependencies | gates ที่ต้องผ่าน | ประมาณเวลา |
 |---|---|---|---|---|---|---|
+| P0-DEV-01 | devops | done | `infra/docker-compose.yml` (dev) — pg16 + redis + api + web + worker · **`docker compose up` เดียวได้ระบบ + seed** (Manifest กลุ่ม 5 ข้อกำหนด Phase 0) | P0-BE-10, P0-BE-13 | compose up สำเร็จรอบเดียว + seed ครบ + คลิกเทียบ gallery ได้ | 3 ชม. |
 | P0-DEV-01 | devops | done | `infra/docker-compose.yml` (dev) — pg16 + redis + api + web + worker · **`docker compose up` เดียวได้ระบบ + seed** (Manifest กลุ่ม 5 ข้อกำหนด Phase 0) | P0-BE-10, P0-BE-13 | compose up สำเร็จรอบเดียว + seed ครบ + คลิกเทียบ gallery ได้ | 3 ชม. | · **milestone สำเร็จ (verified compose up + seed + curl 200)**
 | P0-DEV-02 | devops | done | `.github/workflows/ci.yml` ตามกลุ่ม 4.3 — stages: lint+typecheck → migration check → contract → unit → E2E → visual · เขียว auto-merge feature→dev · main ล็อกให้ Wei · **sacred หลัง merge** · done ตาม B-010 ตอบ ก (pipeline จริงรันเมื่อมี remote) | P0-BE-01 | pipeline รันผ่านบน branch ทดสอบ | 3 ชม. |
 | P0-DEV-03 | devops | done | `.github/CODEOWNERS` ตามกลุ่ม 4.4 — ล็อกเขตต่อ agent + sacred files (OpenAPI · merged migrations · CLAUDE.md ทุกใบ · CI config · secrets · `docs/extract/*` · i18n-full.json) | P0-BE-01 | ครอบคลุม sacred ครบตาม PLAN.md §10 | 1 ชม. |
 | P0-DEV-04 | devops | done | branch policy + runbook — dev auto-merge เมื่อ CI เขียว · main = Wei promote คนเดียว · runbook: deploy dev / promote main / restore DB → `infra/runbook.md` (กลุ่ม 2.6) | P0-DEV-02 | review โดย Wei + ทดสอบ flow feature→dev จริง 1 รอบ | 2 ชม. |
-| P0-DEV-05 | devops | ready | infra prod compose skeleton (VPS Singapore ตามภาคผนวก A) — env จาก host **ห้าม secrets ใน repo** | P0-DEV-01 | config validate ผ่าน + scan ไม่พบ secret | 3 ชม. |
+| P0-DEV-05 | devops | done | infra prod compose skeleton (VPS Singapore ตามภาคผนวก A) — env จาก host **ห้าม secrets ใน repo** | P0-DEV-01 | config validate ผ่าน + scan ไม่พบ secret | 3 ชม. |
 
 ## เขต — Audit follow-ups (จาก 47-agent audit ของ Wei 12 ก.ค. · ผ่านแบบมีเงื่อนไข ทำก่อน milestone ที่ระบุ)
 
