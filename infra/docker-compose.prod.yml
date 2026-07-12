@@ -1,0 +1,79 @@
+# infra/docker-compose.prod.yml — production skeleton (TASKS.md P0-DEV-05)
+# Target: Docker Compose on a VPS in Singapore, with Cloudflare in front
+# (DNS + CDN + WAF + rate limit + Turnstile — PLAN.md Appendix A; no Workers/D1/Pages).
+#
+# Hard rules (infra/CLAUDE.md + PLAN.md §10):
+# - NO secrets in this repo — every value comes from the host environment / secret store.
+#   `${VAR:?...}` below fails fast when a required value is missing on the host.
+# - Images are built by CI (GitHub Actions — P0-DEV-02) and pulled from a registry;
+#   prod never builds from source on the VPS.
+#
+# TODO(P0-DEV-05): complete this skeleton —
+#   - reverse proxy / TLS termination service (only edge port exposed; Cloudflare in front)
+#   - registry image references + tag pinning strategy
+#   - postgres backup job + restore procedure wiring (runbook: infra/runbook.md — P0-DEV-04)
+#   - resource limits, log rotation, healthcheck-based restarts
+#   - `docker compose -f docker-compose.prod.yml config` must validate with host env set,
+#     and a secret scan of the repo must stay clean (gate for P0-DEV-05).
+
+name: juneflow-prod
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set on host}
+      POSTGRES_USER: ${POSTGRES_USER:?set on host}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set on host}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # No published ports in prod — internal network only.
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # TODO(P0-DEV-05): persistence (AOF) + memory policy for BullMQ queues.
+
+  api:
+    image: ${API_IMAGE:?CI-built api image ref, set on host}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set on host}
+      REDIS_URL: ${REDIS_URL:?set on host}
+      # TODO(P0-DEV-05): better-auth secrets, Cloudflare R2 credentials, LINE Login keys —
+      # all via host env / secret store only (sacred — PLAN.md §10).
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    # TODO(P0-DEV-05): migrations in prod run as an explicit deploy step (see infra/runbook.md),
+    # not automatically on container start.
+
+  worker:
+    image: ${API_IMAGE:?CI-built api image ref, set on host}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set on host}
+      REDIS_URL: ${REDIS_URL:?set on host}
+    depends_on:
+      redis:
+        condition: service_started
+    command: ["pnpm", "run", "worker"] # TODO(P0-BE-13): worker entrypoint
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE:?CI-built web image ref, set on host}
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    # TODO(P0-DEV-05): served behind the reverse proxy; Cloudflare handles CDN/WAF above it.
+
+volumes:
+  pgdata:

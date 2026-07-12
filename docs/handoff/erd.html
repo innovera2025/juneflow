@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Juneflow — ERD แผนภาพความสัมพันธ์ฐานข้อมูล</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0}
+body{font-family:Sarabun,sans-serif;background:#F5F6F7;color:#223548}
+.top{padding:22px 28px 10px}
+h1{font-size:22px}.sub{color:#556B82;font-size:13px;margin-top:3px}
+.legend{display:flex;gap:16px;font-size:11.5px;color:#556B82;padding:8px 28px 0;flex-wrap:wrap}
+.legend b{font-family:"IBM Plex Sans"}
+#stage{position:relative;margin:16px auto 60px;background:#fff;border:1px solid #D9DCDF;width:1860px;min-height:100px;border-radius:8px;overflow:hidden}
+#wires{position:absolute;inset:0;pointer-events:none}
+.band{position:absolute;left:0;right:0;border-top:1px dashed #E3E7EB;padding:6px 14px;font-size:10.5px;font-weight:800;letter-spacing:.08em;color:#8FA0B2;text-transform:uppercase}
+.ent{position:absolute;width:236px;background:#fff;border:1.5px solid #C2C8CE;border-radius:6px;box-shadow:0 1px 3px rgba(15,23,42,.07);font-size:11px}
+.ent h3{font-size:12px;padding:6px 10px;border-bottom:1px solid #E3E7EB;border-radius:5px 5px 0 0;color:#fff;font-family:"IBM Plex Sans",Sarabun;display:flex;justify-content:space-between;align-items:center}
+.ent h3 small{font-weight:400;opacity:.85;font-size:9.5px}
+.ent ul{list-style:none;padding:5px 10px 7px}
+.ent li{padding:1.5px 0;color:#38506B;display:flex;gap:6px}
+.ent li b{font-family:"IBM Plex Sans";color:#0A6ED1;font-weight:600}
+.ent li.pk b{color:#B45309}
+.card-lbl{font-family:"IBM Plex Sans";font-size:10px;font-weight:700;fill:#556B82}
+@media print{body{background:#fff}#stage{border:none}}
+</style>
+</head>
+<body>
+<div class="top"><h1>ERD — แผนภาพความสัมพันธ์ฐานข้อมูล Juneflow</h1>
+<div class="sub">~34 entities · 6 โดเมน · คู่กับ data-dictionary.html (ฟิลด์เต็ม) · เส้น = FK, ป้าย 1/N = cardinality, เส้นประ = ความสัมพันธ์แบบอ้างอิงทุกโมดูล</div></div>
+<div class="legend"><span><b style="color:#B45309">id</b> = Primary Key</span><span><b style="color:#0A6ED1">xxx_id</b> = Foreign Key</span><span>สีหัวกล่อง = โดเมน</span></div>
+<div id="stage"><svg id="wires"></svg></div>
+
+<script>
+/* ---------- data ---------- */
+const C = { plat:"#6D28D9", master:"#0B2A4A", boq:"#0A6ED1", sub:"#B45309", pm:"#0F766E", fin:"#B4453C", other:"#556B82" };
+const BANDS = [
+  [0,    "Platform / Tenant"],
+  [300,  "Master / โครงการ"],
+  [610,  "BOQ & จัดซื้อ"],
+  [990,  "ผู้รับเหมา & ตรวจรับ"],
+  [1270, "PM · บำรุงรักษา (CMMS)"],
+  [1550, "การเงิน-บัญชี"],
+  [1930, "ที่ดิน / ขาย / ระบบกลาง"],
+];
+const X = (c) => 30 + c * 262;               // 7 คอลัมน์
+const ENT = [
+ /* id, col, y, color, title, note, fields */
+ ["pkg",0,40,C.plat,"Package","S/M/L/Full",["id","size, price_m/price_y","limits{prj,user,gb,ai}","menus[] + sub_rules"]],
+ ["subx",1,40,C.plat,"Subscription","",["id","company_id","package_id","cycle, renew_at, status"]],
+ ["com",2,40,C.plat,"Company","tenant",["id","name, tax_id","status"]],
+ ["usr",3,40,C.plat,"User","",["id","company_id","role_id","email, status(blocked)"]],
+ ["role",4,40,C.plat,"Role","",["id","name","approval_limits{}"]],
+ ["pinv",5,40,C.plat,"PlatformInvoice","",["id","subscription_id","amount, status"]],
+ ["aiu",6,40,C.plat,"AiUsage","โควต้า AI",["id","company_id","month, used"]],
+
+ ["ptype",0,345,C.master,"ProjectType","Full only",["id","hierarchy[]","modules{}"]],
+ ["prj",1,345,C.master,"Project","",["id","company_id","type_id","budget, status"]],
+ ["pbu",2,345,C.master,"Phase/Block/Unit","tree",["id","project_id","parent_id","model_id, sale_status"]],
+ ["model",3,345,C.master,"Model","แบบบ้าน",["id","name, area"]],
+ ["cc",4,345,C.master,"CostCenter","",["id","project_id","code"]],
+ ["ven",5,345,C.master,"Vendor","ผู้ขาย/ผู้รับเหมา",["id","kind: supplier|subcon","credit_term"]],
+ ["cus",6,345,C.master,"Customer","",["id","name, tax_id"]],
+
+ ["bom",0,660,C.boq,"BOM Template","สูตรต่อหลัง",["id","unit_type","items[]"]],
+ ["boq",1,660,C.boq,"BOQDoc","revise = v+1",["id","project_id","version, status(lock)"]],
+ ["bgrp",2,660,C.boq,"BOQGroup","หมวด + CBS",["id","boq_id","budget/used/committed"]],
+ ["bitem",3,660,C.boq,"BOQItem","",["id","group_id","cat M|L|S, qty, price","remain_qty, element_id"]],
+ ["pr",4,660,C.boq,"PR + Items","วัสดุ|เหมา|ทดรอง",["id","project_id","boq_item_id (n)","status, approval_step"]],
+ ["po",5,660,C.boq,"PO / WO","+ VariationOrder",["id","pr_id","vendor_id","total, vo[]"]],
+ ["gr",6,660,C.boq,"GR","รับของ/ตีกลับ",["id","po_id","qty_ok/qty_rejected","photos[] → defect"]],
+
+ ["scon",0,1030,C.sub,"SubconContract","",["id","vendor_id","project_id","value, retention_pct"]],
+ ["wp",1,1030,C.sub,"WorkPeriod","งวดงาน",["id","contract_id","basis %|ระยะ|milestone","status → paid"]],
+ ["acc",2,1030,C.sub,"Acceptance","ศูนย์ตรวจรับ",["id","period_id","inspector, photos[]","signed_at"]],
+ ["def",3,1030,C.sub,"Defect","ตีกลับ-แก้-ตรวจซ้ำ",["id","acceptance_id","before/after_photo","due, status"]],
+
+ ["pmc",0,1310,C.pm,"PMContract","MA | รายครั้ง",["id","project_id","customer_id","mode, visits/ปี, sla"]],
+ ["pma",1,1310,C.pm,"PMAsset","",["id","contract_id","kind, cycle, next_due"]],
+ ["pmwo",2,1310,C.pm,"PMWorkOrder","checkin+checklist",["id","asset_id","template_id","checklist[], sign"]],
+ ["pmt",3,1310,C.pm,"ChecklistTemplate","ตั้งค่ากลาง",["id","kind","items[]"]],
+ ["pmq",4,1310,C.pm,"PMQuote","อะไหล่ → LINE",["id","wo_id","parts[], decision"]],
+
+ ["apb",0,1590,C.fin,"APBilling","3-way match",["id","po_id, gr_id","invoice_no, due"]],
+ ["pv",1,1590,C.fin,"PV","ใบสำคัญจ่าย",["id","billing_ids[]","wht_pct, net","batch_id (bank)"]],
+ ["arinv",2,1590,C.fin,"ARInvoice","+ e-Tax queue",["id","customer_id","vat, credit_term","etax_status"]],
+ ["rv",3,1590,C.fin,"RV","รับชำระ",["id","invoice_id","amount, method"]],
+ ["jv",4,1590,C.fin,"JV","double entry",["id","source_doc","lines[{acc,dr,cr,cc}]","period(lock)"]],
+ ["coa",5,1590,C.fin,"GLAccount","ผังบัญชี tree",["id","code, name","parent_id"]],
+ ["fa",6,1590,C.fin,"FixedAsset","ค่าเสื่อม→JV",["id","cost, life_years","cc_id"]],
+ ["labor",5,1760,C.fin,"Worker→Attendance→Payroll","ค่าแรง→ต้นทุน",["worker_id","day, ot","period, cc_id"]],
+ ["bank",6,1760,C.fin,"BankStatement/Reconcile","",["id","lines[] ↔ pv/rv","period, locked"]],
+
+ ["land",0,1985,C.other,"LandPlot","pipeline 7 ขั้น",["id","project_id","deed_no, area, gps","stage, dd{}, tenure"]],
+ ["sunit",1,1985,C.other,"SalesUnit","จอง→โอน",["id","unit_id","customer_id","stage, down[], loan"]],
+ ["doc",2,1985,C.other,"Document (DMS)","ทุกโมดูลแนบ",["id","cat, project_id","version, expiry","link_module"]],
+ ["noti",3,1985,C.other,"Notification","",["id","user_id","type, ref, read"]],
+ ["audit",4,1985,C.other,"AuditLog","ทุก mutation",["id","user, action","entity, before/after"]],
+];
+/* [from, to, fromLabel, toLabel, dashed] — from "1" side ไป "N" side โดย default */
+const REL = [
+ ["pkg","subx"],["com","subx"],["subx","pinv"],["com","aiu"],["com","usr"],["role","usr"],
+ ["com","prj"],["ptype","prj"],["prj","pbu"],["model","pbu"],["prj","cc"],
+ ["prj","boq"],["boq","bgrp"],["bgrp","bitem"],["bom","bitem"],["bitem","pr"],["pr","po"],["ven","po"],["po","gr"],
+ ["ven","scon"],["scon","wp"],["wp","acc","1","1"],["acc","def"],["wp","apb"],
+ ["prj","pmc"],["cus","pmc"],["pmc","pma"],["pma","pmwo"],["pmt","pmwo"],["pmwo","pmq"],
+ ["po","apb"],["gr","apb"],["pv","apb"],["cus","arinv"],["arinv","rv"],
+ ["pv","jv"],["rv","jv"],["fa","jv"],["coa","jv"],["labor","jv"],["bank","pv","","",1],
+ ["prj","land"],["pbu","sunit"],["cus","sunit"],
+ ["doc","acc","","",1],["doc","scon","","",1],["audit","jv","","",1],
+];
+
+/* ---------- render ---------- */
+const stage = document.getElementById("stage");
+const boxes = {};
+BANDS.forEach(([y, l]) => { const d = document.createElement("div"); d.className = "band"; d.style.top = y + "px"; d.textContent = l; stage.appendChild(d); });
+ENT.forEach(([id, col, y, color, title, note, fields]) => {
+  const d = document.createElement("div");
+  d.className = "ent"; d.style.left = X(col) + "px"; d.style.top = y + "px";
+  d.innerHTML = `<h3 style="background:${color}">${title}<small>${note || ""}</small></h3>
+    <ul>${fields.map((f, i) => `<li class="${i === 0 ? "pk" : ""}"><b>${f.split(" ")[0].replace(/,$/, "")}</b><span>${f.split(" ").slice(1).join(" ")}</span></li>`).join("")}</ul>`;
+  stage.appendChild(d);
+  boxes[id] = d;
+});
+// stage height
+const maxBottom = Math.max(...ENT.map(([id]) => boxes[id].offsetTop + boxes[id].offsetHeight));
+stage.style.height = (maxBottom + 50) + "px";
+// wires
+const svg = document.getElementById("wires");
+svg.setAttribute("width", 1860); svg.setAttribute("height", maxBottom + 50);
+const rect = (id) => { const b = boxes[id]; return { x: b.offsetLeft, y: b.offsetTop, w: b.offsetWidth, h: b.offsetHeight }; };
+function port(r, side) {
+  if (side === "R") return [r.x + r.w, r.y + r.h / 2];
+  if (side === "L") return [r.x, r.y + r.h / 2];
+  if (side === "B") return [r.x + r.w / 2, r.y + r.h];
+  return [r.x + r.w / 2, r.y];
+}
+REL.forEach(([a, b, la = "1", lb = "N", dashed]) => {
+  const ra = rect(a), rb = rect(b);
+  let p1, p2, path;
+  const sameRow = Math.abs(ra.y - rb.y) < 60;
+  if (sameRow && rb.x > ra.x) { p1 = port(ra, "R"); p2 = port(rb, "L"); const mx = (p1[0] + p2[0]) / 2; path = `M${p1[0]},${p1[1]} L${mx},${p1[1]} L${mx},${p2[1]} L${p2[0]},${p2[1]}`; }
+  else if (sameRow) { p1 = port(ra, "L"); p2 = port(rb, "R"); const mx = (p1[0] + p2[0]) / 2; path = `M${p1[0]},${p1[1]} L${mx},${p1[1]} L${mx},${p2[1]} L${p2[0]},${p2[1]}`; }
+  else if (rb.y > ra.y) { p1 = port(ra, "B"); p2 = port(rb, "T"); const my = p2[1] - 18 - (Math.abs(p2[0]-p1[0]) % 5) * 4; path = `M${p1[0]},${p1[1]} L${p1[0]},${my} L${p2[0]},${my} L${p2[0]},${p2[1]}`; }
+  else { p1 = port(ra, "T"); p2 = port(rb, "B"); const my = p1[1] - 18 - (Math.abs(p2[0]-p1[0]) % 5) * 4; path = `M${p1[0]},${p1[1]} L${p1[0]},${my} L${p2[0]},${my} L${p2[0]},${p2[1]}`; }
+  const el = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  el.setAttribute("d", path); el.setAttribute("fill", "none");
+  el.setAttribute("stroke", dashed ? "#A9B6C3" : "#7C93A9"); el.setAttribute("stroke-width", "1.4");
+  if (dashed) el.setAttribute("stroke-dasharray", "5 4");
+  svg.appendChild(el);
+  [[p1, la], [p2, lb]].forEach(([p, txt]) => {
+    if (!txt) return;
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("x", p[0] + 4); t.setAttribute("y", p[1] - 4); t.setAttribute("class", "card-lbl"); t.textContent = txt;
+    svg.appendChild(t);
+  });
+});
+</script>
+</body>
+</html>

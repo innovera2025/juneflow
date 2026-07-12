@@ -1,0 +1,1 @@
+ALTER TABLE "sales_unit" ADD COLUMN "contract" numeric(16, 2);

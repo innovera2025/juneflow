@@ -1,0 +1,34 @@
+{
+  "name": "@juneflow/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Juneflow API - Fastify + better-auth + BullMQ worker (Backend/Platform zone, see PLAN.md section 5)",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@juneflow/db": "workspace:*",
+    "better-auth": "^1.2.8",
+    "bullmq": "^5.34.0",
+    "drizzle-orm": "^0.38.3",
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.2",
+    "pg": "^8.13.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.0"
+  }
+}

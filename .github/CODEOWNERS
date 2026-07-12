@@ -1,0 +1,55 @@
+# .github/CODEOWNERS — Juneflow zone ownership
+# (Bootstrap Manifest v2 group 4.4 + PLAN.md §8 Agent Team & Ownership + §10 sacred files)
+#
+# TODO: replace EVERY placeholder handle below (@juneflow-backend, @juneflow-web,
+#       @juneflow-mobile, @juneflow-qa, @juneflow-integrations, @juneflow-devops,
+#       @juneflow-wei) with real GitHub usernames/teams before enabling branch
+#       protection + required reviews on dev/main.
+#
+# CODEOWNERS resolution: the LAST matching pattern wins. Zone rules come first,
+# sacred-file rules (owned by Wei) come last so they always take precedence —
+# e.g. /.github/ appears in the devops zone AND in the sacred block; the sacred
+# block wins because CI config is a sacred file (PLAN.md §10).
+#
+# Secrets are also sacred, but no pattern is needed: secrets must NEVER exist
+# in the repo at all (PLAN.md §10 + infra/CLAUDE.md).
+
+# --- Zone ownership (PLAN.md §8: one agent = one worktree = one zone) ---
+
+# Backend/Platform — apps/api + packages/db (+ packages/contracts;
+# openapi.yaml itself is overridden by the sacred block below)
+/apps/api/                @juneflow-backend
+/packages/db/             @juneflow-backend
+/packages/contracts/      @juneflow-backend
+
+# Frontend Web — strictest Design Fidelity zone
+/apps/web/                @juneflow-web
+
+# Mobile (Flutter)
+/apps/mobile/             @juneflow-mobile
+
+# QA — expected-first, never reads implementation before writing expected
+/tests/                   @juneflow-qa
+
+# Integrations — mock-first
+/packages/tax-engine/     @juneflow-integrations
+/packages/bank-file/      @juneflow-integrations
+/packages/notifications/  @juneflow-integrations
+
+# DevOps (rotating)
+/infra/                   @juneflow-devops
+/scripts/                 @juneflow-devops
+/.github/                 @juneflow-devops
+
+# --- Sacred files (PLAN.md §10) — Wei only; changed via approved blocker only ---
+# TODO: replace @juneflow-wei with Wei's real GitHub username.
+
+/packages/contracts/openapi.yaml    @juneflow-wei
+# Merged migrations dir = drizzle-kit "out" dir — keep in sync with
+# packages/db/drizzle.config.ts (out: "./drizzle").
+/packages/db/drizzle/               @juneflow-wei
+**/CLAUDE.md                        @juneflow-wei
+/.github/                           @juneflow-wei
+/docs/extract/                      @juneflow-wei
+/packages/i18n/src/i18n-full.json   @juneflow-wei
+/PLAN.md                            @juneflow-wei

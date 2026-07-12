@@ -1,0 +1,25 @@
+{
+  "name": "@juneflow/notifications",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NotificationAdapter compliance interface + line/email/webpush adapters (skeleton + fake, mock-first). Credentials via env only (P0-INT-04) - never committed.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adapters/line": "./src/adapters/line.ts",
+    "./adapters/email": "./src/adapters/email.ts",
+    "./adapters/webpush": "./src/adapters/webpush.ts",
+    "./config": "./src/config.ts"
+  },
+  "scripts": {
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.0"
+  }
+}

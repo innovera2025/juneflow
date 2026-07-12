@@ -1,0 +1,68 @@
+/* Juneflow Design Tokens — 2 themes
+   ใช้: <html data-theme="fiori"> (ค่าเริ่มต้น) หรือ data-theme="navy" */
+
+:root, [data-theme="fiori"] {
+  /* brand */
+  --brand: #0A6ED1;          /* SAP Blue — ปุ่มหลัก ลิงก์ active */
+  --brand-2: #085CAF;        /* hover */
+  --brand-soft: #E3F0FB;     /* พื้นอ่อนของ brand */
+  --accent: #0A6ED1;
+  /* shell (sidebar เข้ม) */
+  --shell-bg: #354A5F;
+  --shell-bg-2: #2F4254;
+  --shell-border: #46586B;
+  --shell-text: #C9D6E2;
+  --shell-text-strong: #FFFFFF;
+  --shell-active: #7CC4FF;
+  /* surfaces */
+  --bg: #F5F6F7;
+  --surface: #FFFFFF;
+  --surface-2: #FAFBFC;
+  --surface-3: #E8ECF0;
+  --border: #D9DCDF;
+  --border-strong: #C2C8CE;
+  /* text */
+  --text: #223548;
+  --text-2: #556B82;
+  --text-3: #8FA0B2;
+  /* status */
+  --ok: #107E3E;   --ok-soft: #EBF5EF;
+  --warn: #E9730C; --warn-soft: #FDF1E7;
+  --danger: #BB0000; --danger-soft: #FBEAEA;
+  --info: #0A6ED1; --info-soft: #E3F0FB;
+  --draft: #6A7D90; --draft-soft: #EEF1F4;
+  /* geometry */
+  --r-sm: 4px; --r-md: 4px; --r-lg: 6px; --r-pill: 999px;
+  --row-h: 32px;             /* ความสูงแถวตาราง (dense) */
+  --pad-page: 24px; --pad-card: 16px;
+  /* type */
+  --font: "Inter", "Noto Sans Thai", "Noto Sans Arabic", "Noto Sans SC", system-ui, sans-serif;
+  --font-num: "Inter", system-ui, sans-serif;  /* + font-variant-numeric: tabular-nums */
+  --fs-body: 13px; --fs-table: 12px; --fs-th: 10.5px; --fs-h1: 17px;
+  /* elevation */
+  --shadow-xs: 0 1px 0 rgba(0,0,0,.04);
+  --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
+  --shadow-lg: 0 12px 32px rgba(15,23,42,.18);
+  color-scheme: light;       /* กัน OS dark mode ทำ input เพี้ยน */
+}
+
+[data-theme="navy"] {
+  --brand: #0B2A4A; --brand-2: #133E6B; --brand-soft: #E8EEF6; --accent: #0F766E;
+  --shell-bg: #0B2A4A; --shell-bg-2: #0E3157; --shell-border: #1D4368;
+  --shell-text: #C7D5E5; --shell-text-strong: #FFFFFF; --shell-active: #7CC4FF;
+  --bg: #F5F7FA; --surface: #FFFFFF; --surface-2: #FAFBFD; --surface-3: #EEF2F6;
+  --border: #E4E9F0; --border-strong: #D3DBE5;
+  --text: #1A2B42; --text-2: #5A6B82; --text-3: #8C99AC;
+  --ok: #1A7F5A; --ok-soft: #E3F2EA; --warn: #B7791F; --warn-soft: #FBEFDC;
+  --danger: #B4453C; --danger-soft: #F9E8E5; --info: #3B6FB0; --info-soft: #E9F0F8;
+  --r-sm: 6px; --r-md: 8px; --r-lg: 10px;
+  --row-h: 40px; --fs-table: 12.5px;
+  --font: "Noto Sans Thai", "Inter", system-ui, sans-serif;
+}
+
+/* กติกาใช้งานหลัก
+   1. ตัวเลขเงินทุกที่: class num → font-variant-numeric: tabular-nums, ชิดขวาในตาราง
+   2. ปุ่ม: primary=var(--brand) ขาว · outline · ghost · danger — มุม var(--r-md), focus ring 2px var(--brand)
+   3. Badge สถานะ: พื้น *-soft + ตัวหนังสือสีสถานะ + จุดกลม 6px
+   4. ตาราง: หัว uppercase var(--fs-th) สี text-3 พื้น surface-2 · เส้นคั่น 1px var(--border) · ไม่มี zebra
+   5. Empty state ทุกตาราง + Loading (top progress 3px + skeleton) ทุกการเปลี่ยนหน้า */

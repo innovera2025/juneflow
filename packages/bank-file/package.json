@@ -1,0 +1,23 @@
+{
+  "name": "@juneflow/bank-file",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BankFileFormatter compliance interface + kbank-direct implementation (skeleton + fake, mock-first). Credentials via env only (P0-INT-04) - never committed.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./kbank-direct": "./src/kbank-direct/index.ts",
+    "./config": "./src/config.ts"
+  },
+  "scripts": {
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.0"
+  }
+}

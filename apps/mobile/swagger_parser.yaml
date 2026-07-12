@@ -1,0 +1,29 @@
+# Dart API client codegen config (P0-MOB-03).
+#
+# Single source of the API contract = packages/contracts/openapi.yaml (SACRED,
+# read-only from this zone). FE/Mobile GENERATE clients from it — hand-written
+# models are forbidden (PLAN.md §5, root CLAUDE.md "OpenAPI คือ contract").
+#
+# Generator: swagger_parser (pure Dart; openapi-generator's Java runtime is not
+# available on the build host). Output = retrofit interfaces (built on `dio`,
+# the HTTP client already declared in pubspec.yaml) + json_serializable models.
+#
+# Regenerate with:  tool/gen_api_client.sh
+# NEVER hand-edit lib/api/** — change openapi.yaml (via Wei) and regenerate.
+swagger_parser:
+  # Derived working copy (tool/normalize_openapi.py) of the SACRED contract at
+  # ../../packages/contracts/openapi.yaml — path-level parameters inlined so the
+  # pure-Dart generator can parse it. The sacred file itself is never modified.
+  schema_path: build/openapi.normalized.yaml
+  # lib/api/generated/** is reserved for generated client code and is excluded
+  # from static analysis (analysis_options.yaml) — never hand-edit it.
+  output_directory: lib/api/generated
+  json_serializer: json_serializable
+  root_client: true
+  root_client_name: JuneflowApiClient
+  client_postfix: Api
+  put_clients_in_folder: true
+  enums_to_json: true
+  unknown_enum_value: true
+  markdown_comments: true
+  use_xnullable: true

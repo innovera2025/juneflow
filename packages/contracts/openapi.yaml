@@ -1,0 +1,2859 @@
+# =============================================================================
+# SACRED FILE — changes require Wei approval via BLOCKERS.md
+# (PLAN.md section 8/10: OpenAPI contract change goes through Wei ONLY — even
+#  the contract owner (Backend/Platform zone) needs approval before merging.)
+# =============================================================================
+# Single source of the API contract (PLAN.md section 5): FE/Mobile generate
+# clients from this file — hand-written models are forbidden.
+#
+# Derived from: docs/handoff/api-contract.md  (faithful transcription — endpoint
+#   set, verbs and action-endpoint pattern come straight from that doc; nothing
+#   is invented. Ambiguities go to BLOCKERS.md, never guessed.)
+#
+# Contract conventions (api-contract.md):
+#   - REST · JSON · prefix /api/v1
+#   - every request carries Authorization: Bearer <jwt>; the JWT carries
+#     company_id = tenant scope (except the inbound LINE webhook, which LINE
+#     signs with x-line-signature — see /line/webhook)
+#   - standard resource pattern: GET /x?filter&page · GET /x/:id · POST /x ·
+#     PUT /x/:id — status changes go through action endpoints ONLY
+#     (POST /x/:id/approve), never via direct PUT of a status field
+#   - every mutation writes AuditLog automatically (middleware)
+#   - attachments: POST /files (multipart) first, then pass file_id — files
+#     enter DMS automatically with link_module
+#   - all exports are async jobs: POST /exports {type,params} →
+#     GET /exports/:id (url when done)
+#   - quota middleware (menus/projects/users/storage/AI per package) →
+#     402 QUOTA_EXCEEDED + upgrade_url
+#
+# Modeling notes (transcription, not design decisions):
+#   - Resource field shapes are intentionally left opaque (schema `Entity`)
+#     except where api-contract.md names fields explicitly. Full field modeling
+#     belongs to the data-dictionary schema tasks, not this contract; inventing
+#     fields here is forbidden by PLAN.md section 0.
+#   - The list/pagination response envelope is NOT specified in api-contract.md.
+#     Lists return a bare array (the representative shape) pending Wei's decision
+#     on the envelope — see BLOCKERS.md B-014 (non-blocking).
+
+openapi: 3.1.0
+
+info:
+  title: Juneflow API
+  version: 0.1.0
+  description: >-
+    Construction ERP + Subscription SaaS (multi-tenant).
+    REST, JSON, prefix /api/v1. Every request carries
+    "Authorization: Bearer <jwt>"; the JWT carries company_id (tenant scope).
+    Status changes go through action endpoints only, never direct PUT.
+
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Auth & tenant (login, password reset, current user)
+  - name: admin
+    description: Platform Admin — packages, subscribers, users, invoices (system owner)
+  - name: master
+    description: Master data (projects, project types, vendors, customers, cost centers, doc numbering)
+  - name: boq
+    description: BOQ / procurement (BOQ docs, AI QTO, PR, PO/WO, GR)
+  - name: subcon
+    description: Subcontractor / acceptance (contracts, work periods, defects)
+  - name: pm
+    description: PM (CMMS) — contracts, assets, checklists, work orders, quotes
+  - name: finance
+    description: Finance-Accounting (AP/AR/GL/Bank/FA/e-Tax/Labor/OPEX)
+  - name: land-sales
+    description: Land / Sales (plots, leads, bookings, contracts, downs, loans)
+  - name: dms
+    description: DMS / Notifications / Audit / Reports
+  - name: files
+    description: File upload (presigned → R2 → DMS)
+  - name: exports
+    description: Async export jobs
+  - name: line
+    description: LINE OA webhook
+
+paths:
+  # ============================ Auth & Tenant ================================
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login (POST /auth/login {email,password})
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginInput"
+      responses:
+        "200":
+          description: "Authenticated: token + user + company + package."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/forgot:
+    post:
+      tags: [auth]
+      summary: Request password reset (POST /auth/forgot)
+      operationId: authForgot
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+
+  /auth/reset:
+    post:
+      tags: [auth]
+      summary: Reset password (POST /auth/reset)
+      operationId: authReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+
+  /me:
+    get:
+      tags: [auth]
+      summary: Current user (GET /me → user + role + approval_limits + package)
+      operationId: getMe
+      responses:
+        "200":
+          description: Current user with role, approval limits and package usage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================ Platform Admin ==============================
+  /admin/packages:
+    get:
+      tags: [admin]
+      summary: List packages (S/M/L/Full)
+      operationId: listAdminPackages
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [admin]
+      summary: Create package ({price,limits,menus[],sub_rules})
+      operationId: createAdminPackage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /admin/packages/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [admin]
+      summary: Get package by id
+      operationId: getAdminPackage
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [admin]
+      summary: Update package (never changes status — use action endpoints)
+      operationId: updateAdminPackage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/subscribers:
+    get:
+      tags: [admin]
+      summary: List subscribers (companies + usage)
+      operationId: listAdminSubscribers
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /admin/subscribers/{id}/package:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [admin]
+      summary: Change subscriber package (PUT {package_id,seats})
+      operationId: setAdminSubscriberPackage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /admin/subscribers/{id}/suspend:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin]
+      summary: Suspend subscriber (action endpoint)
+      operationId: suspendAdminSubscriber
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /admin/subscribers/{id}/notify:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin]
+      summary: Notify subscriber (action endpoint)
+      operationId: notifyAdminSubscriber
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/users:
+    get:
+      tags: [admin]
+      summary: List users (GET /admin/users?company=)
+      operationId: listAdminUsers
+      parameters:
+        - name: company
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /admin/users/{id}/block:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin]
+      summary: Block user (action endpoint)
+      operationId: blockAdminUser
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /admin/users/{id}/reset-password:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin]
+      summary: Reset user password (action endpoint)
+      operationId: resetAdminUserPassword
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/invoices:
+    get:
+      tags: [admin]
+      summary: List platform invoices
+      operationId: listAdminInvoices
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /admin/invoices/{id}/remind:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin]
+      summary: Send invoice reminder (action endpoint)
+      operationId: remindAdminInvoice
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =============================== Master ===================================
+  /projects:
+    get:
+      tags: [master]
+      summary: List projects (GET /x?filter&page pattern)
+      operationId: listProjects
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: >-
+            Project list (tenant-scoped). Pagination envelope unspecified in
+            api-contract.md (see B-014) — bare array is the representative shape.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create project (POST /x pattern)
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created (AuditLog written by middleware).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          $ref: "#/components/responses/QuotaExceeded"
+  /projects/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Get project by id (GET /x/:id pattern)
+      operationId: getProject
+      responses:
+        "200":
+          description: Project (tenant-scoped by company_id from JWT).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [master]
+      summary: Update project (PUT /x/:id — never changes status)
+      description: >-
+        Status transitions are NOT allowed here — use action endpoints
+        (see /boq/{id}/approve).
+      operationId: updateProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "200":
+          description: Updated (AuditLog written by middleware).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/hierarchy:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Project hierarchy tree (phase/block/unit)
+      operationId: getProjectHierarchy
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /project-types:
+    get:
+      tags: [master]
+      summary: List project types (hierarchy[], modules{} — Full only)
+      operationId: listProjectTypes
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create project type
+      operationId: createProjectType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /project-types/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Get project type by id
+      operationId: getProjectType
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [master]
+      summary: Update project type
+      operationId: updateProjectType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vendors:
+    get:
+      tags: [master]
+      summary: List vendors (GET /vendors?kind=supplier|subcon)
+      operationId: listVendors
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [supplier, subcon]
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create vendor
+      operationId: createVendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /vendors/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Get vendor by id
+      operationId: getVendor
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [master]
+      summary: Update vendor
+      operationId: updateVendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /customers:
+    get:
+      tags: [master]
+      summary: List customers
+      operationId: listCustomers
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create customer
+      operationId: createCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /customers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Get customer by id
+      operationId: getCustomer
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [master]
+      summary: Update customer
+      operationId: updateCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /cost-centers:
+    get:
+      tags: [master]
+      summary: List cost centers
+      operationId: listCostCenters
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create cost center
+      operationId: createCostCenter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /cost-centers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Get cost center by id
+      operationId: getCostCenter
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [master]
+      summary: Update cost center
+      operationId: updateCostCenter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /doc-numbering:
+    get:
+      tags: [master]
+      summary: List doc-numbering rules
+      operationId: listDocNumbering
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create doc-numbering rule
+      operationId: createDocNumbering
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /doc-numbering/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Get doc-numbering rule by id
+      operationId: getDocNumbering
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [master]
+      summary: Update doc-numbering rule
+      operationId: updateDocNumbering
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ============================ BOQ / Procurement ===========================
+  /boq:
+    get:
+      tags: [boq]
+      summary: List BOQ docs
+      operationId: listBoq
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [boq]
+      summary: Create BOQ doc
+      operationId: createBoq
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /boq/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Submit BOQ doc (action endpoint)
+      operationId: submitBoq
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /boq/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Approve BOQ doc — locks it (action endpoint)
+      description: >-
+        Status changes go through action endpoints only (api-contract.md:
+        POST /boq/:id/submit | /approve | /revise). Approve locks the BOQ doc.
+      operationId: approveBoq
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /boq/{id}/revise:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Revise BOQ doc → new version v+1 (action endpoint)
+      operationId: reviseBoq
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /boq/{id}/items:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [boq]
+      summary: List BOQ items (GET /boq/:id/items?group=)
+      operationId: listBoqItems
+      parameters:
+        - name: group
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [boq]
+      summary: Bulk add BOQ items (from BOM/Excel/AI)
+      operationId: addBoqItems
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /boq/{id}/generate-pr:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Generate PR from BOQ ({item_ids[],qty{}}) — splits material/subcon PR, cuts remain
+      operationId: generateBoqPr
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                item_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                qty:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /ai-qto/upload:
+    post:
+      tags: [boq]
+      summary: Upload model for AI QTO (deducts AI credit) → job_id
+      operationId: uploadAiQto
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "202":
+          description: AI QTO job accepted (AI credit deducted).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          $ref: "#/components/responses/QuotaExceeded"
+  /ai-qto/{job}:
+    parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [boq]
+      summary: AI QTO job status (progress/elements)
+      operationId: getAiQtoJob
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /ai-qto/{job}/create-boq:
+    parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [boq]
+      summary: Create BOQ from AI QTO result ({mappings[]})
+      operationId: createBoqFromAiQto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mappings:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pr:
+    get:
+      tags: [boq]
+      summary: List PRs
+      operationId: listPr
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [boq]
+      summary: Create PR
+      operationId: createPr
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pr/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Submit PR (action endpoint)
+      operationId: submitPr
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /pr/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Approve PR (action endpoint)
+      operationId: approvePr
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /pr/{id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Reject PR ({reason}) (action endpoint)
+      operationId: rejectPr
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /po:
+    get:
+      tags: [boq]
+      summary: List POs
+      operationId: listPo
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [boq]
+      summary: Create PO
+      operationId: createPo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /po/{id}/variation-order:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Add PO variation order ({dir,amount,reason}) (action endpoint)
+      operationId: createPoVariationOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dir:
+                  type: string
+                amount:
+                  type: number
+                reason:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wo:
+    get:
+      tags: [boq]
+      summary: List WOs
+      operationId: listWo
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [boq]
+      summary: Create WO
+      operationId: createWo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gr:
+    post:
+      tags: [boq]
+      summary: Goods receipt ({po_id,lines[{qty_ok,qty_rejected,photos[]}]}) — rejects gen defect-report
+      operationId: createGr
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [po_id, lines]
+              properties:
+                po_id:
+                  type: string
+                  format: uuid
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      qty_ok:
+                        type: number
+                      qty_rejected:
+                        type: number
+                      photos:
+                        type: array
+                        items:
+                          type: string
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ========================= Subcon / Acceptance ============================
+  /subcon-contracts:
+    get:
+      tags: [subcon]
+      summary: List subcon contracts
+      operationId: listSubconContracts
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [subcon]
+      summary: Create subcon contract
+      operationId: createSubconContract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /subcon-contracts/{id}/periods:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [subcon]
+      summary: List work periods of a subcon contract
+      operationId: listSubconContractPeriods
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /periods/{id}/deliver:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [subcon]
+      summary: Deliver work period ({docs[],photos[]}) → status delivered (action endpoint)
+      operationId: deliverPeriod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                docs:
+                  type: array
+                  items:
+                    type: string
+                photos:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /periods/{id}/inspect:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [subcon]
+      summary: Inspect work period ({result:pass|reject, defects[]}) (action endpoint)
+      operationId: inspectPeriod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result]
+              properties:
+                result:
+                  type: string
+                  enum: [pass, reject]
+                defects:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      item:
+                        type: string
+                      severity:
+                        type: string
+                      photo_before:
+                        type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /periods/{id}/approve-payment:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [subcon]
+      summary: Approve period payment → creates AP billing (retention deducted) (action endpoint)
+      operationId: approvePeriodPayment
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /defects/{id}/fix:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [subcon]
+      summary: Mark defect fixed ({photo_after}) (action endpoint)
+      operationId: fixDefect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                photo_after:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /defects/{id}/recheck:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [subcon]
+      summary: Recheck defect ({result}) (action endpoint)
+      operationId: recheckDefect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                result:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /acceptance-center:
+    get:
+      tags: [subcon]
+      summary: Acceptance center (GET ?type=gr|period|house&status=)
+      operationId: listAcceptanceCenter
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [gr, period, house]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # =============================== PM (CMMS) ================================
+  /pm/contracts:
+    get:
+      tags: [pm]
+      summary: List PM contracts
+      operationId: listPmContracts
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [pm]
+      summary: Create PM contract ({project_id,mode:ma|visits,visits_per_year,sla}) — mode=visits gen schedule+WO
+      operationId: createPmContract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project_id:
+                  type: string
+                  format: uuid
+                mode:
+                  type: string
+                  enum: [ma, visits]
+                visits_per_year:
+                  type: integer
+                sla:
+                  type: string
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pm/assets:
+    get:
+      tags: [pm]
+      summary: List PM assets
+      operationId: listPmAssets
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [pm]
+      summary: Create PM asset
+      operationId: createPmAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pm/checklist-templates:
+    get:
+      tags: [pm]
+      summary: List checklist templates
+      operationId: listPmChecklistTemplates
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [pm]
+      summary: Create checklist template
+      operationId: createPmChecklistTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pm/workorders:
+    get:
+      tags: [pm]
+      summary: List PM work orders
+      operationId: listPmWorkorders
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [pm]
+      summary: Create PM work order
+      operationId: createPmWorkorder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pm/workorders/{id}/checkin:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [pm]
+      summary: Work order check-in ({gps}) (action endpoint)
+      operationId: checkinPmWorkorder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gps:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /pm/workorders/{id}/checklist:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [pm]
+      summary: Update work order checklist ({items[{result,before,after}]})
+      operationId: updatePmWorkorderChecklist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      result:
+                        type: string
+                      before:
+                        type: string
+                      after:
+                        type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /pm/workorders/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [pm]
+      summary: Close work order ({cause,fix,advice,signature}) → gen certificate + push LINE (action endpoint)
+      operationId: closePmWorkorder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cause:
+                  type: string
+                fix:
+                  type: string
+                advice:
+                  type: string
+                signature:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /pm/quotes:
+    post:
+      tags: [pm]
+      summary: Create PM quote ({wo_id,parts[]})
+      operationId: createPmQuote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                wo_id:
+                  type: string
+                  format: uuid
+                parts:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pm/quotes/{id}/decide:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [pm]
+      summary: Decide PM quote ({approve}) — customer via LINE (action endpoint)
+      operationId: decidePmQuote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve:
+                  type: boolean
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ========================= Finance-Accounting =============================
+  /ap/billing:
+    post:
+      tags: [finance]
+      summary: AP billing ({po_id,gr_id,invoice_no}) — 3-way match
+      operationId: createApBilling
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                po_id:
+                  type: string
+                  format: uuid
+                gr_id:
+                  type: string
+                  format: uuid
+                invoice_no:
+                  type: string
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ap/pv:
+    post:
+      tags: [finance]
+      summary: AP payment voucher ({billing_ids[],wht_pct})
+      operationId: createApPv
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                billing_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                wht_pct:
+                  type: number
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pv/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [finance]
+      summary: Approve payment voucher (action endpoint)
+      operationId: approvePv
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /bank/export-batch:
+    post:
+      tags: [finance]
+      summary: Export payment batch to bank file
+      operationId: exportBankBatch
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ar/invoices:
+    post:
+      tags: [finance]
+      summary: AR invoice ({customer_id,lines[],credit_term}) → queues e-Tax
+      operationId: createArInvoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_id:
+                  type: string
+                  format: uuid
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                credit_term:
+                  type: string
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ar/rv:
+    post:
+      tags: [finance]
+      summary: AR receipt voucher ({invoice_id,amount})
+      operationId: createArRv
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invoice_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: number
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/posting-inbox:
+    get:
+      tags: [finance]
+      summary: GL posting inbox
+      operationId: getGlPostingInbox
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/post:
+    post:
+      tags: [finance]
+      summary: Post documents to GL ({doc_ids[]}) → gen JV
+      operationId: postGl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                doc_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/jv:
+    get:
+      tags: [finance]
+      summary: List journal vouchers
+      operationId: listGlJv
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create journal voucher
+      operationId: createGlJv
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/coa:
+    get:
+      tags: [finance]
+      summary: Chart of accounts
+      operationId: getGlCoa
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/reports/trial-balance:
+    get:
+      tags: [finance]
+      summary: Trial balance (GET ?period=)
+      operationId: getGlTrialBalance
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/reports/statements:
+    get:
+      tags: [finance]
+      summary: Financial statements (GET ?period=)
+      operationId: getGlStatements
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/reports/project-pl:
+    get:
+      tags: [finance]
+      summary: Project P&L (GET ?period=)
+      operationId: getGlProjectPl
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/reports/cashflow:
+    get:
+      tags: [finance]
+      summary: Cashflow (GET ?period=)
+      operationId: getGlCashflow
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /bank/statements/import:
+    post:
+      tags: [finance]
+      summary: Import bank statement (file) → auto-match
+      operationId: importBankStatements
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /bank/reconcile:
+    post:
+      tags: [finance]
+      summary: Bank reconcile ({period})
+      operationId: reconcileBank
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                period:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /gl/close-period:
+    post:
+      tags: [finance]
+      summary: Close GL period ({period}) — locks past entries
+      operationId: closeGlPeriod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                period:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fa/assets:
+    get:
+      tags: [finance]
+      summary: List fixed assets
+      operationId: listFaAssets
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create fixed asset
+      operationId: createFaAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fa/run-depreciation:
+    post:
+      tags: [finance]
+      summary: Run depreciation ({month})
+      operationId: runFaDepreciation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                month:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /labor/workers:
+    get:
+      tags: [finance]
+      summary: List labor workers
+      operationId: listLaborWorkers
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create labor worker
+      operationId: createLaborWorker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /labor/attendance:
+    get:
+      tags: [finance]
+      summary: List labor attendance
+      operationId: listLaborAttendance
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Record labor attendance
+      operationId: createLaborAttendance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /labor/payroll:
+    get:
+      tags: [finance]
+      summary: List labor payroll
+      operationId: listLaborPayroll
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create labor payroll run
+      operationId: createLaborPayroll
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /opex/budgets:
+    get:
+      tags: [finance]
+      summary: List OPEX budgets (GET ?year=)
+      operationId: listOpexBudgets
+      parameters:
+        - name: year
+          in: query
+          required: false
+          schema:
+            type: integer
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create OPEX budget
+      operationId: createOpexBudget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /etax/send:
+    post:
+      tags: [finance]
+      summary: Send e-Tax ({invoice_ids[]})
+      operationId: sendEtax
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invoice_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /etax/status:
+    get:
+      tags: [finance]
+      summary: e-Tax status
+      operationId: getEtaxStatus
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================ Land / Sales ================================
+  /land/plots:
+    get:
+      tags: [land-sales]
+      summary: List land plots
+      operationId: listLandPlots
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      summary: Create land plot
+      operationId: createLandPlot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /land/plots/{id}/advance-stage:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      summary: Advance land plot stage (action endpoint)
+      operationId: advanceLandPlotStage
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /land/plots/{id}/dd:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [land-sales]
+      summary: Update land plot due-diligence ({checklist})
+      operationId: updateLandPlotDd
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                checklist:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /land/plots/{id}/deal:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      summary: Create land plot deal ({type:buy|lease, terms{}}) (action endpoint)
+      operationId: createLandPlotDeal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [buy, lease]
+                terms:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /sales/leads:
+    get:
+      tags: [land-sales]
+      summary: List sales leads
+      operationId: listSalesLeads
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      summary: Create sales lead
+      operationId: createSalesLead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /sales/bookings:
+    get:
+      tags: [land-sales]
+      summary: List sales bookings
+      operationId: listSalesBookings
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      summary: Create sales booking
+      operationId: createSalesBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /sales/contracts:
+    get:
+      tags: [land-sales]
+      summary: List sales contracts
+      operationId: listSalesContracts
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      summary: Create sales contract
+      operationId: createSalesContract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /sales/downs:
+    get:
+      tags: [land-sales]
+      summary: List sales down payments
+      operationId: listSalesDowns
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      summary: Create sales down payment
+      operationId: createSalesDown
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /sales/loans:
+    get:
+      tags: [land-sales]
+      summary: List sales loans
+      operationId: listSalesLoans
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      summary: Create sales loan
+      operationId: createSalesLoan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /sales/units/{id}/transfer:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      summary: Transfer sales unit (action endpoint)
+      operationId: transferSalesUnit
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ================= DMS / Notifications / Audit / Reports ==================
+  /documents:
+    get:
+      tags: [dms]
+      summary: List documents (GET ?cat=&project=)
+      operationId: listDocuments
+      parameters:
+        - name: cat
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: project
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [dms]
+      summary: Create document (DMS)
+      operationId: createDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /documents/{id}/versions:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [dms]
+      summary: List document versions
+      operationId: listDocumentVersions
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /notifications:
+    get:
+      tags: [dms]
+      summary: List notifications
+      operationId: listNotifications
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /notifications/{id}/read:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [dms]
+      summary: Mark notification read (action endpoint)
+      operationId: readNotification
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /audit-log:
+    get:
+      tags: [dms]
+      summary: Query audit log (GET ?entity=&user=&action=)
+      operationId: listAuditLog
+      parameters:
+        - name: entity
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: user
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /reports/hub:
+    get:
+      tags: [dms]
+      summary: Reports hub (all-module report list)
+      operationId: getReportsHub
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /reports/{id}/export:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [dms]
+      summary: Export a report ({format}) — async job
+      operationId: exportReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format:
+                  type: string
+      responses:
+        "202":
+          description: Export job accepted (poll GET /exports/{id}).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =============================== Files ====================================
+  /files:
+    post:
+      tags: [files]
+      summary: Upload file (multipart) → file_id — enters DMS with link_module
+      description: >-
+        api-contract.md note 2: attachments upload here first, then pass the
+        returned file_id to the owning endpoint. Storage quota enforced.
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                link_module:
+                  type: string
+      responses:
+        "201":
+          description: File stored (enters DMS with link_module).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUploaded"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          $ref: "#/components/responses/QuotaExceeded"
+
+  # ============================== Exports ===================================
+  /exports:
+    post:
+      tags: [exports]
+      summary: Start async export ({type,params})
+      operationId: createExport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                params:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "202":
+          description: Export job accepted (poll GET /exports/{id}).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /exports/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [exports]
+      summary: Get export job (url when done)
+      operationId: getExport
+      responses:
+        "200":
+          description: Export job status; url present when finished.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =============================== LINE OA ==================================
+  /line/webhook:
+    post:
+      tags: [line]
+      summary: LINE OA webhook (inbound events)
+      description: >-
+        Inbound webhook from LINE. Unlike every other endpoint it does NOT
+        carry our Bearer JWT — LINE signs the request with x-line-signature,
+        which the platform verifies. Hence security is overridden to none here.
+      operationId: lineWebhook
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          description: Event acknowledged.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT carries company_id = tenant scope (api-contract.md).
+
+  parameters:
+    Filter:
+      name: filter
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Free-text/structured filter (GET /x?filter&page pattern).
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+      description: 1-based page index (GET /x?filter&page pattern).
+    Period:
+      name: period
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Accounting period selector (e.g. YYYY-MM).
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Missing/invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found within the tenant scope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    QuotaExceeded:
+      description: >-
+        Package/AI quota exceeded (quota middleware per
+        docs/extract/PACKAGE-RULES.md) — always code QUOTA_EXCEEDED with
+        upgrade_url (PLAN.md section 5).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/QuotaExceededError"
+    EntityOk:
+      description: Resource (tenant-scoped by company_id from JWT).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Entity"
+    EntityCreated:
+      description: Created (AuditLog written by middleware).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Entity"
+    EntityList:
+      description: >-
+        List (tenant-scoped). Pagination envelope unspecified in
+        api-contract.md (see BLOCKERS.md B-014) — bare array is the
+        representative shape.
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/Entity"
+    ActionOk:
+      description: >-
+        Action applied; any status transition is handled server-side
+        (AuditLog written by middleware).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Entity"
+
+  schemas:
+    Entity:
+      type: object
+      description: >-
+        Opaque resource. Exact fields live in the data-dictionary schema tasks,
+        not in this contract transcription — inventing fields here is forbidden
+        (PLAN.md section 0). Modeled explicitly only where api-contract.md names
+        fields (e.g. AuthLoginInput).
+      additionalProperties: true
+
+    Error:
+      type: object
+      description: Standard error envelope.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    QuotaExceededError:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          required: [upgrade_url]
+          properties:
+            code:
+              type: string
+              enum: [QUOTA_EXCEEDED]
+            upgrade_url:
+              type: string
+              format: uri
+
+    Job:
+      type: object
+      description: Async job handle (AI QTO / exports). url present when done.
+      properties:
+        job_id:
+          type: string
+        id:
+          type: string
+        status:
+          type: string
+        url:
+          type: string
+          format: uri
+      additionalProperties: true
+
+    FileUploaded:
+      type: object
+      description: Result of POST /files — pass file_id to the owning endpoint.
+      required: [file_id]
+      properties:
+        file_id:
+          type: string
+          format: uuid
+        link_module:
+          type: string
+        url:
+          type: string
+          format: uri
+
+    AuthLoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    AuthLoginResult:
+      type: object
+      description: "POST /auth/login result: token + user + company + package."
+      required: [token]
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/Entity"
+        company:
+          $ref: "#/components/schemas/Entity"
+        package:
+          $ref: "#/components/schemas/Entity"
+
+    Me:
+      type: object
+      description: "GET /me: user + role + approval_limits + package{menus,limits,ai_used}."
+      properties:
+        user:
+          $ref: "#/components/schemas/Entity"
+        role:
+          $ref: "#/components/schemas/Entity"
+        approval_limits:
+          $ref: "#/components/schemas/Entity"
+        package:
+          $ref: "#/components/schemas/Entity"
+
+    Project:
+      type: object
+      description: >-
+        Minimal placeholder per data-dictionary Project (name, type, budget,
+        status). Full field modeling belongs to the schema tasks.
+      required: [id, name, type, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [realestate, solar, civil, service]
+        budget:
+          type: number
+        currency_code:
+          type: string
+          description: Every money value carries currency_code (PLAN.md section 4).
+        status:
+          type: string
+
+    ProjectInput:
+      type: object
+      description: "Project create/update input (fields per data-dictionary)."
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [realestate, solar, civil, service]
+        budget:
+          type: number
+        currency_code:
+          type: string

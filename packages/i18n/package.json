@@ -1,0 +1,25 @@
+{
+  "name": "@juneflow/i18n",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Key-based i18n loader over src/i18n-full.json (sacred, copied verbatim) - th/zh/en/ar + RTL. Never invent translations.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/i18n-full.json": "./src/i18n-full.json"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.0"
+  }
+}
