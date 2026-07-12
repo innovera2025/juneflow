@@ -31,6 +31,7 @@
 import {
   pgEnum,
   pgTable,
+  index,
   text,
   uuid,
   integer,
@@ -152,7 +153,7 @@ export const apBillings = pgTable("ap_billing", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("ap_billing_company_idx").on(t.companyId)]);
 
 /**
  * PV — payment voucher settling one or more AP billings (data-dictionary
@@ -180,7 +181,7 @@ export const pvs = pgTable("pv", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("pv_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // AR (receivables)
@@ -215,7 +216,7 @@ export const arInvoices = pgTable("ar_invoice", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("ar_invoice_company_idx").on(t.companyId)]);
 
 /**
  * RV — receipt voucher recording payment against an AR invoice (data-dictionary
@@ -239,7 +240,7 @@ export const rvs = pgTable("rv", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("rv_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // GL journal (double entry)
@@ -269,7 +270,7 @@ export const jvs = pgTable("jv", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("jv_company_idx").on(t.companyId)]);
 
 /**
  * JVLine — one debit/credit leg of a JV (decision C9:
@@ -325,7 +326,7 @@ export const cheques = pgTable("cheque", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("cheque_company_idx").on(t.companyId)]);
 
 /**
  * BankStatement — an imported bank statement whose lines are matched against
@@ -347,7 +348,7 @@ export const bankStatements = pgTable("bank_statement", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("bank_statement_company_idx").on(t.companyId)]);
 
 /**
  * Reconcile — the match result between a bank statement and PV/RV entries, which
@@ -374,7 +375,7 @@ export const reconciles = pgTable("reconcile", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("reconcile_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Fixed assets
@@ -403,7 +404,7 @@ export const fixedAssets = pgTable("fixed_asset", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("fixed_asset_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Labor cost (Worker -> Attendance -> Payroll) + OPEX
@@ -428,7 +429,7 @@ export const workers = pgTable("worker", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("worker_company_idx").on(t.companyId)]);
 
 /**
  * Attendance — a worker's daily time record (erd.html labor "worker_id, day, ot,
@@ -451,7 +452,7 @@ export const attendances = pgTable("attendance", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("attendance_company_idx").on(t.companyId)]);
 
 /**
  * Payroll — a worker's payout for a period (erd.html labor "period, cc_id").
@@ -475,7 +476,7 @@ export const payrolls = pgTable("payroll", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("payroll_company_idx").on(t.companyId)]);
 
 /**
  * OpexBudget — a department's operating budget by month, compared across years

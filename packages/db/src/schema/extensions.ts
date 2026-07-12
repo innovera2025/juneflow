@@ -27,6 +27,8 @@
 import {
   pgEnum,
   pgTable,
+  unique,
+  index,
   text,
   uuid,
   integer,
@@ -91,7 +93,7 @@ export const warehouses = pgTable("warehouse", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("warehouse_company_idx").on(t.companyId)]);
 
 /**
  * InventoryItem — a stocked material (inventory.jsx `ITEMS`: code, cat, name,
@@ -122,7 +124,7 @@ export const inventoryItems = pgTable("inventory_item", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("inventory_item_company_idx").on(t.companyId)]);
 
 /**
  * StockTransfer — a warehouse-to-warehouse move (inventory.jsx `TRANSFERS`: no,
@@ -155,7 +157,7 @@ export const stockTransfers = pgTable("stock_transfer", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("stock_transfer_company_idx").on(t.companyId)]);
 
 /**
  * MaterialIssue — an issue of stock out to a project (inventory.jsx `ISSUES`: no,
@@ -187,7 +189,7 @@ export const materialIssues = pgTable("material_issue", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("material_issue_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 2 — Lead / CRM (5-stage funnel) — sales-crm.jsx `LEADS_BY_STAGE`
@@ -222,7 +224,7 @@ export const leads = pgTable("lead", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("lead_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 3 — ServiceTicket (after-sales repair) — sales-service.jsx
@@ -264,7 +266,7 @@ export const serviceTickets = pgTable("service_ticket", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("service_ticket_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 4 — Solar (Inverter O&M / PPA invoice / ROI / Permit steps / Warranty)
@@ -297,7 +299,7 @@ export const solarInverters = pgTable("solar_inverter", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("solar_inverter_company_idx").on(t.companyId)]);
 
 /**
  * SolarOmTicket — an inverter O&M ticket (solar.jsx `tickets`: no, t(title),
@@ -325,7 +327,7 @@ export const solarOmTickets = pgTable("solar_om_ticket", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("solar_om_ticket_company_idx").on(t.companyId)]);
 
 /**
  * PpaInvoice — a power-purchase-agreement (sell-electricity) invoice (solar.jsx
@@ -352,7 +354,7 @@ export const ppaInvoices = pgTable("ppa_invoice", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("ppa_invoice_company_idx").on(t.companyId)]);
 
 /**
  * SolarRoi — a per-year ROI row for a solar project (solar.jsx `years`: y(year),
@@ -378,7 +380,7 @@ export const solarRois = pgTable("solar_roi", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("solar_roi_company_idx").on(t.companyId)]);
 
 /**
  * SolarPermitStep — one step in the solar permitting pipeline (solar.jsx `steps`:
@@ -402,7 +404,7 @@ export const solarPermitSteps = pgTable("solar_permit_step", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("solar_permit_step_company_idx").on(t.companyId)]);
 
 /**
  * SolarWarranty — a warranty-registry entry for installed equipment (solar.jsx
@@ -430,7 +432,7 @@ export const solarWarranties = pgTable("solar_warranty", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("solar_warranty_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 5 — Timeline (Task / Milestone Gantt) — timeline.jsx
@@ -465,7 +467,7 @@ export const timelineTasks = pgTable("timeline_task", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("timeline_task_company_idx").on(t.companyId)]);
 
 /**
  * Milestone — a project milestone marker on the timeline (timeline.jsx
@@ -489,7 +491,7 @@ export const milestones = pgTable("milestone", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("milestone_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 6 — PettyCash transaction — petty-alloc.jsx `PETTY_TX`
@@ -525,7 +527,7 @@ export const pettyCashTxns = pgTable("petty_cash_txn", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("petty_cash_txn_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 7 — OrgStructure (ORG_SEED) — master.jsx `ORG_SEED`
@@ -555,7 +557,7 @@ export const orgUnits = pgTable("org_unit", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("org_unit_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 8 — DocNumbering (DOCNUM_SEED) — master.jsx `DOCNUM_SEED`
@@ -583,7 +585,7 @@ export const docNumberings = pgTable("doc_numbering", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [unique("doc_numbering_company_type_uq").on(t.companyId, t.type)]);
 
 // ---------------------------------------------------------------------------
 // Item 9 — Retention ledger — accounting-extra2.jsx `RETENTION_SEED`
@@ -621,7 +623,7 @@ export const retentionLedgers = pgTable("retention_ledger", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("retention_ledger_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 10 — RevRec / WIP — accounting-extra.jsx `REVREC_SEED` / `WIP_SEED`
@@ -654,7 +656,7 @@ export const revRecs = pgTable("rev_rec", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("rev_rec_company_idx").on(t.companyId)]);
 
 /**
  * Wip — work-in-progress cost balance per project (accounting-extra.jsx
@@ -681,7 +683,7 @@ export const wips = pgTable("wip", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("wip_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 11 — AR CreditNote — accounting-extra2.jsx `ARCN_SEED`
@@ -716,7 +718,7 @@ export const arCreditNotes = pgTable("ar_credit_note", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("ar_credit_note_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 12 — BidComparison — real-forms2.jsx `rows` (vendor bid compare)
@@ -742,7 +744,7 @@ export const bidComparisons = pgTable("bid_comparison", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("bid_comparison_company_idx").on(t.companyId)]);
 
 /**
  * BidComparisonLine — one vendor's quote on a bid comparison (real-forms2.jsx
