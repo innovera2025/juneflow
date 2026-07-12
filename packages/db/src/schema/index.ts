@@ -150,26 +150,33 @@
 //                          middleware, see apps/api/src/plugins/audit-log.ts)
 //
 // =============================================================================
-// TODO(P0-BE-09) - PLAN.md Appendix B mandatory extensions (all 14 items;
+// DONE(P0-BE-09) - PLAN.md Appendix B mandatory extensions (all 14 items;
 //                  in pototype but not in data-dictionary - designed from
 //                  screens + mock per docs/extract/MOCK-DATA.md).
 //                  G1 FULL gate = dictionary above + all 14 below.
+//                  Items 1-12 -> ./extensions.ts; items 13-14 extend existing
+//                  platform.ts tables (roles.perms / company group cols).
 // =============================================================================
-// [ ]  1. Inventory        - Item / Warehouse / StockTransfer / MaterialIssue
-// [ ]  2. Lead/CRM         - 5-stage funnel
-// [ ]  3. ServiceTicket    - after-sales repair requests
-// [ ]  4. Solar            - Inverter O&M / PPA invoice / ROI / Permit steps /
-//                            Warranty registry
-// [ ]  5. Timeline         - Task / Milestone Gantt
-// [ ]  6. PettyCash        - petty cash transactions
-// [ ]  7. OrgStructure     - ORG_SEED
-// [ ]  8. DocNumbering     - DOCNUM_SEED
-// [ ]  9. Retention ledger
-// [ ] 10. RevRec/WIP
-// [ ] 11. AR CreditNote
-// [ ] 12. BidComparison
-// [ ] 13. Role.perms matrix - 11 modules x 5 permissions
-// [ ] 14. Multi-company group - COMPANIES + docPrefix
+// [x]  1. Inventory        - Item / Warehouse / StockTransfer / MaterialIssue
+//                            (warehouses / inventoryItems / stockTransfers /
+//                            materialIssues)
+// [x]  2. Lead/CRM         - 5-stage funnel (leads; leadStage enum)
+// [x]  3. ServiceTicket    - after-sales repair requests (serviceTickets)
+// [x]  4. Solar            - Inverter O&M / PPA invoice / ROI / Permit steps /
+//                            Warranty registry (solarInverters / solarOmTickets /
+//                            ppaInvoices / solarRois / solarPermitSteps /
+//                            solarWarranties)
+// [x]  5. Timeline         - Task / Milestone Gantt (timelineTasks / milestones)
+// [x]  6. PettyCash        - petty cash transactions (pettyCashTxns)
+// [x]  7. OrgStructure     - ORG_SEED (orgUnits)
+// [x]  8. DocNumbering     - DOCNUM_SEED (docNumberings)
+// [x]  9. Retention ledger (retentionLedgers)
+// [x] 10. RevRec/WIP       (revRecs / wips)
+// [x] 11. AR CreditNote    (arCreditNotes)
+// [x] 12. BidComparison    (bidComparisons / bidComparisonLines)
+// [x] 13. Role.perms matrix - 11 modules x 5 permissions (roles.perms, platform.ts)
+// [x] 14. Multi-company group - COMPANIES + docPrefix (company group_parent_id /
+//                            short / color / doc_prefix / biz, platform.ts)
 //
 // Table definitions land in per-group files; re-export from this file so
 // drizzle.config.ts and @juneflow/api see one schema root.
@@ -181,3 +188,4 @@ export * from "./subcon.js";
 export * from "./pm.js";
 export * from "./finance.js";
 export * from "./misc.js";
+export * from "./extensions.js";

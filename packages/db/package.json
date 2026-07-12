@@ -6,7 +6,8 @@
   "description": "Juneflow DB - Drizzle schema (data-dictionary + PLAN.md Appendix B) + seed from MOCK-DATA.md",
   "exports": {
     ".": "./src/schema/index.ts",
-    "./schema": "./src/schema/index.ts"
+    "./schema": "./src/schema/index.ts",
+    "./client": "./src/client.ts"
   },
   "scripts": {
     "generate": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate",
