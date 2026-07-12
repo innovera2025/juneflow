@@ -4,21 +4,66 @@
 #
 # Hard rules (infra/CLAUDE.md + PLAN.md §10):
 # - NO secrets in this repo — every value comes from the host environment / secret store.
-#   `${VAR:?...}` below fails fast when a required value is missing on the host.
+#   `${VAR:?...}` below fails fast when a required value is missing on the host, so a
+#   misconfigured deploy stops instead of silently starting with a blank/default secret.
+#   There are DELIBERATELY no dev-style `:-default` fallbacks for any credential here.
 # - Images are built by CI (GitHub Actions — P0-DEV-02) and pulled from a registry;
-#   prod never builds from source on the VPS.
+#   prod never builds from source on the VPS. Image refs are host-provided and MUST be
+#   pinned to an immutable tag or digest (see IMAGE PINNING below) — never `:latest`.
 #
-# TODO(P0-DEV-05): complete this skeleton —
-#   - reverse proxy / TLS termination service (only edge port exposed; Cloudflare in front)
-#   - registry image references + tag pinning strategy
-#   - postgres backup job + restore procedure wiring (runbook: infra/runbook.md — P0-DEV-04)
-#   - resource limits, log rotation, healthcheck-based restarts
-#   - `docker compose -f docker-compose.prod.yml config` must validate with host env set,
-#     and a secret scan of the repo must stay clean (gate for P0-DEV-05).
+# Edge topology (PLAN.md Appendix A):
+#   internet → Cloudflare (DNS/CDN/WAF/rate limit/Turnstile) → [only the `edge` service
+#   publishes a host port] → api / web on the internal network. Postgres, Redis, worker
+#   and the api/web app containers have NO published ports — internal network only.
+#
+# Deploy / migrate / restore procedures live in infra/runbook.md (P0-DEV-04). Migrations
+# run as an explicit deploy step via the `migrate` service under the `deploy` profile
+# (`docker compose --profile deploy run --rm migrate`), NOT automatically on app start.
+#
+# IMAGE PINNING: set API_IMAGE / WEB_IMAGE on the host to a registry ref pinned by digest,
+#   e.g. `registry.example/juneflow-api@sha256:...` (preferred) or an immutable version
+#   tag `registry.example/juneflow-api:0.1.0`. CI publishes both tag and digest.
+#
+# Gate (P0-DEV-05): `docker compose -f infra/docker-compose.prod.yml config` validates
+#   with host env set, and a repo secret scan stays clean (no literal credentials here).
 
 name: juneflow-prod
 
+x-logging: &default-logging
+  # Log rotation so a long-running VPS deploy never fills the disk with container logs.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
+  # ── Edge / TLS termination ───────────────────────────────────────────────
+  # The ONLY service that publishes host ports. Cloudflare sits in front (CDN/WAF/
+  # rate limit/Turnstile); this proxy terminates the origin TLS (Cloudflare Origin
+  # cert) and routes to web (static SPA) + api (/api). Config and certs are mounted
+  # from host paths — never baked into an image or committed to the repo.
+  edge:
+    image: ${EDGE_IMAGE:-caddy:2}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${EDGE_CONFIG_DIR:?host dir with Caddyfile/nginx.conf, set on host}:/etc/caddy:ro
+      - ${EDGE_TLS_DIR:?host dir with Cloudflare Origin cert+key, set on host}:/tls:ro
+      - edge_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ── Datastores ───────────────────────────────────────────────────────────
   postgres:
     image: postgres:16
     environment:
@@ -27,53 +72,143 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set on host}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Backups: pg_dump/pg_restore run out-of-band as a scheduled host job that writes
+      # into this volume; the restore procedure is documented in infra/runbook.md
+      # (§restore DB). Kept as an explicit operator step, not an in-stack cron container.
+      - pgbackups:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     # No published ports in prod — internal network only.
 
   redis:
     image: redis:7
+    # AOF persistence so BullMQ queues survive a restart; noeviction so the broker never
+    # silently drops queued jobs under memory pressure (BullMQ requires no key eviction).
+    command:
+      [
+        "redis-server",
+        "--appendonly", "yes",
+        "--maxmemory", "${REDIS_MAXMEMORY:-256mb}",
+        "--maxmemory-policy", "noeviction",
+      ]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
-    # TODO(P0-DEV-05): persistence (AOF) + memory policy for BullMQ queues.
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    # No published ports in prod — internal network only.
 
+  # ── Explicit deploy-time migration (profile: deploy) ─────────────────────
+  # Runs schema migrations as a deliberate step during deploy, then exits — it is NOT
+  # part of the default `up` (guarded by the `deploy` profile). Uses the CI-built api
+  # image; the migrate entrypoint is documented in infra/runbook.md (§deploy dev/promote).
+  #   docker compose -f infra/docker-compose.prod.yml --profile deploy run --rm migrate
+  migrate:
+    image: ${API_IMAGE:?CI-built api image ref, set on host}
+    profiles: ["deploy"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set on host}
+    command: ["pnpm", "--filter", "@juneflow/db", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+
+  # ── Application ──────────────────────────────────────────────────────────
   api:
     image: ${API_IMAGE:?CI-built api image ref, set on host}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set on host}
       REDIS_URL: ${REDIS_URL:?set on host}
-      # TODO(P0-DEV-05): better-auth secrets, Cloudflare R2 credentials, LINE Login keys —
-      # all via host env / secret store only (sacred — PLAN.md §10).
+      # All remaining secrets come from the host env / secret store only (sacred —
+      # PLAN.md §10): better-auth secret, Cloudflare R2 credentials, LINE Login/LIFF keys.
+      # Listed as required so a deploy missing any of them fails fast instead of booting
+      # a half-configured api.
+      AUTH_SECRET: ${AUTH_SECRET:?set on host}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set on host}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set on host}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set on host}
+      R2_BUCKET: ${R2_BUCKET:?set on host}
+      LINE_CHANNEL_ID: ${LINE_CHANNEL_ID:?set on host}
+      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:?set on host}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      # /health from the Fastify skeleton (apps/api/src/index.ts). node:22 ships global fetch.
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     restart: unless-stopped
-    # TODO(P0-DEV-05): migrations in prod run as an explicit deploy step (see infra/runbook.md),
-    # not automatically on container start.
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   worker:
     image: ${API_IMAGE:?CI-built api image ref, set on host}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set on host}
       REDIS_URL: ${REDIS_URL:?set on host}
+      AUTH_SECRET: ${AUTH_SECRET:?set on host}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set on host}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set on host}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set on host}
+      R2_BUCKET: ${R2_BUCKET:?set on host}
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
-        condition: service_started
-    command: ["pnpm", "run", "worker"] # TODO(P0-BE-13): worker entrypoint
+        condition: service_healthy
+    # Same image as api, worker entrypoint (matches the dev stack + apps/api Dockerfile).
+    command: ["node", "dist/worker.js"]
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   web:
     image: ${WEB_IMAGE:?CI-built web image ref, set on host}
     depends_on:
       api:
         condition: service_started
+    # Served behind the `edge` reverse proxy; Cloudflare handles CDN/WAF above it.
+    # No published ports — the edge service is the only ingress.
     restart: unless-stopped
-    # TODO(P0-DEV-05): served behind the reverse proxy; Cloudflare handles CDN/WAF above it.
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
 volumes:
   pgdata:
+  pgbackups:
+  redisdata:
+  edge_data:
