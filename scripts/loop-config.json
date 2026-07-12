@@ -4,46 +4,68 @@
     "_comment": "Fallbacks when an agent entry omits a cap. claudeFlags are passed to every headless `claude -p` round; the loop is unattended so permission prompts cannot be answered — override with the LOOP_CLAUDE_FLAGS env var if a stricter mode is wanted.",
     "maxRoundsPerNight": 10,
     "budgetUsdPerNight": 20,
-    "claudeFlags": ["--dangerously-skip-permissions"]
+    "claudeFlags": [
+      "--dangerously-skip-permissions"
+    ]
   },
   "agents": {
     "backend": {
-      "zonePaths": ["apps/api", "packages/db", "packages/contracts"],
+      "zonePaths": [
+        "apps/api",
+        "packages/db",
+        "packages/contracts",
+        "packages/tokens",
+        "packages/i18n"
+      ],
       "zoneClaudeMd": "apps/api/CLAUDE.md",
       "featureBranch": "feature/backend",
       "maxRoundsPerNight": 10,
       "budgetUsdPerNight": 20
     },
     "web": {
-      "zonePaths": ["apps/web"],
+      "zonePaths": [
+        "apps/web"
+      ],
       "zoneClaudeMd": "apps/web/CLAUDE.md",
       "featureBranch": "feature/web",
       "maxRoundsPerNight": 10,
       "budgetUsdPerNight": 20
     },
     "mobile": {
-      "zonePaths": ["apps/mobile"],
+      "zonePaths": [
+        "apps/mobile"
+      ],
       "zoneClaudeMd": "apps/mobile/CLAUDE.md",
       "featureBranch": "feature/mobile",
       "maxRoundsPerNight": 10,
       "budgetUsdPerNight": 20
     },
     "qa": {
-      "zonePaths": ["tests"],
+      "zonePaths": [
+        "tests"
+      ],
       "zoneClaudeMd": "tests/CLAUDE.md",
       "featureBranch": "feature/qa",
       "maxRoundsPerNight": 10,
       "budgetUsdPerNight": 20
     },
     "integrations": {
-      "zonePaths": ["packages/tax-engine", "packages/bank-file", "packages/notifications"],
+      "zonePaths": [
+        "packages/tax-engine",
+        "packages/bank-file",
+        "packages/notifications"
+      ],
       "zoneClaudeMd": "packages/integrations/CLAUDE.md",
       "featureBranch": "feature/integrations",
       "maxRoundsPerNight": 10,
       "budgetUsdPerNight": 20
     },
     "devops": {
-      "zonePaths": ["infra", "scripts", ".github"],
+      "zonePaths": [
+        "infra",
+        "scripts",
+        ".github"
+      ],
       "zoneClaudeMd": "infra/CLAUDE.md",
       "featureBranch": "feature/devops",
       "maxRoundsPerNight": 10,
