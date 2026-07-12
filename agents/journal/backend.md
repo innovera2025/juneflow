@@ -169,3 +169,14 @@
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: git progress: yes
 - 2026-07-12T01:33:10Z loop round ended (agent: backend)
+- 2026-07-12T01:37:21Z loop round ended (agent: backend)
+
+## 2026-07-12 08:37 · loop-runner · รอบที่ 5/10 · task: P0-BE-11
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-BE-11 → สถานะ review · ค่าใช้จ่ายรอบนี้ $8.37515975 (สะสม $21.3251/เพดาน $20)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+
+## 2026-07-12 08:37 · loop-runner · หยุดที่เพดานงบ
+- ทำอะไร: หยุดลูปก่อนรอบที่ 6: งบสะสม $21.3251 ถึงเพดาน $20 (guardrail ตาม PLAN.md §10)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: task ล่าสุด: P0-BE-11 · รันใหม่ได้ในรอบคืนถัดไป
