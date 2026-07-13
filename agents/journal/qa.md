@@ -10,6 +10,12 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-13 · รอบที่ 10 · task: P0-FIX-06
+
+- ทำอะไร: sync `git merge dev` (สะอาด — ได้ FIX-05 seed refinements · dep P0-FIX-06 ครบ) → หยิบ P0-FIX-06. อัปเดต `tests/seed/seed-counts.spec.ts` แบบ expected-first (ทุกค่าอ้าง spec/blocker ไม่อ่าน seed impl): Company **9** (B-022ก) · platform_invoice **7** = T-1001 `INV-SUB-*` 3 ใบ (79000/72000/18400 paid — subscription.jsx:31) + admin-other 4 (B-025ก+B-024) · Vendor **13** (supplier 7/subcon 6 — B-026ก + SC-07=supplier ตาม directive FIX-05) · ทะเบียนผู้รับเหมา = vendor kind=subcon = **6** · B-024 4 บรรทัด (งวดเบิกจ่าย/แผน PM/ลูกหนี้/เอกสารข้ามบริษัท) → กลุ่ม `REPORT_DERIVED` ไม่ใช่ตาราง seed · ปิด todo B-009 → Unit/SalesUnit = **84** persisted · เพิ่ม suite เทียบ DB จริง (`describe.runIf(DATABASE_URL)` · devDep `pg`). Gate: pg16 disposable @5433 → migrate ✓ seed exit 0 → **vitest run seed = 113/113** (รวม real-DB 17 ข้อ ตรง seed จริงทุกค่า) · reseed รันซ้ำ 113/113 (idempotent) · ไม่มี DATABASE_URL = 96 passed / 17 skipped (CI-safe เพราะ ci.yml ไม่มี pg service). → `review` + REVIEW-QUEUE row (commit `a9a44f1`).
+- ตัดสินใจอะไร: (1) แถว §สรุป "Subscription Invoice (tenant): 3" ไม่เป็น entity แยกอีก — เป็น subset ของ platform_invoice ตาม B-024/B-025 (กัน double-count) · (2) real-DB hookup จำกัดเฉพาะบรรทัดที่ mapping ยืนยันแล้ว (B-024 6 บรรทัด + blockers ตอบแล้ว + C1/C9 + expected-0) — บรรทัดอื่น (BOQ balance/archive, Posting inbox, งบทดลอง, Aging, P&L ฯลฯ) เปิด `describe.todo` รอยืนยัน mapping ต่อบรรทัด กัน QA ตัดสิน mapping เอง (§0 กฎ 4) · (3) T-1001 ระบุผ่าน company.name = "บจก. รุ่งเรืองก่อสร้าง" (SUBSCRIBERS.org — schema ไม่มีคอลัมน์ tenant code) · (4) suite DB จริง gate ด้วย DATABASE_URL เพราะ CI stage tests ไม่มี postgres service — ไม่ใช่การหลบ gate: รันจริงในเครื่องเป็นหลักฐานในแถว REVIEW-QUEUE.
+- เจออะไร: (1) port 5433 ว่าง (pg disposable ของ FIX-05 ถูกเก็บแล้ว) → ต้อง `docker run` pg16 ใหม่เอง (`qa-fix06-pg` · ไม่แตะ 5434 ของ backend) — agent รอบถัดไปอย่า assume DB ค้างอยู่ · (2) seed log รายงาน "report-derived (no table, skipped): 13 datasets" สอดคล้อง B-024 · (3) คิว ready เขต qa หลังรอบนี้ = **0** — Wei เติมคิว ≥5 ตาม PLAN.md §10 · แนะนำเปิด task "seed hookup ตารางที่เหลือ" (ต่อจาก describe.todo ท้ายไฟล์) · (4) lockfile เปลี่ยน 6 บรรทัด (pg importers ของ tests เท่านั้น) — จุดให้ diff-reviewer ดู.
+
 ## 2026-07-13 · รอบที่ 9 · task: P0-QA-03
 
 - ทำอะไร: หยิบ P0-QA-03 (สถานะกลับเป็น `ready` หลัง **B-034 ตอบแล้ว** — orchestrator re-scope: harness + reachability smoke จริง · "login → shell" = todo ผูก WEB-05). อ่าน B-034 (คอลัมน์คำตอบ), `tests/e2e/{README,playwright.config.ts}`, `infra/docker-compose.yml` (web `$WEB_PORT`/5173 · api `$API_PORT`/3000 + /health). Probe compose dev ที่ **live จริง**: web `/`=200 · api `/health`=`{"ok":true}`. เขียน `tests/e2e/smoke.spec.ts`: 2 test reachability (web `/`=200 + `html` attached · api `/health`=200 `{ok:true}` ผ่าน `request` context) + `test.fixme` "login → shell load" (todo ยังไม่รัน · ผูก P0-WEB-05/B-020). อัปเดต README status. **G4 เขียวจริงบน compose dev**: `pnpm --filter @juneflow/tests test:e2e` = **2 passed | 1 skipped** exit 0. → `review` + REVIEW-QUEUE row.
@@ -141,3 +147,15 @@
 - ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $2.6682/$10 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T20:43:40Z loop round ended (agent: qa)
+
+## 2026-07-13 03:43 · loop-runner · รอบที่ 1/2 · task: P0-QA-03
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-QA-03 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.1086270000000003 (สะสม $2.1086/เพดาน $10)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T20:44:15Z loop round ended (agent: qa)
+
+## 2026-07-13 03:44 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $2.7069/$10 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
