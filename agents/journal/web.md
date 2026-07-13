@@ -10,6 +10,18 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-13 · รอบที่ 8 · task: P1-WEB-01
+
+- ทำอะไร: หยิบ **P1-WEB-01** (port จอ Login · dep = — · ready ตัวเดียวที่หยิบได้ในเขต web · P0-FIX-03 = `review` แล้ว) → `doing`. อ่าน spec ครบตามกฎ apps/web/CLAUDE.md บรรทัด 7: `docs/extract/NAV-ROUTES.md:133` (route `login` "เข้าสู่ระบบ" · component `ScreenLogin` · ไฟล์ `extra-screens.jsx` · render ก่อน shell) + ต้นทาง `pototype/extra-screens.jsx:7-48` (`ScreenLogin`: brand panel + form email/pw + remember/forgot + ปุ่มเข้าสู่ระบบ + สมัครทดลองฟรี) + `ForgotForm` (modal ลืมรหัสผ่าน). **escalate เป็น blocker — ไม่ได้ implement โค้ดจอ** (ดูตัดสินใจ). **ผล gates: N/A** (ยังไม่แตะโค้ดจอ เพราะติด i18n conflict ก่อนเริ่ม port ตาม port-screen ขั้นที่ 5).
+- ตัดสินใจอะไร: **ไม่แปลใหม่ ไม่เดา → เปิด B-035 (block P1-WEB-01).** ตรวจ `docs/extract/i18n-full.json` ครบทั้ง `dict`(59) / `phrases`(736) / `nav_i18n`(112) ด้วย exact-match — จอ Login มีข้อความไทย ~15 ชิ้น**ไม่มี key** (เช่น "เข้าสู่ระบบ", "รหัสผ่าน", "จดจำฉันไว้", "ลืมรหัสผ่าน?", "กรุณากรอกอีเมลและรหัสผ่าน", "เข้าสู่ระบบสำเร็จ", hero title/sub, "สมัครทดลองฟรี", ForgotForm ทั้งชุด) · มีแค่ "อีเมล"(`phrases`) / "ยกเลิก"(`common.cancel`) / "ระบบงานก่อสร้าง"(`dict/app.name`) / "ภาษา"(`common.lang`). สาเหตุ: `_source` ถอด i18n จาก `i18n.jsx`/`i18n-phrases.jsx`/`i18n-accounting.jsx`/`i18n-phrases3.jsx` เท่านั้น — `extra-screens.jsx` (จอ "missing production screens") ไม่ถูก extract. ตาม **PLAN §0 กฎ 2** + zone CLAUDE.md บรรทัด 13-14 (string ไม่มี key → BLOCKERS ห้ามเดา) + port-screen ขั้นที่ 5 → escalate. `i18n-full.json` เป็น sacred (web แตะไม่ได้) เสนอ Wei 3 ทาง (ก·แนะนำ Wei เติม key `auth.*` + คำแปล th/zh/en/ar / ข override + Wei ส่งคำแปล / ค ยกเว้นกฎ auth screen). ไม่มี C1–C10 ข้อใดครอบ (auth screen ไม่อยู่ในตารางคำตัดสิน).
+- เจออะไร: (1) **B-035 เปิดใหม่** — i18n gap นี้กระทบทุกจอที่ port มาจาก `extra-screens.jsx` (Login/ReportsHub/SettingsCompany/NotificationsCenter/ForgotForm) ไม่ใช่แค่ Login → Wei ควรตอบเป็นชุดเพื่อปลดหลายจอ. เกี่ยวเนื่อง **B-034** (QA-03 smoke "login→shell" รอ login port) — ปลด B-035 ช่วยปลด B-034 ด้วย. (2) **คิว `ready` เขต web หลังรอบนี้ = 0 ที่หยิบได้** (WEB-05 blocked B-020 · P1-WEB-01 blocked B-035 · FIX-03 review รอ promote) — ต่ำกว่าเกณฑ์ ≥5 มาก → **เตือน Wei:** ตอบ B-035 (ปลด Login) + B-020 (ปลด WEB-05) + promote review-queue web + เติมคิว Phase 1 web (ห้าม agent สร้าง task ผูก MVP เอง — [TBD-MVP]). (3) รอบนี้ไม่มี diff โค้ด (แก้เฉพาะ TASKS.md/BLOCKERS.md/journal) — no-progress guard: เป็นการ escalate ที่ถูกต้องตาม protocol ไม่ใช่ diff ว่างจากงานค้าง.
+
+## 2026-07-13 · รอบที่ 7 · task: P0-FIX-03
+
+- ทำอะไร: หยิบ **P0-FIX-03** (WEB-06 audit · เขต web · dep = — พร้อม B-028 ตอบ ก) → `doing`. เขต web มี ready 2 ตัว (P0-FIX-03, P1-WEB-01) — เลือก FIX-03 ก่อนเพราะเป็น P0 audit + spec ระบุ "ต้องตัดสินก่อนจอ authenticated แรก" (prerequisite ของ P1). อ่าน spec: B-028 ตอบ ก (web ใช้ bearer JWT ตาม contract · ไม่แตะ openapi.yaml sacred) + `apps/web/src/api-client.ts` + `packages/contracts/openapi.yaml` (`security: [bearerAuth: []]` global · `securitySchemes.bearerAuth` http/bearer/JWT) + `vite.config.ts` (proxy = TODO ยังไม่ wire) + openapi-fetch 0.17 middleware API (`.use({onRequest})`). **implement:** (1) api-client.ts เปลี่ยน cookie (`credentials:"include"`) → `apiClient.use({onRequest})` แนบ `Authorization: Bearer <jwt>` เมื่อมี token · public endpoint (`security:[]`) รันได้ไม่มี header (2) แก้ header comment เท็จที่อ้าง "Vite dev proxy ... is wired in vite.config.ts" (จริง = TODO) + ลบ comment cookie auth (3) เพิ่ม `auth-token.ts` (single localStorage bearer-JWT holder · injectable deps · mirror lang-store.ts · login P1-WEB-01 จะ setAuthToken) + `auth-token.test.ts` (G3). **ผล gates (ไม่มีจอ → ไม่มี visual gate):** typecheck ✓ · build ✓ (vite 176 modules) · **vitest 18 passed** (auth-token 7 เคส) · turbo lint web = no-op เขียว · **ด่าน 4.5 diff-reviewer = PASS** (sacred/zone/design-fidelity/auth-correctness/test-coverage). → commit `30b358b` · task → `review` · เพิ่มแถว REVIEW-QUEUE.
+- ตัดสินใจอะไร: ใช้ B-028 ตอบ ก ตรงตัว (bearer ไม่แตะ sacred) — ไม่มี conflict ใหม่. เลือกทำ bearer ผ่าน openapi-fetch middleware (`.use`) แทนแก้ค่า createClient ต่อ request (สะอาด + typed) · เก็บ token ใน store แยกไฟล์ตามแพทเทิร์น lang-store (login รอบหน้าจะ set) · **ไม่เปลี่ยน default base URL `/api/v1`** (นอก scope FIX-03 + กระทบ compose reachability ของ QA-03) เพียงแก้ comment ให้ตรงจริง. ไม่ตัดสิน design/spec เอง (auth/build tooling — C1–C10 n/a).
+- เจออะไร: (1) i18n-guard hook บล็อกตัวอักษรไทยในไฟล์โค้ด (comment "(ก)"/"ภาคผนวก" ครั้งแรก) → เขียน comment เป็นอังกฤษล้วน (CLAUDE.md กฎภาษา) ผ่าน. (2) web package ไม่มี lint script → turbo lint = no-op (ตรงพฤติกรรม CI เดิม) — ยืนยัน gate CI ผ่านด้วย typecheck+build. (3) **auth-token.test.ts ใช้ mirror ของ onRequest middleware** (openapi-fetch ไม่ export middleware ตรง ๆ) — diff-reviewer ตั้ง note non-blocking ว่าอนาคตอาจ import จริงเลี่ยง drift · logic store จริงถูก test ตรง. (4) **คิว `ready` เขต web หลังรอบนี้ = 1** (P1-WEB-01 login · WEB-05 ยัง blocked B-020) — ต่ำกว่าเกณฑ์ ≥5 → เตือน Wei: ตอบ B-020 ปลด WEB-05 + เติมคิว Phase 1 web (ห้าม agent สร้าง task ผูก MVP เอง — [TBD-MVP]). รอบหน้าเขต web หยิบได้: P1-WEB-01 (port จอ Login).
+
 ## 2026-07-12 · รอบที่ 6 · task: P0-WEB-05
 
 - ทำอะไร: หยิบ P0-WEB-05 (app shell — dep WEB-02+WEB-03 = done แล้ว, เป็น ready task เดียวที่หยิบได้ในเขต web) → `doing`. อ่านต้นทางครบรอบนี้ตามกฎ apps/web/CLAUDE.md: `pototype/chrome.jsx` (Sidebar/TopBar/ProjectSwitcher/CompanySwitcher(ref)/LanguageSwitcher(ref)/NotificationsPopover/SearchPalette/UserMenu + NAV/ROUTE_LABELS/PARENT_ID_OF_ROUTE) + `pototype/shell.jsx` (AppShell/RouteView/Placeholder/Tweaks/toast/modal host) + spec: NAV-ROUTES(ผ่าน registry P0-WEB-02), I18N-KEYS.md (3 ชั้น dict/nav/phrases), port-map.md (chrome=shell, shell=routing host, shared primitives = P0-WEB-05), contract endpoints (`/me`,`/projects`,`/project-types` มีจริง). **ไม่ได้ implement — escalate เป็น blocker** (ดูด้านล่าง). **ผล gates: N/A** (ยังไม่แตะโค้ด เพราะติด conflict ก่อนเริ่ม port).
@@ -106,3 +118,21 @@
 - ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต web — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $3.2861/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-13T02:35:56Z loop round ended (agent: web)
+
+## 2026-07-13 09:35 · loop-runner · รอบที่ 1/3 · task: P0-FIX-03
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-FIX-03 → สถานะ review · ค่าใช้จ่ายรอบนี้ $3.9044882500000004 (สะสม $3.9045/เพดาน $16)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-13T02:41:20Z loop round ended (agent: web)
+
+## 2026-07-13 09:41 · loop-runner · รอบที่ 2/3 · task: P1-WEB-01
+- ทำอะไร: รัน claude headless 1 รอบ · task P1-WEB-01 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $2.423447500000001 (สะสม $6.3279/เพดาน $16)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-13T02:41:56Z loop round ended (agent: web)
+
+## 2026-07-13 09:41 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 3/3: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต web — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $6.9489/$16 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
