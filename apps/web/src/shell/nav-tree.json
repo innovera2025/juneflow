@@ -1,0 +1,162 @@
+{
+  "_source": "Faithful transcription of pototype/chrome.jsx NAV (lines 98-239) — the label/icon/grouping layer that routes/registry.ts deliberately omits (P0-WEB-05). Route ids here are cross-checked 1:1 against SIDEBAR_ROUTES in nav-tree.test.ts. Thai label strings ARE the nav_i18n keys (tn()); Thai is allowed in .json (i18n-guard skips .json/.md). Badge counts are C10 mock mechanics: 'badge' holds the count-source route id, NEVER the hardcoded number (chrome.jsx 4/17/8/5/12/6) — the count comes from a real query (none exists yet: BLOCKERS B-039).",
+  "sections": {
+    "main": "งานหลัก",
+    "energy": "พลังงาน · EPC",
+    "acct": "บัญชี-การเงิน",
+    "sales": "งานขาย-อสังหาฯ",
+    "system": "ระบบ",
+    "usage": "บัญชีการใช้งาน",
+    "platform": "ผู้ดูแลแพลตฟอร์ม"
+  },
+  "tree": [
+    { "kind": "item", "id": "dashboard", "icon": "dashboard", "label": "Dashboard" },
+    { "kind": "item", "id": "exec", "icon": "pie", "label": "ภาพรวมผู้บริหาร" },
+
+    { "kind": "section", "sectionId": "main", "label": "งานหลัก" },
+    { "kind": "item", "id": "land", "icon": "landplot", "label": "งานสำรวจ & จัดหาที่ดิน", "mod": "land", "sub": [
+      { "id": "land.pipeline", "label": "Pipeline จัดหาที่ดิน" },
+      { "id": "land.bank", "label": "ทะเบียนแปลงที่ดิน" },
+      { "id": "land.survey", "label": "สำรวจ-รังวัด & Feasibility" },
+      { "id": "land.dd", "label": "Due Diligence & ซื้อ/เช่า" }
+    ] },
+    { "kind": "item", "id": "boq", "icon": "budget", "label": "BOQ & งบประมาณ", "badge": "boq", "mod": "boq", "sub": [
+      { "id": "boq.overview", "label": "BOQ Overview" },
+      { "id": "boq.list", "label": "BOQ List" },
+      { "id": "boq.aiqto", "label": "นำเข้า CAD/BIM (AI ถอด BOQ)" },
+      { "id": "boq.bom", "label": "BOM (สูตรต่อหลัง)" },
+      { "id": "boq.editor", "label": "BOQ Editor" },
+      { "id": "boq.approval", "label": "อนุมัติ BOQ", "badge": "boq.approval" },
+      { "id": "boq.archive", "label": "Archive" },
+      { "id": "boq.reports", "label": "รายงาน BOQ" }
+    ] },
+    { "kind": "item", "id": "proc", "icon": "cart", "label": "จัดซื้อ", "mod": "proc", "sub": [
+      { "id": "pr.list", "label": "ใบขอซื้อ (PR)", "badge": "pr.list" },
+      { "id": "po.list", "label": "ใบสั่งซื้อ (PO)" },
+      { "id": "wo.list", "label": "ใบสั่งจ้าง (WO)" },
+      { "id": "gr.list", "label": "รับสินค้า (GR)" }
+    ] },
+    { "kind": "item", "id": "subcon", "icon": "hardhat", "label": "ผู้รับเหมา (Progress)", "mod": "subcon", "sub": [
+      { "id": "subcon.progress", "label": "Progress รวม" },
+      { "id": "subcon.contracts", "label": "ทะเบียนสัญญา" }
+    ] },
+    { "kind": "item", "id": "timeline", "icon": "calendar", "label": "แผนงานโครงการ", "mod": "timeline" },
+    { "kind": "item", "id": "inv", "icon": "box", "label": "คลังวัสดุ", "mod": "inv", "sub": [
+      { "id": "inv.items", "label": "Item Master" },
+      { "id": "inv.stock", "label": "Stock & คลัง" },
+      { "id": "inv.transfer", "label": "โอนคลัง" },
+      { "id": "inv.issue", "label": "เบิกออก" }
+    ] },
+    { "kind": "item", "id": "petty", "icon": "cash", "label": "เงินสดย่อย", "mod": "petty" },
+    { "kind": "item", "id": "accept", "icon": "check", "label": "ศูนย์ตรวจรับ", "badge": "accept" },
+    { "kind": "item", "id": "labor", "icon": "users", "label": "แรงงาน & ค่าแรง", "sub": [
+      { "id": "labor.attendance", "label": "เช็คชื่อรายวัน" },
+      { "id": "labor.payroll", "label": "สรุปค่าแรง & ลงต้นทุน" },
+      { "id": "labor.workers", "label": "ทะเบียนคนงาน" }
+    ] },
+    { "kind": "item", "id": "pm", "icon": "wrench", "label": "PM · บำรุงรักษา", "mod": "pm", "sub": [
+      { "id": "pm.dashboard", "label": "PM Dashboard" },
+      { "id": "pm.contracts", "label": "สัญญาบำรุงรักษา" },
+      { "id": "pm.schedule", "label": "แผน PM" },
+      { "id": "pm.wo", "label": "ใบงาน PM", "badge": "pm.wo" },
+      { "id": "pm.assets", "label": "ทะเบียนอุปกรณ์" }
+    ] },
+
+    { "kind": "section", "sectionId": "energy", "label": "พลังงาน · EPC" },
+    { "kind": "item", "id": "solar.monitor", "icon": "sun", "label": "Monitoring · O&M", "mod": "om" },
+    { "kind": "item", "id": "solar.ppa", "icon": "trend", "label": "ขายไฟ / PPA", "mod": "ppa" },
+    { "kind": "item", "id": "solar.roi", "icon": "pie", "label": "ROI & ผลตอบแทน", "mod": "roi" },
+    { "kind": "item", "id": "solar.permit", "icon": "paperclip", "label": "ขออนุญาต (PEA/MEA/COD)", "mod": "permit" },
+    { "kind": "item", "id": "solar.warranty", "icon": "shield", "label": "Warranty / รับประกัน", "mod": "warranty" },
+
+    { "kind": "section", "sectionId": "acct", "label": "บัญชี-การเงิน" },
+    { "kind": "item", "id": "alloc", "icon": "pie", "label": "จัดสรรต้นทุน" },
+    { "kind": "item", "id": "opex", "icon": "budget", "label": "งบ OPEX บริษัท" },
+    { "kind": "item", "id": "gl", "icon": "ledger", "label": "GL · สมุดบัญชี", "sub": [
+      { "id": "gl.coa", "label": "ผังบัญชี (COA)" },
+      { "id": "gl.jv", "label": "JV · บันทึกรายการมือ" },
+      { "id": "gl.inbox", "label": "GL Posting Inbox", "badge": "gl.inbox" },
+      { "id": "gl.trial", "label": "งบทดลอง" },
+      { "id": "gl.statements", "label": "งบดุล + กำไรขาดทุน" },
+      { "id": "gl.revrec", "label": "รับรู้รายได้ & WIP" },
+      { "id": "gl.cashflow", "label": "งบกระแสเงินสด" },
+      { "id": "gl.projectpl", "label": "P&L รายโครงการ" },
+      { "id": "gl.close", "label": "ปิดงวดบัญชี" }
+    ] },
+    { "kind": "item", "id": "ap", "icon": "cart", "label": "AP · เจ้าหนี้", "sub": [
+      { "id": "ap.billing", "label": "ตั้งหนี้ (Billing)" },
+      { "id": "ap.pv", "label": "ใบสำคัญจ่าย (PV)" },
+      { "id": "ap.cn-dn", "label": "ใบลดหนี้ / เพิ่มหนี้" },
+      { "id": "ap.deposit", "label": "มัดจำจ่าย" },
+      { "id": "ap.retention", "label": "เงินประกันผลงาน (Retention)" },
+      { "id": "ap.aging", "label": "อายุหนี้ (Aging)" }
+    ] },
+    { "kind": "item", "id": "ar", "icon": "ledger", "label": "AR · ลูกหนี้", "sub": [
+      { "id": "ar.invoice", "label": "ใบแจ้งหนี้ / วางบิล" },
+      { "id": "ar.tax", "label": "ใบกำกับ / ใบเสร็จ" },
+      { "id": "ar.rv", "label": "ใบสำคัญรับ (RV)" },
+      { "id": "ar.cn", "label": "ใบลดหนี้ (Credit Note)" },
+      { "id": "ar.aging", "label": "อายุหนี้ (Aging)" }
+    ] },
+    { "kind": "item", "id": "bank", "icon": "cash", "label": "ธนาคาร & เช็ค", "sub": [
+      { "id": "bank.cheque", "label": "ทะเบียนเช็ค" },
+      { "id": "bank.recon", "label": "กระทบยอดธนาคาร" },
+      { "id": "bank.export", "label": "Export to Bank" }
+    ] },
+    { "kind": "item", "id": "tax", "icon": "paperclip", "label": "ภาษี (Tax)", "sub": [
+      { "id": "tax.vat", "label": "ภ.พ.30 (VAT)" },
+      { "id": "tax.wht", "label": "ภ.ง.ด.3 / 53 (WHT)" },
+      { "id": "tax.etax", "label": "e-Tax Invoice" }
+    ] },
+    { "kind": "item", "id": "fa", "icon": "box", "label": "สินทรัพย์ (FA)", "sub": [
+      { "id": "fa.register", "label": "ทะเบียนสินทรัพย์" },
+      { "id": "fa.depr", "label": "ค่าเสื่อมราคา" },
+      { "id": "fa.adjust", "label": "ปรับมูลค่า / Write-Off" }
+    ] },
+
+    { "kind": "section", "sectionId": "sales", "label": "งานขาย-อสังหาฯ" },
+    { "kind": "item", "id": "sales", "icon": "trend", "label": "ขาย · CRM · โอน", "badge": "sales", "mod": "sales_re", "sub": [
+      { "id": "sales.dashboard", "label": "Sales Dashboard" },
+      { "id": "sales.crm", "label": "CRM / Leads", "badge": "sales.crm" },
+      { "id": "sales.process", "label": "ขายยูนิต (Quote/จอง/สัญญา)" },
+      { "id": "sales.down", "label": "งวดดาวน์" },
+      { "id": "sales.loan", "label": "สินเชื่อ & โอน" },
+      { "id": "sales.service", "label": "After-Sales · แจ้งซ่อม", "badge": "sales.service" }
+    ] },
+
+    { "kind": "section", "sectionId": "system", "label": "ระบบ" },
+    { "kind": "item", "id": "master", "icon": "grid", "label": "ข้อมูลกลาง (Master)", "sub": [
+      { "id": "master.company", "label": "Company / Org" },
+      { "id": "master.ptype", "label": "ประเภทโครงการ (Project Type)" },
+      { "id": "master.vendor", "label": "ผู้ขาย / ผู้รับเหมา" },
+      { "id": "master.customer", "label": "ลูกค้า (Customer)" },
+      { "id": "master.project", "label": "Project / Phase / Block / Unit" },
+      { "id": "master.model", "label": "Model / แบบบ้าน" },
+      { "id": "master.cc", "label": "Cost Center" },
+      { "id": "master.docnum", "label": "Document Numbering" }
+    ] },
+    { "kind": "item", "id": "users", "icon": "users", "label": "ผู้ใช้ & สิทธิ์" },
+    { "kind": "item", "id": "reports", "icon": "report", "label": "ศูนย์รายงาน" },
+    { "kind": "item", "id": "dms", "icon": "doc", "label": "ศูนย์เอกสาร (DMS)" },
+    { "kind": "item", "id": "settings", "icon": "settings", "label": "ตั้งค่าระบบ" },
+    { "kind": "item", "id": "audit", "icon": "history", "label": "บันทึกการใช้งาน" },
+
+    { "kind": "section", "sectionId": "usage", "label": "บัญชีการใช้งาน" },
+    { "kind": "item", "id": "sub", "icon": "tag", "label": "Subscription", "sub": [
+      { "id": "sub.mine", "label": "แพ็กเกจของฉัน" },
+      { "id": "sub.plans", "label": "แพ็กเกจ & ราคา" },
+      { "id": "sub.billing", "label": "บิล & ใบเสร็จ" }
+    ] },
+
+    { "kind": "section", "sectionId": "platform", "label": "ผู้ดูแลแพลตฟอร์ม" },
+    { "kind": "item", "id": "admin", "icon": "shield", "label": "Platform Admin", "sub": [
+      { "id": "admin.overview", "label": "ภาพรวมรายได้" },
+      { "id": "admin.subs", "label": "จัดการผู้สมัคร" },
+      { "id": "admin.plans", "label": "จัดการแพ็กเกจ" },
+      { "id": "admin.invoices", "label": "ใบแจ้งหนี้" }
+    ] },
+    { "kind": "item", "id": "mobile", "icon": "inbox", "label": "Mobile Approval" },
+    { "kind": "item", "id": "line", "icon": "users", "label": "LINE OA · ลูกบ้าน", "mod": "lineoa" },
+    { "kind": "item", "id": "sync", "icon": "sync", "label": "Sync SAP / REM" }
+  ]
+}

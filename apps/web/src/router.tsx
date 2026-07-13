@@ -1,29 +1,23 @@
 /**
- * TanStack Router route tree for @juneflow/web (P0-WEB-02).
+ * TanStack Router route tree for @juneflow/web.
  *
- * Builds the full route tree from the structural route registry (registry.ts),
- * which is transcribed 1:1 from docs/extract/NAV-ROUTES.md — the extracted
- * source of truth for every route (PLAN.md section 0 rule 2). The checker
- * scripts/check-nav-parity.mjs proves the registry matches NAV-ROUTES.md 100%.
+ * Root layout = the app shell (P0-WEB-05): <ShellProvider> wraps <AppShell/>, which
+ * renders the sidebar + per-page topbar chrome around the routed screen (<Outlet/>),
+ * ported 1:1 from pototype/shell.jsx + chrome.jsx. Route "login" is full-bleed (no
+ * shell) per shell.jsx:106-119. Every route is built from the structural registry
+ * (routes/registry.ts, proven 100% == NAV-ROUTES.md by scripts/check-nav-parity.mjs).
  *
- * What this task delivers:
- *  - a route per Sidebar route (100) + per RouteView-only route (8),
- *  - `fin.*` legacy ids redirected to their real route (C-note in registry),
- *  - "/" redirects to the default route ("dashboard"),
- *  - every screen behind a Phase-0 feature flag: since no screen is ported yet
- *    (P0-WEB-05+), all routes render the Placeholder scaffold (feature-flags.ts).
- *
- * Rulings: C7 (boq.bom is a first-class route), C8 (subcon.* gated by module
- * subcon) are encoded in registry.ts. Real screens + the chrome.jsx/shell.jsx
- * app shell (labels via i18n, badges via real queries — C10) arrive in P0-WEB-05.
- * No design values are hardcoded here — colors/spacing come from @juneflow/tokens.
+ * Screen bodies: login (P1-WEB-01) is ported; every other route renders the shell
+ * Placeholder (Page→TopBar + "under development" card) until its screen lands — so the
+ * full chrome is demoable now. Labels come from i18n keys, badges from real queries
+ * (C10), data from GET /me + GET /projects via the generated client. `fin.*` legacy
+ * ids redirect; "/" redirects to the default route ("dashboard").
  */
 import {
   createRootRoute,
   createRoute,
   createRouter,
   redirect,
-  Outlet,
 } from "@tanstack/react-router";
 import {
   DEFAULT_ROUTE,
@@ -31,37 +25,26 @@ import {
   LEGACY_REDIRECTS,
   SIDEBAR_ROUTES,
 } from "./routes/registry";
-import { isRouteEnabled } from "./feature-flags";
 import { LoginScreen } from "./screens/login/login-screen";
+import { ShellProvider } from "./shell/shell-context";
+import { AppShell } from "./shell/app-shell";
+import { Placeholder } from "./shell/page";
 
 /**
  * Ported screens keyed by route id. A route with an entry here renders its real
- * screen (P1-*); everything else falls back to the Placeholder scaffold until its
- * screen lands. Login (P1-WEB-01) is standalone/full-bleed and needs no app shell.
+ * screen; everything else renders the shell Placeholder until its screen lands.
  */
 const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
 };
 
 const rootRoute = createRootRoute({
-  component: () => <Outlet />,
+  component: () => (
+    <ShellProvider>
+      <AppShell />
+    </ShellProvider>
+  ),
 });
-
-/**
- * Scaffold placeholder shown for every route until its real screen is ported
- * (P0-WEB-05+). Renders only the technical route id (no translated copy — real
- * screens use i18n keys exclusively, PLAN.md section 0). Hidden from the sidebar
- * while its feature flag is off.
- */
-function Placeholder({ routeId }: { routeId: string }) {
-  const enabled = isRouteEnabled(routeId);
-  return (
-    <main data-route={routeId} data-enabled={enabled}>
-      <code>{routeId}</code>
-      <p>{enabled ? "screen pending port (P0-WEB-05+)" : "hidden behind feature flag"}</p>
-    </main>
-  );
-}
 
 // Build the "/" index route -> redirect to the default route (shell.jsx default).
 const indexRoute = createRoute({
