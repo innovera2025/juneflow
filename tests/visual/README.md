@@ -24,6 +24,8 @@
   - `capture` — screenshot จริงเทียบ reference ตาม `screens.manifest.json` (ยังว่างจนกว่าจอ apps/web จะมา · map route→ref อยู่ที่ `reference-index.md`) · **skip** (ไม่ fail) เมื่อ manifest ว่าง หรือ `VISUAL_BASE_URL` ไม่ถึง → gate เขียวระหว่าง scaffold
 - **รายงาน diff:** `.results/visual-report.md` + `.results/visual-report.json` + `.results/diff/*.png` (gitignored — ไม่อยู่ใน `reference/`)
 - **threshold เริ่ม strict** (`VISUAL_MAX_DIFF_PIXEL_RATIO=0`, `VISUAL_CHANNEL_THRESHOLD=0`) — การผ่อน threshold สำหรับ jpg lossy ของจอจริง = คำตัดสินของ Wei/BLOCKERS ไม่ใช่ default เงียบ ๆ (skill `visual-gate` กฎเหล็ก)
+- **Mask regions (P0-QA-07 · B-044):** ยกเว้นเฉพาะสี่เหลี่ยมที่ Wei อนุมัติจากการนับ diff — **opt-in ต่อจอ** ผ่าน field `masks` ใน `screens.manifest.json` (คีย์จาก `lib/masks.ts` `MASK_REGISTRY`) · ทุก region ต้องมี `reason` อ้าง id ใน `BLOCKERS.md` (บังคับ runtime — ไม่มี citation = throw) · ไม่ใช่การผ่อน threshold ทั่วไป · **dimension mismatch ยัง auto-FAIL เสมอ** (mask ช่วยไม่ได้ — P0-FIX-04 คงเดิม) · จำนวน masked px + จำนวนที่ต่างจริงในนั้นถูกรายงานใน `visual-report.md` (คอลัมน์ `masked px`) และย้อมน้ำเงินใน diff PNG
+  - mask ปัจจุบัน: `sidebar-logo-b044` = กล่องโลโก้ sidebar (wordmark + tagline) rect x8 y6 w224 h56 — วัดจาก `reference/gallery/g1/01-s.jpg` (1600x1000: lockup x16..124 y16..55 · เส้นแบ่ง y64 · ปุ่ม toggle y≈69) — reference ทุกใบเป็น logo lockup รุ่นเก่า (`juneflow / Construction ERP`) ส่วน port ใช้ `t("app.name")` th=`ระบบงานก่อสร้าง` (B-044(ก) Wei ตัดสิน 13 ก.ค.) · จอที่ไม่มี sidebar lockup (เช่น login — P1-WEB-01) **ห้ามใส่** mask นี้
 - **รัน:** `pnpm --filter @juneflow/tests test:visual`
 
 ## Gate ที่เกี่ยวข้อง (PLAN.md §9)
