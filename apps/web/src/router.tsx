@@ -32,6 +32,16 @@ import {
   SIDEBAR_ROUTES,
 } from "./routes/registry";
 import { isRouteEnabled } from "./feature-flags";
+import { LoginScreen } from "./screens/login/login-screen";
+
+/**
+ * Ported screens keyed by route id. A route with an entry here renders its real
+ * screen (P1-*); everything else falls back to the Placeholder scaffold until its
+ * screen lands. Login (P1-WEB-01) is standalone/full-bleed and needs no app shell.
+ */
+const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
+  login: LoginScreen,
+};
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -64,13 +74,14 @@ const indexRoute = createRoute({
 
 // One route per registered screen (sidebar + RouteView-only). Paths use the raw
 // route id as a single literal segment (e.g. "/boq.overview").
-const screenRoutes = [...SIDEBAR_ROUTES, ...EXTRA_ROUTES].map((r) =>
-  createRoute({
+const screenRoutes = [...SIDEBAR_ROUTES, ...EXTRA_ROUTES].map((r) => {
+  const Ported = PORTED_SCREENS[r.id];
+  return createRoute({
     getParentRoute: () => rootRoute,
     path: `/${r.id}`,
-    component: () => <Placeholder routeId={r.id} />,
-  }),
-);
+    component: Ported ? () => <Ported /> : () => <Placeholder routeId={r.id} />,
+  });
+});
 
 // Legacy fin.* ids redirect to their real route.
 const legacyRoutes = LEGACY_REDIRECTS.map((r) =>

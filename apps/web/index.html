@@ -1,9 +1,29 @@
 <!doctype html>
-<html lang="th">
+<!--
+  data-theme="navy": the prototype forces the navy accent as the app-wide default
+  (shell.jsx applyTweaks + "One-time migration: main accent set to navy per request.
+  Force navy once", shell.jsx:34-43), so every gallery reference (tests/visual/reference)
+  is navy. @juneflow/tokens exposes that exact palette as [data-theme="navy"]
+  (#0B2A4A/#133E6B = ACCENT_PALETTES.navy). Required for the visual gate (PLAN.md section 0).
+-->
+<html lang="th" data-theme="navy">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Design tokens come from @juneflow/tokens (fiori theme) only - never hardcode values (PLAN.md section 0 rule 2) -->
+    <!-- Design tokens come from @juneflow/tokens (navy accent) only - never hardcode values (PLAN.md section 0 rule 2) -->
+    <!--
+      Webfonts loaded exactly as the prototype (Juneflow Fiori.html head): the
+      @juneflow/tokens --font family list (Inter, Noto Sans Thai/Arabic/SC) only
+      renders when the files are actually fetched; without this the browser falls
+      back to a serif (Times) and fails the visual gate. Families come from
+      tokens/prototype - not hardcoded here.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <title>Juneflow</title>
   </head>
   <body>
