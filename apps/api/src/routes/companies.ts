@@ -16,7 +16,7 @@
 // attribution). Under hard tenant scoping (PLAN.md §5) another company's
 // projects are never readable, so members without tenant-attributed projects
 // count 0 — the prototype's per-member split (PROJECT_COMPANY) has no schema
-// home yet; see BLOCKERS.md B-045.
+// home yet; see BLOCKERS.md B-046.
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { companies, projects } from "@juneflow/db/schema";
