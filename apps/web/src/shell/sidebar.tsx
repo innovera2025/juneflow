@@ -6,27 +6,36 @@
  * The menu tree is built from the structural registry (routes/registry.ts, via
  * nav-tree.ts) + i18n labels (tn) + icons — never chrome.jsx's literal Thai/badges.
  *
- * Three gates faithful to chrome.jsx:311-333 — (i) viewMode: platform mode shows
+ * Four gates faithful to chrome.jsx:311-333 — (i) viewMode: platform mode shows
  * only the platform section + dashboard; tenant shows everything else; (ii) a
  * section shows only when ≥1 child passes; (iii) an item shows when moduleOn(mod)
- * for the active project's type. Package gating (pkgMenuAllowed) is a prototype
- * window-global mock with no client endpoint (PACKAGE-RULES.md) → deferred, so all
- * module-visible rows show (matches the default-package reference gallery/g1/01).
+ * for the active project's type; (iv) pkgMenuAllowed(id) — the tenant package's
+ * NAV allow-list from GET /me package.menus (B-043, pkg-builder.jsx:237). Per
+ * B-043 the resulting row-set may differ from the stale gallery/g1/01 capture;
+ * composition follows current NAV + gating, which is the ground truth.
  *
  * Data (C10, §0 rule 3): footer identity comes from GET /me (not the prototype's
  * hardcoded user); module gating from GET /projects' active project type; badge
- * counts from a real query (none yet -> no pill, BLOCKERS B-039). Logo gradient +
- * avatar color are prototype-verbatim literals (B-037(a): no token match).
+ * counts from the real GET /counts query (B-040 — no pill when 0/absent). Logo
+ * gradient + avatar color are prototype-verbatim literals (B-037(a): no token match).
  */
 import { useEffect, useRef, useState } from "react";
+import type { NavKey } from "@juneflow/i18n";
 import { Icon } from "../ui/icon";
 import { Avatar } from "../ui/avatar";
 import { useI18n } from "../i18n";
 import { parentOf, type SectionId } from "../routes/registry";
-import { NAV_TREE, asIconName, asNavKey, type NavItem } from "./nav-tree";
+import { NAV_TREE, asIconName, type NavItem } from "./nav-tree";
 import { moduleOn } from "./project-types";
 import { useShellCtx } from "./shell-context";
-import { useMe, useProjects, resolveActiveProject, entityStr } from "./use-shell-data";
+import {
+  useMe,
+  useProjects,
+  resolveActiveProject,
+  entityStr,
+  pkgMenuAllowed,
+  packageMenus,
+} from "./use-shell-data";
 import { useChromeText } from "./chrome-i18n";
 import { BadgeCount } from "./badge-count";
 import { UserMenu } from "./user-menu";
@@ -95,10 +104,14 @@ export function Sidebar() {
   const activeProject = resolveActiveProject(projectsQ.data, ctx.tweaks.project);
   const activeType = activeProject?.type;
 
-  // Build the visible list applying the three gates (chrome.jsx:311-333).
+  // Build the visible list applying the four gates (chrome.jsx:311-333).
+  const menus = packageMenus(me.data);
   const display: DisplayItem[] = [];
   let curSection: SectionId | undefined;
   const modOk = (mod: string | undefined) => moduleOn(mod, activeType);
+  // pkgOk mirrors chrome.jsx:320: platform mode bypasses package gating; otherwise
+  // the row must pass the tenant package's NAV allow-list (B-043).
+  const pkgOk = (id: string) => viewMode === "platform" || pkgMenuAllowed(id, menus);
   for (let i = 0; i < NAV_TREE.length; i++) {
     const node = NAV_TREE[i];
     const section = node.kind === "section" ? node.sectionId : curSection;
@@ -109,18 +122,18 @@ export function Sidebar() {
       viewMode === "platform" ? inPlatform || (node.kind === "item" && node.id === "dashboard") : !inPlatform;
     if (!modePass) continue;
     if (node.kind === "section") {
-      // section shows only if ≥1 following item passes moduleOn
+      // section shows only if ≥1 following item passes moduleOn AND pkgOk
       let any = false;
       for (let j = i + 1; j < NAV_TREE.length; j++) {
         const nx = NAV_TREE[j];
         if (nx.kind === "section") break;
-        if (modOk(nx.mod)) {
+        if (modOk(nx.mod) && pkgOk(nx.id)) {
           any = true;
           break;
         }
       }
       if (any) display.push({ node, section });
-    } else if (modOk(node.mod)) {
+    } else if (modOk(node.mod) && pkgOk(node.id)) {
       display.push({ node, section });
     }
   }
@@ -208,7 +221,7 @@ export function Sidebar() {
                   padding: "14px 10px 6px",
                 }}
               >
-                {tn(asNavKey(node.label))}
+                {tn(node.label)}
               </div>
             );
           }
@@ -271,7 +284,7 @@ function NavRow({
   expanded: string | null;
   onToggle: (id: string) => void;
   onNavigate: (id: string) => void;
-  tn: (key: ReturnType<typeof asNavKey>) => string;
+  tn: (key: NavKey) => string;
 }) {
   const hasSub = !!item.sub;
   const isParentActive = hasSub ? item.id === parentId : item.id === active;
@@ -301,7 +314,7 @@ function NavRow({
         }}
       >
         <Icon name={asIconName(item.icon)} size={17} />
-        <span style={{ flex: 1 }}>{tn(asNavKey(item.label))}</span>
+        <span style={{ flex: 1 }}>{tn(item.label)}</span>
         {item.badge && <BadgeCount sourceId={item.badge} />}
         {hasSub && <Icon name={isOpen ? "chevD" : "chevR"} size={14} style={{ opacity: 0.6 }} />}
       </div>
@@ -327,7 +340,7 @@ function NavRow({
                   justifyContent: "space-between",
                 }}
               >
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{tn(asNavKey(s.label))}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{tn(s.label)}</span>
                 {s.badge && <BadgeCount sourceId={s.badge} sub />}
               </div>
             );

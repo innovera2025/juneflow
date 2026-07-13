@@ -10,14 +10,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../ui/icon";
 import { Kbd } from "../ui/kbd";
+import type { NavKey } from "@juneflow/i18n";
 import { useI18n } from "../i18n";
 import { useShellCtx } from "./shell-context";
 import { useChromeText } from "./chrome-i18n";
-import { NAV_TREE, asNavKey } from "./nav-tree";
+import { NAV_TREE } from "./nav-tree";
 
 interface Entry {
   id: string;
-  key: string;
+  key: NavKey;
 }
 
 /** Flatten nav-tree leaves + subs into {id, thai-label-key}. */
@@ -57,7 +58,7 @@ export function SearchPalette() {
   }, [open]);
 
   const matches = useMemo(() => {
-    const withLabel = entries.map((e) => ({ ...e, label: tn(asNavKey(e.key)) }));
+    const withLabel = entries.map((e) => ({ ...e, label: tn(e.key) }));
     if (!q) return withLabel.slice(0, 8);
     const ql = q.toLowerCase();
     return withLabel.filter((e) => e.label.toLowerCase().includes(ql)).slice(0, 10);

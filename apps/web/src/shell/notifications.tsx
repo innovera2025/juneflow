@@ -6,8 +6,9 @@
  * endpoint returns an opaque EntityList (no Notification schema in openapi.yaml), so each
  * row is rendered defensively from a best-effort title field; the prototype's rich per-type
  * icon/tone/time/route mapping needs a typed Notification schema (contract gap, BLOCKERS
- * B-039). Header/actions/empty copy come from chrome-strings (tp); the dot shows only when
- * the real list is non-empty.
+ * B-039). Header/actions copy come from chrome-strings (tp); the dot shows only when the
+ * real list is non-empty. No empty-state text: the prototype (chrome.jsx:659-679) always
+ * maps its list and has no empty state — inventing one is forbidden (B-045 / §0 rule 2).
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -86,41 +87,37 @@ export function NotificationsPopover() {
         </button>
       </div>
       <div style={{ maxHeight: 380, overflow: "auto" }}>
-        {list.length === 0 ? (
-          <div style={{ padding: 24, textAlign: "center", color: "var(--text-3)", fontSize: 12 }}>{ct("notifEmpty")}</div>
-        ) : (
-          list.map((n, i) => (
+        {list.map((n, i) => (
+          <div
+            key={i}
+            onClick={() => {
+              setOpen(false);
+              ctx.navigate("notifications");
+            }}
+            style={{ display: "flex", gap: 10, padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid var(--border)" }}
+          >
             <div
-              key={i}
-              onClick={() => {
-                setOpen(false);
-                ctx.navigate("notifications");
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 8,
+                flexShrink: 0,
+                background: "var(--surface-3)",
+                color: "var(--text-2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
-              style={{ display: "flex", gap: 10, padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid var(--border)" }}
             >
-              <div
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 8,
-                  flexShrink: 0,
-                  background: "var(--surface-3)",
-                  color: "var(--text-2)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Icon name="bell" size={14} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.35 }}>
-                  {entityStr(n, "title") || entityStr(n, "message") || entityStr(n, "text")}
-                </div>
+              <Icon name="bell" size={14} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.35 }}>
+                {entityStr(n, "title") || entityStr(n, "message") || entityStr(n, "text")}
               </div>
             </div>
-          ))
-        )}
+          </div>
+        ))}
       </div>
       <div style={{ padding: 10, borderTop: "1px solid var(--border)" }}>
         <Btn

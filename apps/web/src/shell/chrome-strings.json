@@ -1,5 +1,5 @@
 {
-  "_source": "Verbatim UI strings from pototype/chrome.jsx + shell.jsx that are NOT nav labels and have NO dict key in i18n-full.json. Transcribed (never invented/re-translated) so they stay out of .tsx source (i18n-guard) and route through the i18n phrase layer tp(): th (the visual-gate language) renders the exact prototype text; en/zh/ar fall back to the Thai key until translation entries land in the SACRED i18n-full.json (BLOCKERS B-039) — same fallback the 15 keyless nav labels and the login screen (B-035) already ship with. Strings that DO have a dict key (common.*/nav.*) are rendered with t() directly and are not duplicated here.",
+  "_source": "Verbatim UI strings from pototype/chrome.jsx + shell.jsx + company-accept.jsx that are NOT nav labels. Transcribed (never invented/re-translated) so they stay out of .tsx source (i18n-guard skips .json) and route through the i18n phrase layer tp(): th (the visual-gate language) renders the exact prototype text. After PLAT-03 (B-039(ก-ปรับ)) MOST of these Thai strings are now real phrase keys in i18n-full.json, so tp() resolves real en/zh/ar translations; the few not yet filled (companyPickTitle / companyTaxLabel / companyInfo — the un-omitted CompanySwitcher strings, BLOCKERS B-047; and notifEmpty is intentionally NOT here, B-045) fall back to the Thai key until Wei fills them, same fallback precedent as B-035/B-039. Strings that DO have a dict key (common.*/nav.*) are rendered with t()/tn() directly and are not duplicated here.",
   "strings": {
     "viewTenant": "ลูกค้า",
     "viewPlatform": "เจ้าของระบบ",
@@ -15,10 +15,15 @@
     "projUnits": "ยูนิต",
     "projSold": "ขาย",
     "projPresale": "กำลังพรีเซลส์",
+    "companyEyebrow": "บริษัท",
+    "companyPickTitle": "เลือกบริษัท (Multi-Company)",
+    "companyProjSuffix": "โครงการ",
+    "companyTaxLabel": "เลขภาษี",
+    "companyDocLabel": "เลขที่เอกสาร",
+    "companyInfo": "สลับบริษัทแล้ว รายการโครงการ/เอกสาร/งบการเงินจะกรองตามบริษัทที่เลือก · เลขที่เอกสารออกตาม prefix ของแต่ละบริษัท",
     "notifTitle": "แจ้งเตือน",
     "notifMarkAll": "อ่านทั้งหมด",
     "notifViewAll": "ดูการแจ้งเตือนทั้งหมด",
-    "notifEmpty": "ยังไม่มีการแจ้งเตือน",
     "searchPlaceholder": "ค้นหาเอกสาร, หน้าจอ, ลูกค้า, ผู้ขาย...",
     "searchEmpty": "ไม่พบรายการที่ค้น",
     "searchPageTag": "หน้า",

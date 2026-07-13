@@ -1,18 +1,18 @@
 /*
  * ProjectSwitcher — ported from pototype/chrome.jsx ProjectSwitcher (452-601).
  *
- * DATA GAP (scout BLOCKER candidate, BLOCKERS B-039): the prototype renders a
- * short-code color chip, phase list, per-phase units & sold%. GET /projects (SACRED
- * contract) returns ONLY {id,name,type,budget,currency_code,status} — no short,
- * color, phases, units or sold%. Inventing them is forbidden (§0), so this switcher
- * renders faithfully with the fields that exist: TypeBadge (from `type`) + name +
- * status, and selects a project id (no phase). Popover copy comes from chrome-strings.
+ * Data (B-041): the extended GET /projects now carries short / color / units /
+ * phases[] (each {id, name, units, sold_pct, sale_status}) — the exact fields the
+ * prototype's PROJECTS switcher renders (short-code color chip, phase list, per-phase
+ * units & sold%). No field beyond what the API returns is invented (§0). The active
+ * selection is "projectId.phaseId" in ctx.tweaks.project, like the prototype.
  *
  * On select, if the current route's module is off for the new project's type, we
  * redirect to dashboard first (shell.jsx setTweak project special-case, 91-96).
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { components } from "@juneflow/contracts";
 import { Icon } from "../ui/icon";
 import { Btn } from "../ui/button";
 import { useShellCtx } from "./shell-context";
@@ -21,16 +21,28 @@ import { useChromeText } from "./chrome-i18n";
 import { TypeBadge } from "./type-badge";
 import { routeAllowedForType } from "./project-types";
 
+type Project = components["schemas"]["Project"];
+
+/** The active phase for a project + the selected phase id (prototype phase resolution). */
+function resolvePhase(project: Project | undefined, phaseId: string | undefined) {
+  const phases = project?.phases ?? [];
+  return phases.find((ph) => ph.id === phaseId) ?? phases[0];
+}
+
 export function ProjectSwitcher() {
   const ctx = useShellCtx();
   const ct = useChromeText();
   const projectsQ = useProjects();
   const projects = projectsQ.data ?? [];
+
+  const [projTweak, phaseTweak] = (ctx.tweaks.project ?? "").split(".");
   const active = resolveActiveProject(projects, ctx.tweaks.project);
+  const activePhase = resolvePhase(active, phaseTweak);
 
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const [q, setQ] = useState("");
+  const [expandedProj, setExpandedProj] = useState<string | null>(projTweak || null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
@@ -40,6 +52,7 @@ export function ProjectSwitcher() {
       const r = btnRef.current.getBoundingClientRect();
       setPos({ top: r.bottom + 6, left: r.left });
       setQ("");
+      setExpandedProj(active?.id ?? null);
     }
     setOpen((o) => !o);
   };
@@ -58,9 +71,9 @@ export function ProjectSwitcher() {
     };
   }, [open]);
 
-  const select = (id: string, type: string) => {
+  const select = (projectId: string, phaseId: string, type: string) => {
     if (!routeAllowedForType(ctx.route, type)) ctx.navigate("dashboard");
-    ctx.setTweak("project", id);
+    ctx.setTweak("project", `${projectId}.${phaseId}`);
     setOpen(false);
   };
 
@@ -112,28 +125,88 @@ export function ProjectSwitcher() {
 
       <div style={{ flex: 1, overflow: "auto", padding: 6 }}>
         {filtered.map((p) => {
-          const isCur = active?.id === p.id;
+          const isExp = expandedProj === p.id;
+          const phases = p.phases ?? [];
           return (
-            <div
-              key={p.id}
-              onClick={() => select(p.id, p.type)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "10px 10px",
-                borderRadius: 7,
-                cursor: "pointer",
-                background: isCur ? "var(--brand-soft)" : "transparent",
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 600 }}>{p.name}</div>
-                <div style={{ marginTop: 3 }}>
-                  <TypeBadge type={p.type} size="sm" />
+            <div key={p.id}>
+              <div
+                onClick={() => setExpandedProj(isExp ? null : p.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 10px",
+                  borderRadius: 7,
+                  cursor: "pointer",
+                  background: isExp ? "var(--surface-2)" : "transparent",
+                }}
+              >
+                <div
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 6,
+                    background: p.color ?? "var(--brand)",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 10,
+                    fontWeight: 800,
+                    flexShrink: 0,
+                  }}
+                >
+                  {p.short}
                 </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>{p.name}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--text-3)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <TypeBadge type={p.type} size="sm" />
+                    <span>
+                      {phases.length} {ct("projPhase")} · <span className="num">{p.units ?? 0}</span> {ct("projUnitsTotal")}
+                    </span>
+                  </div>
+                </div>
+                <Icon name={isExp ? "chevD" : "chevR"} size={13} color="var(--text-3)" />
               </div>
-              {isCur && <Icon name="check" size={13} color="var(--brand)" />}
+              {isExp && (
+                <div style={{ paddingLeft: 32, paddingBottom: 6 }}>
+                  {phases.map((ph) => {
+                    const isCur = p.id === projTweak && ph.id === phaseTweak;
+                    return (
+                      <div
+                        key={ph.id}
+                        onClick={() => select(p.id, ph.id, p.type)}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          background: isCur ? "var(--brand-soft)" : "transparent",
+                          borderLeft: isCur ? "2px solid var(--brand)" : "2px solid transparent",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          marginBottom: 2,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: isCur ? 700 : 500, color: isCur ? "var(--brand)" : "var(--text)" }}>{ph.name}</div>
+                          <div style={{ fontSize: 10, color: "var(--text-3)" }}>
+                            <span className="num">{ph.units ?? 0}</span> {ct("projUnits")}
+                            {ph.sold_pct != null && (
+                              <>
+                                {" "}· {ct("projSold")} <span className="num">{ph.sold_pct}%</span>
+                              </>
+                            )}
+                            {ph.sale_status === "pre-sale" && <> · {ct("projPresale")}</>}
+                          </div>
+                        </div>
+                        {isCur && <Icon name="check" size={13} color="var(--brand)" />}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
@@ -176,13 +249,37 @@ export function ProjectSwitcher() {
           height: 38,
         }}
       >
-        {active && <TypeBadge type={active.type} size="sm" showName={false} />}
+        <div
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 5,
+            background: active?.color ?? "var(--brand)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 10,
+            fontWeight: 800,
+          }}
+        >
+          {active?.short}
+        </div>
         <div style={{ lineHeight: 1.1, textAlign: "left" }}>
           <div style={{ fontSize: 9.5, color: "var(--text-3)", fontWeight: 500 }}>{ct("projEyebrow")}</div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
-            {active?.name ?? (projectsQ.isLoading ? "…" : "")}
+            {active
+              ? `${active.name}${activePhase ? ` · ${activePhase.name.split(" · ")[0]}` : ""}`
+              : projectsQ.isLoading
+                ? "…"
+                : ""}
           </div>
         </div>
+        {active && (
+          <div style={{ marginLeft: 2 }}>
+            <TypeBadge type={active.type} size="sm" showName={false} />
+          </div>
+        )}
         <Icon name="chevD" size={14} color="var(--text-3)" />
       </button>
       {popover && createPortal(popover, document.body)}
