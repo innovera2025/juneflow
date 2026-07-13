@@ -44,3 +44,39 @@ POSTGRES_PORT=5433 LOOP_CLAUDE_FLAGS="--model claude-opus-4-8 --permission-mode 
 scripts/loop-runner.sh --agent <zone>
 # live log files (session f9e2a420): tasks/b7rc6607s(backend) bnsvz3q56(integrations) bngjc5a6l(qa) bibgb4y50(devops-exited)
 ```
+
+
+---
+
+## [2026-07-13] ORCHESTRATOR AUDIT — REVIEW-QUEUE batch #2 (46 rows) · VERDICT: PROMOTABLE
+
+Independent re-verification of the full promote queue on dev `dbe72aa` (advisory role, requested by Wei).
+
+**Methods & results:**
+1. **Sacred integrity (whole dev history) = PASS** — every sacred immutable is pristine or authorized-only:
+   openapi.yaml (2 commits: stub + P0-BE-12 fill under SACRED_OVERRIDE=B-012) · PLAN.md (+B-032 platform zone) ·
+   i18n-full.json ×2 byte-identical, only login.* keys added (B-035/036) · migrations 0000-0007 pristine +
+   0008 additive (B-016 auth tables) · docs/extract/* + root CLAUDE.md 1 commit each (untouched) ·
+   apps/mobile/CLAUDE.md edit = today's B-015 override. 0 unauthorized sacred edits.
+2. **Migration chain = PASS** — 0000..0008 sequential, _journal idx 0-8 no gaps, `drizzle-kit check` "Everything's fine".
+3. **Aggregate gates `turbo typecheck lint build test` = 28/29 green** — all typecheck/lint/build + per-package
+   tests (api/web/i18n/tokens/integrations/db) pass. Sole miss = @juneflow/tests, root-caused NON-defect:
+   (a) stale local node_modules missing pg devDep → fixed by `pnpm install --frozen-lockfile` (= what CI runs);
+   (b) e2e/smoke needs live compose (by design, P0-QA-03).
+4. **tests-package suites (post frozen-install, CI condition, no DATABASE_URL) = match claims EXACTLY:**
+   unit 48 · seed 96 passed|17 skipped · contract 370 passed|46 skipped · visual 4 passed|1 skipped.
+5. **Key counts landed:** api **81/81** (P1-BE-01 security suites present: auth-guard/tenant-scope/reassign-block/
+   selectReference-allowlist) · web **24/24** (login-submit + auth-token).
+6. **Seed-count cross-consistency (BE-10 → FIX-05 → FIX-06) = PASS** — QA expected-first spec encodes
+   company=9 · platform_invoice=7 (T-1001=3+admin=4) · vendor=13{supplier7,subcon6} · register=6 ·
+   subcon_contract=4/งวด16 · WO=5→subcon · Unit/SalesUnit=84 · JV=7/≥14 · package=4; real-DB suite 113/113.
+7. **Artifact spot-checks = present:** migrations, BE-11 reassign-block test, FIX-04 dimensionMismatch test.
+
+**No defects found.** Non-blocking notes:
+- N1: after pulling dev, `pnpm install --frozen-lockfile` required before local `pnpm test` (FIX-06 added pg). CI handles it.
+- N2: e2e smoke (QA-03) + full G2-live (P1-BE-01, api-in-container) + compose boot require live compose → deferred to
+  P0-DEV-06 (BETTER_AUTH_SECRET provisioning) bring-up; re-verify then.
+
+**For Wei's promote decision (policy, not a defect):** G5 with strict `VISUAL_MAX_DIFF_PIXEL_RATIO=0` reports non-zero
+diff vs JPEG-lossy references (P1-WEB-01/QA-01/QA-04 all flag) — threshold calibration is an explicit Wei/BLOCKERS
+decision (no silent loosening). Login G5 already passed on structural criteria.
