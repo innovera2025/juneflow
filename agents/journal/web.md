@@ -172,3 +172,8 @@
 - ทำอะไร: รอบที่ 2/3: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต web — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $15.0562/$16 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+
+## 2026-07-13 18:15 · web execute · P0-WEB-05 app shell
+- ทำอะไร: port app shell จาก chrome.jsx + shell.jsx → `apps/web/src/shell/` (18 ไฟล์) + `ui/{avatar,kbd,card,icon+full glyphs}`. Sidebar เต็ม (nav tree จาก registry+`nav-tree.json` · label ผ่าน tn/tp · 3 gate: viewMode/moduleOn/section) · TopBar (ProjectSwitcher·LanguageSwitcher·Notifications·Search) · UserMenu · Modal/Toast host · back-nav · Tweaks gear · ShellProvider (ctx แทน window.__juneflowCtx ผูก TanStack Router) · data จริง `/me`+`/projects` (generated client+Query) · badge = C10 (ไม่มี pill · ไม่มี count endpoint).
+- ตัดสินใจอะไร: **แก้ B-036** — ใช้ tn/tp ใน web ได้โดยเก็บ Thai key ในไฟล์ data `.json` (i18n-guard ข้าม .json) ไม่มีไทยใน .tsx เลย (grep ยืนยัน 0). Thai string ที่ไม่มี key → ไฟล์ data + fallback (th ถูก · ตรง B-035). ความขัดแย้งนอกตารางคำตัดสิน → BLOCKERS B-039..B-042 (i18n keys·C10 count endpoint·/companies+project fields·token theme) ไม่เดา.
+- เจออะไร: gates เขียวครบ — typecheck ok · vite build ok · 44 unit (24 เดิม + 20 ใหม่) · nav-parity 100% (100+8+3). smoke (playwright headless) shell mount ไม่มี error · sidebar 244px · nav 33 rows · energy section ซ่อน (realestate default) ตรง g1/01. G5 เต็ม (pixel vs gallery) ต้องมี live seeded stack (api `/me`+`/projects` + login) ซึ่ง compose api boot ยังรอ B-038 — sidebar chrome th ตรง reference จาก smoke.

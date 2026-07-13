@@ -1,0 +1,37 @@
+{
+  "_source": "Faithful transcription of pototype/project-types.jsx PROJECT_TYPES (lines 6-51) — only the fields the shell needs: display name (Thai)/nameEn, TypeBadge icon+color, and the module gate map. Thai lives in .json (i18n-guard skips .json). Drives moduleOn() sidebar gating + TypeBadge. color hexes are prototype-verbatim (B-037(ก): no matching @juneflow/tokens value — project-type identity colors).",
+  "types": {
+    "realestate": {
+      "id": "realestate",
+      "name": "อสังหาริมทรัพย์",
+      "nameEn": "Real Estate",
+      "icon": "building",
+      "color": "#0B2A4A",
+      "modules": { "land": 1, "boq": 1, "proc": 1, "subcon": 1, "timeline": 1, "inv": 1, "petty": 1, "pm": 1, "sales_re": 1, "aftersales": 1, "lineoa": 1 }
+    },
+    "solar": {
+      "id": "solar",
+      "name": "โซลาเซลล์ / พลังงาน (EPC)",
+      "nameEn": "Solar / Energy EPC",
+      "icon": "sun",
+      "color": "#B45309",
+      "modules": { "land": 1, "boq": 1, "proc": 1, "subcon": 1, "timeline": 1, "inv": 1, "petty": 1, "pm": 1, "om": 1, "ppa": 1, "roi": 1, "permit": 1, "warranty": 1 }
+    },
+    "civil": {
+      "id": "civil",
+      "name": "ก่อสร้างทั่วไป / โยธา",
+      "nameEn": "General / Civil",
+      "icon": "hardhat",
+      "color": "#0F766E",
+      "modules": { "land": 1, "boq": 1, "proc": 1, "subcon": 1, "timeline": 1, "inv": 1, "petty": 1, "pm": 1 }
+    },
+    "service": {
+      "id": "service",
+      "name": "โครงการบริการ / ทั่วไป",
+      "nameEn": "Service / General",
+      "icon": "briefcase",
+      "color": "#6D28D9",
+      "modules": { "land": 1, "proc": 1, "timeline": 1, "petty": 1, "pm": 1 }
+    }
+  }
+}
