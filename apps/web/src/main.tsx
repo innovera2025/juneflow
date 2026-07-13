@@ -17,8 +17,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-// Fiori theme tokens - the only allowed source of colors/fonts/spacing/radius (never hardcode values).
+// Design tokens - the only allowed source of colors/fonts/spacing/radius (never hardcode values).
 import "@juneflow/tokens/src/tokens.css";
+// Base primitives: border-box sizing + body font-family: var(--font) (loads the webfonts).
+// Without this the body falls back to a UA serif and content-box sizing shifts layouts.
+import "./base.css";
 import { queryClient } from "./query-client";
 import { router } from "./router";
 import { I18nProvider } from "./i18n";

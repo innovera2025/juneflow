@@ -11,6 +11,7 @@ export default defineConfig({
   // drizzle-kit's CJS loader cannot resolve. Add each new group's file here.
   schema: [
     "./src/schema/platform.ts",
+    "./src/schema/auth.ts",
     "./src/schema/project.ts",
     "./src/schema/boq.ts",
     "./src/schema/subcon.ts",

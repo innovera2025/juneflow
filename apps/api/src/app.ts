@@ -1,0 +1,125 @@
+// Juneflow API — Fastify app assembly (P1-BE-01).
+//
+// Split out of the entrypoint so the wiring is unit-testable (G3): index.ts
+// builds this app with production deps and listens; tests build it with
+// injected seams (resolver / signIn / storage / quota / audit sink).
+//
+// Contract surface (packages/contracts/openapi.yaml):
+// - All contract routes live under the contract server prefix /api/v1
+//   (P1-BE-01 audit debt 1 — live contract tests must not 404).
+// - Every error body is flat {code,message} per the Error schema: tenant-scope
+//   401, route errors, the not-found handler (debt 2) and the global error
+//   handler below. files.ts nested 401 fixed the same round (debt 3).
+// - /health stays at the root: it is NOT a contract endpoint — it is the
+//   compose healthcheck probe (infra/docker-compose.yml pins it).
+import Fastify, { type FastifyInstance } from "fastify";
+import type { Db } from "@juneflow/db/client";
+import {
+  registerTenantScope,
+  DEFAULT_PUBLIC_PATHS,
+  type ResolvedTenant,
+} from "./plugins/tenant-scope.js";
+import type { FastifyRequest } from "fastify";
+import {
+  registerAuditLog,
+  createDbAuditSink,
+  type AuditSink,
+} from "./plugins/audit-log.js";
+import { QuotaGuard } from "./plugins/quota.js";
+import { FeatureFlags, registerFeatureFlags } from "./plugins/feature-flags.js";
+import { registerFilesRoute, type FileStorage } from "./routes/files.js";
+import { registerAuthRoutes } from "./routes/auth.js";
+import { registerMeRoute } from "./routes/me.js";
+import { registerProjectsRoute } from "./routes/projects.js";
+import type { SignIn } from "./auth.js";
+
+export interface AppDeps {
+  /** Base (un-scoped) DB handle — only plugins/TenantDb construction see it. */
+  db: Db;
+  /** Tenant/session resolver (prod: better-auth resolveAuthContext). */
+  resolveTenant: (request: FastifyRequest) => Promise<ResolvedTenant>;
+  /** Credential sign-in seam (prod: better-auth signInWithEmail). */
+  signIn: SignIn;
+  /** File storage seam for POST /files. */
+  storage: FileStorage;
+  /** Quota guard (402 QUOTA_EXCEEDED + upgrade_url). */
+  quota: QuotaGuard;
+  /** Feature flags (defaults: DEFAULT_FEATURE_FLAGS). */
+  features?: FeatureFlags;
+  /** Audit sink override for tests (defaults to the DB sink). */
+  auditSink?: AuditSink;
+  /** Fastify logger toggle (tests turn it off). */
+  logger?: boolean;
+}
+
+/** Assemble the full Fastify app (plugins + handlers + /api/v1 routes). */
+export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
+  const app = Fastify({ logger: deps.logger ?? true });
+
+  // Contract Error is flat {code,message} — including 404s (audit debt 2).
+  app.setNotFoundHandler((request, reply) => {
+    return reply.code(404).send({
+      code: "NOT_FOUND",
+      message: `Route ${request.method}:${request.url} not found`,
+    });
+  });
+
+  // Every failure path answers the flat contract Error shape. 5xx details go
+  // to the log only (e.g. the better-auth misconfig that 500ed the stack —
+  // P1-BE-01 root cause — must not leak internals to clients).
+  app.setErrorHandler((error, request, reply) => {
+    const err = error as {
+      statusCode?: unknown;
+      code?: unknown;
+      message?: unknown;
+    };
+    const statusCode =
+      typeof err.statusCode === "number" && err.statusCode >= 400
+        ? err.statusCode
+        : 500;
+    if (statusCode >= 500) {
+      request.log.error(error);
+      return reply
+        .code(statusCode)
+        .send({ code: "INTERNAL_ERROR", message: "Internal server error" });
+    }
+    return reply.code(statusCode).send({
+      code: typeof err.code === "string" ? err.code : "BAD_REQUEST",
+      message: typeof err.message === "string" ? err.message : "Request failed",
+    });
+  });
+
+  // Enforce company_id tenant scope on every non-public request (fail closed).
+  await registerTenantScope(app, {
+    db: deps.db,
+    resolveCompanyId: deps.resolveTenant,
+    publicPaths: DEFAULT_PUBLIC_PATHS,
+  });
+
+  // Feature flags: hide modules that are not finished yet so dev stays green.
+  await registerFeatureFlags(app, deps.features ?? new FeatureFlags());
+
+  // Every successful mutation writes an AuditLog row (single choke point).
+  await registerAuditLog(app, {
+    sink: deps.auditSink ?? createDbAuditSink(deps.db),
+  });
+
+  // Compose healthcheck probe (root — not part of the contract surface).
+  app.get("/health", async () => ({ ok: true }));
+
+  // Contract routes under the contract server prefix /api/v1.
+  await app.register(
+    async (v1) => {
+      await registerAuthRoutes(v1, { db: deps.db, signIn: deps.signIn });
+      registerMeRoute(v1);
+      registerProjectsRoute(v1);
+      await registerFilesRoute(v1, {
+        storage: deps.storage,
+        quota: deps.quota,
+      });
+    },
+    { prefix: "/api/v1" },
+  );
+
+  return app;
+}

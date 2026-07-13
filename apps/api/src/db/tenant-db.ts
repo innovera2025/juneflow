@@ -12,19 +12,46 @@
 //     handle is held privately and never returned, so a handler physically
 //     cannot issue a query without the tenant predicate.
 //
-// Only tables that carry a `companyId` column can be reached through this
-// wrapper — the generic constraint rejects anything else at compile time, so a
-// tenant-owned table can never be queried un-scoped by accident.
+// Scoped operations accept only tables that carry a `companyId` column (the
+// TenantTable generic). The one unscoped door, selectReference(), is runtime-
+// allowlisted to exactly the platform-global reference tables
+// (package/project_type/company) and throws for everything else — including
+// parent-FK-scoped tenant tables that have no companyId column of their own.
 //
 // G3: src/db/tenant-db.test.ts proves the predicate/value is present on every
 // operation by inspecting the generated SQL (drizzle `.toSQL()`), and that a
 // missing companyId fails closed.
 import { and, eq, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
+import { companies, packages, projectTypes } from "@juneflow/db/schema";
 import type { Db } from "@juneflow/db/client";
 
 /** A tenant-owned table: any Drizzle table exposing a `companyId` column. */
 export type TenantTable = PgTable & { companyId: PgColumn };
+
+/**
+ * A platform-global reference table: one WITHOUT a `companyId` column
+ * (package, project_type, company). NOTE the type gate is only a first line of
+ * defense: it blocks tables that carry a companyId column, but tables scoped
+ * via a PARENT FK (boq_doc → project, work_period → subcon_contract, ...) also
+ * have no companyId column and would compile through. The REAL enforcement is
+ * the REFERENCE_TABLES runtime allowlist in selectReference() — anything not
+ * on it throws TenantScopeError (gate 4.5 finding, P1-BE-01 rework).
+ */
+export type ReferenceTable = PgTable & { companyId?: never };
+
+/**
+ * The ONLY tables selectReference() may read: genuinely platform-global
+ * reference data with no tenant owner at all. Parent-FK-scoped tenant tables
+ * (BOQ, subcon, acceptance, ...) are NOT reference tables — they must be read
+ * through predicates that anchor on a company_id-scoped root. Extend this list
+ * only for tables the erd shows with no company linkage at any depth.
+ */
+const REFERENCE_TABLES: ReadonlySet<PgTable> = new Set<PgTable>([
+  packages,
+  projectTypes,
+  companies,
+]);
 
 /** Insert payload for a tenant table, minus company_id (the wrapper injects it). */
 type TenantInsert<T extends TenantTable> = Omit<T["$inferInsert"], "companyId">;
@@ -33,8 +60,10 @@ type TenantInsert<T extends TenantTable> = Omit<T["$inferInsert"], "companyId">;
 type TenantUpdate<T extends TenantTable> = Partial<Omit<T["$inferInsert"], "companyId">>;
 
 export class TenantScopeError extends Error {
-  constructor() {
-    super("TENANT_SCOPE_MISSING: a valid company_id is required for every query");
+  constructor(
+    message = "TENANT_SCOPE_MISSING: a valid company_id is required for every query",
+  ) {
+    super(message);
     this.name = "TenantScopeError";
   }
 }
@@ -83,5 +112,28 @@ export class TenantDb {
   /** DELETE FROM table WHERE company_id = ? [AND extra]. */
   delete<T extends TenantTable>(table: T, where?: SQL) {
     return this.#db.delete(table).where(this.#scope(table, where));
+  }
+
+  /**
+   * Read a platform-global REFERENCE table (no `companyId` column exists, so no
+   * tenant predicate is possible — exactly: package, project_type, company).
+   * Read-only, and gated TWICE: the ReferenceTable type blocks companyId-column
+   * tables at compile time, and the REFERENCE_TABLES allowlist rejects every
+   * other table at runtime (parent-FK-scoped tenant tables like
+   * boq_doc/work_period have no companyId column and would otherwise compile
+   * through — gate 4.5 finding). Callers must only resolve reference rows the
+   * tenant already points at (e.g. its own subscription's package_id) — never
+   * enumerate other tenants.
+   */
+  selectReference<T extends ReferenceTable>(table: T, where?: SQL) {
+    if (!REFERENCE_TABLES.has(table)) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_REFERENCE_DENIED: not a platform-global reference table " +
+          "(allowlist: package, project_type, company) — tenant-owned data, " +
+          "including parent-FK-scoped tables, must go through the scoped select()",
+      );
+    }
+    const query = this.#db.select().from(table);
+    return where ? query.where(where) : query;
   }
 }

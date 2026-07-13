@@ -38,18 +38,19 @@
 //             Each subcon_contract.vendor_id points to its real firm (name match).
 //             subcon-vendor delta 2→9 flagged to QA (P0-QA-06) via REVIEW-QUEUE.
 //
-// INTERIM (kept this round per P0-BE-10 rework-3 directive item 5 — safe mapping +
-// blocker reference; PLAN.md §0 rule 4):
-//   - B-025   pr-list.jsx PR-2026-0411 type `clear` ∉ pr_type enum → mapped to
-//             `advance` (clearing an advance). NOTE: B-025 was answered mid-round
-//             (ก: keep INV-SUB-* 3 as T-1001's real platform_invoice, drop PINV-0610);
-//             that platform_invoice rework is DEFERRED to a follow-up round.
-//   - B-026   subcon register: this round still flags every subcontractor-type vendor
-//             as kind=subcon (9). B-026 was answered mid-round (ก: register = only the
-//             6 subcon.jsx SUBCONS; the 2 master-party "รับเหมา" must NOT be subcon —
-//             no C6 conflict, C6 only picks the vendor-master list). Applying it
-//             (reclassify V-0031/V-0045 → supplier, rewire `wos`, place SC-07) is
-//             DEFERRED to a follow-up round — see agents/journal/backend.md.
+// ANSWERED BLOCKERS applied this round (P0-FIX-05 — Wei ตอบ 12 ก.ค.):
+//   - B-025(ก) platform_invoice: PINV-2569-0610 (T-1001, subscription-admin.jsx inv) is a
+//             stale-version duplicate → DROPPED. T-1001's authoritative invoices are the 3
+//             INV-SUB-* rows (subscription.jsx:31 SUB_INVOICES). Table now holds 4 admin rows
+//             (other tenants) + 3 T-1001 rows = 7. Count delta flagged to QA (P0-FIX-06).
+//   - B-026(ก) subcon register = the 6 subcon.jsx SUBCONS only (SC-01..SC-06, kind=subcon).
+//             The 2 master-party "รับเหมา" (V-0031/V-0045) are reclassified → supplier; SC-07
+//             (subcon-accept WO-2026-0055 counterparty, not in the register) → supplier too.
+//             The 5 procurement `wos` are rewired to SC-01..SC-05 (po-wo.jsx WO_ROWS.subcon
+//             name match). register(=6)/vendor(=13) count delta flagged to QA (P0-FIX-06).
+//   - B-029(ข) pr-list.jsx PR-2026-0411 type `clear` ∉ pr_type enum (material/subcon/expense/
+//             advance) → kept mapped to `advance` (clearing an advance is the advance flow);
+//             no enum change (§สรุป counts 4 pr_type values). pr count=10 is type-independent.
 //
 // Report-derived §สรุป datasets that have NO backing table are intentionally
 // SKIPPED (documented in REPORT_DERIVED below). Acceptance/Defect stay 0 records
@@ -59,6 +60,9 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
 import { Pool } from "pg";
+// better-auth's own scrypt hasher — seed-time only (devDependency), so seeded
+// credential rows always match what better-auth verifies at sign-in.
+import { hashPassword } from "better-auth/crypto";
 import * as schema from "../schema/index.js";
 import { det } from "./ids.js";
 
@@ -139,14 +143,26 @@ const SUB_CYCLES = ["yearly", "yearly", "monthly", "monthly", "yearly", "monthly
 // B-021(ก): T-1005 (index 4) status `trial` is now a real enum value (migration 0006).
 const SUB_STATUS = ["active", "active", "active", "active", "trial", "overdue", "active", "active", "cancelled"] as const;
 
-// subscription-admin.jsx:194 inv (5 platform invoices)
+// subscription-admin.jsx:194 inv (5 admin platform invoices). B-025(ก): PINV-2569-0610
+// (บจก. รุ่งเรืองก่อสร้าง = T-1001, 79,000) is a stale-version duplicate of T-1001's real
+// invoice → DROPPED. The remaining 4 belong to other tenants (org → SUBSCRIBERS key), each
+// pointing to that tenant's own subscription. Invoice no/date are presentational (not in the
+// platform_invoice schema) → only amount+status seeded.
 const PLATFORM_INV = [
-  { amount: 456000, status: "paid" as const },
-  { amount: 384000, status: "paid" as const },
-  { amount: 79000, status: "paid" as const },
-  { amount: 7900, status: "pending" as const },
-  { amount: 2900, status: "overdue" as const },
-];
+  { subKey: "T-1002", amount: 456000, status: "paid" as const },    // PINV-2569-0612
+  { subKey: "T-1008", amount: 384000, status: "paid" as const },    // PINV-2569-0611
+  { subKey: "T-1004", amount: 7900, status: "pending" as const },   // PINV-2569-0609
+  { subKey: "T-1006", amount: 2900, status: "overdue" as const },   // PINV-2569-0608
+] as const;
+
+// subscription.jsx:31 SUB_INVOICES (3) — B-025(ก): T-1001's REAL platform invoices (the
+// logged-in tenant บจก. รุ่งเรืองก่อสร้าง). Tenant view is authoritative; the admin duplicate
+// (PINV-2569-0610) is dropped above. All point to T-1001's subscription (sub:0).
+const T1001_SUB_INV = [
+  { amount: 79000, status: "paid" as const },   // INV-SUB-2569-012
+  { amount: 72000, status: "paid" as const },   // INV-SUB-2568-011
+  { amount: 18400, status: "paid" as const },   // INV-SUB-2567-008
+] as const;
 
 // master.jsx:895 ROLE_PRESETS (8 roles) — perms matrix 11 modules × 5 perms.
 const MODULE_IDS = ["dashboard", "boq", "pr", "po", "wo", "gr", "subcon", "inventory", "petty", "finance", "master"];
@@ -231,7 +247,9 @@ const CC_SEED = [
   { code: "CC-FIN", name: "ฝ่ายบัญชี-การเงิน" },
 ];
 
-// master-party.jsx:6 VENDOR_SEED (6) — C6. type→kind: รับเหมา=subcon else supplier.
+// master-party.jsx:6 VENDOR_SEED (6) — C6. B-026(ก): all seeded as kind=supplier (the 2
+// "รับเหมา" V-0031/V-0045 are master-party contractors, NOT the subcon.jsx register). `type`
+// kept verbatim from the mock for reference.
 const VENDOR_SEED = [
   { code: "V-0012", name: "บจก. รุ่งเรืองวัสดุก่อสร้าง", type: "วัสดุ", taxId: "0105545012345", term: 30 },
   { code: "V-0024", name: "หจก. ช่างเหล็กไทย", type: "วัสดุ", taxId: "0103539008765", term: 45 },
@@ -241,10 +259,11 @@ const VENDOR_SEED = [
   { code: "V-0061", name: "บจก. หัวเว่ย เทคโนโลยี", type: "วัสดุ", taxId: "0105556778899", term: 0 },
 ];
 
-// subcon.jsx:3 SUBCONS (6 register) + subcon-accept.jsx unique counterparty
-// (SC-07 หจก.ช่างก่อฉาบมั่นคง, WO-2026-0055 — not in the register). B-023(ก): seeded
-// as real subcon vendors (kind=subcon), ADDED to the 2 master-party subcons. `type`
-// = ชนิดงาน kept for reference; the mock has no tax_id / credit_term → null.
+// subcon.jsx:3 SUBCONS (6 register, SC-01..SC-06) + subcon-accept.jsx unique counterparty
+// (SC-07 หจก.ช่างก่อฉาบมั่นคง, WO-2026-0055 — NOT in the register). B-026(ก): only the 6
+// register firms are kind=subcon (จอทะเบียนผู้รับเหมา = 6); SC-07 exists only as a contract
+// counterparty → kind=supplier (see vendor insert). `type` = ชนิดงาน kept for reference;
+// the mock has no tax_id / credit_term → null.
 const SUBCON_FIRMS = [
   { code: "SC-01", name: "บจก. รุ่งเรืองก่อสร้าง", type: "งานโครงสร้าง" },
   { code: "SC-02", name: "หจก. ช่างไทยพัฒนา", type: "งานสถาปัตยกรรม" },
@@ -377,7 +396,7 @@ const BOM_LINES_B1 = [
   { cat: "L", code: "L-03", name: "ค่าแรงทั่วไป-ทำความสะอาด", detail: "ตลอดงาน + ส่งมอบ", unit: "เหมา", qty: 1, price: 85000 },
 ];
 
-// pr-list.jsx:11 PR_ROWS (10). type `clear` → `advance` (B-025). status is free text.
+// pr-list.jsx:11 PR_ROWS (10). type `clear` → `advance` (B-029(ข) — no enum change). status is free text.
 const PR_ROWS = [
   { no: "PR-2026-0418", type: "material", status: "pending", step: 2 },
   { no: "PR-2026-0417", type: "expense", status: "pending", step: 1 },
@@ -386,7 +405,7 @@ const PR_ROWS = [
   { no: "PR-2026-0414", type: "material", status: "approved", step: 3 },
   { no: "PR-2026-0413", type: "advance", status: "approved", step: 2 },
   { no: "PR-2026-0412", type: "material", status: "pending", step: 2 },
-  { no: "PR-2026-0411", type: "advance", status: "approved", step: 2 }, // mock `clear` → advance (B-025)
+  { no: "PR-2026-0411", type: "advance", status: "approved", step: 2 }, // mock `clear` → advance (B-029(ข))
   { no: "PR-2026-0410", type: "subcon", status: "draft", step: 0 },
   { no: "PR-2026-0409", type: "expense", status: "rejected", step: 1 },
 ] as const;
@@ -745,12 +764,19 @@ async function seed(): Promise<void> {
         })),
       );
 
-      await tx.insert(schema.platformInvoices).values(
-        PLATFORM_INV.map((inv, i) => ({
-          id: det(`pinv:${i}`), subscriptionId: det(`sub:${i % 9}`),
+      // B-025(ก): 4 admin invoices (other tenants, by org→SUBSCRIBERS index) + T-1001's
+      // 3 real INV-SUB-* invoices = 7 platform_invoice rows.
+      await tx.insert(schema.platformInvoices).values([
+        ...PLATFORM_INV.map((inv, i) => ({
+          id: det(`pinv:${i}`),
+          subscriptionId: det(`sub:${SUBSCRIBERS.findIndex((s) => s.key === inv.subKey)}`),
           amount: m(inv.amount), status: inv.status,
         })),
-      );
+        ...T1001_SUB_INV.map((inv, i) => ({
+          id: det(`pinv:t1001:${i}`), subscriptionId: det(`sub:0`),
+          amount: m(inv.amount), status: inv.status,
+        })),
+      ]);
 
       await tx.insert(schema.roles).values(
         ROLE_DEFS.map((r) => ({
@@ -765,6 +791,33 @@ async function seed(): Promise<void> {
           id: det(`user:${i}`), companyId: CO1, email: u.email, name: u.name,
           roleId: det(`role:${at(ROLE_DEFS, i).key}`),
           status: (u.status === "active" ? "active" : "blocked") as "active" | "blocked",
+        })),
+      );
+
+      // better-auth credentials (P1-BE-01, B-016(ก)): one auth_user + one
+      // "credential" auth_account per COMPANY_USERS row so the dev stack is
+      // sign-in-able against the REAL bearer flow (B-028(ก)) out of one
+      // `docker compose up`. auth_user.email ↔ user.email links the session to
+      // the dictionary user row within company_id.
+      //
+      // Password is a DEV-ONLY default (same convention as the compose
+      // POSTGRES_PASSWORD dev default "juneflow-dev" — infra/docker-compose.yml);
+      // real deployments must provision credentials outside the seed. The hash
+      // comes from better-auth's own scrypt (better-auth/crypto) so the format
+      // always matches what better-auth verifies — never hand-rolled.
+      const DEV_PASSWORD = "juneflow-dev";
+      const devPasswordHash = await hashPassword(DEV_PASSWORD);
+      await tx.insert(schema.authUsers).values(
+        COMPANY_USERS.map((u, i) => ({
+          id: det(`authuser:${i}`), name: u.name, email: u.email,
+          emailVerified: true, companyId: CO1,
+        })),
+      );
+      await tx.insert(schema.authAccounts).values(
+        COMPANY_USERS.map((_u, i) => ({
+          id: det(`authacct:${i}`), accountId: det(`authuser:${i}`),
+          providerId: "credential", userId: det(`authuser:${i}`),
+          password: devPasswordHash,
         })),
       );
 
@@ -819,20 +872,22 @@ async function seed(): Promise<void> {
         CC_SEED.map((c) => ({ id: det(`cc:${c.code}`), projectId: det("project:rjp"), code: c.code, name: c.name })),
       );
 
-      // B-023(ก): master-party VENDOR_SEED (6) + the 7 real subcon firms (SUBCON_FIRMS).
+      // B-023(ก)+B-026(ก): master-party VENDOR_SEED (6, all supplier) + 7 subcon firms.
+      // Only the 6 register firms (SC-01..SC-06) are kind=subcon → จอทะเบียนผู้รับเหมา = 6;
+      // SC-07 is a contract counterparty outside the register → supplier. Total vendors = 13.
       await tx.insert(schema.vendors).values([
         ...VENDOR_SEED.map((v) => ({
           id: det(`vendor:${v.code}`), companyId: CO1, name: v.name, taxId: v.taxId,
-          kind: (v.type === "รับเหมา" ? "subcon" : "supplier") as "subcon" | "supplier",
-          creditTerm: v.term,
+          kind: "supplier" as const, creditTerm: v.term,
         })),
         ...SUBCON_FIRMS.map((f) => ({
           id: det(`vendor:${f.code}`), companyId: CO1, name: f.name, taxId: null,
-          kind: "subcon" as const, creditTerm: null,
+          kind: (f.code === "SC-07" ? "supplier" : "subcon") as "subcon" | "supplier",
+          creditTerm: null,
         })),
       ]);
-      const SUBCON_VENDORS = VENDOR_SEED.filter((v) => v.type === "รับเหมา").map((v) => det(`vendor:${v.code}`));
-      const SUPPLIER_VENDORS = VENDOR_SEED.filter((v) => v.type !== "รับเหมา").map((v) => det(`vendor:${v.code}`));
+      // All master-party vendors are suppliers now (B-026) → PO/AP pull from here.
+      const SUPPLIER_VENDORS = VENDOR_SEED.map((v) => det(`vendor:${v.code}`));
 
       await tx.insert(schema.customers).values(
         CUSTOMER_SEED.map((c) => ({ id: det(`customer:${c.code}`), companyId: CO1, name: c.name, taxId: c.taxId })),
@@ -914,9 +969,14 @@ async function seed(): Promise<void> {
         })),
       );
 
+      // B-026(ก) + directive: rewire `wos` off the reclassified master-party contractors.
+      // Each WO_ROWS.subcon (po-wo.jsx) matches a register firm by name verbatim:
+      // WO-0117→บจก. รุ่งเรืองก่อสร้าง=SC-01 · 0116→หจก. ช่างไทยพัฒนา=SC-02 · 0115→บจก. ไฟฟ้า
+      // อินเตอร์=SC-03 · 0114→บจก. ประปาไทย เซอร์วิส=SC-04 · 0113→หจก. งานสีบุญลือ=SC-05.
       await tx.insert(schema.wos).values(
         WO_VALUES.map((value, i) => ({
-          id: det(`wo:${i}`), prId: det(`pr:${i + 1}`), vendorId: at(SUBCON_VENDORS, i),
+          id: det(`wo:${i}`), prId: det(`pr:${i + 1}`),
+          vendorId: det(`vendor:SC-0${i + 1}`),
           value: m(value),
         })),
       );

@@ -51,6 +51,7 @@ description: Port ONE pototype screen into apps/web with 100% design fidelity (P
 ### 6) style ผ่าน tokens เท่านั้น
 
 - สี/ฟอนต์/ระยะ/รัศมี มาจาก `@juneflow/tokens` (`packages/tokens` — ธีม fiori จาก tokens.css/tokens.json) **เท่านั้น — ห้าม hardcode ค่าใดๆ** ในโค้ดจอ
+- **ข้อยกเว้นทางการ (คำตัดสิน B-037 ก):** literal (สี/px) ใส่ได้ **เฉพาะเมื่อ** (1) ก๊อป verbatim จาก prototype **และ** (2) ไม่มี token ตรงใน `@juneflow/tokens` — เช่น `#fff` · translucent-white · shadow rgba ที่ prototype hardcode ไว้เอง · ทุกสี/ค่าที่ **มี** token ต้องใช้ `var(--)` เสมอ ห้าม hardcode ทับ (ยึดตาม §0 กฎ 1 fidelity ก่อน กฎ 2 no-hardcode เมื่อชนกัน) · ค่าใหม่ที่ไม่ได้มาจาก prototype = ห้ามคิดเอง → `BLOCKERS.md`
 - กติกา state จาก tokens.css: **empty state ทุกตาราง** + **loading ทุกการเปลี่ยนหน้า** (top progress 3px + skeleton)
 
 ### 7) ตัวเลข = class `num`
