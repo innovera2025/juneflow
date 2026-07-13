@@ -65,6 +65,7 @@ import { Pool } from "pg";
 import { hashPassword } from "better-auth/crypto";
 import * as schema from "../schema/index.js";
 import { det } from "./ids.js";
+import { PACKAGES } from "./packages.js";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -129,13 +130,11 @@ const SUBSCRIBERS = [
 ] as const;
 
 // pkg-builder / subscription.jsx — decision C1: 4 tiers S/M/L/Full
-// (S=2900 M=7900 L=14900 Full=contact). limits keys per C5 (storage_gb/ai_per_month).
-const PACKAGES = [
-  { key: "S", size: "S" as const, name: "Starter", priceM: "2900.00", priceY: "29000.00", limits: { projects: 2, users: 5, storage_gb: 20, ai_per_month: 10 }, menus: ["boq", "proc", "petty", "timeline"], subRules: {} },
-  { key: "M", size: "M" as const, name: "Professional", priceM: "7900.00", priceY: "79000.00", limits: { projects: 10, users: 25, storage_gb: 100, ai_per_month: 50 }, menus: ["boq", "proc", "petty", "timeline", "inv", "subcon", "pm", "land", "finance"], subRules: { "boq.aiqto": "M" } },
-  { key: "L", size: "L" as const, name: "Business", priceM: "14900.00", priceY: "149000.00", limits: { projects: 30, users: 60, storage_gb: 500, ai_per_month: 200 }, menus: ["boq", "proc", "petty", "timeline", "inv", "subcon", "pm", "land", "finance", "sales_re", "aftersales"], subRules: { "boq.aiqto": "L" } },
-  { key: "Full", size: "Full" as const, name: "Enterprise", priceM: null, priceY: null, limits: { projects: -1, users: -1, storage_gb: 1000, ai_per_month: -1 }, menus: ["*"], subRules: { "master.ptype": "Full", "boq.aiqto": "M" } },
-] as const;
+// (S=2900 M=7900 L=14900 Full=contact). limits keys per C5 (storage_gb/
+// ai_per_month). Extracted to ./packages.js by P1-BE-04 (B-043(ค)): menus are
+// now the NAV top-level id allow-lists per PACKAGE-RULES.md §2 (S=6 · M=20 ·
+// L=29 · Full="*") — module keys were the wrong vocabulary — and unit tests
+// assert the lists verbatim.
 
 // subscription-admin.jsx:5 SUBSCRIBERS (9) — cycle/status transcribed verbatim,
 // index-aligned to SUBSCRIBERS above.
