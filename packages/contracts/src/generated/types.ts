@@ -275,6 +275,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tenant's affiliated group companies (Multi-Company)
+         * @description B-041(ก+): the บริษัทในเครือ rows behind the CompanySwitcher (company-accept.jsx COMPANIES / PLAN.md Appendix B item 14). Returns the members of the tenant's company group — companies linked via group_parent_id to the tenant's group head. Tenant-scoped: a tenant can only ever see its own group.
+         */
+        get: operations["listCompanies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects": {
         parameters: {
             query?: never;
@@ -2058,7 +2078,28 @@ export interface components {
                 [key: string]: number;
             };
         };
-        /** @description Minimal placeholder per data-dictionary Project (name, type, budget, status). Full field modeling belongs to the schema tasks. */
+        /** @description An affiliated group company (บริษัทในเครือ) — B-041(ก+). short/color/ biz/doc_prefix are the Multi-Company switcher fields from company-accept.jsx COMPANIES (Appendix B item 14); project_count is derived from the tenant's project rows attributed to the company. */
+        Company: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            short?: string;
+            color?: string;
+            biz?: string;
+            tax_id?: string;
+            doc_prefix?: string;
+            project_count?: number;
+        };
+        /** @description A phase row of a project (project_node kind=phase) — B-041(ก+). units = unit-kind nodes under the phase; sold_pct = round(100 × sold-or-transferred sales units / units); sale_status is the phase node's own sale status (nullable free text). */
+        ProjectPhase: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            units?: number;
+            sold_pct?: number;
+            sale_status?: string;
+        };
+        /** @description Minimal placeholder per data-dictionary Project (name, type, budget, status). Full field modeling belongs to the schema tasks. short / color / company_id / units / phases are the B-041(ก+) approved ProjectSwitcher extensions (chrome.jsx PROJECTS): short/color are stamped master columns (migration 0009); company_id is the owning company; units / phases are derived from project_node + sales_unit. */
         Project: {
             /** Format: uuid */
             id: string;
@@ -2069,6 +2110,12 @@ export interface components {
             /** @description Every money value carries currency_code (PLAN.md section 4). */
             currency_code?: string;
             status: string;
+            short?: string;
+            color?: string;
+            /** Format: uuid */
+            company_id?: string;
+            units?: number;
+            phases?: components["schemas"]["ProjectPhase"][];
         };
         /** @description Project create/update input (fields per data-dictionary). */
         ProjectInput: {
@@ -2465,6 +2512,27 @@ export interface operations {
             200: components["responses"]["ActionOk"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listCompanies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Group company list (bare array per B-014). project_count is derived per company from the tenant's project rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Company"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listProjects: {

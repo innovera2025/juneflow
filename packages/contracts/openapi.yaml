@@ -354,6 +354,30 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   # =============================== Master ===================================
+  /companies:
+    get:
+      tags: [master]
+      summary: List the tenant's affiliated group companies (Multi-Company)
+      description: >-
+        B-041(ก+): the บริษัทในเครือ rows behind the CompanySwitcher
+        (company-accept.jsx COMPANIES / PLAN.md Appendix B item 14). Returns
+        the members of the tenant's company group — companies linked via
+        group_parent_id to the tenant's group head. Tenant-scoped: a tenant
+        can only ever see its own group.
+      operationId: listCompanies
+      responses:
+        "200":
+          description: >-
+            Group company list (bare array per B-014). project_count is
+            derived per company from the tenant's project rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Company"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /projects:
     get:
       tags: [master]
@@ -2884,11 +2908,67 @@ components:
             type: integer
             minimum: 0
 
+    Company:
+      type: object
+      description: >-
+        An affiliated group company (บริษัทในเครือ) — B-041(ก+). short/color/
+        biz/doc_prefix are the Multi-Company switcher fields from
+        company-accept.jsx COMPANIES (Appendix B item 14); project_count is
+        derived from the tenant's project rows attributed to the company.
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        short:
+          type: string
+        color:
+          type: string
+        biz:
+          type: string
+        tax_id:
+          type: string
+        doc_prefix:
+          type: string
+        project_count:
+          type: integer
+          minimum: 0
+
+    ProjectPhase:
+      type: object
+      description: >-
+        A phase row of a project (project_node kind=phase) — B-041(ก+).
+        units = unit-kind nodes under the phase; sold_pct = round(100 ×
+        sold-or-transferred sales units / units); sale_status is the phase
+        node's own sale status (nullable free text).
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        units:
+          type: integer
+          minimum: 0
+        sold_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        sale_status:
+          type: string
+
     Project:
       type: object
       description: >-
         Minimal placeholder per data-dictionary Project (name, type, budget,
         status). Full field modeling belongs to the schema tasks.
+        short / color / company_id / units / phases are the B-041(ก+) approved
+        ProjectSwitcher extensions (chrome.jsx PROJECTS): short/color are
+        stamped master columns (migration 0009); company_id is the owning
+        company; units / phases are derived from project_node + sales_unit.
       required: [id, name, type, status]
       properties:
         id:
@@ -2906,6 +2986,20 @@ components:
           description: Every money value carries currency_code (PLAN.md section 4).
         status:
           type: string
+        short:
+          type: string
+        color:
+          type: string
+        company_id:
+          type: string
+          format: uuid
+        units:
+          type: integer
+          minimum: 0
+        phases:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectPhase"
 
     ProjectInput:
       type: object

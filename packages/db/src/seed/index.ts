@@ -209,15 +209,25 @@ const PROJECT_TYPES = [
   { key: "service" as const, name: "โครงการบริการ / ทั่วไป", hierarchy: ["โครงการ", "เฟส", "งาน (WBS)"], modules: ["land", "proc", "timeline", "petty", "pm"] },
 ];
 
-// chrome.jsx:3 PROJECTS (7 projects / 16 phases)
+// chrome.jsx:3 PROJECTS (7 projects / 16 phases). short/color stamped verbatim
+// per B-041(ก+) (migration 0009 columns — the ProjectSwitcher chip fields).
 const PROJECTS = [
-  { key: "rjp", name: "juneflow พาร์ค ราชพฤกษ์", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · Block A (บ้านเดี่ยว)" }, { k: "p2", l: "เฟส 2 · Block B+C (ทาวน์โฮม)" }, { k: "p3", l: "เฟส 3 · Block D (บ้านแฝด)" }] },
-  { key: "bbt", name: "juneflow บางบัวทอง", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม" }, { k: "p2", l: "เฟส 2 · บ้านเดี่ยว" }] },
-  { key: "rama", name: "juneflow คอนโด พระราม 9", type: "realestate", phases: [{ k: "a", l: "อาคาร A (1-15 ชั้น)" }, { k: "b", l: "อาคาร B (1-15 ชั้น)" }] },
-  { key: "phk", name: "juneflow พหลโยธิน 5", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม Luxury" }] },
-  { key: "slr", name: "โซลาร์ฟาร์ม สระบุรี 8MW", type: "solar", phases: [{ k: "z1", l: "โซน A · Array 1-8 (4MW)" }, { k: "z2", l: "โซน B · Array 9-16 (4MW)" }] },
-  { key: "rdb", name: "ถนน-สะพาน เทศบาลนนทบุรี", type: "civil", phases: [{ k: "s1", l: "ส่วนงาน A · ถนนสาย 1 (กม.0-3.5)" }, { k: "s2", l: "ส่วนงาน B · สะพานข้ามคลอง" }, { k: "s3", l: "ส่วนงาน C · ระบบระบายน้ำ" }] },
-  { key: "erp", name: "ติดตั้งระบบ ERP ลูกค้า ABC", type: "service", phases: [{ k: "ph1", l: "เฟส 1 · Analysis & Design" }, { k: "ph2", l: "เฟส 2 · Implementation" }, { k: "ph3", l: "เฟส 3 · UAT & Go-Live" }] },
+  { key: "rjp", name: "juneflow พาร์ค ราชพฤกษ์", short: "RJP", color: "#0B2A4A", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · Block A (บ้านเดี่ยว)" }, { k: "p2", l: "เฟส 2 · Block B+C (ทาวน์โฮม)" }, { k: "p3", l: "เฟส 3 · Block D (บ้านแฝด)" }] },
+  { key: "bbt", name: "juneflow บางบัวทอง", short: "BBT", color: "#0F766E", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม" }, { k: "p2", l: "เฟส 2 · บ้านเดี่ยว" }] },
+  { key: "rama", name: "juneflow คอนโด พระราม 9", short: "R9", color: "#1D4ED8", type: "realestate", phases: [{ k: "a", l: "อาคาร A (1-15 ชั้น)" }, { k: "b", l: "อาคาร B (1-15 ชั้น)" }] },
+  { key: "phk", name: "juneflow พหลโยธิน 5", short: "PHK", color: "#B45309", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม Luxury" }] },
+  { key: "slr", name: "โซลาร์ฟาร์ม สระบุรี 8MW", short: "SLR", color: "#B45309", type: "solar", phases: [{ k: "z1", l: "โซน A · Array 1-8 (4MW)" }, { k: "z2", l: "โซน B · Array 9-16 (4MW)" }] },
+  { key: "rdb", name: "ถนน-สะพาน เทศบาลนนทบุรี", short: "RDB", color: "#0F766E", type: "civil", phases: [{ k: "s1", l: "ส่วนงาน A · ถนนสาย 1 (กม.0-3.5)" }, { k: "s2", l: "ส่วนงาน B · สะพานข้ามคลอง" }, { k: "s3", l: "ส่วนงาน C · ระบบระบายน้ำ" }] },
+  { key: "erp", name: "ติดตั้งระบบ ERP ลูกค้า ABC", short: "ERP", color: "#6D28D9", type: "service", phases: [{ k: "ph1", l: "เฟส 1 · Analysis & Design" }, { k: "ph2", l: "เฟส 2 · Implementation" }, { k: "ph3", l: "เฟส 3 · UAT & Go-Live" }] },
+] as const;
+
+// company-accept.jsx:6 COMPANIES (3 บริษัทเครือ) — B-041(ก+) "stamp เครือ":
+// short/taxId/color/docPrefix/biz verbatim; wired under the T-1001 tenant's
+// group via group_parent_id at insert time.
+const GROUP_COMPANIES = [
+  { key: "JF", name: "บจก. จูนโฟลว์ ดีเวลลอปเมนท์", short: "JF", taxId: "0-1055-61012-34-5", color: "#0B2A4A", docPrefix: "JF", biz: "พัฒนาอสังหาริมทรัพย์" },
+  { key: "JE", name: "บจก. จูนโฟลว์ เอ็นเนอร์ยี", short: "JE", taxId: "0-1055-64067-89-0", color: "#B45309", docPrefix: "JE", biz: "โรงไฟฟ้าพลังงานแสงอาทิตย์" },
+  { key: "JC", name: "บจก. จูนโฟลว์ คอนสตรัคชั่น", short: "JC", taxId: "0-1055-58033-22-1", color: "#0F766E", docPrefix: "JC", biz: "รับเหมาก่อสร้าง & บริการ" },
 ] as const;
 
 // master.jsx:426 MODELS (5)
@@ -755,6 +765,20 @@ async function seed(): Promise<void> {
       );
       const CO1 = det("company:T-1001"); // main tenant — every company-scoped record hangs here.
 
+      // B-041(ก+): stamp the affiliated company group (เครือ) — the 3
+      // company-accept.jsx COMPANIES rows become real company rows linked to
+      // the T-1001 tenant's group via group_parent_id = CO1 (Appendix B item
+      // 14; the group head keeps the subscription). The 9 tenant companies
+      // above are untouched (B-022(ก) stands) — company rows 9 → 12; count
+      // delta flagged to QA via REVIEW-QUEUE.
+      await tx.insert(schema.companies).values(
+        GROUP_COMPANIES.map((c) => ({
+          id: det(`company:group:${c.key}`), name: c.name, taxId: c.taxId,
+          short: c.short, color: c.color, docPrefix: c.docPrefix, biz: c.biz,
+          groupParentId: CO1,
+        })),
+      );
+
       // Each subscription points to its OWN company (B-022(ก)); package per the real
       // SUBSCRIBERS pkg tier (pro=M / enterprise=Full / starter=S).
       await tx.insert(schema.subscriptions).values(
@@ -832,7 +856,8 @@ async function seed(): Promise<void> {
       await tx.insert(schema.projects).values(
         PROJECTS.map((p, i) => ({
           id: det(`project:${p.key}`), companyId: CO1, typeId: det(`ptype:${p.type}`),
-          name: p.name, budget: m((i + 5) * 10_000_000), status: "active",
+          name: p.name, short: p.short, color: p.color,
+          budget: m((i + 5) * 10_000_000), status: "active",
         })),
       );
 

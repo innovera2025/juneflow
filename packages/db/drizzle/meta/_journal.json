@@ -64,6 +64,13 @@
       "when": 1783927526073,
       "tag": "0008_classy_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783947171279,
+      "tag": "0009_zippy_echo",
+      "breakpoints": true
     }
   ]
 }

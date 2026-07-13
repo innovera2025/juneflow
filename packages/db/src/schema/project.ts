@@ -85,6 +85,11 @@ export const projectTypes = pgTable("project_type", {
  * data-dictionary: name, type, budget, status. type is carried via type_id ->
  * project_type (erd.html). budget is money -> currency_code. status left as
  * free text (dictionary does not enumerate project status values).
+ *
+ * short / color — B-041(ก+) approved columns (migration 0009): the
+ * ProjectSwitcher short-code + chip color from chrome.jsx PROJECTS (e.g.
+ * "RJP" / "#0B2A4A"), stamped verbatim at seed time. Nullable — display-only
+ * master fields, not required by any business rule.
  */
 export const projects = pgTable("project", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -95,6 +100,8 @@ export const projects = pgTable("project", {
     .notNull()
     .references(() => projectTypes.id, { onDelete: "restrict" }),
   name: text("name").notNull(),
+  short: text("short"),
+  color: text("color"),
   budget: numeric("budget", { precision: 16, scale: 2 }),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("active"),
