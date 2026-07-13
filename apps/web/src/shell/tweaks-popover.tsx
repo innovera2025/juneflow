@@ -2,28 +2,20 @@
  * TweaksPopover + floating gear — ported from pototype/shell.jsx (160-178, 345-462).
  *
  * The gear (top-right, title=common.theme) is part of the shell chrome (visible in the
- * reference closed state). CROSS-ZONE LIMIT (BLOCKERS B-039): @juneflow/tokens (out of
- * the web zone) defines only the `fiori`/`navy` themes, NOT the prototype's light/dark +
- * navy/teal/emerald/indigo accent model. shell.jsx applyTweaks sets data-theme=light on
- * mount, which would override the navy palette and BREAK the visual gate — so here
- * data-theme stays "navy" (index.html) and only data-density is applied. Theme/accent
- * selections persist in the tweaks bag but are visually inert until token themes land.
- * Reset (clear localStorage + reload) works. Labels: ASCII where possible + chrome-strings.
+ * reference closed state). CROSS-ZONE LIMIT (B-042, Wei ruling): @juneflow/tokens
+ * (out of the web zone) defines only the `fiori`/`navy` themes, NOT the prototype's
+ * light/dark + navy/teal/emerald/indigo accent model. shell.jsx applyTweaks sets
+ * data-theme=light on mount, which would override the navy palette and BREAK the visual
+ * gate — so data-theme stays "navy" (index.html) and only data-density is wired live
+ * (compact/comfortable/spacious CSS from @juneflow/tokens, PLAT-04). Setting the density
+ * segment updates ctx.tweaks.density; ShellProvider applies the data-density attribute
+ * globally (shell-context.tsx). Theme/accent selections persist in the tweaks bag but
+ * are visually inert until token themes land. Reset (clear localStorage + reload) works.
  */
-import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import { useShellCtx, type Tweaks } from "./shell-context";
 import { useChromeText } from "./chrome-i18n";
-
-/** Apply the density attribute only (see file header for the theme/accent limit). */
-function applyDensity(density: string) {
-  try {
-    document.documentElement.setAttribute("data-density", density);
-  } catch {
-    /* no document */
-  }
-}
 
 function TwSection({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -92,8 +84,6 @@ export function TweaksPopover({ onClose }: { onClose: () => void }) {
   const ctx = useShellCtx();
   const ct = useChromeText();
   const { tweaks, setTweak } = ctx;
-
-  useEffect(() => applyDensity(tweaks.density), [tweaks.density]);
 
   const set = (k: keyof Tweaks, v: string) => setTweak(k, v);
 

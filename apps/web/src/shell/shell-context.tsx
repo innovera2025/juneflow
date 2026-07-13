@@ -141,6 +141,19 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   useEffect(() => persistTweaks(tweaks), [tweaks]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
+  // Apply data-density globally (B-042). The prototype applyTweaks (shell.jsx:16)
+  // sets data-theme + data-density; the theme stays navy (B-042), but
+  // density is live via @juneflow/tokens [data-density] CSS. Default = "comfortable"
+  // (TWEAK_DEFAULTS), so var(--gap)/var(--pad-*) resolve to the comfortable geometry
+  // that the reference gallery was captured at.
+  useEffect(() => {
+    try {
+      document.documentElement.setAttribute("data-density", tweaks.density);
+    } catch {
+      /* no document (SSR/tests) */
+    }
+  }, [tweaks.density]);
+
   const navigate = useCallback(
     (newRoute: string, newParams: Record<string, unknown> = {}) => {
       setHistory((h) => [...h, { route, params }].slice(-12));

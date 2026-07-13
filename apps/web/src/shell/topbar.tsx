@@ -3,18 +3,19 @@
  *
  * Per the prototype architecture the topbar is NOT owned by the shell host — it is
  * rendered per-screen by the Page primitive (ds.jsx Page 284-287). This port keeps
- * that: Page (page.tsx) mounts <TopBar/>. Order: [CompanySwitcher] · ProjectSwitcher ·
- * breadcrumbs · spacer · LanguageSwitcher · Notifications · {actions} · SearchPalette.
+ * that: Page (page.tsx) mounts <TopBar/>. Order: CompanySwitcher · ProjectSwitcher ·
+ * breadcrumbs · spacer · LanguageSwitcher · Notifications · {actions} · SearchPalette
+ * (chrome.jsx:862 `<CompanySwitcher /><ProjectSwitcher />`).
  *
- * CompanySwitcher is OMITTED: the prototype's COMPANIES are a hardcoded mock (§0 rule 3)
- * and GET /me has no company entity and there is no /companies list endpoint in the
- * SACRED openapi.yaml — so no compliant data source exists (BLOCKERS B-039). Breadcrumbs
- * are nav keys resolved with tn(), chevron direction-aware for RTL.
+ * CompanySwitcher is now wired (B-041): it renders the affiliated group
+ * companies from GET /companies (company-accept.jsx:24-104). Breadcrumbs are nav
+ * keys resolved with tn(), chevron direction-aware for RTL.
  */
 import type { ReactNode } from "react";
+import type { NavKey } from "@juneflow/i18n";
 import { Icon } from "../ui/icon";
 import { useI18n } from "../i18n";
-import { asNavKey } from "./nav-tree";
+import { CompanySwitcher } from "./company-switcher";
 import { ProjectSwitcher } from "./project-switcher";
 import { LanguageSwitcher } from "./language-switcher";
 import { NotificationsPopover } from "./notifications";
@@ -22,7 +23,7 @@ import { SearchPalette } from "./search-palette";
 
 export interface TopBarProps {
   /** Nav-key breadcrumbs (tn-resolved), last is the current page. */
-  breadcrumbs?: string[];
+  breadcrumbs?: NavKey[];
   actions?: ReactNode;
   projectSwitch?: boolean;
 }
@@ -42,7 +43,12 @@ export function TopBar({ breadcrumbs = [], actions, projectSwitch = true }: TopB
         gap: 16,
       }}
     >
-      {projectSwitch && <ProjectSwitcher />}
+      {projectSwitch && (
+        <>
+          <CompanySwitcher />
+          <ProjectSwitcher />
+        </>
+      )}
 
       {breadcrumbs.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-2)" }}>
@@ -55,7 +61,7 @@ export function TopBar({ breadcrumbs = [], actions, projectSwitch = true }: TopB
                   color: i === breadcrumbs.length - 1 ? "var(--text)" : "var(--text-2)",
                 }}
               >
-                {tn(asNavKey(b))}
+                {tn(b)}
               </span>
             </span>
           ))}
