@@ -50,7 +50,7 @@ export function routeModuleOf(route: string | undefined): string | null {
   if (route.startsWith("pm.")) return "pm";
   if (route.startsWith("boq.")) return "boq";
   if (/^(pr|po|wo|gr)\./.test(route)) return "proc";
-  if (route === "subcon" || route.startsWith("subcon.")) return "subcon";
+  if (route === "subcon") return "subcon";
   if (route === "timeline") return "timeline";
   if (route.startsWith("inv.")) return "inv";
   if (route === "petty") return "petty";
