@@ -1,0 +1,52 @@
+/*
+ * Base typography + primitives for @juneflow/web (first real screen, P1-WEB-01).
+ *
+ * Only token-derived values are used here — never a hardcoded color/font/size
+ * (PLAN.md §0 rule 2 / apps/web/CLAUDE.md). The prototype relies on a global
+ * body font + a `.num` class (tokens.css comment §1); this file supplies them
+ * from @juneflow/tokens variables so every ported screen inherits them.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* Money/counts: tabular numerals (tokens.css §1). Right-aligned inside tables. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Modal enter animations (ported 1:1 from pototype/modal.jsx). */
+@keyframes jf-fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes jf-popIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

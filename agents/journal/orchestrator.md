@@ -1,5 +1,17 @@
 # Journal — Orchestrator (Fable 5 main session — ไม่ใช่เขต zone)
 
+## 2026-07-12 · post-milestone: QA-03 + DEV-05 + audit follow-ups · ~22:00
+
+- ทำอะไร: หลัง compose milestone — ปิด **DEV-05** (prod compose skeleton VPS Singapore+Cloudflare, ด่าน 4.5 PASS: creds ผ่าน env fail-fast `${VAR:?}` ทุกตัว/image-only/config validate) + **P0-FIX-04** (G5 false-pass ของ Wei audit — size-larger=FAIL, PASS) · **QA-03 block ถูกต้อง B-034**: e2e "login→shell" ขับไม่ได้เพราะ apps/web ยัง Placeholder scaffold (ต้องมี WEB-05 จอจริง = Phase 1) — agent ไม่ fabricate e2e
+- ตัดสินใจอะไร: QA-03/WEB-05/MOB-04 = **เส้นแบ่ง Phase 0→1**: ทั้ง 3 ติดการ port จอจาก pototype (Phase 1) · Phase 0 (scaffold+schema+contract+auth+seed+compose milestone) **เสร็จครบ** · เจอบั๊ก bookkeeping: DEV-01 status ถูก merge conflict resolution ทับกลับเป็น blocked (แก้เป็น done) — บทเรียน: หลัง mark done ต้องเช็ค merge ไม่ revert
+- เจออะไร: **สถานะปิด: 47 done · 3 blocked (QA-03/WEB-05/MOB-04 = Phase 1) · 3 ready (P0-FIX-03/05/06)** · งบรวม ~$1,333 · compose รัน 5 service ให้ Wei คลิก · main = Phase 0 squash (promoted) · milestone เข้า main ต้อง squash รอบใหม่ (Wei) · Phase 1 เริ่มที่ port จอแรกผ่าน skill port-screen → ปลด WEB-05→QA-03 chain
+
+## 2026-07-12 · 🎉 COMPOSE MILESTONE ACHIEVED · ~21:15
+
+- ทำอะไร: ปิด Phase 0 compose milestone หลัง Wei ตัดสิน root-file ownership → สร้างเขต **platform (ที่ 7, B-032)** ครอบ root build/CI + tokens/i18n · chain: platform (P0-FIX-01 root test scripts + P0-PLAT-01 .dockerignore/docker-buildable + P0-PLAT-02) → P0-FIX-07 (web Dockerfile node:20→22) → P0-FIX-08 (B-033: packages/db build→dist + conditional exports + api Dockerfile build db) · **verified end-to-end เอง:** `docker compose up --build` → api/pg/redis healthy + web/worker up + migrate-seed Exited(0) "migrations applied + seed OK" + seed ใน DB (company=9/sales_unit=84/jv_line=17) + `curl /health` = HTTP 200 {ok:true}
+- ตัดสินใจอะไร: verify milestone เองแทนปล่อย loop (เร็ว+ประหยัด+เห็นกับตา — DEV-01 loop exit เพราะ task ยัง blocked ในกระดาน) · gate ของ DEV-01 = การรัน compose จริง (infra ต้องพิสูจน์ได้ ไม่ fabricate) · merge feature/devops (infra config, non-sacred) พร้อมหลักฐาน live
+- เจออะไร: 4 build blocker ของ compose ถูกปิดทีละชั้น (3 root-side โดย platform · web node20 · db raw-.ts) — ปมรากคือ zone ownership ที่ Wei ตัดสิน · **สถานะ:** 43/42+ done · B-030/B-033 ปิด · เหลือ QA-03/DEV-05 (optional, ปลดจาก DEV-01) · P0-FIX-03/04/05 follow-up · Phase 1: WEB-05(B-020)/MOB-04(B-015) · งบรวม ~$1,150 · main = Phase 0 squash (นาย promote แล้ว) · compose ทิ้งไว้ให้ Wei คลิก (`docker compose down` เมื่อเลิก)
+
 > บันทึกปฏิบัติการของ orchestrator นอกเหนือจากรอบ loop ปกติ · entry ใหม่อยู่บนสุด
 > ไฟล์นี้สร้างภายใต้ B-006 เพื่อไม่ให้ log ของ orchestrator ชน journal ประจำเขตตอน merge
 
