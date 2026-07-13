@@ -60,6 +60,14 @@
   --font: "Noto Sans Thai", "Inter", system-ui, sans-serif;
 }
 
+/* Data density — B-042(ข): Tweaks popover ตั้ง <html data-density="..."> เท่านั้น
+   (theme light/dark + accent tokens = deferred · navy/fiori ข้างบนไม่ถูกแตะ)
+   ค่า transcribe ตรงตัวจาก pototype/styles.css:84-86 — ห้ามแก้ตัวเลขเอง (PLAN.md §0 กฎ 2)
+   ไม่มี data-density attr = ค่า geometry ของธีมข้างบนตามเดิม */
+[data-density="compact"]     { --pad-page: 20px; --pad-card: 16px; --gap: 12px; --row-h: 36px; }
+[data-density="comfortable"] { --pad-page: 32px; --pad-card: 22px; --gap: 18px; --row-h: 44px; }
+[data-density="spacious"]    { --pad-page: 44px; --pad-card: 30px; --gap: 24px; --row-h: 52px; }
+
 /* กติกาใช้งานหลัก
    1. ตัวเลขเงินทุกที่: class num → font-variant-numeric: tabular-nums, ชิดขวาในตาราง
    2. ปุ่ม: primary=var(--brand) ขาว · outline · ghost · danger — มุม var(--r-md), focus ring 2px var(--brand)
