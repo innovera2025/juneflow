@@ -20,6 +20,7 @@
 
 import {
   pgTable,
+  index,
   text,
   uuid,
   integer,
@@ -62,7 +63,7 @@ export const landPlots = pgTable("land_plot", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("land_plot_company_idx").on(t.companyId)]);
 
 /**
  * SalesUnit — the booking->transfer sales lifecycle of a project unit, tying AR
@@ -99,7 +100,7 @@ export const salesUnits = pgTable("sales_unit", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("sales_unit_company_idx").on(t.companyId)]);
 
 /**
  * Document (DMS) — a file every module auto-attaches, with a 60-day expiry
@@ -127,7 +128,7 @@ export const documents = pgTable("document", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("document_company_idx").on(t.companyId)]);
 
 /**
  * Notification — a notification-center entry, also fanned to Mobile + LINE
@@ -152,7 +153,7 @@ export const notifications = pgTable("notification", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("notification_company_idx").on(t.companyId)]);
 
 /**
  * AuditLog — an immutable record of every mutation, written by the audit
@@ -179,4 +180,4 @@ export const auditLogs = pgTable("audit_log", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [index("audit_log_company_idx").on(t.companyId)]);

@@ -5,11 +5,24 @@
   "type": "module",
   "description": "Juneflow DB - Drizzle schema (data-dictionary + PLAN.md Appendix B) + seed from MOCK-DATA.md",
   "exports": {
-    ".": "./src/schema/index.ts",
-    "./schema": "./src/schema/index.ts",
-    "./client": "./src/client.ts"
+    ".": {
+      "development": "./src/schema/index.ts",
+      "types": "./dist/schema/index.d.ts",
+      "default": "./dist/schema/index.js"
+    },
+    "./schema": {
+      "development": "./src/schema/index.ts",
+      "types": "./dist/schema/index.d.ts",
+      "default": "./dist/schema/index.js"
+    },
+    "./client": {
+      "development": "./src/client.ts",
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "generate": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate",
     "migrate": "drizzle-kit migrate",
     "migration:check": "drizzle-kit check",
@@ -24,6 +37,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
+    "better-auth": "^1.2.8",
     "drizzle-kit": "^0.30.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"

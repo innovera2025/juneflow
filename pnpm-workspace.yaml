@@ -4,11 +4,22 @@ packages:
   - "packages/*"
   - "tests"
 
+# pnpm 11 blocks dependency build (postinstall) scripts by default and FAILS the
+# install (ERR_PNPM_IGNORED_BUILDS) if any are ignored. Allow-list the native build
+# deps our toolchain needs — esbuild (Vite/Vitest/tsx) and msgpackr-extract
+# (BullMQ/msgpackr) — so `pnpm install --frozen-lockfile` runs their build scripts
+# non-interactively in the Docker build and CI. This is the exact map pnpm 11.5
+# `approve-builds` writes; `onlyBuiltDependencies` is NOT read by pnpm 11.5.
+# See B-030 / P0-PLAT-01.
 allowBuilds:
-  esbuild: set this to true or false
-  msgpackr-extract: set this to true or false
+  esbuild: true
+  msgpackr-extract: true
 
-onlyBuiltDependencies:
-  - esbuild
-  - msgpackr-extract
 verifyDepsBeforeRun: false
+
+# apps/api/Dockerfile runs `pnpm --filter @juneflow/api deploy --prod /out` to produce
+# a self-contained prod bundle. pnpm 10+ refuses a non-injected deploy by default
+# (ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE); enable the pre-v10 legacy deploy so the
+# image builds without needing inject-workspace-packages across the whole monorepo.
+# See B-030 / P0-PLAT-01.
+forceLegacyDeploy: true

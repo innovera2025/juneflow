@@ -1,0 +1,57 @@
+# Docker build context excludes (P0-PLAT-01 / B-030).
+# Both apps/api/Dockerfile and apps/web/Dockerfile build from the repo root
+# (`COPY . .`), so anything not needed to `pnpm install --frozen-lockfile` +
+# build a workspace must be stripped here — otherwise the host node_modules is
+# copied in and `pnpm install` fails with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY.
+# Keep: every package.json, pnpm-lock.yaml, pnpm-workspace.yaml, and workspace src.
+
+# --- dependencies (reinstalled inside the image) ---
+node_modules
+**/node_modules
+
+# --- VCS / agent metadata ---
+.git
+.gitignore
+.worktrees
+.claude
+
+# --- build outputs & caches (regenerated in the build stage) ---
+dist
+**/dist
+build
+**/build
+.turbo
+**/.turbo
+
+# --- test artifacts (generated at run time) ---
+coverage
+**/coverage
+playwright-report
+**/playwright-report
+test-results
+**/test-results
+
+# --- secrets & env (never bake into an image; .env.example is harmless but unneeded) ---
+.env
+.env.*
+
+# --- OS / logs / editor cruft ---
+.DS_Store
+**/.DS_Store
+*.log
+
+# --- read-only reference sources (not tracked; huge — never needed in an image) ---
+pototype
+design_handoff_juneflow
+juneflow-extract
+
+# --- investor deck assets + strays (B-006) ---
+*.pptx
+*.pdf
+clear_layout_assets
+deck_assets_glam
+
+# --- CI / docs / process files (irrelevant to building a workspace) ---
+.github
+agents
+*.md

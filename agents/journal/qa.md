@@ -10,6 +10,30 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-13 · รอบที่ 10 · task: P0-FIX-06
+
+- ทำอะไร: sync `git merge dev` (สะอาด — ได้ FIX-05 seed refinements · dep P0-FIX-06 ครบ) → หยิบ P0-FIX-06. อัปเดต `tests/seed/seed-counts.spec.ts` แบบ expected-first (ทุกค่าอ้าง spec/blocker ไม่อ่าน seed impl): Company **9** (B-022ก) · platform_invoice **7** = T-1001 `INV-SUB-*` 3 ใบ (79000/72000/18400 paid — subscription.jsx:31) + admin-other 4 (B-025ก+B-024) · Vendor **13** (supplier 7/subcon 6 — B-026ก + SC-07=supplier ตาม directive FIX-05) · ทะเบียนผู้รับเหมา = vendor kind=subcon = **6** · B-024 4 บรรทัด (งวดเบิกจ่าย/แผน PM/ลูกหนี้/เอกสารข้ามบริษัท) → กลุ่ม `REPORT_DERIVED` ไม่ใช่ตาราง seed · ปิด todo B-009 → Unit/SalesUnit = **84** persisted · เพิ่ม suite เทียบ DB จริง (`describe.runIf(DATABASE_URL)` · devDep `pg`). Gate: pg16 disposable @5433 → migrate ✓ seed exit 0 → **vitest run seed = 113/113** (รวม real-DB 17 ข้อ ตรง seed จริงทุกค่า) · reseed รันซ้ำ 113/113 (idempotent) · ไม่มี DATABASE_URL = 96 passed / 17 skipped (CI-safe เพราะ ci.yml ไม่มี pg service). → `review` + REVIEW-QUEUE row (commit `a9a44f1`).
+- ตัดสินใจอะไร: (1) แถว §สรุป "Subscription Invoice (tenant): 3" ไม่เป็น entity แยกอีก — เป็น subset ของ platform_invoice ตาม B-024/B-025 (กัน double-count) · (2) real-DB hookup จำกัดเฉพาะบรรทัดที่ mapping ยืนยันแล้ว (B-024 6 บรรทัด + blockers ตอบแล้ว + C1/C9 + expected-0) — บรรทัดอื่น (BOQ balance/archive, Posting inbox, งบทดลอง, Aging, P&L ฯลฯ) เปิด `describe.todo` รอยืนยัน mapping ต่อบรรทัด กัน QA ตัดสิน mapping เอง (§0 กฎ 4) · (3) T-1001 ระบุผ่าน company.name = "บจก. รุ่งเรืองก่อสร้าง" (SUBSCRIBERS.org — schema ไม่มีคอลัมน์ tenant code) · (4) suite DB จริง gate ด้วย DATABASE_URL เพราะ CI stage tests ไม่มี postgres service — ไม่ใช่การหลบ gate: รันจริงในเครื่องเป็นหลักฐานในแถว REVIEW-QUEUE.
+- เจออะไร: (1) port 5433 ว่าง (pg disposable ของ FIX-05 ถูกเก็บแล้ว) → ต้อง `docker run` pg16 ใหม่เอง (`qa-fix06-pg` · ไม่แตะ 5434 ของ backend) — agent รอบถัดไปอย่า assume DB ค้างอยู่ · (2) seed log รายงาน "report-derived (no table, skipped): 13 datasets" สอดคล้อง B-024 · (3) คิว ready เขต qa หลังรอบนี้ = **0** — Wei เติมคิว ≥5 ตาม PLAN.md §10 · แนะนำเปิด task "seed hookup ตารางที่เหลือ" (ต่อจาก describe.todo ท้ายไฟล์) · (4) lockfile เปลี่ยน 6 บรรทัด (pg importers ของ tests เท่านั้น) — จุดให้ diff-reviewer ดู.
+
+## 2026-07-13 · รอบที่ 9 · task: P0-QA-03
+
+- ทำอะไร: หยิบ P0-QA-03 (สถานะกลับเป็น `ready` หลัง **B-034 ตอบแล้ว** — orchestrator re-scope: harness + reachability smoke จริง · "login → shell" = todo ผูก WEB-05). อ่าน B-034 (คอลัมน์คำตอบ), `tests/e2e/{README,playwright.config.ts}`, `infra/docker-compose.yml` (web `$WEB_PORT`/5173 · api `$API_PORT`/3000 + /health). Probe compose dev ที่ **live จริง**: web `/`=200 · api `/health`=`{"ok":true}`. เขียน `tests/e2e/smoke.spec.ts`: 2 test reachability (web `/`=200 + `html` attached · api `/health`=200 `{ok:true}` ผ่าน `request` context) + `test.fixme` "login → shell load" (todo ยังไม่รัน · ผูก P0-WEB-05/B-020). อัปเดต README status. **G4 เขียวจริงบน compose dev**: `pnpm --filter @juneflow/tests test:e2e` = **2 passed | 1 skipped** exit 0. → `review` + REVIEW-QUEUE row.
+- ตัดสินใจอะไร: ทำตาม B-034 คำตอบ (orchestrator re-scope) ตรงตัว — smoke = reachability จริง (web serve 200 + api /health 200 + playwright โหลดหน้าได้) ไม่ใช่ login flow. **ไม่ fabricate** login→shell: apps/web ยัง render แค่ `Placeholder` (ไม่มี login form/shell) → ลงเป็น `test.fixme` (todo ที่ปรากฏใน report แต่ skip · ไม่ทำ G4 แดง) แทนการประดิษฐ์ behavior นอก spec (PLAN §0 กฎ 1+4). ใช้ `test.fixme` เพราะ Playwright ไม่มี `describe.todo` — fixme = idiom เทียบเท่า "todo ยังไม่ implement". ไม่ตัดสิน scope เอง.
+- เจออะไร: (1) compose dev stack **up จริงในเครื่อง** (`juneflow-{web,api,worker,postgres,redis}-1` · web:5173 · api:3000) → reachability smoke รันได้จริงไม่ต้อง mock. (2) B-033/B-030 ปิดแล้ว → api container healthy (`/health`={"ok":true}) ยืนยันจาก probe. (3) **คิว ready เขต qa ยังบางหลังรอบนี้**: P0-QA-03 → review · P0-FIX-06 รอ P0-FIX-05 (ready ไม่ done · dep ไม่ครบ) — เหลือ ready ที่ dep ครบ = 0. Phase 1 login→shell smoke (3b) ปลดเมื่อ P0-WEB-05 (B-020) + login port พร้อม. Wei: promote P0-FIX-05 เพื่อปลด P0-FIX-06 + เติมคิว qa ให้ครบ ≥5.
+
+## 2026-07-12 · รอบที่ 8 · task: P0-QA-03
+
+- ทำอะไร: หยิบ P0-QA-03 (Playwright E2E harness + smoke "login → shell load") — dep P0-DEV-01 = done ตาม TASKS.md จึงหยิบได้ตามกติกา. อ่าน spec: `docs/handoff/flows.html` (ไม่มี login flow), login spec จริงอยู่ที่ prototype `extra-screens.jsx:7-56` (`ScreenLogin`), `tests/e2e/{README,playwright.config.ts}` (scaffold เดิม + TODO P0-QA-03), และตรวจสิ่งที่ compose dev serve จริง: `apps/web/src/router.tsx` render แค่ `Placeholder` scaffold ทุก route (`<main data-route><code>routeId</code>screen pending port (P0-WEB-05+)</main>`). **ไม่ได้แตะโค้ด/gate** — พบว่า UI ปลายทางของ smoke ยังไม่มี → escalate. เปิด **B-034**, เปลี่ยน P0-QA-03 → `blocked`.
+- ตัดสินใจอะไร: **ไม่ตัดสิน scope เอง** (PLAN §0 กฎ 4). smoke "login → shell load" ทำ/ผ่าน G4 ไม่ได้เพราะ (1) ไม่มี login form ให้ขับ (login ยังไม่ถูก port) (2) ไม่มี app shell ให้ assert — P0-WEB-05 `blocked` อยู่ (B-020) (3) เขียน smoke ขับ placeholder แล้วเคลม login→shell = ประดิษฐ์ behavior นอก spec (ผิดกฎ 1) · ทำ `--pass-with-no-tests` เขียวปลอมก็ไม่ปิด G4 จริง. เสนอ Wei 4 ทาง (แนะนำ ข: แยก 3a harness/app-boot smoke ที่รันจริงได้ตอนนี้ + 3b login→shell หลัง P0-WEB-05/login port/compose api healthy).
+- เจออะไร: (1) dep graph ของ P0-QA-03 ระบุแค่ P0-DEV-01 แต่ smoke จริงต้องพึ่ง web login+shell UI (P0-WEB-05, blocked B-020) — dep ขาด. (2) P0-DEV-01 แม้ TASKS.md = done แต่ยังมีปม api runtime packaging ค้างต่อ B-033 (api container crash boot) → compose dev อาจยังไม่ healthy เต็ม. (3) **คิว ready เขต qa = ว่างจริง**หลังรอบนี้: P0-QA-03 → blocked · P0-FIX-06 รอ P0-FIX-05 (ready ไม่ done) · P0-FIX-03 เป็นเขต web — ต่ำกว่าเกณฑ์ ≥5 มาก. ต้องปลด B-020 (P0-WEB-05 shell) + เพิ่ม task port login + promote P0-FIX-05 เพื่อเปิดคิว qa รอบถัดไป.
+
+## 2026-07-12 · รอบที่ 7 · task: P0-FIX-04
+
+- ทำอะไร: ปิดช่องผ่านปลอมของ **visual gate G5** (QA-04 audit) — แก้ `tests/visual/lib/compare.ts`: verdict เดิม (บรรทัด 178-179) ตัดสินจาก `diffRatio > maxDiffPixelRatio` เท่านั้น **ไม่เคยใช้ `dimensionMismatch`** ที่คำนวณไว้แล้ว → candidate ที่ขนาด**ใหญ่กว่า** reference ผ่านเงียบ: diff loop วนตามขนาด ref, `overlapW/H = min(ref,cand) = ref dims` เมื่อ cand ใหญ่กว่า → ทุก pixel ใน loop อยู่ใน overlap, พื้นที่ candidate ส่วนเกินไม่ถูกตรวจเลย → `diffPixels=0` → PASS ทั้งที่ note ประกาศ auto-FAIL. **fix**: `verdict = raw.dimensionMismatch || diffRatio > maxDiffPixelRatio ? "FAIL" : "PASS"` (+comment อธิบายกับดัก) — dimension mismatch = auto-FAIL ทุกทิศตาม PLAN.md §0. เพิ่ม regression test ใน `visual-gate.spec.ts` ("candidate LARGER auto-FAILs"): สร้าง candidate = ref + 40px ทั้งสองมิติ, overlap เป็น pixel-perfect copy → assert `candDims > refDims` + `diffPixels=0` (พิสูจน์กับดักมีจริง) + `dimensionMismatch=true` + `verdict="FAIL"` (พิสูจน์ปิดกับดัก). **Gate = "G5 self-check: size-larger = FAIL"**: `pnpm --filter @juneflow/tests test:visual` = **4 passed | 1 skipped** (identical=PASS · perturbed=FAIL · size-mismatch=FAIL · size-larger=FAIL ใหม่ · capture skip รอ apps/web) → **GREEN** · commit บน `feature/qa`, task → `review`, เพิ่มแถว REVIEW-QUEUE.
+- ตัดสินใจอะไร: ในเขตล้วน — dimension mismatch เป็น auto-FAIL "ทุกทิศ" (ไม่ใช่แค่ larger) เพราะ (1) note เดิมประกาศ auto-FAIL อยู่แล้ว โค้ดแค่ไม่บังคับ (2) task ระบุ "FAIL ทุกทิศ" + PLAN.md §0 = size change คือ layout change. เดิม candidate เล็กกว่า FAIL อยู่แล้วแต่ด้วยเหตุบังเอิญ (out-of-overlap ref pixels ถูก flag) — ตอนนี้ FAIL ด้วยเหตุที่ถูกต้อง (dimensionMismatch) ครอบทั้งสองทิศ. **ไม่แตะ threshold/design** — แก้เฉพาะ verdict gate ไม่แตะ diff algorithm/report/reference.
+- เจออะไร: (1) test เดิม "size mismatch auto-FAILs" ใช้ candidate 8×8 (เล็กกว่า) จึงไม่จับ bug ทิศ larger — เพิ่ม test larger เป็น regression guard ถาวร (ถ้ามีใครถอด `dimensionMismatch ||` ออก test จะแดงเพราะ diffPixels=0→PASS). (2) fix แคบมาก 3 บรรทัด logic + comment, ไม่กระทบ self-check เดิม (ยัง 3 ตัวเดิมเขียว) และไม่กระทบ capture mode (ยัง skip รอ apps/web). (3) **คิว ready เขต qa หลังรอบนี้เหลือ dep ไม่พร้อมทั้งหมด**: P0-QA-03 รอ P0-DEV-01 (blocked) · P0-FIX-06 รอ P0-FIX-05 (ready ไม่ done) · P0-FIX-03 เป็นเขต web ไม่ใช่ qa — ต่ำกว่าเกณฑ์ ≥5 มาก, ต้องปลด P0-DEV-01 (compose dev, ตอนนี้ blocked) + promote P0-FIX-05 เพื่อเปิดคิว qa รอบถัดไป.
+
 ## 2026-07-12 · รอบที่ 6 · task: P0-QA-02
 
 - ทำอะไร: implement **contract test harness (G2)** ที่ `tests/contract/` — 3 ไฟล์ใหม่: `lib/openapi.ts` (engine: โหลด+parse `packages/contracts/openapi.yaml` ด้วย js-yaml · `$ref` resolver + `deref` · `listOperations()` แตก 108 paths × methods = **145 operations** พร้อม effective security/request media types+schema/response schema · `collectRefs` · `validate()` structural validator รองรับ `$ref`/`allOf`/`type`/`required`/`properties`/`items`/`enum`/`const`) · `contract.spec.ts` (**static invariants generate ต่อ endpoint**: unique operationId 145/145 · ทุก op มี 2xx · 141 auth op ต้องมี 401 + Error envelope · requestBody resolve (รวม multipart 3 ตัว) · 404 = Error envelope · 402 = `QUOTA_EXCEEDED`+`upgrade_url` · ทุก `$ref` resolve) · `live.spec.ts` (**contract vs dev API จริง** gated ด้วย `CONTRACT_API_URL`: unset→`describe.skip` · set→รันจริง; เรียกเฉพาะ side-effect-free: 44 guarded GET ต้อง 401+Error envelope · bad login → contract-declared shape) + update `README.md` (สถานะ+วิธีรัน) + เพิ่ม `js-yaml` เข้า `@juneflow/tests` devDeps (offline install จาก store, lockfile +3). **Gate G2 = "harness รันได้กับ dev API"**: `pnpm --filter @juneflow/tests test:contract` = **370 passed | 46 skipped** · full `pnpm test` = exit 0 · **พิสูจน์ live path รันจริงกับ dev API** ด้วย stub contract-conforming (`CONTRACT_API_URL` → **46/46 passed**) → **GREEN** · commit `7ff33a6` บน `feature/qa`, task → `review`, เพิ่มแถว REVIEW-QUEUE.
@@ -99,3 +123,39 @@
 - ทำอะไร: รอบที่ 2/10: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $4.7105/$20 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T14:32:20Z loop round ended (agent: qa)
+
+## 2026-07-12 21:32 · loop-runner · รอบที่ 1/3 · task: P0-FIX-04
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-FIX-04 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.034052 (สะสม $2.0341/เพดาน $14)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T14:33:17Z loop round ended (agent: qa)
+
+## 2026-07-12 21:33 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/3: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $2.9407/$14 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T14:47:41Z loop round ended (agent: qa)
+
+## 2026-07-12 21:47 · loop-runner · รอบที่ 1/2 · task: P0-QA-03
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-QA-03 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $2.0937040000000002 (สะสม $2.0937/เพดาน $10)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T14:48:10Z loop round ended (agent: qa)
+
+## 2026-07-12 21:48 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $2.6682/$10 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-12T20:43:40Z loop round ended (agent: qa)
+
+## 2026-07-13 03:43 · loop-runner · รอบที่ 1/2 · task: P0-QA-03
+- ทำอะไร: รัน claude headless 1 รอบ · task P0-QA-03 → สถานะ review · ค่าใช้จ่ายรอบนี้ $2.1086270000000003 (สะสม $2.1086/เพดาน $10)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-12T20:44:15Z loop round ended (agent: qa)
+
+## 2026-07-13 03:44 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $2.7069/$10 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)

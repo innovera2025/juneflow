@@ -4,6 +4,10 @@
     "lib": ["ES2022"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    // Resolve @juneflow/db to its TS source (its `development` export condition)
+    // so typecheck/vitest need no prior db build; production `node dist/index.js`
+    // still resolves the compiled JS via the `default` condition (P0-FIX-08).
+    "customConditions": ["development"],
     "rootDir": "src",
     "outDir": "dist",
     "strict": true,

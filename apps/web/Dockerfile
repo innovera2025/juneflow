@@ -4,7 +4,7 @@
 # TODO(P0-DEV-01): wired into infra/docker-compose.yml (pg16 + redis + api + web + worker).
 
 # --- build stage ---
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /repo
 RUN corepack enable
 COPY . .
