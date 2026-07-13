@@ -11,9 +11,11 @@ import {
   aiUsage,
   companies,
   packages,
+  projectNodes,
   projects,
   projectTypes,
   roles,
+  salesUnits,
   subscriptions,
   users,
 } from "@juneflow/db";
@@ -75,11 +77,27 @@ const projectRow = {
   companyId: COMPANY,
   typeId: "pt-re",
   name: "juneflow พาร์ค ราชพฤกษ์",
+  short: "RJP",
+  color: "#0B2A4A",
   budget: "50000000.00",
   currencyCode: "THB",
   status: "active",
 };
 const typeRow = { id: "pt-re", key: "realestate", name: "อสังหาริมทรัพย์" };
+// project_node tree (B-041(ก+)): phase → block → 3 units (units hang under an
+// intermediate block node, mirroring the central seed's B-009 layout).
+const nodeRows = [
+  { id: "n-p1", projectId: "pj-rjp", parentId: null, kind: "phase", name: "เฟส 2 · Block B+C (ทาวน์โฮม)", saleStatus: null },
+  { id: "n-b", projectId: "pj-rjp", parentId: "n-p1", kind: "block", name: "Block B", saleStatus: null },
+  { id: "n-u1", projectId: "pj-rjp", parentId: "n-b", kind: "unit", name: "B-01", saleStatus: "sold" },
+  { id: "n-u2", projectId: "pj-rjp", parentId: "n-b", kind: "unit", name: "B-02", saleStatus: "soldBuilt" },
+  { id: "n-u3", projectId: "pj-rjp", parentId: "n-b", kind: "unit", name: "B-03", saleStatus: "booked" },
+];
+const salesUnitRows = [
+  { id: "su-1", companyId: COMPANY, unitId: "n-u1", stage: "sold" },
+  { id: "su-2", companyId: COMPANY, unitId: "n-u2", stage: "soldBuilt" },
+  { id: "su-3", companyId: COMPANY, unitId: "n-u3", stage: "booked" },
+];
 
 // --- stub Db: canned rows per table + captured (table, where) pairs ---------
 interface Captured {
@@ -97,20 +115,27 @@ function stubDb(
   };
   return {
     select: () => ({
-      from: (table: unknown) => ({
-        where: (where: SQL) => {
-          captured.push({ table, where });
-          return Promise.resolve(rowsFor(table));
-        },
-        // selectReference without a predicate awaits the builder directly.
-        then: (
-          onOk: (rows: unknown[]) => unknown,
-          onErr: (err: unknown) => unknown,
-        ) => {
-          captured.push({ table, where: undefined });
-          return Promise.resolve(rowsFor(table)).then(onOk, onErr);
-        },
-      }),
+      from: (table: unknown) => {
+        const builder = {
+          // selectThrough joins (P1-BE-02): the stub answers the child
+          // table's canned rows regardless of join chain.
+          $dynamic: () => builder,
+          innerJoin: () => builder,
+          where: (where: SQL) => {
+            captured.push({ table, where });
+            return Promise.resolve(rowsFor(table));
+          },
+          // selectReference without a predicate awaits the builder directly.
+          then: (
+            onOk: (rows: unknown[]) => unknown,
+            onErr: (err: unknown) => unknown,
+          ) => {
+            captured.push({ table, where: undefined });
+            return Promise.resolve(rowsFor(table)).then(onOk, onErr);
+          },
+        };
+        return builder;
+      },
     }),
   } as unknown as Db;
 }
@@ -161,6 +186,8 @@ const fullDb = (captured: Captured[] = []) =>
       [aiUsage, [{ month: "2026-07", used: 3 }, { month: "2026-07", used: 4 }]],
       [projects, [projectRow]],
       [projectTypes, [typeRow]],
+      [projectNodes, nodeRows],
+      [salesUnits, salesUnitRows],
     ],
     captured,
   );
@@ -309,11 +336,27 @@ describe("GET /api/v1/projects", () => {
         budget: 50_000_000,
         currency_code: "THB",
         status: "active",
+        // B-041(ก+) ProjectSwitcher extensions
+        short: "RJP",
+        color: "#0B2A4A",
+        company_id: COMPANY,
+        units: 3,
+        phases: [
+          {
+            id: "n-p1",
+            name: "เฟส 2 · Block B+C (ทาวน์โฮม)",
+            // 3 unit descendants THROUGH the block node; 2 of 3 sales units
+            // are sold/soldBuilt → round(100 × 2/3) = 67.
+            units: 3,
+            sold_pct: 67,
+            sale_status: null,
+          },
+        ],
       },
     ]);
   });
 
-  it("scopes the project query by company_id", async () => {
+  it("scopes the project, node and sales-unit queries by company_id", async () => {
     const captured: Captured[] = [];
     await (
       await buildTestApp({
@@ -325,6 +368,14 @@ describe("GET /api/v1/projects", () => {
     const projectCalls = capturedFor(captured, projects);
     expect(projectCalls.length).toBe(1);
     expect(paramsOf(projectCalls[0]?.where)).toContain(COMPANY);
+    // project_node has no company_id — scoped THROUGH project (selectThrough).
+    const nodeCalls = capturedFor(captured, projectNodes);
+    expect(nodeCalls.length).toBe(1);
+    expect(paramsOf(nodeCalls[0]?.where)).toContain(COMPANY);
+    // sales_unit is company-scoped directly.
+    const saleCalls = capturedFor(captured, salesUnits);
+    expect(saleCalls.length).toBe(1);
+    expect(paramsOf(saleCalls[0]?.where)).toContain(COMPANY);
     // project_type is a global reference read (no company_id column exists).
     expect(capturedFor(captured, projectTypes).length).toBe(1);
   });

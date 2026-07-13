@@ -13,7 +13,12 @@ import {
   boqDocs,
   companies,
   packages,
+  pmAssets,
+  pmContracts,
+  pmWorkOrders,
+  projects,
   projectTypes,
+  subconContracts,
   users,
   workPeriods,
 } from "@juneflow/db";
@@ -153,6 +158,85 @@ describe("selectReference reads platform-global reference tables (P1-BE-01)", ()
     expect(() => tdb.selectReference(packages)).not.toThrow();
     expect(() => tdb.selectReference(projectTypes)).not.toThrow();
     expect(() => tdb.selectReference(companies)).not.toThrow();
+  });
+});
+
+describe("selectThrough scopes parent-FK child tables via their tenant root (P1-BE-02)", () => {
+  it("single hop (boq_doc → project): joins and binds company_id on the root", () => {
+    const { sql, params } = tdb
+      .selectThrough(boqDocs, [{ fk: boqDocs.projectId, parent: projects }])
+      .toSQL();
+    expect(sql).toContain("inner join");
+    expect(sql).toContain('"project"');
+    expect(sql).toContain('"company_id" = $');
+    expect(params).toContain(COMPANY);
+  });
+
+  it("selects ONLY the child's columns (no root/company data leaks out)", () => {
+    const { sql } = tdb
+      .selectThrough(boqDocs, [{ fk: boqDocs.projectId, parent: projects }])
+      .toSQL();
+    // The selection must come from boq_doc; project columns like budget must
+    // not appear in the SELECT list (before FROM).
+    const selectList = sql.slice(0, sql.indexOf(" from "));
+    expect(selectList).toContain('"boq_doc"');
+    expect(selectList).not.toContain('"budget"');
+  });
+
+  it("multi hop (work_period → subcon_contract → project) still anchors on company_id", () => {
+    const { sql, params } = tdb
+      .selectThrough(workPeriods, [
+        { fk: workPeriods.contractId, parent: subconContracts },
+        { fk: subconContracts.projectId, parent: projects },
+      ])
+      .toSQL();
+    expect((sql.match(/inner join/g) ?? []).length).toBe(2);
+    expect(sql).toContain('"company_id" = $');
+    expect(params).toContain(COMPANY);
+  });
+
+  it("three hops (pm_workorder → pm_asset → pm_contract → project)", () => {
+    const { sql, params } = tdb
+      .selectThrough(pmWorkOrders, [
+        { fk: pmWorkOrders.assetId, parent: pmAssets },
+        { fk: pmAssets.contractId, parent: pmContracts },
+        { fk: pmContracts.projectId, parent: projects },
+      ])
+      .toSQL();
+    expect((sql.match(/inner join/g) ?? []).length).toBe(3);
+    expect(params).toContain(COMPANY);
+  });
+
+  it("AND-s a caller predicate onto the tenant predicate (never replaces it)", () => {
+    const { sql, params } = tdb
+      .selectThrough(
+        boqDocs,
+        [{ fk: boqDocs.projectId, parent: projects }],
+        eq(boqDocs.status, "pending"),
+      )
+      .toSQL();
+    expect(sql).toContain('"company_id" = $');
+    expect(sql).toContain('"status" = $');
+    expect(sql).toContain(" and ");
+    expect(params).toContain(COMPANY);
+    expect(params).toContain("pending");
+  });
+
+  it("fails closed on an empty hop path", () => {
+    expect(() => tdb.selectThrough(boqDocs, [])).toThrow(TenantScopeError);
+    expect(() => tdb.selectThrough(boqDocs, [])).toThrow(
+      /TENANT_SCOPE_PATH_MISSING/,
+    );
+  });
+
+  it("fails closed when the final hop is NOT a company_id-scoped root", () => {
+    // subcon_contract itself scopes via project — stopping there would leave
+    // the query unanchored, so it must throw.
+    expect(() =>
+      tdb.selectThrough(workPeriods, [
+        { fk: workPeriods.contractId, parent: subconContracts },
+      ]),
+    ).toThrow(/TENANT_SCOPE_ROOT_UNSCOPED/);
   });
 });
 

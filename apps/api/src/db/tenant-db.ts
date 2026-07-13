@@ -21,7 +21,7 @@
 // G3: src/db/tenant-db.test.ts proves the predicate/value is present on every
 // operation by inspecting the generated SQL (drizzle `.toSQL()`), and that a
 // missing companyId fails closed.
-import { and, eq, type SQL } from "drizzle-orm";
+import { and, eq, getTableColumns, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { companies, packages, projectTypes } from "@juneflow/db/schema";
 import type { Db } from "@juneflow/db/client";
@@ -112,6 +112,68 @@ export class TenantDb {
   /** DELETE FROM table WHERE company_id = ? [AND extra]. */
   delete<T extends TenantTable>(table: T, where?: SQL) {
     return this.#db.delete(table).where(this.#scope(table, where));
+  }
+
+  /**
+   * Read a parent-FK-scoped tenant table THROUGH its ancestry to a
+   * company_id-scoped root (P1-BE-02). Tables like boq_doc / work_period /
+   * pm_workorder / project_node carry no companyId column of their own — the
+   * erd scopes them via a parent chain that ends at a tenant root (project,
+   * ...). This is the ONLY door for reading them, and it is scoped by
+   * construction:
+   *
+   *   SELECT child.* FROM child
+   *     INNER JOIN hop1 ON child.fk = hop1.id
+   *     [INNER JOIN hop2 ...]
+   *   WHERE root.company_id = <this tenant> [AND extra]
+   *
+   * Fail-closed rules (throws TenantScopeError):
+   *   - hops must be non-empty (a companyId-less table can never be read bare)
+   *   - the FINAL hop's parent must be a TenantTable (companyId column), so
+   *     the tenant predicate always anchors on a real scoped root.
+   */
+  selectThrough<T extends PgTable>(
+    table: T,
+    hops: readonly { fk: PgColumn; parent: PgTable }[],
+    where?: SQL,
+  ) {
+    const root = hops[hops.length - 1]?.parent;
+    if (!root) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_PATH_MISSING: selectThrough() requires at least one " +
+          "join hop ending at a company_id-scoped root table",
+      );
+    }
+    const rootCompanyId = (root as Partial<TenantTable>).companyId;
+    if (!rootCompanyId) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_ROOT_UNSCOPED: the final selectThrough() hop must be a " +
+          "tenant table carrying a company_id column",
+      );
+    }
+    const tenant = eq(rootCompanyId, this.companyId);
+    // Drizzle's join generics do not compose under a generic child table, so
+    // the builder is accumulated through a minimal structural view; the final
+    // row type is exact (we select ONLY the child's columns).
+    interface ThroughBuilder {
+      innerJoin(parent: PgTable, on: SQL): ThroughBuilder;
+      where(predicate: SQL): Promise<T["$inferSelect"][]> & { toSQL(): { sql: string; params: unknown[] } };
+    }
+    let query = this.#db
+      .select(getTableColumns(table))
+      .from(table)
+      .$dynamic() as unknown as ThroughBuilder;
+    for (const hop of hops) {
+      const parentId = (hop.parent as PgTable & { id?: PgColumn }).id;
+      if (!parentId) {
+        throw new TenantScopeError(
+          "TENANT_SCOPE_HOP_INVALID: every selectThrough() hop parent must " +
+            "expose an id primary-key column to join on",
+        );
+      }
+      query = query.innerJoin(hop.parent, eq(hop.fk, parentId));
+    }
+    return query.where(where ? (and(tenant, where) as SQL) : tenant);
   }
 
   /**
