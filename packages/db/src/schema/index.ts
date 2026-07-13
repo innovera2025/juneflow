@@ -37,8 +37,11 @@
 // [x] user               - email, name, role_id, status: active | blocked
 // [x] role               - approval_limits json (approval cap per doc type);
 //                          perms matrix -> Appendix B item 13 below
-// [ ] better-auth tables - session/account/etc., self-hosted in our Postgres
-//                          (P0-BE-11, PLAN.md Appendix A - no hosted auth)
+// [x] better-auth tables - auth_user/auth_session/auth_account/auth_verification,
+//                          self-hosted in our Postgres (PLAN.md Appendix A - no
+//                          hosted auth). B-016(ก): separate auth_user table via
+//                          user.modelName + company_id link -> ./auth.ts
+//                          (P1-BE-01, migration 0008).
 //
 // =============================================================================
 // DONE(P0-BE-07) - groups: Project/Master + BOQ/Procurement + Subcon/Acceptance
@@ -182,6 +185,7 @@
 // drizzle.config.ts and @juneflow/api see one schema root.
 
 export * from "./platform.js";
+export * from "./auth.js";
 export * from "./project.js";
 export * from "./boq.js";
 export * from "./subcon.js";

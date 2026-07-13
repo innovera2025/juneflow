@@ -74,9 +74,11 @@ export async function registerFilesRoute(
     const companyId = request.tenant?.companyId;
     if (!companyId) {
       // tenant-scope should already have rejected; fail closed regardless.
+      // Flat {code,message} per contract Error (P1-BE-01 audit debt — the
+      // nested {error:{...}} shape violated openapi.yaml:2735).
       return reply
         .code(401)
-        .send({ error: { code: "UNAUTHENTICATED", message: "Missing tenant context" } });
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
 
     // Storage quota gates the upload (contract: POST /files → 402 QuotaExceeded).

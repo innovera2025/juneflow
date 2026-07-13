@@ -60,6 +60,9 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
 import { Pool } from "pg";
+// better-auth's own scrypt hasher — seed-time only (devDependency), so seeded
+// credential rows always match what better-auth verifies at sign-in.
+import { hashPassword } from "better-auth/crypto";
 import * as schema from "../schema/index.js";
 import { det } from "./ids.js";
 
@@ -788,6 +791,33 @@ async function seed(): Promise<void> {
           id: det(`user:${i}`), companyId: CO1, email: u.email, name: u.name,
           roleId: det(`role:${at(ROLE_DEFS, i).key}`),
           status: (u.status === "active" ? "active" : "blocked") as "active" | "blocked",
+        })),
+      );
+
+      // better-auth credentials (P1-BE-01, B-016(ก)): one auth_user + one
+      // "credential" auth_account per COMPANY_USERS row so the dev stack is
+      // sign-in-able against the REAL bearer flow (B-028(ก)) out of one
+      // `docker compose up`. auth_user.email ↔ user.email links the session to
+      // the dictionary user row within company_id.
+      //
+      // Password is a DEV-ONLY default (same convention as the compose
+      // POSTGRES_PASSWORD dev default "juneflow-dev" — infra/docker-compose.yml);
+      // real deployments must provision credentials outside the seed. The hash
+      // comes from better-auth's own scrypt (better-auth/crypto) so the format
+      // always matches what better-auth verifies — never hand-rolled.
+      const DEV_PASSWORD = "juneflow-dev";
+      const devPasswordHash = await hashPassword(DEV_PASSWORD);
+      await tx.insert(schema.authUsers).values(
+        COMPANY_USERS.map((u, i) => ({
+          id: det(`authuser:${i}`), name: u.name, email: u.email,
+          emailVerified: true, companyId: CO1,
+        })),
+      );
+      await tx.insert(schema.authAccounts).values(
+        COMPANY_USERS.map((_u, i) => ({
+          id: det(`authacct:${i}`), accountId: det(`authuser:${i}`),
+          providerId: "credential", userId: det(`authuser:${i}`),
+          password: devPasswordHash,
         })),
       );
 
