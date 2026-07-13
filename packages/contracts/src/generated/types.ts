@@ -1775,6 +1775,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Nav badge counts (GET /counts?keys=... → {key: count})
+         * @description Tenant-scoped pending-work counts for the sidebar badges — B-040(ก). The 9 keys are the NAV badge sources in pototype chrome.jsx; decision C10 forbids hardcoded badge numbers, so each count is a live query over the module's pending-state rows (flows.html state machines). Counts never escape the JWT's company_id tenant scope.
+         */
+        get: operations["getCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -2031,6 +2051,12 @@ export interface components {
             role?: components["schemas"]["Entity"];
             approval_limits?: components["schemas"]["Entity"];
             package?: components["schemas"]["Entity"];
+        };
+        /** @description GET /counts result — pending-work count per requested nav badge key (B-040(ก)). Keys mirror the request's keys parameter; every value is a tenant-scoped live query count (decision C10 — never hardcoded). */
+        Counts: {
+            counts: {
+                [key: string]: number;
+            };
         };
         /** @description Minimal placeholder per data-dictionary Project (name, type, budget, status). Full field modeling belongs to the schema tasks. */
         Project: {
@@ -4627,6 +4653,39 @@ export interface operations {
             200: components["responses"]["ActionOk"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getCounts: {
+        parameters: {
+            query: {
+                /** @description Comma-separated nav badge ids to count. An unknown key answers 400 with the flat Error shape. */
+                keys: ("boq" | "boq.approval" | "pr.list" | "accept" | "pm.wo" | "gl.inbox" | "sales" | "sales.crm" | "sales.service")[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending-work count per requested key (tenant-scoped). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Counts"];
+                };
+            };
+            /** @description Unknown/invalid count key. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listDocuments: {

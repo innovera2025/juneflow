@@ -2384,6 +2384,56 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   # ================= DMS / Notifications / Audit / Reports ==================
+  /counts:
+    get:
+      tags: [dms]
+      summary: "Nav badge counts (GET /counts?keys=... → {key: count})"
+      description: >-
+        Tenant-scoped pending-work counts for the sidebar badges — B-040(ก).
+        The 9 keys are the NAV badge sources in pototype chrome.jsx; decision
+        C10 forbids hardcoded badge numbers, so each count is a live query
+        over the module's pending-state rows (flows.html state machines).
+        Counts never escape the JWT's company_id tenant scope.
+      operationId: getCounts
+      parameters:
+        - name: keys
+          in: query
+          required: true
+          style: form
+          explode: false
+          description: >-
+            Comma-separated nav badge ids to count. An unknown key answers
+            400 with the flat Error shape.
+          schema:
+            type: array
+            minItems: 1
+            items:
+              type: string
+              enum:
+                - boq
+                - boq.approval
+                - pr.list
+                - accept
+                - pm.wo
+                - gl.inbox
+                - sales
+                - sales.crm
+                - sales.service
+      responses:
+        "200":
+          description: Pending-work count per requested key (tenant-scoped).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Counts"
+        "400":
+          description: Unknown/invalid count key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /documents:
     get:
       tags: [dms]
@@ -2819,6 +2869,20 @@ components:
           $ref: "#/components/schemas/Entity"
         package:
           $ref: "#/components/schemas/Entity"
+
+    Counts:
+      type: object
+      description: >-
+        GET /counts result — pending-work count per requested nav badge key
+        (B-040(ก)). Keys mirror the request's keys parameter; every value is a
+        tenant-scoped live query count (decision C10 — never hardcoded).
+      required: [counts]
+      properties:
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
 
     Project:
       type: object
