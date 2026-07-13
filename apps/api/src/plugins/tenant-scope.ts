@@ -27,19 +27,37 @@ export interface TenantContext {
   companyId: string;
 }
 
+/** The authenticated session user (better-auth auth_user), when resolved. */
+export interface AuthUserContext {
+  id: string;
+  email: string;
+  name: string;
+}
+
 declare module "fastify" {
   interface FastifyRequest {
     tenant?: TenantContext;
     /** Tenant-scoped DB handle — the ONLY db access a handler may use. */
     db?: TenantDb;
+    /** Session user identity (set when the resolver returns one — e.g. /me). */
+    authUser?: AuthUserContext;
   }
 }
+
+/**
+ * Resolver result: a bare company_id (legacy shape, kept for tests/simple
+ * resolvers) or a full context carrying the session user. null → reject.
+ */
+export type ResolvedTenant =
+  | string
+  | { companyId: string; user?: AuthUserContext }
+  | null;
 
 export interface TenantScopeOptions {
   /** Un-scoped base handle; wrapped per-request into a company_id-scoped TenantDb. */
   db: Db;
-  /** Resolve the caller's company_id (default: better-auth session). null → reject. */
-  resolveCompanyId: (request: FastifyRequest) => Promise<string | null>;
+  /** Resolve the caller's tenant (default: better-auth session). null → reject. */
+  resolveCompanyId: (request: FastifyRequest) => Promise<ResolvedTenant>;
   /**
    * Routes reachable without a tenant (login, health). Matched by exact path or
    * `prefix/*` wildcard. Everything else fails closed.
@@ -79,7 +97,9 @@ export async function registerTenantScope(
       const pathname = request.url.split("?", 1)[0] ?? request.url;
       if (isPublic(pathname, publicPaths)) return;
 
-      const companyId = await options.resolveCompanyId(request);
+      const resolved = await options.resolveCompanyId(request);
+      const companyId =
+        typeof resolved === "string" ? resolved : resolved?.companyId;
       if (!companyId) {
         await reply.code(401).send({
           code: "UNAUTHENTICATED",
@@ -90,6 +110,9 @@ export async function registerTenantScope(
 
       request.tenant = { companyId };
       request.db = new TenantDb(options.db, companyId);
+      if (typeof resolved === "object" && resolved?.user) {
+        request.authUser = resolved.user;
+      }
     },
   );
 }

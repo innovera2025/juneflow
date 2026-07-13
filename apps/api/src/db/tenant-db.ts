@@ -26,6 +26,14 @@ import type { Db } from "@juneflow/db/client";
 /** A tenant-owned table: any Drizzle table exposing a `companyId` column. */
 export type TenantTable = PgTable & { companyId: PgColumn };
 
+/**
+ * A platform-global reference table: one WITHOUT a `companyId` column, so
+ * tenant scoping is impossible by definition (package, project_type, company).
+ * The `companyId?: never` constraint makes the two sets mutually exclusive at
+ * compile time — a tenant-owned table can never slip through this door.
+ */
+export type ReferenceTable = PgTable & { companyId?: never };
+
 /** Insert payload for a tenant table, minus company_id (the wrapper injects it). */
 type TenantInsert<T extends TenantTable> = Omit<T["$inferInsert"], "companyId">;
 
@@ -83,5 +91,18 @@ export class TenantDb {
   /** DELETE FROM table WHERE company_id = ? [AND extra]. */
   delete<T extends TenantTable>(table: T, where?: SQL) {
     return this.#db.delete(table).where(this.#scope(table, where));
+  }
+
+  /**
+   * Read a platform-global REFERENCE table (no `companyId` column exists, so no
+   * tenant predicate is possible — e.g. package, project_type, company). This is
+   * deliberately read-only and type-gated to non-tenant tables: every
+   * tenant-owned table still MUST go through the scoped select() above.
+   * Callers must only resolve reference rows the tenant already points at
+   * (e.g. its own subscription's package_id) — never enumerate other tenants.
+   */
+  selectReference<T extends ReferenceTable>(table: T, where?: SQL) {
+    const query = this.#db.select().from(table);
+    return where ? query.where(where) : query;
   }
 }

@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "@juneflow/db/client";
-import { users } from "@juneflow/db";
+import { packages, users } from "@juneflow/db";
 import { TenantDb, TenantScopeError } from "./tenant-db.js";
 
 const COMPANY = "11111111-1111-1111-1111-111111111111";
@@ -100,6 +100,29 @@ describe("update is always company_id-scoped", () => {
     // company_id survives only as the WHERE scope predicate.
     expect(sql).toContain('"company_id" = $');
     expect(params).toContain(COMPANY);
+  });
+});
+
+describe("selectReference reads platform-global reference tables (P1-BE-01)", () => {
+  const PKG = "33333333-3333-3333-3333-333333333333";
+
+  it("issues no company_id predicate — the table has no such column", () => {
+    const { sql } = tdb.selectReference(packages).toSQL();
+    expect(sql).not.toContain("company_id");
+  });
+
+  it("applies only the caller predicate (e.g. the tenant's own package_id)", () => {
+    const { sql, params } = tdb
+      .selectReference(packages, eq(packages.id, PKG))
+      .toSQL();
+    expect(sql).toContain('"id" = $1');
+    expect(params).toContain(PKG);
+  });
+
+  it("rejects tenant-owned tables at compile time", () => {
+    // @ts-expect-error — users carries companyId, so it is NOT a ReferenceTable;
+    // tenant-owned tables must go through the scoped select() only.
+    tdb.selectReference(users);
   });
 });
 

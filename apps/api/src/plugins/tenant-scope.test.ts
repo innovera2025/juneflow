@@ -66,3 +66,44 @@ describe("resolved tenant is attached and scoped", () => {
     });
   });
 });
+
+describe("object resolver results (P1-BE-01: session user for /me)", () => {
+  const SESSION_USER = { id: "au-1", email: "a@b.co", name: "A" };
+
+  it("attaches the session user alongside the scoped db", async () => {
+    app = Fastify();
+    await registerTenantScope(app, {
+      db,
+      resolveCompanyId: async () => ({
+        companyId: COMPANY,
+        user: SESSION_USER,
+      }),
+    });
+    app.get("/whoami", async (request) => ({
+      authUser: request.authUser ?? null,
+      scoped: request.db?.companyId ?? null,
+    }));
+    await app.ready();
+
+    const res = await app.inject({ url: "/whoami" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ authUser: SESSION_USER, scoped: COMPANY });
+  });
+
+  it("fails closed when the object result carries no company_id", async () => {
+    app = Fastify();
+    await registerTenantScope(app, {
+      db,
+      resolveCompanyId: async () => ({ companyId: "", user: SESSION_USER }),
+    });
+    app.get("/whoami", async () => ({ ok: true }));
+    await app.ready();
+
+    const res = await app.inject({ url: "/whoami" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Missing tenant context",
+    });
+  });
+});
