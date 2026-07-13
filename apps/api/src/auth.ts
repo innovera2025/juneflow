@@ -30,21 +30,43 @@ import {
 import type { FastifyRequest } from "fastify";
 
 /**
- * DEV-ONLY fallback secret. better-auth (correctly) refuses to run on ITS
- * built-in default secret under NODE_ENV=production — which is exactly what
- * made every /api/v1/* request 500 on the compose stack (P1-BE-01 root cause:
- * the api image sets NODE_ENV=production and infra passes no
- * BETTER_AUTH_SECRET). The dev stack must boot from one `docker compose up`
- * (PLAN.md §7), so we fall back to this clearly-dev constant, same convention
- * as the compose POSTGRES_PASSWORD dev default. Real deployments MUST set
- * BETTER_AUTH_SECRET (infra/.env or host env — infra/CLAUDE.md secrets rule).
+ * DEV-ONLY fallback secret — NEVER active in production (gate 4.5 rework).
+ * better-auth (correctly) refuses to run on ITS built-in default secret under
+ * NODE_ENV=production — which is what made every /api/v1/* request 500 on the
+ * compose stack (P1-BE-01 root cause: the api image sets NODE_ENV=production
+ * and infra passes no BETTER_AUTH_SECRET). This constant exists ONLY for
+ * explicitly non-production processes (local dev/tests); in production a
+ * missing BETTER_AUTH_SECRET fails fast at boot (resolveAuthSecret below), so
+ * no real deployment can ever sign sessions with a repo-committed value
+ * (infra/CLAUDE.md secrets rule). Compose-side provisioning → BLOCKERS B-038.
  */
 const DEV_ONLY_SECRET =
   "juneflow-dev-only-secret--set-BETTER_AUTH_SECRET-in-real-deployments";
 
-/** True when the process runs on the dev fallback secret (index.ts warns). */
+/** True when this process would run on the dev fallback (index.ts warns). */
 export function usingDevAuthSecret(): boolean {
   return !process.env.BETTER_AUTH_SECRET;
+}
+
+/**
+ * Resolve the signing secret, fail-closed by environment:
+ * - BETTER_AUTH_SECRET set → use it (all environments).
+ * - missing + NODE_ENV=production → throw (fail fast at boot — a production
+ *   process must never fall back to a committed secret).
+ * - missing + non-production → DEV_ONLY_SECRET (compose/local dev boots from
+ *   one `docker compose up`, PLAN.md §7), with a boot warning from index.ts.
+ */
+export function resolveAuthSecret(): string {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "BETTER_AUTH_SECRET is not set. Refusing to start in production with " +
+        "the dev fallback secret — provision it via env (infra/.env or host " +
+        "env; see BLOCKERS.md B-038 for compose dev provisioning).",
+    );
+  }
+  return DEV_ONLY_SECRET;
 }
 
 /** Build the self-hosted better-auth instance over our Postgres via Drizzle. */
@@ -61,7 +83,7 @@ function buildAuth() {
         auth_verification: authVerifications,
       },
     }),
-    secret: process.env.BETTER_AUTH_SECRET ?? DEV_ONLY_SECRET,
+    secret: resolveAuthSecret(),
     baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
     emailAndPassword: { enabled: true },
     // Bearer tokens so `Authorization: Bearer <token>` works, matching the

@@ -29,9 +29,16 @@ import { QuotaGuard, unlimitedQuotaResolver } from "./plugins/quota.js";
 import { createFakeR2Storage } from "./routes/files.js";
 import {
   resolveAuthContext,
+  resolveAuthSecret,
   signInWithEmail,
   usingDevAuthSecret,
 } from "./auth.js";
+
+// Fail fast at BOOT (gate 4.5 rework): better-auth builds lazily on the first
+// request, so validate the secret config here — a production process with no
+// BETTER_AUTH_SECRET must die now with a clear message, not 500 per-request
+// or silently sign sessions with a committed dev value.
+resolveAuthSecret();
 
 // Base (un-scoped) DB handle. Never handed to route handlers directly — the
 // tenant-scope hook wraps it per-request into a company_id-scoped TenantDb.
