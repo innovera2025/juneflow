@@ -90,6 +90,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
       REDIS_URL: redis://redis:6379
+      # Dev-only default secret — real value must come from infra/.env, never committed.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-juneflow-dev-secret}
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
@@ -120,6 +122,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
       REDIS_URL: redis://redis:6379
+      # Dev-only default secret — real value must come from infra/.env, never committed.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-juneflow-dev-secret}
     depends_on:
       redis:
         condition: service_started
