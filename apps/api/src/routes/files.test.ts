@@ -92,3 +92,23 @@ describe("storage quota", () => {
     expect(minted).toBe(false);
   });
 });
+
+describe("fail-closed without a tenant (P1-BE-01 audit debt 3)", () => {
+  it("responds 401 with the FLAT contract Error shape", async () => {
+    // Build WITHOUT the tenant decoration hook — simulates a request that
+    // somehow bypassed tenant-scope; the route must still fail closed, flat.
+    app = Fastify();
+    await registerFilesRoute(app, {
+      storage: createFakeR2Storage("https://r2.test"),
+      quota: quotaGuard(-1, 0),
+    });
+    await app.ready();
+
+    const res = await app.inject({ method: "POST", url: "/files" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Missing tenant context",
+    });
+  });
+});

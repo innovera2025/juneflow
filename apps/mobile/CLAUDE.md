@@ -11,7 +11,7 @@
 - Dart client **generate จาก OpenAPI** (`packages/contracts/openapi.yaml`) — ห้ามเขียน model มือ
 
 ## Spec ของจอ (Design Fidelity)
-- Spec = ภาพ mobile ใน `pototype/gallery/` + โค้ด `mobile*.jsx` **รวม 31 จอ**
+- Spec = ภาพ mobile ใน `pototype/gallery/` + โค้ด `mobile*.jsx` **รวม 26 จอ distinct + host**
   (`mobile.jsx` · `mobile-screens.jsx` · `mobile-field.jsx` · `mobile-pm.jsx` · `mobile-preview.jsx`)
 - เขียนใหม่เป็น Flutter widget โดย **visual ต้องตรงต้นฉบับ** — ผ่าน visual gate เหมือนจอ web
 - **ห้ามเริ่ม task ที่มี UI โดยไม่ได้เปิดอ่านไฟล์ .jsx ต้นทางในรอบนั้น — การอ้างว่าเคยอ่านแล้วไม่นับ**
