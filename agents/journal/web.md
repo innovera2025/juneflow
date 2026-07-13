@@ -10,6 +10,12 @@
 > - เจออะไร: (สิ่งที่พบ/ติดขัด/blocker ที่เปิด/สิ่งที่ agent รอบถัดไปควรรู้)
 > ```
 
+## 2026-07-13 · รอบที่ 9 · task: P1-WEB-01
+
+- ทำอะไร: หยิบ **P1-WEB-01** ใหม่ (Wei ตอบ B-035 = เพิ่ม 20 `login.*` dict keys → unblock กลับเป็น `ready`, dep = —, ตัวเดียวที่หยิบได้ในเขต web) → `doing` · ใช้ skill `port-screen`. อ่าน spec ครบรอบนี้: `NAV-ROUTES.md:133` (route `login`) + `pototype/extra-screens.jsx:7-48` (`ScreenLogin`) + `ForgotForm:210-222` + primitives ต้นทาง `ds.jsx`(Icon/Btn) `pr-form.jsx`(Field) `modal.jsx`(Modal) `shell.jsx:104-119`(login host = ScreenLogin + modal + toast, render ก่อน shell) + contract `/auth/login` (`AuthLoginInput`→`AuthLoginResult{token}`). **implement (compliant, typecheck ✓ + unit 6/6 ✓ — uncommitted, resume-ready):** `src/base.css` (base type + `.num` + modal keyframes, token-derived), `src/ui/{icon,button,field,modal}.tsx` (port 1:1, สี/รัศมี = tokens), `src/screens/login/login-submit.ts`+`.test.ts` (pure auth logic: validate→POST `/auth/login` ผ่าน generated client→`setAuthToken`→outcome, 6 เคส), `src/screens/login/forgot-form.tsx` (dict keys ล้วน). **ยังไม่เขียน `login-screen.tsx` (host) + wire router/main** — ติด hook ที่ label เดียว. **ผล gates: G5 visual gate = ยังไม่ได้รัน** (จอ host ยังเขียนไม่ได้). → **escalate B-036, task → blocked.**
+- ตัดสินใจอะไร: 19/20 string map เข้า **dict key** ได้ครบ: `login.*` (B-035, ไทย verbatim ทุกภาษา ตรง prototype login) + `app.name` (brand "Juneflow · …") + `common.lang` (stat "ภาษา"). mock ไม่ port (§0 กฎ 3): pre-filled seed email → เริ่ม empty (data diff, visual gate ยอมรับ) · signup link = guarded `window.openSignup` no-op (SignupWizard ยังไม่ port, ตรง prototype). geometry (px panel/field) เก็บ literal ตาม prototype เพื่อผ่าน g4/01 · สี/ฟอนต์/รัศมีปุ่ม = tokens. auth-failure(401) copy ไม่มี key (mock ไม่เคย fail) → ไม่ประดิษฐ์ (§0 กฎ 2), `console.error`+re-enable — **follow-up: ต้องมี key ถ้าจอ authenticated ต้องการ error state**. **ไม่ตัดสิน spec เอง** → เปิด B-036 สำหรับ label ที่เหลือ.
+- เจออะไร (สาเหตุ block): Field label **"อีเมล"** (extra-screens.jsx:36) — B-035 จัดไว้ว่าใช้ `phrases/"อีเมล"` จึงไม่เพิ่ม dict `login.email` (มีแต่ `login.password`) · แต่ `phrases`/`nav_i18n` เป็น **Thai-as-key** ต้องใส่ literal ไทย (`tp("อีเมล")`) และ hook `i18n-guard.sh` **บล็อกไทยทุกตัวใน `apps/web/src/**/*.tsx`** → `tp()/tn()` เขียนใน web ไม่ได้เลย (ยืนยันจากรอบ 5 = **B-017** เรื่องเดียวกัน PHRASE_PATTERNS) · ไม่มี dict key ให้ "อีเมล" → email label ไม่มี key ที่ web ใช้ได้ → **B-036** เสนอ (ก·แนะนำ) Wei เพิ่ม dict `login.email`="อีเมล" (สมมาตร login.password) / (ข) allowlist ไทยใน tp/tn ที่ i18n-guard (platform/devops). **broader:** channel tn/tp ทั้งชุดใช้ใน web UI code ไม่ได้ภายใต้ i18n-guard (= B-017) — flag platform/devops. **คิว `ready` เขต web หลังรอบนี้ = 0 ที่หยิบได้** (WEB-05 blocked B-020 · P1-WEB-01 blocked B-036 · FIX-03 review) → **เตือน Wei:** ตอบ B-036 (+B-020, B-017) + promote review-queue web + เติมคิว Phase 1 web ให้ ≥5 (ห้าม agent สร้าง task ผูก MVP เอง — [TBD-MVP]). โค้ด compliant ที่เขียนไว้ (base.css/ui/login-submit/forgot-form + test) uncommitted บน worktree รอ resume ทันทีที่ B-036 ตอบ.
+
 ## 2026-07-13 · รอบที่ 8 · task: P1-WEB-01
 
 - ทำอะไร: หยิบ **P1-WEB-01** (port จอ Login · dep = — · ready ตัวเดียวที่หยิบได้ในเขต web · P0-FIX-03 = `review` แล้ว) → `doing`. อ่าน spec ครบตามกฎ apps/web/CLAUDE.md บรรทัด 7: `docs/extract/NAV-ROUTES.md:133` (route `login` "เข้าสู่ระบบ" · component `ScreenLogin` · ไฟล์ `extra-screens.jsx` · render ก่อน shell) + ต้นทาง `pototype/extra-screens.jsx:7-48` (`ScreenLogin`: brand panel + form email/pw + remember/forgot + ปุ่มเข้าสู่ระบบ + สมัครทดลองฟรี) + `ForgotForm` (modal ลืมรหัสผ่าน). **escalate เป็น blocker — ไม่ได้ implement โค้ดจอ** (ดูตัดสินใจ). **ผล gates: N/A** (ยังไม่แตะโค้ดจอ เพราะติด i18n conflict ก่อนเริ่ม port ตาม port-screen ขั้นที่ 5).
@@ -136,3 +142,15 @@
 - ทำอะไร: รอบที่ 3/3: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต web — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $6.9489/$16 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+- 2026-07-13T05:08:59Z loop round ended (agent: web)
+
+## 2026-07-13 12:09 · loop-runner · รอบที่ 1/3 · task: P1-WEB-01
+- ทำอะไร: รัน claude headless 1 รอบ · task P1-WEB-01 → สถานะ blocked · ค่าใช้จ่ายรอบนี้ $9.158201499999999 (สะสม $9.1582/เพดาน $16)
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: git progress: yes
+- 2026-07-13T05:10:03Z loop round ended (agent: web)
+
+## 2026-07-13 12:10 · loop-runner · คิวว่าง
+- ทำอะไร: รอบที่ 2/3: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต web — จบลูป
+- ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
+- เจออะไร: งบสะสม $10.3608/$16 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
