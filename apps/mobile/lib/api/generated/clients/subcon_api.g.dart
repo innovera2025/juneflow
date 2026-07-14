@@ -20,13 +20,16 @@ class _SubconApi implements SubconApi {
   final ParseErrorLogger? errorLogger;
 
   @override
-  Future<List<Entity>> listSubconContracts({String? filter, int? page}) async {
+  Future<GetSubconContractsResponse> listSubconContracts({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetSubconContractsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -36,12 +39,10 @@ class _SubconApi implements SubconApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetSubconContractsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetSubconContractsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -78,12 +79,14 @@ class _SubconApi implements SubconApi {
   }
 
   @override
-  Future<List<Entity>> listSubconContractPeriods({required String id}) async {
+  Future<GetSubconContractsIdPeriodsResponse> listSubconContractPeriods({
+    required String id,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{};
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetSubconContractsIdPeriodsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -93,12 +96,10 @@ class _SubconApi implements SubconApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetSubconContractsIdPeriodsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetSubconContractsIdPeriodsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -258,7 +259,7 @@ class _SubconApi implements SubconApi {
   }
 
   @override
-  Future<List<Entity>> listAcceptanceCenter({
+  Future<GetAcceptanceCenterResponse> listAcceptanceCenter({
     Type? type,
     String? status,
   }) async {
@@ -270,7 +271,7 @@ class _SubconApi implements SubconApi {
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetAcceptanceCenterResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -280,12 +281,10 @@ class _SubconApi implements SubconApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetAcceptanceCenterResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetAcceptanceCenterResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;

@@ -6,6 +6,10 @@ import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 
 import '../models/entity.dart';
+import '../models/get_pm_assets_response.dart';
+import '../models/get_pm_checklist_templates_response.dart';
+import '../models/get_pm_contracts_response.dart';
+import '../models/get_pm_workorders_response.dart';
 import '../models/pm_contracts_request_body.dart';
 import '../models/pm_quotes_id_decide_request_body.dart';
 import '../models/pm_quotes_request_body.dart';
@@ -25,7 +29,7 @@ abstract class PmApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/pm/contracts')
-  Future<List<Entity>> listPmContracts({
+  Future<GetPmContractsResponse> listPmContracts({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -42,7 +46,7 @@ abstract class PmApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/pm/assets')
-  Future<List<Entity>> listPmAssets({
+  Future<GetPmAssetsResponse> listPmAssets({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -59,7 +63,7 @@ abstract class PmApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/pm/checklist-templates')
-  Future<List<Entity>> listPmChecklistTemplates({
+  Future<GetPmChecklistTemplatesResponse> listPmChecklistTemplates({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -76,7 +80,7 @@ abstract class PmApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/pm/workorders')
-  Future<List<Entity>> listPmWorkorders({
+  Future<GetPmWorkordersResponse> listPmWorkorders({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });

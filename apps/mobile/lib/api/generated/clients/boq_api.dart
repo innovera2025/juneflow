@@ -11,6 +11,11 @@ import 'package:retrofit/retrofit.dart';
 import '../models/ai_qto_job_create_boq_request_body.dart';
 import '../models/boq_id_generate_pr_request_body.dart';
 import '../models/entity.dart';
+import '../models/get_boq_id_items_response.dart';
+import '../models/get_boq_response.dart';
+import '../models/get_po_response.dart';
+import '../models/get_pr_response.dart';
+import '../models/get_wo_response.dart';
 import '../models/gr_request_body.dart';
 import '../models/job.dart';
 import '../models/po_id_variation_order_request_body.dart';
@@ -28,7 +33,7 @@ abstract class BoqApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/boq')
-  Future<List<Entity>> listBoq({
+  Future<GetBoqResponse> listBoq({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -61,7 +66,7 @@ abstract class BoqApi {
 
   /// List BOQ items (GET /boq/:id/items?group=)
   @GET('/boq/{id}/items')
-  Future<List<Entity>> listBoqItems({
+  Future<GetBoqIdItemsResponse> listBoqItems({
     @Path('id') required String id,
     @Query('group') String? group,
   });
@@ -106,7 +111,7 @@ abstract class BoqApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/pr')
-  Future<List<Entity>> listPr({
+  Future<GetPrResponse> listPr({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -142,7 +147,7 @@ abstract class BoqApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/po')
-  Future<List<Entity>> listPo({
+  Future<GetPoResponse> listPo({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -166,7 +171,7 @@ abstract class BoqApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/wo')
-  Future<List<Entity>> listWo({
+  Future<GetWoResponse> listWo({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });

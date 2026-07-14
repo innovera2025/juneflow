@@ -20,13 +20,48 @@ class _MasterApi implements MasterApi {
   final ParseErrorLogger? errorLogger;
 
   @override
-  Future<List<Project>> listProjects({String? filter, int? page}) async {
+  Future<GetCompaniesResponse> listCompanies() async {
     final _extra = <String, dynamic>{};
-    final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
+    final queryParameters = <String, dynamic>{};
+    final _headers = <String, dynamic>{};
+    const Map<String, dynamic>? _data = null;
+    final _options = _setStreamType<GetCompaniesResponse>(
+      Options(method: 'GET', headers: _headers, extra: _extra)
+          .compose(
+            _dio.options,
+            '/companies',
+            queryParameters: queryParameters,
+            data: _data,
+          )
+          .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
+    );
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetCompaniesResponse _value;
+    try {
+      _value = GetCompaniesResponse.fromJson(_result.data!);
+    } on Object catch (e, s) {
+      errorLogger?.logError(e, s, _options, response: _result);
+      rethrow;
+    }
+    return _value;
+  }
+
+  @override
+  Future<GetProjectsResponse> listProjects({
+    String? filter,
+    int? page,
+    int? pageSize,
+  }) async {
+    final _extra = <String, dynamic>{};
+    final queryParameters = <String, dynamic>{
+      r'filter': filter,
+      r'page': page,
+      r'page_size': pageSize,
+    };
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Project>>(
+    final _options = _setStreamType<GetProjectsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -36,12 +71,10 @@ class _MasterApi implements MasterApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Project> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetProjectsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Project.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetProjectsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -163,13 +196,16 @@ class _MasterApi implements MasterApi {
   }
 
   @override
-  Future<List<Entity>> listProjectTypes({String? filter, int? page}) async {
+  Future<GetProjectTypesResponse> listProjectTypes({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetProjectTypesResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -179,12 +215,10 @@ class _MasterApi implements MasterApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetProjectTypesResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetProjectTypesResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -279,7 +313,7 @@ class _MasterApi implements MasterApi {
   }
 
   @override
-  Future<List<Entity>> listVendors({
+  Future<GetVendorsResponse> listVendors({
     Kind? kind,
     String? filter,
     int? page,
@@ -293,7 +327,7 @@ class _MasterApi implements MasterApi {
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetVendorsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -303,12 +337,10 @@ class _MasterApi implements MasterApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetVendorsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetVendorsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -403,13 +435,16 @@ class _MasterApi implements MasterApi {
   }
 
   @override
-  Future<List<Entity>> listCustomers({String? filter, int? page}) async {
+  Future<GetCustomersResponse> listCustomers({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetCustomersResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -419,12 +454,10 @@ class _MasterApi implements MasterApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetCustomersResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetCustomersResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -519,13 +552,16 @@ class _MasterApi implements MasterApi {
   }
 
   @override
-  Future<List<Entity>> listCostCenters({String? filter, int? page}) async {
+  Future<GetCostCentersResponse> listCostCenters({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetCostCentersResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -535,12 +571,10 @@ class _MasterApi implements MasterApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetCostCentersResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetCostCentersResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -635,13 +669,16 @@ class _MasterApi implements MasterApi {
   }
 
   @override
-  Future<List<Entity>> listDocNumbering({String? filter, int? page}) async {
+  Future<GetDocNumberingResponse> listDocNumbering({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetDocNumberingResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -651,12 +688,10 @@ class _MasterApi implements MasterApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetDocNumberingResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetDocNumberingResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;

@@ -1,10 +1,10 @@
 // GET /projects — first resource list route (P1-BE-01, extended P1-BE-03).
 //
-// Contract (openapi.yaml /projects GET): bare array of Project
+// Contract (openapi.yaml /projects GET): the B-014 paginated list envelope
+// {data, page, page_size, total} where each `data` row is a Project
 // {id, name, type, budget, currency_code, status} + the B-041(ก+) approved
 // ProjectSwitcher extensions {short, color, company_id, units, phases[]} —
-// required [id, name, type, status]; pagination envelope intentionally
-// unspecified (B-014 → bare array).
+// required [id, name, type, status].
 //
 // `type` is the project_type KEY (realestate|solar|civil|service): the table
 // stores type_id → project_type (erd.html), so we resolve keys via the
@@ -31,6 +31,7 @@ import {
   projectTypes,
   salesUnits,
 } from "@juneflow/db/schema";
+import { listEnvelope } from "./list-envelope.js";
 
 type ProjectNodeRow = typeof projectNodes.$inferSelect;
 
@@ -117,24 +118,30 @@ export function registerProjectsRoute(app: FastifyInstance): void {
     }
 
     return reply.code(200).send(
-      rows.map((p) => {
-        const nodes = nodesByProject.get(p.id) ?? [];
-        return {
-          id: p.id,
-          name: p.name,
-          // type_id is NOT NULL + FK-restrict onto project_type, so the key
-          // always resolves for a well-formed row.
-          type: typeKeyById.get(p.typeId),
-          budget: p.budget == null ? null : Number(p.budget),
-          currency_code: p.currencyCode,
-          status: p.status,
-          short: p.short,
-          color: p.color,
-          company_id: p.companyId,
-          units: nodes.filter((n) => n.kind === "unit").length,
-          phases: derivePhases(nodes, stageByUnitId),
-        };
-      }),
+      // B-014: wrap the project rows in the paginated list envelope
+      // ({data, page, page_size, total}). The full list is returned as one
+      // page (filter/page/page_size are accepted but not interpreted) — see
+      // list-envelope.ts.
+      listEnvelope(
+        rows.map((p) => {
+          const nodes = nodesByProject.get(p.id) ?? [];
+          return {
+            id: p.id,
+            name: p.name,
+            // type_id is NOT NULL + FK-restrict onto project_type, so the key
+            // always resolves for a well-formed row.
+            type: typeKeyById.get(p.typeId),
+            budget: p.budget == null ? null : Number(p.budget),
+            currency_code: p.currencyCode,
+            status: p.status,
+            short: p.short,
+            color: p.color,
+            company_id: p.companyId,
+            units: nodes.filter((n) => n.kind === "unit").length,
+            phases: derivePhases(nodes, stageByUnitId),
+          };
+        }),
+      ),
     );
   });
 }

@@ -20,13 +20,13 @@ class _BoqApi implements BoqApi {
   final ParseErrorLogger? errorLogger;
 
   @override
-  Future<List<Entity>> listBoq({String? filter, int? page}) async {
+  Future<GetBoqResponse> listBoq({String? filter, int? page}) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetBoqResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -36,12 +36,10 @@ class _BoqApi implements BoqApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetBoqResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetBoqResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -159,13 +157,16 @@ class _BoqApi implements BoqApi {
   }
 
   @override
-  Future<List<Entity>> listBoqItems({required String id, String? group}) async {
+  Future<GetBoqIdItemsResponse> listBoqItems({
+    required String id,
+    String? group,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'group': group};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetBoqIdItemsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -175,12 +176,10 @@ class _BoqApi implements BoqApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetBoqIdItemsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetBoqIdItemsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -347,13 +346,13 @@ class _BoqApi implements BoqApi {
   }
 
   @override
-  Future<List<Entity>> listPr({String? filter, int? page}) async {
+  Future<GetPrResponse> listPr({String? filter, int? page}) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetPrResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -363,12 +362,10 @@ class _BoqApi implements BoqApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetPrResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetPrResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -490,13 +487,13 @@ class _BoqApi implements BoqApi {
   }
 
   @override
-  Future<List<Entity>> listPo({String? filter, int? page}) async {
+  Future<GetPoResponse> listPo({String? filter, int? page}) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetPoResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -506,12 +503,10 @@ class _BoqApi implements BoqApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetPoResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetPoResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -579,13 +574,13 @@ class _BoqApi implements BoqApi {
   }
 
   @override
-  Future<List<Entity>> listWo({String? filter, int? page}) async {
+  Future<GetWoResponse> listWo({String? filter, int? page}) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetWoResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -595,12 +590,10 @@ class _BoqApi implements BoqApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetWoResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetWoResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;

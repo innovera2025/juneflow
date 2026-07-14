@@ -319,7 +319,7 @@ describe("GET /api/v1/me", () => {
 });
 
 describe("GET /api/v1/projects", () => {
-  it("answers the bare Project array with the project_type KEY", async () => {
+  it("answers the Project rows (B-014 envelope) with the project_type KEY", async () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -328,32 +328,39 @@ describe("GET /api/v1/projects", () => {
     ).inject({ url: "/api/v1/projects" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual([
-      {
-        id: "pj-rjp",
-        name: "juneflow พาร์ค ราชพฤกษ์",
-        type: "realestate",
-        budget: 50_000_000,
-        currency_code: "THB",
-        status: "active",
-        // B-041(ก+) ProjectSwitcher extensions
-        short: "RJP",
-        color: "#0B2A4A",
-        company_id: COMPANY,
-        units: 3,
-        phases: [
-          {
-            id: "n-p1",
-            name: "เฟส 2 · Block B+C (ทาวน์โฮม)",
-            // 3 unit descendants THROUGH the block node; 2 of 3 sales units
-            // are sold/soldBuilt → round(100 × 2/3) = 67.
-            units: 3,
-            sold_pct: 67,
-            sale_status: null,
-          },
-        ],
-      },
-    ]);
+    // B-014: the list is wrapped in the paginated envelope. One row is returned
+    // as a single full page (page_size = max(rows, DEFAULT_PAGE_SIZE) = 50).
+    expect(res.json()).toEqual({
+      data: [
+        {
+          id: "pj-rjp",
+          name: "juneflow พาร์ค ราชพฤกษ์",
+          type: "realestate",
+          budget: 50_000_000,
+          currency_code: "THB",
+          status: "active",
+          // B-041(ก+) ProjectSwitcher extensions
+          short: "RJP",
+          color: "#0B2A4A",
+          company_id: COMPANY,
+          units: 3,
+          phases: [
+            {
+              id: "n-p1",
+              name: "เฟส 2 · Block B+C (ทาวน์โฮม)",
+              // 3 unit descendants THROUGH the block node; 2 of 3 sales units
+              // are sold/soldBuilt → round(100 × 2/3) = 67.
+              units: 3,
+              sold_pct: 67,
+              sale_status: null,
+            },
+          ],
+        },
+      ],
+      page: 1,
+      page_size: 50,
+      total: 1,
+    });
   });
 
   it("scopes the project, node and sales-unit queries by company_id", async () => {

@@ -6,6 +6,10 @@ import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 
 import '../models/entity.dart';
+import '../models/get_admin_invoices_response.dart';
+import '../models/get_admin_packages_response.dart';
+import '../models/get_admin_subscribers_response.dart';
+import '../models/get_admin_users_response.dart';
 
 part 'admin_api.g.dart';
 
@@ -19,7 +23,7 @@ abstract class AdminApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/admin/packages')
-  Future<List<Entity>> listAdminPackages({
+  Future<GetAdminPackagesResponse> listAdminPackages({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -49,7 +53,7 @@ abstract class AdminApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/admin/subscribers')
-  Future<List<Entity>> listAdminSubscribers({
+  Future<GetAdminSubscribersResponse> listAdminSubscribers({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -80,7 +84,7 @@ abstract class AdminApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/admin/users')
-  Future<List<Entity>> listAdminUsers({
+  Future<GetAdminUsersResponse> listAdminUsers({
     @Query('company') String? company,
     @Query('filter') String? filter,
     @Query('page') int? page,
@@ -104,7 +108,7 @@ abstract class AdminApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/admin/invoices')
-  Future<List<Entity>> listAdminInvoices({
+  Future<GetAdminInvoicesResponse> listAdminInvoices({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });

@@ -368,14 +368,19 @@ paths:
       responses:
         "200":
           description: >-
-            Group company list (bare array per B-014). project_count is
+            Group company list (B-014 paginated envelope). project_count is
             derived per company from the tenant's project rows.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Company"
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Company"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /projects:
@@ -386,17 +391,22 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Filter"
         - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
           description: >-
-            Project list (tenant-scoped). Pagination envelope unspecified in
-            api-contract.md (see B-014) — bare array is the representative shape.
+            Project list (tenant-scoped, B-014 paginated envelope).
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Project"
+                allOf:
+                  - $ref: "#/components/schemas/Paginated"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Project"
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
@@ -2727,6 +2737,14 @@ components:
         type: integer
         minimum: 1
       description: 1-based page index (GET /x?filter&page pattern).
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+      description: Rows per page (B-014). Server applies a default when omitted.
     Period:
       name: period
       in: query
@@ -2778,15 +2796,19 @@ components:
             $ref: "#/components/schemas/Entity"
     EntityList:
       description: >-
-        List (tenant-scoped). Pagination envelope unspecified in
-        api-contract.md (see BLOCKERS.md B-014) — bare array is the
-        representative shape.
+        Paginated list envelope (B-014, tenant-scoped). data holds the page
+        of rows; page/page_size/total are pagination metadata.
       content:
         application/json:
           schema:
-            type: array
-            items:
-              $ref: "#/components/schemas/Entity"
+            allOf:
+              - $ref: "#/components/schemas/Paginated"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Entity"
     ActionOk:
       description: >-
         Action applied; any status transition is handled server-side
@@ -2806,6 +2828,29 @@ components:
         fields (e.g. AuthLoginInput).
       additionalProperties: true
 
+    Paginated:
+      type: object
+      description: >-
+        Standard list envelope (B-014). Every list endpoint returns this
+        wrapper: data is the page of rows (item type set per endpoint via
+        allOf), the rest is pagination metadata. Tenant scope still applies.
+      required: [data, page, page_size, total]
+      properties:
+        data:
+          type: array
+          items: {}
+        page:
+          type: integer
+          minimum: 1
+          example: 1
+        page_size:
+          type: integer
+          minimum: 1
+          example: 20
+        total:
+          type: integer
+          minimum: 0
+          example: 137
     Error:
       type: object
       description: Standard error envelope.

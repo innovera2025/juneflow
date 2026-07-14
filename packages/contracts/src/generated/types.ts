@@ -2025,6 +2025,16 @@ export interface components {
         Entity: {
             [key: string]: unknown;
         };
+        /** @description Standard list envelope (B-014). Every list endpoint returns this wrapper: data is the page of rows (item type set per endpoint via allOf), the rest is pagination metadata. Tenant scope still applies. */
+        Paginated: {
+            data: unknown[];
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 137 */
+            total: number;
+        };
         /** @description Standard error envelope. */
         Error: {
             code: string;
@@ -2172,13 +2182,15 @@ export interface components {
                 "application/json": components["schemas"]["Entity"];
             };
         };
-        /** @description List (tenant-scoped). Pagination envelope unspecified in api-contract.md (see BLOCKERS.md B-014) — bare array is the representative shape. */
+        /** @description Paginated list envelope (B-014, tenant-scoped). data holds the page of rows; page/page_size/total are pagination metadata. */
         EntityList: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Entity"][];
+                "application/json": components["schemas"]["Paginated"] & {
+                    data?: components["schemas"]["Entity"][];
+                };
             };
         };
         /** @description Action applied; any status transition is handled server-side (AuditLog written by middleware). */
@@ -2196,6 +2208,8 @@ export interface components {
         Filter: string;
         /** @description 1-based page index (GET /x?filter&page pattern). */
         Page: number;
+        /** @description Rows per page (B-014). Server applies a default when omitted. */
+        PageSize: number;
         /** @description Accounting period selector (e.g. YYYY-MM). */
         Period: string;
         IdPath: string;
@@ -2523,13 +2537,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Group company list (bare array per B-014). project_count is derived per company from the tenant's project rows. */
+            /** @description Group company list (B-014 paginated envelope). project_count is derived per company from the tenant's project rows. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Company"][];
+                    "application/json": components["schemas"]["Paginated"] & {
+                        data?: components["schemas"]["Company"][];
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2542,6 +2558,8 @@ export interface operations {
                 filter?: components["parameters"]["Filter"];
                 /** @description 1-based page index (GET /x?filter&page pattern). */
                 page?: components["parameters"]["Page"];
+                /** @description Rows per page (B-014). Server applies a default when omitted. */
+                page_size?: components["parameters"]["PageSize"];
             };
             header?: never;
             path?: never;
@@ -2549,13 +2567,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Project list (tenant-scoped). Pagination envelope unspecified in api-contract.md (see B-014) — bare array is the representative shape. */
+            /** @description Project list (tenant-scoped, B-014 paginated envelope). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Project"][];
+                    "application/json": components["schemas"]["Paginated"] & {
+                        data?: components["schemas"]["Project"][];
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];
