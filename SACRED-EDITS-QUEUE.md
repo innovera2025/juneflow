@@ -3,7 +3,7 @@
 > คิวการแก้ **sacred files** ที่ Wei อนุมัติแล้ว แต่ยังไม่ apply (hook `protect-files.sh` ล็อกไว้ · ปลดผ่าน `SACRED_OVERRIDE=wei-approved:B-xxx` ในรอบ loop เท่านั้น)
 > ที่มา: batch B blocker closeout — Wei เคลียร 14 blocker (2026-07-13). Draft โดย workflow `blocker-batch-closeout` (read-only · ไม่มีไฟล์ถูกแก้ตอน draft)
 > **กฎ:** ทุก Thai string ด้านล่าง = verbatim จาก prototype ที่อ้าง · ห้ามแปลใหม่ · zh/en/ar = th fallback เฉพาะ key ใหม่ (ตาม B-035/B-039 precedent)
-> งานที่ apply แต่ละก้อนถูกผูกเป็น task ใน `TASKS.md`: **P1-PLAT-01** (§1 i18n) · **P1-BE-05** (§2 openapi envelope) · B-007 (§3 · Phase 3 pending) · **P1-BE-09** (§4 openapi `/models`+`/users`+`/roles`) · **P1-PLAT-02** (§5 i18n จอ master.model+users · pending-compile)
+> งานที่ apply แต่ละก้อนถูกผูกเป็น task ใน `TASKS.md`: **P1-PLAT-01** (§1 i18n) · **P1-BE-05** (§2 openapi envelope) · B-007 (§3 · Phase 3 pending) · **P1-BE-09** (§4 openapi `/models`+`/users`+`/roles`) · **P1-PLAT-02** (§5 i18n จอ master.model+users · pending-compile) · **P1-BE-10** (§6 org-hierarchy + project-tree) · **P1-PLAT-03** (§7 i18n จอ master.company+project · pending-compile)
 
 ---
 
@@ -305,3 +305,190 @@ Regenerated clients = **ไม่ sacred** (regen · ห้าม hand-edit) · 
 - MasterModel (~17 string): "เพิ่ม Model" · subtitle จอ (L527) · modal title/subtitle (L511-512) · form labels "รหัส Model"/"ชื่อแบบบ้าน"/"พื้นที่ใช้สอย (ตร.ม.)"/"ราคาเริ่มต้น (ล้านบาท)"/"ห้องนอน"/"ห้องน้ำ"/"ที่จอดรถ" · info banner (L497) · validation 5 ข้อความ (L453-459) · placeholders (L474, L478) · notify dynamic (L518 — เข้า phrase_patterns ถ้ามีตัวเลข) · card labels "ราคาเริ่มต้น"/"M ฿" (L550-574)
 - UsersPermissions: "เพิ่มผู้ใช้" · "เพิ่มบทบาท" · "วงเงินอนุมัติ" · PERMS 5 คำ (ดู/สร้าง/แก้ไข/อนุมัติ/ยกเลิก L907) · MODULES 11 ชื่อ (L908 — เช็ค key เดิมก่อน) · form labels UserAddForm (L1004-1054) + RoleAddForm (L1056-1116) · notify "บันทึกสิทธิ์ {name} แล้ว" (L995 — phrase pattern)
 - key ที่มีอยู่แล้ว ห้ามเพิ่มซ้ำ: "Model / แบบบ้าน" · "ข้อมูลกลาง" · "ร่าง" · "ใช้งาน" · "ยกเลิก" · "ยูนิต" · "รายการ" · "ตร.ม." · `nav.users` (ดูรายการเต็มใน recon P1-WEB-13/14)
+
+---
+
+## 6) `openapi.yaml` — B-052 org-hierarchy + B-053 project-tree write side · `SACRED_OVERRIDE=wei-approved:B-052` (ครอบ B-053 · task P1-BE-10)
+
+**Decision (Wei ✅ 14 ก.ค. ผ่าน orch-A):**
+- **B-052 org:** node ทุกชั้น lvl0-2 เก็บใน `org_unit` (ตารางมีอยู่แล้ว `packages/db/src/schema/extensions.ts:541` — ไม่ต้องสร้างตาราง) · contract = GET+POST `/org-units` + PUT+DELETE `/org-units/{id}` · `note` เก็บ **text ตาม mock** (client compose · PUT partial-merge: field ที่ไม่ส่ง = คงเดิม) · server rules: **DELETE cascade ทั้ง subtree** (quirk 1 ชั้นของ mock = bug ไม่ใช่ spec · UI ไม่มี confirm ตาม pototype) · **กัน circular parent** · **code unique ต่อ tenant รวมทุกชั้น** · "sync SAP เมื่อ 5 นาทีก่อน" = static i18n text
+- **B-053 master.project (port-as-seen):** `POST /projects/{id}/nodes` (create block ใต้ phase แรก/active + autogen N unit สถานะว่าง · cap 200) · typed `HierarchyNode` + rewrite `GET /projects/{id}/hierarchy` 200 · ขยาย `ProjectInput` (short/units/phases[]) · ปุ่ม edit block = render-only · นำเข้ายูนิต/มุมมองยูนิต = notify ตาม pototype · Model dropdown ทุก project type ตาม mock
+
+**Prereq:** ไม่มี (§2/§4 merge แล้ว) · **ห้ามแตะส่วนอื่นของไฟล์**
+
+### 6a) `/org-units` — เพิ่มใน Master section หลัง block `/projects/{id}/hierarchy` (~L567 ก่อน `/project-types:` L569)
+
+```yaml
+  /org-units:
+    get:
+      tags: [master]
+      summary: List org structure nodes (flat ordered tree, lvl 0-2)
+      operationId: listOrgUnits
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create org node (company lvl0 or department/team lvl 1-2)
+      operationId: createOrgUnit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /org-units/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [master]
+      summary: Update org node (partial merge - omitted fields keep current values)
+      operationId: updateOrgUnit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [master]
+      summary: Delete org node (cascades to the whole subtree)
+      operationId: deleteOrgUnit
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+```
+
+### 6b) Project-tree write side — เพิ่ม path ใหม่ต่อจาก `/projects/{id}/hierarchy`
+
+```yaml
+  /projects/{id}/nodes:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [master]
+      summary: Create block node under the first/active phase (auto-generates N unit nodes, status empty, max 200)
+      operationId: createProjectNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+```
+
+### 6c) Rewrite `GET /projects/{id}/hierarchy` 200 (~L561-563 · `EntityOk` → typed · คง 401/404 เดิม)
+
+```yaml
+        "200":
+          description: Flat ordered tree of hierarchy nodes (phase/block/unit).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HierarchyNode"
+```
+
+### 6d) NEW schema `HierarchyNode` — append ท้าย `components.schemas` (หลัง `ProjectInput`)
+
+```yaml
+    HierarchyNode:
+      type: object
+      description: >-
+        One node of a project's structure tree (B-053). kind follows the
+        project type's hierarchy labels; unit nodes carry sale/build status.
+      required: [id, kind, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [phase, block, unit]
+        code:
+          type: string
+        name:
+          type: string
+        model_id:
+          type: string
+          format: uuid
+        units:
+          type: integer
+          minimum: 0
+        sold:
+          type: integer
+          minimum: 0
+        built:
+          type: integer
+          minimum: 0
+        color:
+          type: string
+        status:
+          type: string
+      additionalProperties: true
+```
+
+### 6e) ขยาย `ProjectInput` (~L3157-3170) — เพิ่ม 3 properties (ไม่แตะ required เดิม)
+
+```yaml
+        short:
+          type: string
+        units:
+          type: integer
+          minimum: 0
+        phases:
+          type: array
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              units:
+                type: integer
+                minimum: 0
+```
+
+### 6f) Impl directives (ไม่ sacred — สำหรับ P1-BE-10)
+
+- **org_unit:** ตารางมีแล้ว — migration ใหม่แค่ unique index per-tenant บน code (เช่น `unique(company_id, upper(code)) where code is not null`) · handlers = scoped `select` ปกติ (org_unit มี company_id ตรง) · GET ต้องคืน **flat ordered list แบบ tree traversal** (parent แล้วลูกตามทันที — ตรง document order ของ mock)
+- **seed:** ORG_SEED 10 แถว (`master.jsx:7-18`) — สร้าง `parent_id` จริงจากลำดับ array (seed เดิมไม่มี parentCode: ลูก = แถวถัดไปที่ lvl ลึกกว่า) · เก็บ icon ตาม seed (building/users/user)
+- **rules:** lvl ลูก = min(parent.lvl+1, 2) · dept ต้องมี parent · tax_id regex `\d{10,13}` (company · เฉพาะเมื่อส่ง) · DELETE cascade subtree · กัน circular (parent ใหม่ห้ามเป็น descendant ของตัวเอง) · PUT partial-merge
+- **project nodes:** ใช้ตาราง `project_nodes` ที่มีอยู่ (`projects.ts:102` อ้างแล้ว) · create block ผูก phase แรก/active · autogen N units status ว่าง · cap 200/บล็อก · unit code `{blockCode}-{NN}` padStart 2 · sold/built = count จาก query จริง (C10) · **impl `GET /projects/{id}/hierarchy`** (selectThrough ผ่าน project) ให้จอใช้ได้จริง
+- regen TS client · **flag mobile: Dart client regen รอบถัดไป** (append งานเข้า P1-MOB-01 ถ้ายังไม่ merge หรือเปิด task ใหม่)
