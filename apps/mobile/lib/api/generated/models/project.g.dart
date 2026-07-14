@@ -13,6 +13,13 @@ Project _$ProjectFromJson(Map<String, dynamic> json) => Project(
   status: json['status'] as String,
   budget: json['budget'] as num?,
   currencyCode: json['currency_code'] as String?,
+  short: json['short'] as String?,
+  color: json['color'] as String?,
+  companyId: json['company_id'] as String?,
+  units: (json['units'] as num?)?.toInt(),
+  phases: (json['phases'] as List<dynamic>?)
+      ?.map((e) => ProjectPhase.fromJson(e as Map<String, dynamic>))
+      .toList(),
 );
 
 Map<String, dynamic> _$ProjectToJson(Project instance) => <String, dynamic>{
@@ -22,4 +29,9 @@ Map<String, dynamic> _$ProjectToJson(Project instance) => <String, dynamic>{
   'budget': instance.budget,
   'currency_code': instance.currencyCode,
   'status': instance.status,
+  'short': instance.short,
+  'color': instance.color,
+  'company_id': instance.companyId,
+  'units': instance.units,
+  'phases': instance.phases,
 };

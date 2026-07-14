@@ -91,7 +91,13 @@ export function aggregate(): { jsonPath: string; mdPath: string } {
   const rows = parts
     .map((r) => {
       const ref = r.refPath.split("/reference/")[1] ?? r.refPath;
-      return `| ${r.screen} | ${r.kind} | \`${ref}\` | ${r.candLabel} | ${r.refDims.w}x${r.refDims.h} | ${r.candDims.w}x${r.candDims.h} | ${r.diffPixels} | ${ratioPct(r.diffRatio)} | **${r.verdict}** | ${r.note}${r.diffPath ? ` · diff: \`${r.diffPath}\`` : ""} |`;
+      const masked =
+        (r.maskedPixels ?? 0) > 0
+          ? `${r.maskedPixels} (${r.maskedDiffPixels} diff · ${(r.maskRegions ?? [])
+              .map((m) => m.reason.match(/B-\d+/)?.[0] ?? "?")
+              .join(", ")})`
+          : "—";
+      return `| ${r.screen} | ${r.kind} | \`${ref}\` | ${r.candLabel} | ${r.refDims.w}x${r.refDims.h} | ${r.candDims.w}x${r.candDims.h} | ${r.diffPixels} | ${ratioPct(r.diffRatio)} | ${masked} | **${r.verdict}** | ${r.note}${r.diffPath ? ` · diff: \`${r.diffPath}\`` : ""} |`;
     })
     .join("\n");
 
@@ -106,16 +112,22 @@ export function aggregate(): { jsonPath: string; mdPath: string } {
 
 ## Per-screen
 
-| screen | kind | reference | candidate | ref dims | cand dims | diff px | diff ratio | verdict | note |
-|---|---|---|---|---|---|---|---|---|---|
-${rows || "| _(no screens compared — app not built yet; real captures pending apps/web)_ |||||||||"}
+| screen | kind | reference | candidate | ref dims | cand dims | diff px | diff ratio | masked px | verdict | note |
+|---|---|---|---|---|---|---|---|---|---|---|
+${rows || "| _(no screens compared — app not built yet; real captures pending apps/web)_ ||||||||||"}
 
 ## How to read
 
 - **diff ratio** = differing pixels ÷ total pixels. Verdict FAIL when it exceeds
   \`VISUAL_MAX_DIFF_PIXEL_RATIO\` (default 0 = strict, per skill \`visual-gate\`).
-- A **dimension mismatch** auto-FAILs (layout change — PLAN.md §0).
-- Diff PNGs highlight differing pixels in red under \`.results/diff/\`.
+- A **dimension mismatch** auto-FAILs (layout change — PLAN.md §0) — masks never
+  rescue it.
+- **masked px** = pixels excluded by Wei-approved mask regions (P0-QA-07), shown
+  as \`total (differing · cited blocker)\`. Masks are opt-in per screen via
+  \`screens.manifest.json\` → \`lib/masks.ts\`; each region must cite its
+  BLOCKERS.md id (e.g. B-044 sidebar logo lockup).
+- Diff PNGs highlight differing pixels in red (masked regions in blue) under
+  \`.results/diff/\`.
 `;
 
   const mdPath = join(RESULTS_DIR, "visual-report.md");

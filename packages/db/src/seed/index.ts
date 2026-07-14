@@ -65,6 +65,7 @@ import { Pool } from "pg";
 import { hashPassword } from "better-auth/crypto";
 import * as schema from "../schema/index.js";
 import { det } from "./ids.js";
+import { PACKAGES } from "./packages.js";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -129,13 +130,11 @@ const SUBSCRIBERS = [
 ] as const;
 
 // pkg-builder / subscription.jsx — decision C1: 4 tiers S/M/L/Full
-// (S=2900 M=7900 L=14900 Full=contact). limits keys per C5 (storage_gb/ai_per_month).
-const PACKAGES = [
-  { key: "S", size: "S" as const, name: "Starter", priceM: "2900.00", priceY: "29000.00", limits: { projects: 2, users: 5, storage_gb: 20, ai_per_month: 10 }, menus: ["boq", "proc", "petty", "timeline"], subRules: {} },
-  { key: "M", size: "M" as const, name: "Professional", priceM: "7900.00", priceY: "79000.00", limits: { projects: 10, users: 25, storage_gb: 100, ai_per_month: 50 }, menus: ["boq", "proc", "petty", "timeline", "inv", "subcon", "pm", "land", "finance"], subRules: { "boq.aiqto": "M" } },
-  { key: "L", size: "L" as const, name: "Business", priceM: "14900.00", priceY: "149000.00", limits: { projects: 30, users: 60, storage_gb: 500, ai_per_month: 200 }, menus: ["boq", "proc", "petty", "timeline", "inv", "subcon", "pm", "land", "finance", "sales_re", "aftersales"], subRules: { "boq.aiqto": "L" } },
-  { key: "Full", size: "Full" as const, name: "Enterprise", priceM: null, priceY: null, limits: { projects: -1, users: -1, storage_gb: 1000, ai_per_month: -1 }, menus: ["*"], subRules: { "master.ptype": "Full", "boq.aiqto": "M" } },
-] as const;
+// (S=2900 M=7900 L=14900 Full=contact). limits keys per C5 (storage_gb/
+// ai_per_month). Extracted to ./packages.js by P1-BE-04 (B-043(ค)): menus are
+// now the NAV top-level id allow-lists per PACKAGE-RULES.md §2 (S=6 · M=20 ·
+// L=29 · Full="*") — module keys were the wrong vocabulary — and unit tests
+// assert the lists verbatim.
 
 // subscription-admin.jsx:5 SUBSCRIBERS (9) — cycle/status transcribed verbatim,
 // index-aligned to SUBSCRIBERS above.
@@ -174,15 +173,18 @@ const permsFrom = (matrix: Matrix): schema.RolePerms => {
   });
   return out;
 };
-const ROLE_DEFS: { key: string; name: string; limit: number | null; perms: Matrix }[] = [
-  { key: "pm", name: "Project Manager", limit: 1000000, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,0,0,0,0]] },
-  { key: "dir", name: "Director · CONS", limit: null, perms: [[1,0,0,0,0],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]] },
-  { key: "proc", name: "Procurement Mgr", limit: 500000, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,1,0,0],[0,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
-  { key: "site", name: "Site Engineer", limit: 200000, perms: [[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
-  { key: "acc", name: "Accounting", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,0,0,0,0]] },
-  { key: "sale", name: "Sales / REM", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0]] },
-  { key: "wh", name: "Warehouse", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0],[1,1,1,1,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
-  { key: "exec", name: "ผู้บริหาร / ดูได้อย่างเดียว", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
+// B-051 (P1-BE-09): `level` is the master.jsx ROLE_PRESETS approval tier (0..4);
+// `limit` is the single blanket approval ceiling in REAL baht (the mock's
+// "1,000,000 ฿" / "ไม่จำกัด" / "—" display strings → numeric | null).
+const ROLE_DEFS: { key: string; name: string; limit: number | null; level: number; perms: Matrix }[] = [
+  { key: "pm", name: "Project Manager", limit: 1000000, level: 3, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,0,0,0,0]] },
+  { key: "dir", name: "Director · CONS", limit: null, level: 4, perms: [[1,0,0,0,0],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]] },
+  { key: "proc", name: "Procurement Mgr", limit: 500000, level: 2, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,1,0,0],[0,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
+  { key: "site", name: "Site Engineer", limit: 200000, level: 1, perms: [[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
+  { key: "acc", name: "Accounting", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,0,0,0,0]] },
+  { key: "sale", name: "Sales / REM", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0]] },
+  { key: "wh", name: "Warehouse", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0],[1,1,1,1,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
+  { key: "exec", name: "ผู้บริหาร / ดูได้อย่างเดียว", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
 ];
 
 // subscription-admin.jsx:19 COMPANY_USERS["T-1001"] (12 users)
@@ -209,24 +211,40 @@ const PROJECT_TYPES = [
   { key: "service" as const, name: "โครงการบริการ / ทั่วไป", hierarchy: ["โครงการ", "เฟส", "งาน (WBS)"], modules: ["land", "proc", "timeline", "petty", "pm"] },
 ];
 
-// chrome.jsx:3 PROJECTS (7 projects / 16 phases)
+// chrome.jsx:3 PROJECTS (7 projects / 16 phases). short/color stamped verbatim
+// per B-041(ก+) (migration 0009 columns — the ProjectSwitcher chip fields).
 const PROJECTS = [
-  { key: "rjp", name: "juneflow พาร์ค ราชพฤกษ์", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · Block A (บ้านเดี่ยว)" }, { k: "p2", l: "เฟส 2 · Block B+C (ทาวน์โฮม)" }, { k: "p3", l: "เฟส 3 · Block D (บ้านแฝด)" }] },
-  { key: "bbt", name: "juneflow บางบัวทอง", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม" }, { k: "p2", l: "เฟส 2 · บ้านเดี่ยว" }] },
-  { key: "rama", name: "juneflow คอนโด พระราม 9", type: "realestate", phases: [{ k: "a", l: "อาคาร A (1-15 ชั้น)" }, { k: "b", l: "อาคาร B (1-15 ชั้น)" }] },
-  { key: "phk", name: "juneflow พหลโยธิน 5", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม Luxury" }] },
-  { key: "slr", name: "โซลาร์ฟาร์ม สระบุรี 8MW", type: "solar", phases: [{ k: "z1", l: "โซน A · Array 1-8 (4MW)" }, { k: "z2", l: "โซน B · Array 9-16 (4MW)" }] },
-  { key: "rdb", name: "ถนน-สะพาน เทศบาลนนทบุรี", type: "civil", phases: [{ k: "s1", l: "ส่วนงาน A · ถนนสาย 1 (กม.0-3.5)" }, { k: "s2", l: "ส่วนงาน B · สะพานข้ามคลอง" }, { k: "s3", l: "ส่วนงาน C · ระบบระบายน้ำ" }] },
-  { key: "erp", name: "ติดตั้งระบบ ERP ลูกค้า ABC", type: "service", phases: [{ k: "ph1", l: "เฟส 1 · Analysis & Design" }, { k: "ph2", l: "เฟส 2 · Implementation" }, { k: "ph3", l: "เฟส 3 · UAT & Go-Live" }] },
+  { key: "rjp", name: "juneflow พาร์ค ราชพฤกษ์", short: "RJP", color: "#0B2A4A", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · Block A (บ้านเดี่ยว)" }, { k: "p2", l: "เฟส 2 · Block B+C (ทาวน์โฮม)" }, { k: "p3", l: "เฟส 3 · Block D (บ้านแฝด)" }] },
+  { key: "bbt", name: "juneflow บางบัวทอง", short: "BBT", color: "#0F766E", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม" }, { k: "p2", l: "เฟส 2 · บ้านเดี่ยว" }] },
+  { key: "rama", name: "juneflow คอนโด พระราม 9", short: "R9", color: "#1D4ED8", type: "realestate", phases: [{ k: "a", l: "อาคาร A (1-15 ชั้น)" }, { k: "b", l: "อาคาร B (1-15 ชั้น)" }] },
+  { key: "phk", name: "juneflow พหลโยธิน 5", short: "PHK", color: "#B45309", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม Luxury" }] },
+  { key: "slr", name: "โซลาร์ฟาร์ม สระบุรี 8MW", short: "SLR", color: "#B45309", type: "solar", phases: [{ k: "z1", l: "โซน A · Array 1-8 (4MW)" }, { k: "z2", l: "โซน B · Array 9-16 (4MW)" }] },
+  { key: "rdb", name: "ถนน-สะพาน เทศบาลนนทบุรี", short: "RDB", color: "#0F766E", type: "civil", phases: [{ k: "s1", l: "ส่วนงาน A · ถนนสาย 1 (กม.0-3.5)" }, { k: "s2", l: "ส่วนงาน B · สะพานข้ามคลอง" }, { k: "s3", l: "ส่วนงาน C · ระบบระบายน้ำ" }] },
+  { key: "erp", name: "ติดตั้งระบบ ERP ลูกค้า ABC", short: "ERP", color: "#6D28D9", type: "service", phases: [{ k: "ph1", l: "เฟส 1 · Analysis & Design" }, { k: "ph2", l: "เฟส 2 · Implementation" }, { k: "ph3", l: "เฟส 3 · UAT & Go-Live" }] },
 ] as const;
 
-// master.jsx:426 MODELS (5)
+// company-accept.jsx:6 COMPANIES (3 บริษัทเครือ) — B-041(ก+) "stamp เครือ":
+// short/taxId/color/docPrefix/biz verbatim; wired under the T-1001 tenant's
+// group via group_parent_id at insert time.
+const GROUP_COMPANIES = [
+  { key: "JF", name: "บจก. จูนโฟลว์ ดีเวลลอปเมนท์", short: "JF", taxId: "0-1055-61012-34-5", color: "#0B2A4A", docPrefix: "JF", biz: "พัฒนาอสังหาริมทรัพย์" },
+  { key: "JE", name: "บจก. จูนโฟลว์ เอ็นเนอร์ยี", short: "JE", taxId: "0-1055-64067-89-0", color: "#B45309", docPrefix: "JE", biz: "โรงไฟฟ้าพลังงานแสงอาทิตย์" },
+  { key: "JC", name: "บจก. จูนโฟลว์ คอนสตรัคชั่น", short: "JC", taxId: "0-1055-58033-22-1", color: "#0F766E", docPrefix: "JC", biz: "รับเหมาก่อสร้าง & บริการ" },
+] as const;
+
+// master.jsx:426 MODELS (5) — B-050 (P1-BE-09): full house-model attributes.
+// `code`/`type`(=name, pure display, no "A-1 · " prefix now that code is its own
+// column)/area/bed/bath/parking/status/color transcribed verbatim; `price` is
+// converted from the mock's millions (8.24) to REAL full baht (8_240_000 — the
+// schema stores baht + currency_code, FE divides by 1e6 for "M ฿"). The mock's
+// hardcoded `count` (unit count) is NOT seeded — unit_count/bom_item_count are
+// derived at query time (C10).
 const MODELS = [
-  { key: "A-1", name: "A-1 · บ้านเดี่ยว 2 ชั้น", area: "168.00" },
-  { key: "B-1", name: "B-1 · ทาวน์โฮม 2 ชั้น", area: "92.00" },
-  { key: "C-1", name: "C-1 · ทาวน์โฮม 3 ชั้น", area: "138.00" },
-  { key: "D-1", name: "D-1 · บ้านแฝด 2 ชั้น", area: "142.00" },
-  { key: "E-1", name: "E-1 · ทาวน์โฮม 4 ห้องนอน (ใหม่)", area: "145.00" },
+  { code: "A-1", type: "บ้านเดี่ยว 2 ชั้น", area: "168.00", bed: 4, bath: 4, parking: 2, price: 8_240_000, status: "active" as const, color: "#0B2A4A" },
+  { code: "B-1", type: "ทาวน์โฮม 2 ชั้น", area: "92.00", bed: 3, bath: 2, parking: 1, price: 4_850_000, status: "active" as const, color: "#0F766E" },
+  { code: "C-1", type: "ทาวน์โฮม 3 ชั้น", area: "138.00", bed: 4, bath: 3, parking: 2, price: 5_650_000, status: "active" as const, color: "#1D4ED8" },
+  { code: "D-1", type: "บ้านแฝด 2 ชั้น", area: "142.00", bed: 3, bath: 3, parking: 2, price: 6_420_000, status: "active" as const, color: "#B45309" },
+  { code: "E-1", type: "ทาวน์โฮม 4 ห้องนอน (ใหม่)", area: "145.00", bed: 4, bath: 3, parking: 2, price: 5_950_000, status: "draft" as const, color: "#7C3AED" },
 ];
 
 // master.jsx:240 BLOCK_SEED (3 blocks — project_node kind='block')
@@ -755,6 +773,20 @@ async function seed(): Promise<void> {
       );
       const CO1 = det("company:T-1001"); // main tenant — every company-scoped record hangs here.
 
+      // B-041(ก+): stamp the affiliated company group (เครือ) — the 3
+      // company-accept.jsx COMPANIES rows become real company rows linked to
+      // the T-1001 tenant's group via group_parent_id = CO1 (Appendix B item
+      // 14; the group head keeps the subscription). The 9 tenant companies
+      // above are untouched (B-022(ก) stands) — company rows 9 → 12; count
+      // delta flagged to QA via REVIEW-QUEUE.
+      await tx.insert(schema.companies).values(
+        GROUP_COMPANIES.map((c) => ({
+          id: det(`company:group:${c.key}`), name: c.name, taxId: c.taxId,
+          short: c.short, color: c.color, docPrefix: c.docPrefix, biz: c.biz,
+          groupParentId: CO1,
+        })),
+      );
+
       // Each subscription points to its OWN company (B-022(ก)); package per the real
       // SUBSCRIBERS pkg tier (pro=M / enterprise=Full / starter=S).
       await tx.insert(schema.subscriptions).values(
@@ -783,6 +815,10 @@ async function seed(): Promise<void> {
           id: det(`role:${r.key}`), companyId: CO1, name: r.name,
           approvalLimits: r.limit == null ? {} : { default: r.limit },
           perms: permsFrom(r.perms),
+          // B-051 superset: single blanket limit as real baht (null = unlimited /
+          // no ceiling) + the approval tier. currency_code defaults to THB.
+          approvalLevel: r.level,
+          approvalLimit: r.limit == null ? null : m(r.limit),
         })),
       );
 
@@ -832,12 +868,19 @@ async function seed(): Promise<void> {
       await tx.insert(schema.projects).values(
         PROJECTS.map((p, i) => ({
           id: det(`project:${p.key}`), companyId: CO1, typeId: det(`ptype:${p.type}`),
-          name: p.name, budget: m((i + 5) * 10_000_000), status: "active",
+          name: p.name, short: p.short, color: p.color,
+          budget: m((i + 5) * 10_000_000), status: "active",
         })),
       );
 
       await tx.insert(schema.models).values(
-        MODELS.map((mo) => ({ id: det(`model:${mo.key}`), companyId: CO1, name: mo.name, area: mo.area })),
+        MODELS.map((mo) => ({
+          id: det(`model:${mo.code}`), companyId: CO1,
+          // name = pure display name (mock `type`); code is its own column now.
+          name: mo.type, code: mo.code, area: mo.area,
+          bed: mo.bed, bath: mo.bath, parking: mo.parking,
+          price: m(mo.price), status: mo.status, color: mo.color,
+        })),
       );
 
       // project_node tree: 16 phase nodes + 3 block nodes + 84 unit nodes (B-01..B-84).
@@ -855,7 +898,8 @@ async function seed(): Promise<void> {
           id: det(`block:${b.code}`), projectId: det("project:rjp"),
           // blocks live under เฟส 2 (Block B+C) of ราชพฤกษ์
           parentId: det("node:rjp:p2"), modelId: det(`model:${b.modelKey}`),
-          kind: "block", name: b.name, saleStatus: null,
+          // B-053: the block code (HierarchyNode.code / unit-code prefix).
+          kind: "block", name: b.name, code: b.code, saleStatus: null,
         });
       }
       // 84 unit leaf nodes under Block B (B-009: persist the sales-process generator).
@@ -863,7 +907,8 @@ async function seed(): Promise<void> {
         nodeRows.push({
           id: det(`unitnode:${i}`), projectId: det("project:rjp"),
           parentId: det("block:B"), modelId: det("model:B-1"),
-          kind: "unit", name: unitCode(i), saleStatus: unitStage(i),
+          // B-053: unit code = "{blockCode}-{NN}" (= its name).
+          kind: "unit", name: unitCode(i), code: unitCode(i), saleStatus: unitStage(i),
         });
       }
       await tx.insert(schema.projectNodes).values(nodeRows);
@@ -893,14 +938,19 @@ async function seed(): Promise<void> {
         CUSTOMER_SEED.map((c) => ({ id: det(`customer:${c.code}`), companyId: CO1, name: c.name, taxId: c.taxId })),
       );
 
-      // org tree — parent = last-seen node one level up.
+      // org tree — parent = last-seen node one level up. createdAt is staggered
+      // by array index (all rows would otherwise share the transaction's now())
+      // so GET /org-units can return the ORG_SEED document order via a
+      // (created_at, id) sibling sort — the mock renders ORG_SEED in array order.
       const orgRows: (typeof schema.orgUnits.$inferInsert)[] = [];
       const lastAtLevel: Record<number, string> = {};
-      ORG_SEED.forEach((o) => {
+      const ORG_EPOCH = Date.UTC(2024, 0, 1, 0, 0, 0);
+      ORG_SEED.forEach((o, i) => {
         const id = det(`org:${o.code}`);
         orgRows.push({
           id, companyId: CO1, parentId: o.lvl === 0 ? null : (lastAtLevel[o.lvl - 1] ?? null),
           level: o.lvl, icon: o.ic, name: o.name, code: o.code, note: o.note,
+          createdAt: new Date(ORG_EPOCH + i * 1000),
         });
         lastAtLevel[o.lvl] = id;
       });

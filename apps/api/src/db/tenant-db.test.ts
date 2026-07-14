@@ -13,10 +13,19 @@ import {
   boqDocs,
   companies,
   packages,
+  pmAssets,
+  pmContracts,
+  pmWorkOrders,
+  projects,
   projectTypes,
+  subconContracts,
   users,
   workPeriods,
 } from "@juneflow/db";
+import { projectNodes } from "@juneflow/db";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { Db } from "@juneflow/db/client";
 import { TenantDb, TenantScopeError } from "./tenant-db.js";
 
 const COMPANY = "11111111-1111-1111-1111-111111111111";
@@ -153,6 +162,139 @@ describe("selectReference reads platform-global reference tables (P1-BE-01)", ()
     expect(() => tdb.selectReference(packages)).not.toThrow();
     expect(() => tdb.selectReference(projectTypes)).not.toThrow();
     expect(() => tdb.selectReference(companies)).not.toThrow();
+  });
+});
+
+describe("selectThrough scopes parent-FK child tables via their tenant root (P1-BE-02)", () => {
+  it("single hop (boq_doc → project): joins and binds company_id on the root", () => {
+    const { sql, params } = tdb
+      .selectThrough(boqDocs, [{ fk: boqDocs.projectId, parent: projects }])
+      .toSQL();
+    expect(sql).toContain("inner join");
+    expect(sql).toContain('"project"');
+    expect(sql).toContain('"company_id" = $');
+    expect(params).toContain(COMPANY);
+  });
+
+  it("selects ONLY the child's columns (no root/company data leaks out)", () => {
+    const { sql } = tdb
+      .selectThrough(boqDocs, [{ fk: boqDocs.projectId, parent: projects }])
+      .toSQL();
+    // The selection must come from boq_doc; project columns like budget must
+    // not appear in the SELECT list (before FROM).
+    const selectList = sql.slice(0, sql.indexOf(" from "));
+    expect(selectList).toContain('"boq_doc"');
+    expect(selectList).not.toContain('"budget"');
+  });
+
+  it("multi hop (work_period → subcon_contract → project) still anchors on company_id", () => {
+    const { sql, params } = tdb
+      .selectThrough(workPeriods, [
+        { fk: workPeriods.contractId, parent: subconContracts },
+        { fk: subconContracts.projectId, parent: projects },
+      ])
+      .toSQL();
+    expect((sql.match(/inner join/g) ?? []).length).toBe(2);
+    expect(sql).toContain('"company_id" = $');
+    expect(params).toContain(COMPANY);
+  });
+
+  it("three hops (pm_workorder → pm_asset → pm_contract → project)", () => {
+    const { sql, params } = tdb
+      .selectThrough(pmWorkOrders, [
+        { fk: pmWorkOrders.assetId, parent: pmAssets },
+        { fk: pmAssets.contractId, parent: pmContracts },
+        { fk: pmContracts.projectId, parent: projects },
+      ])
+      .toSQL();
+    expect((sql.match(/inner join/g) ?? []).length).toBe(3);
+    expect(params).toContain(COMPANY);
+  });
+
+  it("AND-s a caller predicate onto the tenant predicate (never replaces it)", () => {
+    const { sql, params } = tdb
+      .selectThrough(
+        boqDocs,
+        [{ fk: boqDocs.projectId, parent: projects }],
+        eq(boqDocs.status, "pending"),
+      )
+      .toSQL();
+    expect(sql).toContain('"company_id" = $');
+    expect(sql).toContain('"status" = $');
+    expect(sql).toContain(" and ");
+    expect(params).toContain(COMPANY);
+    expect(params).toContain("pending");
+  });
+
+  it("fails closed on an empty hop path", () => {
+    expect(() => tdb.selectThrough(boqDocs, [])).toThrow(TenantScopeError);
+    expect(() => tdb.selectThrough(boqDocs, [])).toThrow(
+      /TENANT_SCOPE_PATH_MISSING/,
+    );
+  });
+
+  it("fails closed when the final hop is NOT a company_id-scoped root", () => {
+    // subcon_contract itself scopes via project — stopping there would leave
+    // the query unanchored, so it must throw.
+    expect(() =>
+      tdb.selectThrough(workPeriods, [
+        { fk: workPeriods.contractId, parent: subconContracts },
+      ]),
+    ).toThrow(/TENANT_SCOPE_ROOT_UNSCOPED/);
+  });
+});
+
+describe("insertThrough is the fail-closed WRITE door for parent-FK child tables (P1-BE-10)", () => {
+  const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+  // A minimal fake base Db: the ownership SELECT returns `ownedRows`; the INSERT
+  // captures its rows. We also capture the SELECT predicate to prove it is
+  // anchored on company_id + the parent id.
+  function fakeDb(ownedRows: unknown[], sink: { where?: SQL; inserted?: unknown[] }): Db {
+    return {
+      select: () => ({
+        from: () => ({
+          where: (where: SQL) => {
+            sink.where = where;
+            return Promise.resolve(ownedRows);
+          },
+        }),
+      }),
+      insert: () => ({
+        values: (rows: unknown[]) => ({
+          returning: () => {
+            sink.inserted = rows;
+            return Promise.resolve(rows);
+          },
+        }),
+      }),
+    } as unknown as Db;
+  }
+
+  it("throws (writes NOTHING) when the parent is not owned by this tenant", async () => {
+    const sink: { where?: SQL; inserted?: unknown[] } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+    await expect(
+      t.insertThrough(projectNodes, projects, PROJECT, [
+        { projectId: PROJECT, kind: "block", name: "B" } as never,
+      ]),
+    ).rejects.toThrow(/TENANT_SCOPE_PARENT_DENIED/);
+    expect(sink.inserted).toBeUndefined();
+    // ownership check is scoped by company_id AND the parent id.
+    const params = new PgDialect().sqlToQuery(sink.where!).params;
+    expect(params).toContain(COMPANY);
+    expect(params).toContain(PROJECT);
+  });
+
+  it("inserts the rows once the parent is proven tenant-owned", async () => {
+    const sink: { where?: SQL; inserted?: unknown[] } = {};
+    const t = new TenantDb(fakeDb([{ id: PROJECT }], sink), COMPANY);
+    const rows = [
+      { projectId: PROJECT, kind: "block", name: "B" } as never,
+      { projectId: PROJECT, kind: "unit", name: "B-01" } as never,
+    ];
+    await t.insertThrough(projectNodes, projects, PROJECT, rows);
+    expect(sink.inserted).toHaveLength(2);
   });
 });
 

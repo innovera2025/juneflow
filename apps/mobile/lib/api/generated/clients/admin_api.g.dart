@@ -20,13 +20,16 @@ class _AdminApi implements AdminApi {
   final ParseErrorLogger? errorLogger;
 
   @override
-  Future<List<Entity>> listAdminPackages({String? filter, int? page}) async {
+  Future<GetAdminPackagesResponse> listAdminPackages({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetAdminPackagesResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -36,12 +39,10 @@ class _AdminApi implements AdminApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetAdminPackagesResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetAdminPackagesResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -136,13 +137,16 @@ class _AdminApi implements AdminApi {
   }
 
   @override
-  Future<List<Entity>> listAdminSubscribers({String? filter, int? page}) async {
+  Future<GetAdminSubscribersResponse> listAdminSubscribers({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetAdminSubscribersResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -152,12 +156,10 @@ class _AdminApi implements AdminApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetAdminSubscribersResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetAdminSubscribersResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -256,7 +258,7 @@ class _AdminApi implements AdminApi {
   }
 
   @override
-  Future<List<Entity>> listAdminUsers({
+  Future<GetAdminUsersResponse> listAdminUsers({
     String? company,
     String? filter,
     int? page,
@@ -270,7 +272,7 @@ class _AdminApi implements AdminApi {
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetAdminUsersResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -280,12 +282,10 @@ class _AdminApi implements AdminApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetAdminUsersResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetAdminUsersResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -348,13 +348,16 @@ class _AdminApi implements AdminApi {
   }
 
   @override
-  Future<List<Entity>> listAdminInvoices({String? filter, int? page}) async {
+  Future<GetAdminInvoicesResponse> listAdminInvoices({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetAdminInvoicesResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -364,12 +367,10 @@ class _AdminApi implements AdminApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetAdminInvoicesResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetAdminInvoicesResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;

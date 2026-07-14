@@ -103,6 +103,53 @@ describe('tp() — PHRASES layer (Thai phrase IS the key)', () => {
   });
 });
 
+describe('B-039 Thai-fallback entries (Wei-approved fill, P0-PLAT-03)', () => {
+  // New nav_i18n / phrases entries added under SACRED_OVERRIDE=wei-approved:B-039
+  // follow the B-035 pattern: en/zh/ar hold the SAME Thai string, so every
+  // language resolves to the Thai label verbatim (prototype never translates
+  // these — tn() falls back to the Thai label, pototype/i18n.jsx:314).
+  const ALL_LANGS: LangCode[] = ['th', 'zh', 'en', 'ar'];
+
+  it('new nav_i18n entries resolve th-verbatim in all 4 languages', () => {
+    const sample = ['ศูนย์ตรวจรับ', 'Progress รวม', 'งบ OPEX บริษัท', 'ผู้ดูแลแพลตฟอร์ม'] as const;
+    for (const label of sample) {
+      for (const lang of ALL_LANGS) {
+        expect(tn(label, lang)).toBe(label);
+      }
+    }
+  });
+
+  it('sidebar "บันทึกการใช้งาน" stays Thai in every language (NOT the legacy nav.audit dict translation)', () => {
+    for (const lang of ALL_LANGS) {
+      expect(tn('บันทึกการใช้งาน', lang)).toBe('บันทึกการใช้งาน');
+    }
+    // The legacy dict entry keeps its real translations — untouched by B-039.
+    expect(t('nav.audit', 'en')).not.toBe('บันทึกการใช้งาน');
+  });
+
+  it('new phrases entries resolve th-verbatim in all 4 languages', () => {
+    const sample = [
+      'เจ้าของระบบ',
+      'เลือกโครงการ + เฟส',
+      'โปรไฟล์ของฉัน',
+      'ความหนาแน่นข้อมูล',
+      '↻ รีเซ็ตทั้งหมด + รีโหลด',
+    ] as const;
+    for (const phrase of sample) {
+      for (const lang of ALL_LANGS) {
+        expect(tp(phrase, lang)).toBe(phrase);
+      }
+    }
+  });
+
+  it('pre-existing real translations were not overwritten by the fill', () => {
+    // These 5 chrome strings already had real phrase translations before B-039.
+    expect(tp('แจ้งเตือน', 'en')).toBe(i18nFull.phrases['แจ้งเตือน'].en);
+    expect(tp('แจ้งเตือน', 'en')).not.toBe('แจ้งเตือน');
+    expect(tp('ตั้งค่าระบบ', 'en')).not.toBe('ตั้งค่าระบบ');
+  });
+});
+
 describe('RTL direction', () => {
   it('isRTL is true only for ar', () => {
     expect(isRTL('th')).toBe(false);

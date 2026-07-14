@@ -20,13 +20,16 @@ class _LandSalesApi implements LandSalesApi {
   final ParseErrorLogger? errorLogger;
 
   @override
-  Future<List<Entity>> listLandPlots({String? filter, int? page}) async {
+  Future<GetLandPlotsResponse> listLandPlots({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetLandPlotsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -36,12 +39,10 @@ class _LandSalesApi implements LandSalesApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetLandPlotsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetLandPlotsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -167,13 +168,16 @@ class _LandSalesApi implements LandSalesApi {
   }
 
   @override
-  Future<List<Entity>> listSalesLeads({String? filter, int? page}) async {
+  Future<GetSalesLeadsResponse> listSalesLeads({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetSalesLeadsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -183,12 +187,10 @@ class _LandSalesApi implements LandSalesApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetSalesLeadsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetSalesLeadsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -225,13 +227,16 @@ class _LandSalesApi implements LandSalesApi {
   }
 
   @override
-  Future<List<Entity>> listSalesBookings({String? filter, int? page}) async {
+  Future<GetSalesBookingsResponse> listSalesBookings({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetSalesBookingsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -241,12 +246,10 @@ class _LandSalesApi implements LandSalesApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetSalesBookingsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetSalesBookingsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -283,13 +286,16 @@ class _LandSalesApi implements LandSalesApi {
   }
 
   @override
-  Future<List<Entity>> listSalesContracts({String? filter, int? page}) async {
+  Future<GetSalesContractsResponse> listSalesContracts({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetSalesContractsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -299,12 +305,10 @@ class _LandSalesApi implements LandSalesApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetSalesContractsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetSalesContractsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -341,13 +345,16 @@ class _LandSalesApi implements LandSalesApi {
   }
 
   @override
-  Future<List<Entity>> listSalesDowns({String? filter, int? page}) async {
+  Future<GetSalesDownsResponse> listSalesDowns({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetSalesDownsResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -357,12 +364,10 @@ class _LandSalesApi implements LandSalesApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetSalesDownsResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetSalesDownsResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;
@@ -399,13 +404,16 @@ class _LandSalesApi implements LandSalesApi {
   }
 
   @override
-  Future<List<Entity>> listSalesLoans({String? filter, int? page}) async {
+  Future<GetSalesLoansResponse> listSalesLoans({
+    String? filter,
+    int? page,
+  }) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{r'filter': filter, r'page': page};
     queryParameters.removeWhere((k, v) => v == null);
     final _headers = <String, dynamic>{};
     const Map<String, dynamic>? _data = null;
-    final _options = _setStreamType<List<Entity>>(
+    final _options = _setStreamType<GetSalesLoansResponse>(
       Options(method: 'GET', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -415,12 +423,10 @@ class _LandSalesApi implements LandSalesApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<List<dynamic>>(_options);
-    late List<Entity> _value;
+    final _result = await _dio.fetch<Map<String, Object?>>(_options);
+    late GetSalesLoansResponse _value;
     try {
-      _value = _result.data!
-          .map((dynamic i) => Entity.fromJson(i as Map<String, dynamic>))
-          .toList();
+      _value = GetSalesLoansResponse.fromJson(_result.data!);
     } on Object catch (e, s) {
       errorLogger?.logError(e, s, _options, response: _result);
       rethrow;

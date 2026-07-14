@@ -19,6 +19,11 @@
       "development": "./src/client.ts",
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
+    },
+    "./seed/packages": {
+      "development": "./src/seed/packages.ts",
+      "types": "./dist/seed/packages.d.ts",
+      "default": "./dist/seed/packages.js"
     }
   },
   "scripts": {

@@ -24,10 +24,12 @@
 // them as a persisted number. Any NEW conflict outside PLAN.md Appendix C ->
 // BLOCKERS.md, never decide locally.
 
+import { sql } from "drizzle-orm";
 import {
   pgEnum,
   pgTable,
   unique,
+  uniqueIndex,
   index,
   text,
   uuid,
@@ -557,7 +559,17 @@ export const orgUnits = pgTable("org_unit", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("org_unit_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("org_unit_company_idx").on(t.companyId),
+  // B-052: `code` is unique per tenant across ALL levels (company + department),
+  // case-insensitively — the mock uppercases the code and rejects a duplicate
+  // (master.jsx OrgAddForm "รหัสนี้มีอยู่แล้ว"). A partial UNIQUE index on
+  // upper(code) enforces it in the DB (handlers 409 first); WHERE code IS NOT
+  // NULL keeps rows without a code (column is nullable) from colliding on NULL.
+  uniqueIndex("org_unit_company_code_uq")
+    .on(t.companyId, sql`upper(${t.code})`)
+    .where(sql`${t.code} is not null`),
+]);
 
 // ---------------------------------------------------------------------------
 // Item 8 — DocNumbering (DOCNUM_SEED) — master.jsx `DOCNUM_SEED`

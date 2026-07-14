@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { compareImages, fileToDataUrl } from "./lib/compare";
+import { MASK_REGISTRY, resolveMasks } from "./lib/masks";
 import { recordScreen } from "./lib/report";
 
 // tests/visual/visual-gate.spec.ts — Visual gate harness (Gate G5 · PLAN.md §0 + §9).
@@ -109,12 +111,203 @@ test.describe("visual gate · engine self-check (no app required)", () => {
   });
 });
 
+// ---- mask self-check: B-044 logo-region exclusion (P0-QA-07) ------------------
+
+/** Paint solid magenta blocks over a decoded copy of `src` at the given rects. */
+async function perturbAt(
+  page: Page,
+  src: string,
+  rects: Array<{ x: number; y: number; w: number; h: number }>
+): Promise<string> {
+  return page.evaluate(
+    async ({ src, rects }) => {
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = src;
+      });
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      ctx.fillStyle = "#ff00ff";
+      for (const r of rects) ctx.fillRect(r.x, r.y, r.w, r.h);
+      return c.toDataURL("image/png");
+    },
+    { src, rects }
+  );
+}
+
+test.describe("visual gate · mask regions (B-044 · P0-QA-07)", () => {
+  const LOGO_MASK = MASK_REGISTRY["sidebar-logo-b044"];
+  const maskRegions = resolveMasks(["sidebar-logo-b044"]);
+  // A change fully INSIDE the mask — the reference's own logo lockup area.
+  const insideRect = { x: 16, y: 16, w: 100, h: 36 };
+  // A change clearly OUTSIDE the mask (main content area).
+  const outsideRect = { x: 400, y: 400, w: 50, h: 50 };
+
+  test("a candidate differing ONLY inside the mask PASSes, masked pixels reported", async ({ page }) => {
+    const cand = await perturbAt(page, fileToDataUrl(SELF_CHECK_REF), [insideRect]);
+    const r = await compareImages(page, SELF_CHECK_REF, cand, "self:mask-inside", { maskRegions });
+    expect(r.diffPixels).toBe(0); // exclusion works — nothing outside differs
+    expect(r.maskedPixels).toBe(LOGO_MASK.width * LOGO_MASK.height); // reported
+    expect(r.maskedDiffPixels).toBeGreaterThan(0); // the hidden difference is visible in the report
+    expect(r.dimensionMismatch).toBe(false);
+    expect(r.verdict).toBe("PASS");
+    expect(r.note).toContain("masked");
+    expect(r.note).toContain("B-044");
+    recordScreen({ ...r, screen: "self-check/mask-inside", kind: "self-check" });
+  });
+
+  test("a candidate differing inside AND outside the mask FAILs", async ({ page }) => {
+    const cand = await perturbAt(page, fileToDataUrl(SELF_CHECK_REF), [insideRect, outsideRect]);
+    const r = await compareImages(page, SELF_CHECK_REF, cand, "self:mask-in+out", { maskRegions });
+    expect(r.maskedDiffPixels).toBeGreaterThan(0); // inside part masked...
+    expect(r.diffPixels).toBeGreaterThan(0); // ...but the outside part still counts
+    expect(r.verdict).toBe("FAIL"); // mask is NOT a general loosening
+    recordScreen({ ...r, screen: "self-check/mask-in-out", kind: "self-check" });
+  });
+
+  test("a size mismatch still auto-FAILs even with the mask configured", async ({ page }) => {
+    // P0-FIX-04 interplay: masks must never rescue a dimension mismatch.
+    const bigger = await page.evaluate(async (src) => {
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = src;
+      });
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth + 40;
+      c.height = img.naturalHeight + 40;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      return c.toDataURL("image/png");
+    }, fileToDataUrl(SELF_CHECK_REF));
+    const r = await compareImages(page, SELF_CHECK_REF, bigger, "self:mask-size", { maskRegions });
+    expect(r.dimensionMismatch).toBe(true);
+    expect(r.verdict).toBe("FAIL");
+    recordScreen({ ...r, screen: "self-check/mask-size-larger", kind: "self-check" });
+  });
+
+  test("a mask region without a blocker citation is rejected", async ({ page }) => {
+    await expect(
+      compareImages(page, SELF_CHECK_REF, fileToDataUrl(SELF_CHECK_REF), "self:mask-nocite", {
+        maskRegions: [{ x: 0, y: 0, width: 10, height: 10, reason: "logo looks different" }],
+      })
+    ).rejects.toThrow(/BLOCKERS\.md/);
+  });
+
+  test("an unknown mask registry key is rejected", async () => {
+    expect(() => resolveMasks(["sidebar-logo-b999"])).toThrow(/Unknown mask/);
+  });
+});
+
+// ---- content-area crop self-check: B-048 shell-only G5 (P0-QA-08) -------------
+//
+// A shell-bearing route ships the chrome (sidebar x<244 + topbar y<56) before
+// its body screen is ported, so the content region (x>=244 AND y>=56) has no
+// counterpart to compare against yet. The "content-area-b048" mask excludes
+// exactly that region so G5 compares ONLY the chrome. These self-checks prove:
+//   (1) a change in the BODY passes (correctly excluded),
+//   (2) a change in the CHROME still fails (mask is spatial, not a loosener),
+//   (3) a dimension mismatch still auto-FAILs (P0-FIX-04 untouched).
+test.describe("visual gate · content-area crop (B-048 · P0-QA-08)", () => {
+  const CONTENT_MASK = MASK_REGISTRY["content-area-b048"];
+  const maskRegions = resolveMasks(["content-area-b048"]);
+  // SELF_CHECK_REF is gallery/g1/01-s.jpg (1600x1000). The mask (244,56,1356,944)
+  // clips to the full bottom-right content rectangle of that reference.
+  const clippedMaskedPixels = (1600 - 244) * (1000 - 56); // 1356*944 = 1,280,064
+  // A change fully INSIDE the content region (body area to be masked).
+  const bodyRect = { x: 800, y: 500, w: 120, h: 120 };
+  // A change in the TOPBAR chrome band (x>=244 but y<56 — must NOT be masked).
+  const topbarRect = { x: 800, y: 12, w: 120, h: 30 };
+  // A change in the SIDEBAR chrome column (x<244 — must NOT be masked).
+  const sidebarRect = { x: 40, y: 400, w: 120, h: 30 };
+
+  test("a candidate differing ONLY in the content area PASSes, masked pixels reported", async ({ page }) => {
+    const cand = await perturbAt(page, fileToDataUrl(SELF_CHECK_REF), [bodyRect]);
+    const r = await compareImages(page, SELF_CHECK_REF, cand, "self:content-inside", { maskRegions });
+    expect(r.diffPixels).toBe(0); // the whole content change is excluded
+    expect(r.maskedPixels).toBe(clippedMaskedPixels); // full content rectangle masked
+    expect(r.maskedDiffPixels).toBeGreaterThan(0); // hidden difference still visible in the report
+    expect(r.dimensionMismatch).toBe(false);
+    expect(r.verdict).toBe("PASS");
+    expect(r.note).toContain("masked");
+    expect(r.note).toContain("B-048");
+    recordScreen({ ...r, screen: "self-check/content-inside", kind: "self-check" });
+  });
+
+  test("a change in the TOPBAR chrome (x>=244, y<56) still FAILs under the content mask", async ({ page }) => {
+    const cand = await perturbAt(page, fileToDataUrl(SELF_CHECK_REF), [topbarRect]);
+    const r = await compareImages(page, SELF_CHECK_REF, cand, "self:content-topbar", { maskRegions });
+    expect(r.diffPixels).toBeGreaterThan(0); // topbar is chrome — NOT masked
+    expect(r.verdict).toBe("FAIL"); // content mask must not eat the topbar band
+    recordScreen({ ...r, screen: "self-check/content-topbar", kind: "self-check" });
+  });
+
+  test("a change in the SIDEBAR chrome (x<244) still FAILs under the content mask", async ({ page }) => {
+    const cand = await perturbAt(page, fileToDataUrl(SELF_CHECK_REF), [sidebarRect]);
+    const r = await compareImages(page, SELF_CHECK_REF, cand, "self:content-sidebar", { maskRegions });
+    expect(r.diffPixels).toBeGreaterThan(0); // sidebar is chrome — NOT masked
+    expect(r.verdict).toBe("FAIL");
+    recordScreen({ ...r, screen: "self-check/content-sidebar", kind: "self-check" });
+  });
+
+  test("a size mismatch still auto-FAILs even with the content mask configured", async ({ page }) => {
+    // P0-FIX-04 interplay: the content mask must never rescue a dimension mismatch.
+    const bigger = await page.evaluate(async (src) => {
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = src;
+      });
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth + 40;
+      c.height = img.naturalHeight + 40;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      return c.toDataURL("image/png");
+    }, fileToDataUrl(SELF_CHECK_REF));
+    const r = await compareImages(page, SELF_CHECK_REF, bigger, "self:content-size", { maskRegions });
+    expect(r.dimensionMismatch).toBe(true);
+    expect(r.verdict).toBe("FAIL");
+    recordScreen({ ...r, screen: "self-check/content-size-larger", kind: "self-check" });
+  });
+
+  test("both chrome masks coexist (sidebar-logo + content-area) and resolve", async () => {
+    const combined = resolveMasks(["sidebar-logo-b044", "content-area-b048"]);
+    expect(combined).toHaveLength(2);
+    expect(CONTENT_MASK).toBeDefined();
+    expect(CONTENT_MASK.reason).toMatch(/B-048/);
+  });
+
+  test("the app-shell manifest row parses and its masks resolve", async () => {
+    const manifest = loadManifest();
+    const shell = manifest.find((m) => m.screen === "app-shell");
+    expect(shell, "app-shell row present in screens.manifest.json").toBeDefined();
+    expect(shell!.route).toBe("dashboard");
+    expect(shell!.ref).toBe("gallery/g1/01-s.jpg");
+    expect(shell!.masks).toEqual(["sidebar-logo-b044", "content-area-b048"]);
+    // Every listed mask key must be a real registry entry (throws otherwise).
+    expect(() => resolveMasks(shell!.masks)).not.toThrow();
+    expect(resolveMasks(shell!.masks)).toHaveLength(2);
+  });
+});
+
 // ---- capture mode: real screens vs reference (pending apps/web) ---------------
 
 interface ManifestEntry {
   screen: string;
   route: string;
   ref: string; // relative to tests/visual/reference/
+  // Opt-in Wei-approved mask keys from lib/masks.ts MASK_REGISTRY (P0-QA-07).
+  // Shell-bearing screens list "sidebar-logo-b044"; screens without the
+  // sidebar lockup (e.g. login, P1-WEB-01) must omit this field.
+  masks?: string[];
 }
 
 function loadManifest(): ManifestEntry[] {
@@ -163,7 +356,9 @@ test.describe("visual gate · capture mode (real screens vs reference)", () => {
       const candidate =
         "data:image/png;base64," + shot.toString("base64");
       const refPath = join(REF_DIR, entry.ref);
-      const r = await compareImages(page, refPath, candidate, `capture:${entry.route}`);
+      const r = await compareImages(page, refPath, candidate, `capture:${entry.route}`, {
+        maskRegions: resolveMasks(entry.masks),
+      });
       recordScreen({ ...r, screen: entry.screen, kind: "capture" });
       expect(r.verdict, r.note).toBe("PASS");
     });

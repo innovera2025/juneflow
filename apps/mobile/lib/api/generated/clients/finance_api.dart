@@ -16,6 +16,14 @@ import '../models/bank_reconcile_request_body.dart';
 import '../models/entity.dart';
 import '../models/etax_send_request_body.dart';
 import '../models/fa_run_depreciation_request_body.dart';
+import '../models/get_fa_assets_response.dart';
+import '../models/get_gl_coa_response.dart';
+import '../models/get_gl_jv_response.dart';
+import '../models/get_gl_posting_inbox_response.dart';
+import '../models/get_labor_attendance_response.dart';
+import '../models/get_labor_payroll_response.dart';
+import '../models/get_labor_workers_response.dart';
+import '../models/get_opex_budgets_response.dart';
 import '../models/gl_close_period_request_body.dart';
 import '../models/gl_post_request_body.dart';
 
@@ -63,7 +71,7 @@ abstract class FinanceApi {
 
   /// GL posting inbox
   @GET('/gl/posting-inbox')
-  Future<List<Entity>> getGlPostingInbox();
+  Future<GetGlPostingInboxResponse> getGlPostingInbox();
 
   /// Post documents to GL ({doc_ids[]}) → gen JV
   @POST('/gl/post')
@@ -77,7 +85,7 @@ abstract class FinanceApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/gl/jv')
-  Future<List<Entity>> listGlJv({
+  Future<GetGlJvResponse> listGlJv({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -90,7 +98,7 @@ abstract class FinanceApi {
 
   /// Chart of accounts
   @GET('/gl/coa')
-  Future<List<Entity>> getGlCoa();
+  Future<GetGlCoaResponse> getGlCoa();
 
   /// Trial balance (GET ?period=).
   ///
@@ -149,7 +157,7 @@ abstract class FinanceApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/fa/assets')
-  Future<List<Entity>> listFaAssets({
+  Future<GetFaAssetsResponse> listFaAssets({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -172,7 +180,7 @@ abstract class FinanceApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/labor/workers')
-  Future<List<Entity>> listLaborWorkers({
+  Future<GetLaborWorkersResponse> listLaborWorkers({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -189,7 +197,7 @@ abstract class FinanceApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/labor/attendance')
-  Future<List<Entity>> listLaborAttendance({
+  Future<GetLaborAttendanceResponse> listLaborAttendance({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -206,7 +214,7 @@ abstract class FinanceApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/labor/payroll')
-  Future<List<Entity>> listLaborPayroll({
+  Future<GetLaborPayrollResponse> listLaborPayroll({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -223,7 +231,7 @@ abstract class FinanceApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/opex/budgets')
-  Future<List<Entity>> listOpexBudgets({
+  Future<GetOpexBudgetsResponse> listOpexBudgets({
     @Query('year') int? year,
     @Query('filter') String? filter,
     @Query('page') int? page,

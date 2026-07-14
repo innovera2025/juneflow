@@ -64,6 +64,27 @@
       "when": 1783927526073,
       "tag": "0008_classy_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783947171279,
+      "tag": "0009_zippy_echo",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784011473234,
+      "tag": "0010_third_clint_barton",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784018953568,
+      "tag": "0011_high_mercury",
+      "breakpoints": true
     }
   ]
 }

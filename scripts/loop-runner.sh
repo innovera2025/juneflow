@@ -109,6 +109,11 @@ done
 
 [ -n "${AGENT}" ] || { usage >&2; die "--agent is required"; }
 
+# Export LOOP_AGENT for this process and every `claude -p` child round so the
+# env-keyed hooks (zone-guard, journal-append, notify) activate in headless runs
+# where there is no interactive session to infer the agent from (B-005).
+export LOOP_AGENT="${AGENT}"
+
 for bin in git jq claude awk shasum mktemp; do
   command -v "${bin}" >/dev/null 2>&1 || die "required tool not found on PATH: ${bin}"
 done
@@ -348,6 +353,18 @@ while [ "${ROUND}" -le "${MAX_ROUNDS}" ]; do
       "งบสะสม \$${TOTAL_COST_USD}/\$${BUDGET_USD} · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)"
     log "no eligible ready task in zone — exiting"
     exit 0
+  fi
+
+  # Gates still red after the 3-attempt cap: run_round's contract leaves
+  # ROUND_STATUS=doing (review/blocked/none/unknown are handled elsewhere).
+  # Fire a one-shot "gates RED x3" push via the notify hook's CLI mode (B-005).
+  # notify.sh never blocks (silent no-op without NTFY_TOPIC); keep the loop
+  # resilient with >/dev/null and a trailing || true regardless.
+  if [ "${ROUND_STATUS}" = "doing" ]; then
+    "${REPO_ROOT}/.claude/hooks/notify.sh" "Juneflow gates RED x3" \
+      "agent: ${AGENT} · task ${ROUND_TASK} ยังแดงหลังครบ 3 รอบ (ROUND_STATUS=doing) — ดู agents/journal/${AGENT}.md" \
+      >/dev/null 2>&1 || true
+    log "gates still red after 3-attempt cap (task ${ROUND_TASK}) — notify fired"
   fi
 
   if [ "${before_fp}" = "${after_fp}" ]; then

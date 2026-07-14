@@ -72,6 +72,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tenant users (GET /users?filter&page) */
+        get: operations["listUsers"];
+        put?: never;
+        /** Invite tenant user (email invite; username generated from email; status starts invited) */
+        post: operations["createUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tenant roles with permission matrix (GET /roles?filter&page) */
+        get: operations["listRoles"];
+        put?: never;
+        /** Create tenant role (name + approval limit + approval level + permission matrix) */
+        post: operations["createRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Update tenant role (permission matrix save) */
+        put: operations["updateRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/packages": {
         parameters: {
             query?: never;
@@ -275,6 +330,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tenant's affiliated group companies (Multi-Company)
+         * @description B-041(ก+): the บริษัทในเครือ rows behind the CompanySwitcher (company-accept.jsx COMPANIES / PLAN.md Appendix B item 14). Returns the members of the tenant's company group — companies linked via group_parent_id to the tenant's group head. Tenant-scoped: a tenant can only ever see its own group.
+         */
+        get: operations["listCompanies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects": {
         parameters: {
             query?: never;
@@ -329,6 +404,63 @@ export interface paths {
         get: operations["getProjectHierarchy"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/org-units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List org structure nodes (flat ordered tree, lvl 0-2) */
+        get: operations["listOrgUnits"];
+        put?: never;
+        /** Create org node (company lvl0 or department/team lvl 1-2) */
+        post: operations["createOrgUnit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/org-units/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Update org node (partial merge - omitted fields keep current values) */
+        put: operations["updateOrgUnit"];
+        post?: never;
+        /** Delete org node (cascades to the whole subtree) */
+        delete: operations["deleteOrgUnit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create block node under the first/active phase (auto-generates N unit nodes, status empty, max 200) */
+        post: operations["createProjectNode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -519,6 +651,24 @@ export interface paths {
         /** Update doc-numbering rule */
         put: operations["updateDocNumbering"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List house models (GET /models?filter&page) */
+        get: operations["listModels"];
+        put?: never;
+        /** Create house model (new model starts as draft) */
+        post: operations["createModel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1775,6 +1925,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Nav badge counts (GET /counts?keys=... → {key: count})
+         * @description Tenant-scoped pending-work counts for the sidebar badges — B-040(ก). The 9 keys are the NAV badge sources in pototype chrome.jsx; decision C10 forbids hardcoded badge numbers, so each count is a live query over the module's pending-state rows (flows.html state machines). Counts never escape the JWT's company_id tenant scope.
+         */
+        get: operations["getCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents": {
         parameters: {
             query?: never;
@@ -1985,6 +2155,36 @@ export interface components {
         Entity: {
             [key: string]: unknown;
         };
+        /** @description One node of a project's structure tree (B-053). kind follows the project type's hierarchy labels; unit nodes carry sale/build status. */
+        HierarchyNode: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parent_id?: string;
+            /** @enum {string} */
+            kind: "phase" | "block" | "unit";
+            code?: string;
+            name: string;
+            /** Format: uuid */
+            model_id?: string;
+            units?: number;
+            sold?: number;
+            built?: number;
+            color?: string;
+            status?: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description Standard list envelope (B-014). Every list endpoint returns this wrapper: data is the page of rows (item type set per endpoint via allOf), the rest is pagination metadata. Tenant scope still applies. */
+        Paginated: {
+            data: unknown[];
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 137 */
+            total: number;
+        };
         /** @description Standard error envelope. */
         Error: {
             code: string;
@@ -2032,7 +2232,34 @@ export interface components {
             approval_limits?: components["schemas"]["Entity"];
             package?: components["schemas"]["Entity"];
         };
-        /** @description Minimal placeholder per data-dictionary Project (name, type, budget, status). Full field modeling belongs to the schema tasks. */
+        /** @description GET /counts result — pending-work count per requested nav badge key (B-040(ก)). Keys mirror the request's keys parameter; every value is a tenant-scoped live query count (decision C10 — never hardcoded). */
+        Counts: {
+            counts: {
+                [key: string]: number;
+            };
+        };
+        /** @description An affiliated group company (บริษัทในเครือ) — B-041(ก+). short/color/ biz/doc_prefix are the Multi-Company switcher fields from company-accept.jsx COMPANIES (Appendix B item 14); project_count is derived from the tenant's project rows attributed to the company. */
+        Company: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            short?: string;
+            color?: string;
+            biz?: string;
+            tax_id?: string;
+            doc_prefix?: string;
+            project_count?: number;
+        };
+        /** @description A phase row of a project (project_node kind=phase) — B-041(ก+). units = unit-kind nodes under the phase; sold_pct = round(100 × sold-or-transferred sales units / units); sale_status is the phase node's own sale status (nullable free text). */
+        ProjectPhase: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            units?: number;
+            sold_pct?: number;
+            sale_status?: string;
+        };
+        /** @description Minimal placeholder per data-dictionary Project (name, type, budget, status). Full field modeling belongs to the schema tasks. short / color / company_id / units / phases are the B-041(ก+) approved ProjectSwitcher extensions (chrome.jsx PROJECTS): short/color are stamped master columns (migration 0009); company_id is the owning company; units / phases are derived from project_node + sales_unit. */
         Project: {
             /** Format: uuid */
             id: string;
@@ -2043,6 +2270,12 @@ export interface components {
             /** @description Every money value carries currency_code (PLAN.md section 4). */
             currency_code?: string;
             status: string;
+            short?: string;
+            color?: string;
+            /** Format: uuid */
+            company_id?: string;
+            units?: number;
+            phases?: components["schemas"]["ProjectPhase"][];
         };
         /** @description Project create/update input (fields per data-dictionary). */
         ProjectInput: {
@@ -2051,6 +2284,12 @@ export interface components {
             type: "realestate" | "solar" | "civil" | "service";
             budget?: number;
             currency_code?: string;
+            short?: string;
+            units?: number;
+            phases?: {
+                label?: string;
+                units?: number;
+            }[];
         };
     };
     responses: {
@@ -2099,13 +2338,15 @@ export interface components {
                 "application/json": components["schemas"]["Entity"];
             };
         };
-        /** @description List (tenant-scoped). Pagination envelope unspecified in api-contract.md (see BLOCKERS.md B-014) — bare array is the representative shape. */
+        /** @description Paginated list envelope (B-014, tenant-scoped). data holds the page of rows; page/page_size/total are pagination metadata. */
         EntityList: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Entity"][];
+                "application/json": components["schemas"]["Paginated"] & {
+                    data?: components["schemas"]["Entity"][];
+                };
             };
         };
         /** @description Action applied; any status transition is handled server-side (AuditLog written by middleware). */
@@ -2123,6 +2364,8 @@ export interface components {
         Filter: string;
         /** @description 1-based page index (GET /x?filter&page pattern). */
         Page: number;
+        /** @description Rows per page (B-014). Server applies a default when omitted. */
+        PageSize: number;
         /** @description Accounting period selector (e.g. YYYY-MM). */
         Period: string;
         IdPath: string;
@@ -2209,6 +2452,96 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listAdminPackages: {
@@ -2441,6 +2774,29 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listCompanies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Group company list (B-014 paginated envelope). project_count is derived per company from the tenant's project rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paginated"] & {
+                        data?: components["schemas"]["Company"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     listProjects: {
         parameters: {
             query?: {
@@ -2448,6 +2804,8 @@ export interface operations {
                 filter?: components["parameters"]["Filter"];
                 /** @description 1-based page index (GET /x?filter&page pattern). */
                 page?: components["parameters"]["Page"];
+                /** @description Rows per page (B-014). Server applies a default when omitted. */
+                page_size?: components["parameters"]["PageSize"];
             };
             header?: never;
             path?: never;
@@ -2455,13 +2813,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Project list (tenant-scoped). Pagination envelope unspecified in api-contract.md (see B-014) — bare array is the representative shape. */
+            /** @description Project list (tenant-scoped, B-014 paginated envelope). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Project"][];
+                    "application/json": components["schemas"]["Paginated"] & {
+                        data?: components["schemas"]["Project"][];
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2556,7 +2916,108 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Flat ordered tree of hierarchy nodes (phase/block/unit). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["HierarchyNode"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listOrgUnits: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createOrgUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateOrgUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
             200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteOrgUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createProjectNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };
@@ -2915,6 +3376,41 @@ export interface operations {
             200: components["responses"]["EntityOk"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listModels: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     listBoq: {
@@ -4627,6 +5123,39 @@ export interface operations {
             200: components["responses"]["ActionOk"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getCounts: {
+        parameters: {
+            query: {
+                /** @description Comma-separated nav badge ids to count. An unknown key answers 400 with the flat Error shape. */
+                keys: ("boq" | "boq.approval" | "pr.list" | "accept" | "pm.wo" | "gl.inbox" | "sales" | "sales.crm" | "sales.service")[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending-work count per requested key (tenant-scoped). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Counts"];
+                };
+            };
+            /** @description Unknown/invalid count key. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listDocuments: {

@@ -55,6 +55,14 @@ export const projectTypeKey = pgEnum("project_type_key", [
  */
 export const vendorKind = pgEnum("vendor_kind", ["supplier", "subcon"]);
 
+/**
+ * Model.status — a house model is either published (`active`) or a `draft`
+ * (B-050, P1-BE-09). master.jsx MODELS carry status active|draft, and a newly
+ * created model always starts `draft` (ModelAddForm:465 "สถานะ ร่าง · สร้าง BOM
+ * ได้หลังบันทึก").
+ */
+export const modelStatus = pgEnum("model_status", ["active", "draft"]);
+
 // ---------------------------------------------------------------------------
 // Tables
 // ---------------------------------------------------------------------------
@@ -85,6 +93,11 @@ export const projectTypes = pgTable("project_type", {
  * data-dictionary: name, type, budget, status. type is carried via type_id ->
  * project_type (erd.html). budget is money -> currency_code. status left as
  * free text (dictionary does not enumerate project status values).
+ *
+ * short / color — B-041(ก+) approved columns (migration 0009): the
+ * ProjectSwitcher short-code + chip color from chrome.jsx PROJECTS (e.g.
+ * "RJP" / "#0B2A4A"), stamped verbatim at seed time. Nullable — display-only
+ * master fields, not required by any business rule.
  */
 export const projects = pgTable("project", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -95,6 +108,8 @@ export const projects = pgTable("project", {
     .notNull()
     .references(() => projectTypes.id, { onDelete: "restrict" }),
   name: text("name").notNull(),
+  short: text("short"),
+  color: text("color"),
   budget: numeric("budget", { precision: 16, scale: 2 }),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("active"),
@@ -116,15 +131,42 @@ export const models = pgTable("model", {
   companyId: uuid("company_id")
     .notNull()
     .references(() => companies.id, { onDelete: "cascade" }),
+  // `name` is the model's display name (master.jsx MODELS `type`, e.g.
+  // "บ้านเดี่ยว 2 ชั้น") — the erd Model.name. `code` is the short model code
+  // (e.g. "A-1"), unique per tenant (B-050).
   name: text("name").notNull(),
+  // B-050 (P1-BE-09) house-model attributes from master.jsx MODELS (L426-432).
+  // `code` is uppercase, unique within the company (model_company_code_uq).
+  // Nullable at the column level so the new-column migration lands on existing
+  // rows; presence + uniqueness are enforced by POST /models and the seed.
+  code: text("code"),
+  // Room spec (mock int). Nullable — added after the original rows existed.
+  bed: integer("bed"),
+  bath: integer("bath"),
+  parking: integer("parking"),
+  // area stays numeric (existing column) — integer mock values store cleanly.
   area: numeric("area", { precision: 12, scale: 2 }),
+  // `price` is the starting price in REAL money — FULL baht (numeric +
+  // currency_code), NOT the mock's "M ฿" (millions) display. The FE divides by
+  // 1e6 for the "8.24 M ฿" card (master.jsx:559). Nullable (price is optional
+  // on the create form).
+  price: numeric("price", { precision: 16, scale: 2 }),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  status: modelStatus("status").notNull().default("draft"),
+  // The model card accent color — persisted, assigned server-side by rotating a
+  // 7-color palette at create time (master.jsx MODEL_COLORS:449). Nullable for
+  // the pre-existing rows the migration alters.
+  color: text("color"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("model_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("model_company_idx").on(t.companyId),
+  unique("model_company_code_uq").on(t.companyId, t.code),
+]);
 
 /**
  * ProjectNode — the Phase/Block/Unit hierarchy, one self-referential tree per
@@ -147,6 +189,13 @@ export const projectNodes = pgTable("project_node", {
   }),
   kind: text("kind").notNull(),
   name: text("name").notNull(),
+  // Node code (B-053): the block/unit code surfaced as HierarchyNode.code.
+  // Blocks carry the user-entered code (e.g. "B"); units carry the generated
+  // "{blockCode}-{NN}" (padStart 2); phases have none. Nullable (phase nodes +
+  // pre-existing rows). Block-code uniqueness within a project is enforced by
+  // the createProjectNode handler, not a DB constraint (project_node has no
+  // company_id — see tenant scope), so no unique index here.
+  code: text("code"),
   saleStatus: text("sale_status"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()

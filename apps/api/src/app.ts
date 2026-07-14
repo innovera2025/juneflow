@@ -31,6 +31,16 @@ import { registerFilesRoute, type FileStorage } from "./routes/files.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerMeRoute } from "./routes/me.js";
 import { registerProjectsRoute } from "./routes/projects.js";
+import { registerCountsRoute } from "./routes/counts.js";
+import { registerCompaniesRoute } from "./routes/companies.js";
+import { registerProjectTypesRoute } from "./routes/project-types.js";
+import { registerCostCentersRoute } from "./routes/cost-centers.js";
+import { registerDocNumberingRoute } from "./routes/doc-numbering.js";
+import { registerModelsRoute } from "./routes/models.js";
+import { registerUsersRoute } from "./routes/users.js";
+import { registerRolesRoute } from "./routes/roles.js";
+import { registerOrgUnitsRoute } from "./routes/org-units.js";
+import { registerProjectNodesRoute } from "./routes/project-nodes.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -113,6 +123,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       await registerAuthRoutes(v1, { db: deps.db, signIn: deps.signIn });
       registerMeRoute(v1);
       registerProjectsRoute(v1);
+      registerCountsRoute(v1);
+      registerCompaniesRoute(v1);
+      registerProjectTypesRoute(v1);
+      registerCostCentersRoute(v1);
+      registerDocNumberingRoute(v1);
+      registerModelsRoute(v1);
+      registerUsersRoute(v1);
+      registerRolesRoute(v1);
+      registerOrgUnitsRoute(v1);
+      registerProjectNodesRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,
