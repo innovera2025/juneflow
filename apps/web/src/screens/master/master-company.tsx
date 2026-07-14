@@ -95,17 +95,19 @@ export function MasterCompany() {
     });
   };
 
-  // Header keys on a REAL edit (preset.id present), not mere preset truthiness. The
-  // prototype's `preset ? edit-title(preset.name) : add-title` renders an "<edit> undefined"
-  // title for the add-sub preset ({level,parent_id} — no id/name), while its own form treats
-  // add-sub as an ADD (editing = has code). We key the header the same way the form does, so
-  // add-sub shows the ADD header. The prototype's undefined-name title is an internal
-  // inconsistency, not intended copy (PLAN §0 rule 4: not reproduced, not silently improved).
+  // Chrome keys on `preset` truthiness — verbatim the prototype's
+  // `preset ? edit-title(preset.name) : add-title` (master.jsx:141-143). So the add-sub
+  // preset ({level,parent_id} — no id/name) shows EDIT chrome (edit icon, common.edit
+  // title, edit subtitle) even though its form BEHAVES as add (editing = !!preset.id =
+  // false). That chrome-vs-behaviour mismatch is faithful to the prototype; we drop only
+  // its uncopiable "undefined" leak — `preset.name ?? ""` renders an empty name, so the
+  // add-sub title is `common.edit` + " " with no trailing name (§0 rule 2: no i18n key
+  // for a JS `undefined`). B-055 = (a), Wei-ratified.
   const openAdd = (preset?: OrgPreset) =>
     ctx.openModal({
-      title: preset?.id ? `${t("common.edit")} ${preset.name ?? ""}` : t("org.addBtn"),
-      subtitle: preset?.id ? t("org.editSubtitle") : t("org.addSubtitle"),
-      icon: preset?.id ? "edit" : "plus",
+      title: preset ? `${t("common.edit")} ${preset.name ?? ""}` : t("org.addBtn"),
+      subtitle: preset ? t("org.editSubtitle") : t("org.addSubtitle"),
+      icon: preset ? "edit" : "plus",
       iconTone: "var(--brand)",
       size: "md",
       body: ({ close }: { close: () => void }) => (
