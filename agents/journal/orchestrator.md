@@ -80,3 +80,39 @@ Independent re-verification of the full promote queue on dev `dbe72aa` (advisory
 **For Wei's promote decision (policy, not a defect):** G5 with strict `VISUAL_MAX_DIFF_PIXEL_RATIO=0` reports non-zero
 diff vs JPEG-lossy references (P1-WEB-01/QA-01/QA-04 all flag) — threshold calibration is an explicit Wei/BLOCKERS
 decision (no silent loosening). Login G5 already passed on structural criteria.
+
+---
+
+## 2026-07-13 (later) — batch B blocker closeout + Phase-1 kickoff (orchestrator)
+
+Wei asked "เหลืองานส่วนไหน" → reported: board drained (62 done · 0 ready · 0 blocked), everything remaining
+gated on Wei (MVP def · promote 8-row REVIEW-QUEUE · answer open blockers). Wei then: "สรุป 22 blocker
+เคลียรวดเดียว".
+
+- Read all 52 BLOCKERS rows: the "22 open" were **14 truly-open decisions + duplicate/stale rows** from
+  un-reconciled worktree merges (B-030/033/034 each had a "ปิดแล้ว" copy AND a stale "รอ Wei ตอบ block"
+  copy; B-031 had 2 identical rows).
+- Presented a batched decision sheet (clusters A retro-confirm / B i18n / C contract / D infra) → Wei cleared
+  all via AskUserQuestion: **A+B+D = approve-recommended**; **B-014 = ข envelope** (not bare array — the one
+  flip); **B-018 = ค** (keep build-time flag); **B-046 = ข** (accept 0/0/0). B-007 = ก but Phase-3 PENDING.
+- **Workflow `blocker-batch-closeout`** (3 read-only drafters) produced: sacred-edit patch text, Phase-1 port
+  wave, BLOCKERS reconcile plan. Orchestrator applied all mutations itself (no parallel file writes).
+- **Applied:**
+  1. `SACRED-EDITS-QUEUE.md` (new) = patch text for the sacred edits (NOT applied to sacred — queued for loop
+     with SACRED_OVERRIDE). §1 i18n B-017 phrase_patterns + B-047 3 CompanySwitcher keys (login.email found
+     ALREADY PRESENT → B-036 no-op). §2 openapi B-014 Paginated envelope (42 list endpoints: 40 via shared
+     EntityList + listProjects/listCompanies inline). §3 B-007 Phase-3 pending. Discovery: i18n has 3 copies
+     (2 synced active + `juneflow-extract` stale/divergent — do NOT touch or cmp-gate the stale one).
+  2. `BLOCKERS.md` = recorded 16 answers (Wei 13 ก.ค.) + deleted 3 stale dup rows + collapsed B-031 (2→1).
+     Applied via asserted python script (each op count==1 or raise). Verified: 48 rows, 0 open in table
+     (3 residual "รอ Wei ตอบ" = header status-value definitions only), 0 duplicate ids, 0 broken rows.
+  3. `TASKS.md` = 15 Phase-1 tasks appended (5 ready · 10 blocked). Ready: P1-PLAT-01 (apply i18n patch),
+     P1-BE-05 (apply B-014 envelope + regen + FE sweep), P0-DEV-07 (B-005 loop-runner LOOP_AGENT+notify),
+     P0-QA-08 (B-048 shell-only G5), P1-WEB-07 (dashboard.jsx). Blocked cascade: P1-BE-06/07/08
+     (/project-types /cost-centers /doc-numbering dep P1-BE-05) → unblock P1-WEB-10/11/12; P1-WEB-08/09
+     (company/project master dep P1-BE-05); P1-WEB-13/14 (model/users need contract change → Wei).
+- **Envelope-first sequencing** is deliberate: apply B-014 (P1-BE-05) BEFORE porting list screens so FE builds
+  against final shape (the whole point of choosing ข now). P1-BE-05 must also sweep the already-shipped shell
+  consumers (ProjectSwitcher/CompanySwitcher/badges read res.data).
+- Board now: 62 done · 5 ready · 10 blocked. Still for Wei: promote REVIEW-QUEUE 8 rows to main; decide
+  contract additions /models + tenant /users (P1-WEB-13/14). Loop can run the 5 ready tasks.
