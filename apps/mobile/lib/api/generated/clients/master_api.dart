@@ -10,6 +10,7 @@ import '../models/get_companies_response.dart';
 import '../models/get_cost_centers_response.dart';
 import '../models/get_customers_response.dart';
 import '../models/get_doc_numbering_response.dart';
+import '../models/get_models_response.dart';
 import '../models/get_project_types_response.dart';
 import '../models/get_projects_response.dart';
 import '../models/get_vendors_response.dart';
@@ -218,6 +219,23 @@ abstract class MasterApi {
   @PUT('/doc-numbering/{id}')
   Future<Entity> updateDocNumbering({
     @Path('id') required String id,
+    @Body() required Entity body,
+  });
+
+  /// List house models (GET /models?filter&page).
+  ///
+  /// [filter] - Free-text/structured filter (GET /x?filter&page pattern).
+  ///
+  /// [page] - 1-based page index (GET /x?filter&page pattern).
+  @GET('/models')
+  Future<GetModelsResponse> listModels({
+    @Query('filter') String? filter,
+    @Query('page') int? page,
+  });
+
+  /// Create house model (new model starts as draft)
+  @POST('/models')
+  Future<Entity> createModel({
     @Body() required Entity body,
   });
 }
