@@ -245,28 +245,28 @@ export function buildHierarchy(nodes: NodeRow[]): Record<string, unknown>[] {
     return out;
   };
 
+  // HierarchyNode types its optional fields as string/uuid (not nullable), so
+  // null-valued fields are OMITTED rather than emitted as null — only real values
+  // reach the wire. required [id, kind, name] are always present.
   const wire = (node: NodeRow): Record<string, unknown> => {
     const base: Record<string, unknown> = {
       id: node.id,
-      parent_id: node.parentId,
       kind: node.kind,
-      code: node.code,
       name: node.name,
     };
+    if (node.parentId) base.parent_id = node.parentId;
+    if (node.code != null) base.code = node.code;
+    if (node.modelId) base.model_id = node.modelId;
     if (node.kind === "unit") {
-      return { ...base, model_id: node.modelId, status: node.saleStatus };
+      if (node.saleStatus != null) base.status = node.saleStatus;
+      return base;
     }
     // phase / block: aggregate the descendant unit sale statuses (C10).
     const units = collectUnits(node.id, []);
-    const sold = units.filter((u) => SOLD_STATUSES.has(u.saleStatus ?? "")).length;
-    const built = units.filter((u) => BUILT_STATUSES.has(u.saleStatus ?? "")).length;
-    return {
-      ...base,
-      model_id: node.modelId,
-      units: units.length,
-      sold,
-      built,
-    };
+    base.units = units.length;
+    base.sold = units.filter((u) => SOLD_STATUSES.has(u.saleStatus ?? "")).length;
+    base.built = units.filter((u) => BUILT_STATUSES.has(u.saleStatus ?? "")).length;
+    return base;
   };
 
   const out: Record<string, unknown>[] = [];
