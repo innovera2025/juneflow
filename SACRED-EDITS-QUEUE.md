@@ -495,6 +495,6 @@ Regenerated clients = **ไม่ sacred** (regen · ห้าม hand-edit) · 
 
 ---
 
-## 9) `i18n-full.json` — key 3 จอ master (ptype/cc/docnum) · `SACRED_OVERRIDE=wei-approved:B-062` (task P1-PLAT-04 · **PENDING-COMPILE**)
+## 9) `i18n-full.json` — key 3 จอ master (ptype/cc/docnum) · `SACRED_OVERRIDE=wei-approved:B-062` (task P1-PLAT-04 · **APPLIED 15 ก.ค.**)
 
-**Scope อนุมัติแล้ว (B-059/060/061/062 ✅ Wei 15 ก.ค.):** ~70 key — ptype 23 (`project-type-screen.jsx:5-218` รวม module near-miss 7 ตัว key ใหม่ verbatim + notify template 2) · cc ~20 (`master.jsx:584-731` รวม "ศูนย์ต้นทุน" ทั้งตระกูล + toast template + dropdown enum labels) · docnum ~30 (`master.jsx:737-889` รวมหัวตาราง 6 + RESET_OPTS/LOCK_OPTS enum labels + template 2) · กติกา: th verbatim · template แบบ §8 (curly quotes ตาม prototype) · en/zh/ar = th fallback (B-039) · เช็ค key เดิมก่อน ห้ามเพิ่มซ้ำ · ห้ามแตะ juneflow-extract · patch text จริงให้ P1-PLAT-04 compile ลง section นี้ก่อน apply
+**Scope อนุมัติแล้ว (B-059/060/061/062 ✅ Wei 15 ก.ค.):** ~70 key — ptype 23 (`project-type-screen.jsx:5-218` รวม module near-miss 7 ตัว key ใหม่ verbatim + notify template 2) · cc ~20 (`master.jsx:584-731` รวม "ศูนย์ต้นทุน" ทั้งตระกูล + toast template + dropdown enum labels) · docnum ~30 (`master.jsx:737-889` รวมหัวตาราง 6 + RESET_OPTS/LOCK_OPTS enum labels + template 2) · กติกา: th verbatim · template แบบ §8 (curly quotes ตาม prototype) · en/zh/ar = th fallback (B-039) · เช็ค key เดิมก่อน ห้ามเพิ่มซ้ำ · ห้ามแตะ juneflow-extract · **APPLIED**: 91 keys (ptype 34 · cc 24 · docnum 33 · skipped-existing 24 ตรวจแล้ว) · ทุก key verify verbatim/prefix กับ jsx ต้นทางก่อนเขียน · dict 221→312 · เนื้อ patch เต็ม = commit diff (feat i18n P1-PLAT-04)

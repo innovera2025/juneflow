@@ -96,3 +96,7 @@
 - ทำอะไร: apply 11 residual dict key ที่ §7 ตกหล่น (visible + note + toast template) commit 0348ee7 · resolves B-054
 - ตัดสินใจอะไร: toast = dict template {name}/{code} (web compose) ไม่ใช่ phrase_pattern · org.noteTaxLabel ตัด (reuse company.taxLabel)
 - เจออะไร: cmp byte-identical · i18n 19/19 · gate-4.5 inline PASS → unblock WEB-08 re-port
+
+## 2026-07-15 · orch-A · P1-PLAT-04 (§9 i18n 3 จอ master)
+- ทำอะไร: compile 91 keys (agent read-only) → unescape HTML entities ที่ปนมา → verify ทุก key verbatim/prefix กับ jsx (assert ล้มถ้าไม่ตรง) → text-insert ก่อน nav_i18n รักษา format → mirror copy → i18n 19/19
+- บทเรียน: (1) baseline dict ต้องอ่านสด — ระหว่างรอบ orch-B เพิ่ม 6 keys (215→221) ถ้า hardcode จะพัง (2) compile ผ่าน agent อาจ HTML-escape ต้อง unescape ก่อน apply (3) template verify ใช้ prefix ก่อน { เพราะ jsx เป็น ${interpolation}
