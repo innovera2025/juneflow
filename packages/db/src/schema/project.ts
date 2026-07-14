@@ -63,6 +63,27 @@ export const vendorKind = pgEnum("vendor_kind", ["supplier", "subcon"]);
  */
 export const modelStatus = pgEnum("model_status", ["active", "draft"]);
 
+/**
+ * CostCenter.type — Project | Overhead | Dept (B-059, P1-BE-11). master.jsx
+ * CC_SEED carries the three values verbatim (MasterCC type badge + CCAddForm
+ * dropdown, master.jsx:584-592/641).
+ */
+export const costCenterType = pgEnum("cost_center_type", [
+  "Project",
+  "Overhead",
+  "Dept",
+]);
+
+/**
+ * CostCenter.status — draft | approved (B-059, P1-BE-11). A plain field, NOT a
+ * workflow: creation always lands `draft` (CCAddForm submits status "draft",
+ * master.jsx:628; no approval flow exists in flows.html per the B-059 ruling).
+ */
+export const costCenterStatus = pgEnum("cost_center_status", [
+  "draft",
+  "approved",
+]);
+
 // ---------------------------------------------------------------------------
 // Tables
 // ---------------------------------------------------------------------------
@@ -208,6 +229,15 @@ export const projectNodes = pgTable("project_node", {
 /**
  * CostCenter — attached to every cost document (incl. land survey work).
  * data-dictionary: code, name, project_id. `code` is unique within a project.
+ *
+ * type / link / owner / budget / status — B-059(ก) approved superset
+ * (P1-BE-11): the MasterCC screen (master.jsx:584-731) renders 7 columns the
+ * dictionary lacked. link = the "ผูกกับ (เฟส / Block / แผนก)" display text;
+ * owner = the responsible person's display name; budget is money → FULL baht
+ * numeric + currency_code (repo money rule — never the mock's formatted
+ * string). type/link/owner/budget are nullable at the column level so the
+ * new-column migration lands on pre-existing rows (B-050 precedent); presence
+ * is enforced by the seed + POST /cost-centers.
  */
 export const costCenters = pgTable(
   "cost_center",
@@ -218,6 +248,13 @@ export const costCenters = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     code: text("code").notNull(),
     name: text("name").notNull(),
+    type: costCenterType("type"),
+    link: text("link"),
+    owner: text("owner"),
+    budget: numeric("budget", { precision: 16, scale: 2 }),
+    currencyCode: text("currency_code").notNull().default("THB"),
+    // Plain status field (no approval flow) — a new cost center starts draft.
+    status: costCenterStatus("status").notNull().default("draft"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),

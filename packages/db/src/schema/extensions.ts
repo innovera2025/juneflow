@@ -577,9 +577,15 @@ export const orgUnits = pgTable("org_unit", {
 
 /**
  * DocNumbering — a running-number counter per document type (master.jsx
- * `DOCNUM_SEED`: type, prefix, running, reset, lock). `running` is the next
- * sequence value; `reset_rule` is the reset cadence (yearly/monthly/never per
- * mock RESET_OPTS); `locked` freezes the format. Unique per (company, type).
+ * `DOCNUM_SEED`: type, prefix, running, reset, lock). `running` is TEXT
+ * (B-060(ก), P1-BE-11 — was integer): the stored value is the LAST-used
+ * running number kept verbatim from the mock, including leading zeros
+ * ("0291") and non-numeric values (BOQ row "B-02 v3" — master.jsx:874 renders
+ * non-numeric strings as-is); the mock table's "เลขถัดไป" +1 display is
+ * FE-side and applies to all-digit values only. Real issuing-time semantics
+ * land with the Phase-2 numbering service. `reset_rule` is the reset cadence
+ * (yearly/monthly/never per mock RESET_OPTS); `locked` freezes the format.
+ * Unique per (company, type).
  */
 export const docNumberings = pgTable("doc_numbering", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -588,7 +594,7 @@ export const docNumberings = pgTable("doc_numbering", {
     .references(() => companies.id, { onDelete: "cascade" }),
   type: text("type").notNull(),
   prefix: text("prefix"),
-  running: integer("running").notNull().default(1),
+  running: text("running").notNull().default("1"),
   resetRule: text("reset_rule"),
   locked: boolean("locked").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
