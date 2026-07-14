@@ -163,3 +163,18 @@
 - ทำอะไร: รอบที่ 2/2: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต qa — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $2.7069/$10 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+
+## 2026-07-14 · loop round · task: P0-QA-08 (B-048 · G5 shell-only methodology) → review
+- ทำอะไร:
+  - เพิ่ม region `content-area-b048` ใน `tests/visual/lib/masks.ts` MASK_REGISTRY (reuse opt-in pattern P0-QA-07): rect **x244 y56 w1356 h944** = content region (x≥244 ∧ y≥56) บน ref 1600x1000 · `reason` อ้าง B-048(ก) — invariant เดิมคงอยู่ (citation ไม่มี = throw)
+  - เพิ่มแถวใน `tests/visual/screens.manifest.json`: `{screen:"app-shell", route:"dashboard", ref:"gallery/g1/01-s.jpg", masks:["sidebar-logo-b044","content-area-b048"]}` + อัปเดต note อธิบาย content-area-b048 (drop เมื่อ body port)
+  - เพิ่ม self-check 6 ตัวใน `visual-gate.spec.ts` (describe "content-area crop B-048 · P0-QA-08"): content-inside=PASS/masked reported · topbar-chrome=FAIL · sidebar-chrome=FAIL · size-mismatch+mask=FAIL · 2 masks coexist · app-shell manifest row parse+resolve
+- ตัดสินใจอะไร:
+  - geometry ยืนยันจาก **design truth** ไม่เดา: sidebar width 244 (`apps/web/src/shell/sidebar.tsx:147` ← chrome.jsx:340-444) · topbar height 56 (`apps/web/src/shell/topbar.tsx:36`) · layout = Sidebar เต็มสูง (x<244) + content column ที่มี per-page TopBar (y<56) → chrome = sidebar ∪ topbar · content = x≥244 ∧ y≥56 (single rect ถึงมุมล่างขวา) — ตรงกับ B-044 logo mask ที่จบ x231<244
+  - mask นี้เป็น spatial exclusion ชั่วคราว (shell-only) **ไม่ใช่ threshold loosener**: channelThreshold/maxDiffPixelRatio ยัง 0 · chrome ต่าง = ยัง FAIL · dimensionMismatch auto-FAIL (P0-FIX-04) **ไม่แตะ** (พิสูจน์ด้วย self-check size-mismatch+mask=FAIL)
+  - **ไม่แตะ** `tests/visual/reference/**` (sacred) · เขต tests/ ล้วน · ไม่แตะ sacred file ใด
+- เจออะไร:
+  - `test:visual` **16 passed / 1 skipped** (skip = capture-mode app-shell รอ live compose — พฤติกรรมถูกต้อง offline) · unit **48** · seed **96/113** · contract **374/422** เขียว
+  - **G4 e2e smoke FAIL = ต้อง `docker compose up`** (ERR_CONNECTION_REFUSED web:5173/api:3000 · offline round ไม่มี stack) — **pre-existing env · ไม่เกี่ยวกับ change tests/visual** (diff = 3 ไฟล์ visual เท่านั้น) → ไม่ใช่ regression · G5 (gate ของ P0-QA-08) เขียว
+  - full-page G5 ของ app-shell กลับมาเมื่อ dashboard port (P1-WEB-07) → ตอนนั้น drop key `content-area-b048` จาก manifest row
+  - commit บน feature/qa · ตั้ง P0-QA-08 → review + REVIEW-QUEUE row · **ไม่ merge dev** (รอ gate 4.5 diff-reviewer + Wei)

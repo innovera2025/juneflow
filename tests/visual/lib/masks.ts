@@ -32,6 +32,41 @@ export const MASK_REGISTRY: Record<string, MaskRegion> = {
     reason:
       "B-044(ก) Wei-approved 2026-07-13 — sidebar logo lockup: references show older 'juneflow / Construction ERP'; port renders brand mark + t(\"app.name\") (th: ระบบงานก่อสร้าง)",
   },
+
+  // B-048(ก) — Wei ruling 2026-07-13 ("ตอบแล้ว — นำไปใช้", task P0-QA-08):
+  // shell-only G5. A shell-bearing route (app-shell) ships the chrome
+  // (Sidebar + per-page TopBar) BEFORE its body screen is ported, so the
+  // reference's content area (e.g. the full Dashboard in g1/01-s.jpg) has no
+  // counterpart yet — only a Placeholder. This mask EXCLUDES the content
+  // region so G5 compares ONLY the chrome until the body screen lands
+  // (dashboard → P1-WEB-07), at which point full-page G5 returns and this key
+  // is dropped from the row.
+  //
+  // Geometry (reference-image coords, verified against the ported shell):
+  //   - sidebar occupies the full-height left column, width 244
+  //     (apps/web/src/shell/sidebar.tsx:147 · ported from chrome.jsx:340-444;
+  //      consistent with the B-044 logo lockup ending at x=231 < 244).
+  //   - the per-page TopBar is the top band of the content column, height 56
+  //     (apps/web/src/shell/topbar.tsx:36 · ds.jsx Page → TopBar).
+  //   => chrome = sidebar (x<244, any y) + topbar (x>=244, y<56);
+  //      content  = x>=244 AND y>=56  → the rectangle masked here.
+  // Sized to the 1600x1000 g1-g4 gallery references (244+1356=1600,
+  // 56+944=1000) so it reaches the bottom-right corner exactly. compare.ts
+  // clips every mask rect to the reference bounds (Math.min(w,...)/Math.min(h,...)),
+  // so a smaller reference is handled safely too.
+  //
+  // This is a targeted, Wei-approved SPATIAL exclusion, NOT a threshold
+  // loosening: channelThreshold/maxDiffPixelRatio stay 0, chrome differences
+  // outside this rect still FAIL, and the dimensionMismatch auto-FAIL
+  // (P0-FIX-04) is untouched — a size/layout change can never be masked away.
+  "content-area-b048": {
+    x: 244,
+    y: 56,
+    width: 1356,
+    height: 944,
+    reason:
+      "B-048(ก) Wei-approved 2026-07-13 (P0-QA-08) — shell-only G5: content region (x>=244, y>=56) excluded so a shell-bearing route compares ONLY chrome (sidebar+topbar) until its body screen is ported (dashboard → P1-WEB-07); drop this key once full-page G5 returns",
+  },
 };
 
 /** Resolve manifest mask keys → regions. Unknown key = config error, throw. */
