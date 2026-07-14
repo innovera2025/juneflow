@@ -72,3 +72,9 @@
 - ทำอะไร: รอบที่ 4/4: ไม่มี task สถานะ ready ที่ dependencies ครบในเขต platform — จบลูป
 - ตัดสินใจอะไร: — (loop-runner เป็นกลไกอัตโนมัติ ไม่ตัดสินใจเชิง design/spec — ความขัดแย้งต้องเข้า BLOCKERS.md โดย agent ในรอบ)
 - เจออะไร: งบสะสม $10.1682/$16 · เติมคิว ready ให้ครบ ≥ 5 task ต่อเขต (PLAN.md §10)
+
+
+## 2026-07-14 · P1-PLAT-01 — batch-B sacred i18n patch (B-017 + B-047)
+- ทำอะไร: apply SACRED-EDITS-QUEUE.md §1 ลง i18n-full.json 2 สำเนา (docs/extract + packages/i18n/src) — B-047 3 dict key company.* (th verbatim) + B-017 phrase_patterns 2 pattern (real translations) · login.email no-op · juneflow-extract stale ไม่แตะ. commit f399fd1.
+- ตัดสินใจอะไร: — (patch content Wei อนุมัติแล้ว B-017/B-047 · orchestrator apply ตรงตาม Wei อนุญาต เพราะ Chat-1 terminal round ไม่ได้ commit อะไร · SACRED_OVERRIDE token อยู่ใน BLOCKERS.md)
+- เจออะไร: cmp byte-identical ✓ · JSON valid ✓ · i18n test 19/19 · gate-4.5 PASS → รอ orchestrator merge เข้า dev
