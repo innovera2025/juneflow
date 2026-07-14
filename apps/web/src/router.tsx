@@ -26,6 +26,7 @@ import {
   SIDEBAR_ROUTES,
 } from "./routes/registry";
 import { LoginScreen } from "./screens/login/login-screen";
+import { MasterCompany } from "./screens/master/master-company";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -36,6 +37,7 @@ import { Placeholder } from "./shell/page";
  */
 const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
+  "master.company": MasterCompany,
 };
 
 const rootRoute = createRootRoute({

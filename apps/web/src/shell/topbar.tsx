@@ -8,11 +8,13 @@
  * (chrome.jsx:862 `<CompanySwitcher /><ProjectSwitcher />`).
  *
  * CompanySwitcher is now wired (B-041): it renders the affiliated group
- * companies from GET /companies (company-accept.jsx:24-104). Breadcrumbs are nav
- * keys resolved with tn(), chevron direction-aware for RTL.
+ * companies from GET /companies (company-accept.jsx:24-104). Breadcrumbs are
+ * PRE-RESOLVED display nodes (matching ds.jsx Page, which takes display strings):
+ * the caller resolves each crumb with the right layer — e.g. master.company mixes a
+ * dict crumb t("master.breadcrumb") with a nav crumb tn("Company / Org"), which a
+ * single-layer NavKey[] could not express. Chevron is direction-aware for RTL.
  */
 import type { ReactNode } from "react";
-import type { NavKey } from "@juneflow/i18n";
 import { Icon } from "../ui/icon";
 import { useI18n } from "../i18n";
 import { CompanySwitcher } from "./company-switcher";
@@ -22,14 +24,14 @@ import { NotificationsPopover } from "./notifications";
 import { SearchPalette } from "./search-palette";
 
 export interface TopBarProps {
-  /** Nav-key breadcrumbs (tn-resolved), last is the current page. */
-  breadcrumbs?: NavKey[];
+  /** Pre-resolved breadcrumb nodes (caller applies t()/tn()), last is the current page. */
+  breadcrumbs?: ReactNode[];
   actions?: ReactNode;
   projectSwitch?: boolean;
 }
 
 export function TopBar({ breadcrumbs = [], actions, projectSwitch = true }: TopBarProps) {
-  const { tn, dir } = useI18n();
+  const { dir } = useI18n();
   return (
     <header
       style={{
@@ -61,7 +63,7 @@ export function TopBar({ breadcrumbs = [], actions, projectSwitch = true }: TopB
                   color: i === breadcrumbs.length - 1 ? "var(--text)" : "var(--text-2)",
                 }}
               >
-                {tn(b)}
+                {b}
               </span>
             </span>
           ))}

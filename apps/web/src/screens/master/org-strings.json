@@ -1,0 +1,4 @@
+{
+  "_source": "Verbatim Thai PHRASE key from pototype/master.jsx MasterCompany (L180 card-header count '· {N} บริษัท · {N} แผนก'). 'บริษัท' is an i18n phrase key (docs/extract/i18n-full.json phrases -> tp() gives Company/公司/الشركة; th echoes the key). Kept in .json (i18n-guard skips .json) so Thai never appears in .tsx source — same pattern as shell/chrome-strings.json. 'แผนก' has a dict key (org.unitDept) so it is rendered with t() directly and is NOT duplicated here.",
+  "companyUnit": "บริษัท"
+}
