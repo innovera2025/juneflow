@@ -54,21 +54,28 @@ export function useMe() {
   });
 }
 
-/** GET /projects — projects (extended: short/color/company_id/units/phases[]) for the switcher. */
+/**
+ * GET /projects — projects (extended: short/color/company_id/units/phases[]) for the switcher.
+ * B-014: the endpoint now returns the paginated envelope `{data, page, page_size, total}`;
+ * the switcher consumes the full page, so we surface `data` (the rows) as the hook value.
+ */
 export function useProjects() {
   return useQuery<Project[]>({
     queryKey: ["projects"],
-    queryFn: () => unwrap(apiClient.GET("/projects")),
+    queryFn: async () => (await unwrap(apiClient.GET("/projects"))).data ?? [],
     enabled: authed(),
     staleTime: 60_000,
   });
 }
 
-/** GET /companies — affiliated group companies for the Multi-Company switcher (B-041). */
+/**
+ * GET /companies — affiliated group companies for the Multi-Company switcher (B-041).
+ * B-014: paginated envelope `{data, ...}`; the switcher reads the full page (`data`).
+ */
 export function useCompanies() {
   return useQuery<Company[]>({
     queryKey: ["companies"],
-    queryFn: () => unwrap(apiClient.GET("/companies")),
+    queryFn: async () => (await unwrap(apiClient.GET("/companies"))).data ?? [],
     enabled: authed(),
     staleTime: 5 * 60_000,
   });
@@ -173,11 +180,15 @@ export function packageMenus(me: Me | undefined): readonly string[] | undefined 
   return Array.isArray(menus) ? (menus as string[]) : undefined;
 }
 
-/** GET /notifications — bell popover list + unread dot (opaque EntityList, C10). */
+/**
+ * GET /notifications — bell popover list + unread dot (opaque EntityList, C10).
+ * B-014: EntityList is now the paginated envelope `{data, ...}`; the popover reads
+ * the page rows (`data`).
+ */
 export function useNotifications() {
   return useQuery<Record<string, unknown>[]>({
     queryKey: ["notifications"],
-    queryFn: () => unwrap(apiClient.GET("/notifications")),
+    queryFn: async () => (await unwrap(apiClient.GET("/notifications"))).data ?? [],
     enabled: authed(),
     staleTime: 30_000,
   });
