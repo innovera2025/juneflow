@@ -3,7 +3,7 @@
 > คิวการแก้ **sacred files** ที่ Wei อนุมัติแล้ว แต่ยังไม่ apply (hook `protect-files.sh` ล็อกไว้ · ปลดผ่าน `SACRED_OVERRIDE=wei-approved:B-xxx` ในรอบ loop เท่านั้น)
 > ที่มา: batch B blocker closeout — Wei เคลียร 14 blocker (2026-07-13). Draft โดย workflow `blocker-batch-closeout` (read-only · ไม่มีไฟล์ถูกแก้ตอน draft)
 > **กฎ:** ทุก Thai string ด้านล่าง = verbatim จาก prototype ที่อ้าง · ห้ามแปลใหม่ · zh/en/ar = th fallback เฉพาะ key ใหม่ (ตาม B-035/B-039 precedent)
-> งานที่ apply แต่ละก้อนถูกผูกเป็น task ใน `TASKS.md`: **P1-PLAT-01** (§1 i18n) · **P1-BE-05** (§2 openapi envelope) · B-007 (§3 · Phase 3 pending)
+> งานที่ apply แต่ละก้อนถูกผูกเป็น task ใน `TASKS.md`: **P1-PLAT-01** (§1 i18n) · **P1-BE-05** (§2 openapi envelope) · B-007 (§3 · Phase 3 pending) · **P1-BE-09** (§4 openapi `/models`+`/users`+`/roles`) · **P1-PLAT-02** (§5 i18n จอ master.model+users · pending-compile)
 
 ---
 
@@ -163,3 +163,145 @@ Regenerated clients = **ไม่ sacred** (regen · ห้าม hand-edit) · 
 - `i18n-full.json` — label income-type keyed ตาม string id (sacred patch แยก Phase 3)
 
 **ไม่ apply ใน batch B** — carry forward เป็น Phase-3 item
+
+---
+
+## 4) `openapi.yaml` — B-050 `/models` + B-051 `/users`+`/roles` · `SACRED_OVERRIDE=wei-approved:B-050` (task P1-BE-09)
+
+**Decision (Wei ✅ 14 ก.ค.):** B-050 (ก) GET+POST `/models` · B-051 (ก) ชุดเต็ม GET+POST `/users` + GET+POST `/roles` + PUT `/roles/{id}` — ทุก resource = `Entity` opaque ตาม convention เดิม (ไม่เพิ่ม named schema · field semantics ล็อกที่ DB/seed ตามคำตอบ B-050/B-051 ใน `BLOCKERS.md`)
+
+**Prereq:** apply **หลัง §2 (B-014 envelope) merge เข้า dev แล้วเท่านั้น** — `EntityList` ต้องเป็น `Paginated` ก่อน · **ห้ามแตะส่วนอื่นของไฟล์**
+
+### 4a) Master section — เพิ่มท้ายกลุ่ม `# ===== Master =====` (ก่อน banner ถัดไป)
+
+```yaml
+  /models:
+    get:
+      tags: [master]
+      summary: List house models (GET /models?filter&page)
+      operationId: listModels
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create house model (new model starts as draft)
+      operationId: createModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+```
+
+### 4b) Auth section — เพิ่มท้ายกลุ่ม auth (หลัง `/me`)
+
+```yaml
+  /users:
+    get:
+      tags: [auth]
+      summary: List tenant users (GET /users?filter&page)
+      operationId: listUsers
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [auth]
+      summary: Invite tenant user (email invite; username generated from email; status starts invited)
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /roles:
+    get:
+      tags: [auth]
+      summary: List tenant roles with permission matrix (GET /roles?filter&page)
+      operationId: listRoles
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [auth]
+      summary: Create tenant role (name + approval limit + approval level + permission matrix)
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /roles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [auth]
+      summary: Update tenant role (permission matrix save)
+      operationId: updateRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+```
+
+### 4c) Impl directives (ไม่ sacred — สำหรับ P1-BE-09 · จากคำตอบ B-050/B-051)
+
+- `models`: field ตาม mock `master.jsx:426-432` — `code` unique ต่อ tenant · `type` = ชื่อแบบบ้าน (display) · `area`/`bed`/`bath`/`parking` int · `price` **บาทเต็ม** numeric + `currency_code` (FE format "M ฿" = /1e6 toFixed(2) ตาม mock L559) · `status` enum `active|draft` (create เริ่ม `draft`) · `color` persist — server วน palette 7 สี (mock L449) ตอน create · `unit_count`/`bom_item_count` = derived count จริง (C10) ห้าม hardcode `248+i*30`
+- `roles`: **superset** — `approval_limits` json ต่อชนิดเอกสาร (ตาม dictionary) + `approval_level` int 0-4 + `perms` matrix 11 โมดูล × 5 สิทธิ์ + `user_count` derived · วงเงิน numeric + `currency_code` ห้ามเก็บ string format ("1,000,000 ฿")
+- `users`: `status` enum `active|blocked|invited` · POST = invite ทาง email + gen username จาก email + toggle "เปิดใช้งานทันที" (`master.jsx:1033-1045`) · `department` enum `CONS|PROC|FIN|SLS|ADM|WH` (`master.jsx:1025`)
+- seed: MODELS ทุกแถว (`master.jsx:426-432`) + ROLE_PRESETS 8 (`master.jsx:895-904`) — count fields จาก query จริง
+
+---
+
+## 5) `i18n-full.json` — key จอ master.model + users · `SACRED_OVERRIDE=wei-approved:B-050` (task P1-PLAT-02 · **PENDING-COMPILE**)
+
+**Scope อนุมัติแล้ว (B-050/B-051 ✅ Wei 14 ก.ค.):** key ที่ขาดของ 2 จอ — th = **verbatim** จาก `pototype/master.jsx` · en/zh/ar = th fallback (B-035/B-039 precedent) · key naming ตามกลุ่ม dict เดิม
+
+**Inventory เริ่มต้น (P1-PLAT-02 ตรวจซ้ำและ compile patch text ลง section นี้ก่อน apply):**
+- MasterModel (~17 string): "เพิ่ม Model" · subtitle จอ (L527) · modal title/subtitle (L511-512) · form labels "รหัส Model"/"ชื่อแบบบ้าน"/"พื้นที่ใช้สอย (ตร.ม.)"/"ราคาเริ่มต้น (ล้านบาท)"/"ห้องนอน"/"ห้องน้ำ"/"ที่จอดรถ" · info banner (L497) · validation 5 ข้อความ (L453-459) · placeholders (L474, L478) · notify dynamic (L518 — เข้า phrase_patterns ถ้ามีตัวเลข) · card labels "ราคาเริ่มต้น"/"M ฿" (L550-574)
+- UsersPermissions: "เพิ่มผู้ใช้" · "เพิ่มบทบาท" · "วงเงินอนุมัติ" · PERMS 5 คำ (ดู/สร้าง/แก้ไข/อนุมัติ/ยกเลิก L907) · MODULES 11 ชื่อ (L908 — เช็ค key เดิมก่อน) · form labels UserAddForm (L1004-1054) + RoleAddForm (L1056-1116) · notify "บันทึกสิทธิ์ {name} แล้ว" (L995 — phrase pattern)
+- key ที่มีอยู่แล้ว ห้ามเพิ่มซ้ำ: "Model / แบบบ้าน" · "ข้อมูลกลาง" · "ร่าง" · "ใช้งาน" · "ยกเลิก" · "ยูนิต" · "รายการ" · "ตร.ม." · `nav.users` (ดูรายการเต็มใน recon P1-WEB-13/14)
