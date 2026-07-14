@@ -466,3 +466,9 @@
 - เจออะไร:
   - gates เขียวหมด: contract lint (contracts typecheck+regen · openapi.yaml byte-identical ไม่แตะ) ✓ · api typecheck ✓ · api build (tsc) ✓ · api unit **127/127** (6 ใหม่: 401 fail-closed · 6-field {id,type,prefix,running,reset_rule,locked} envelope · schema-columns-only no company_id/timestamp leak · empty→page_size≥1 · read doc_numbering bound company_id=<tenant> บน column ตัวเอง (where-capturing stub ยืนยัน table=docNumberings + where params contains COMPANY) · tenant อื่น predicate = company_id ตัวเอง ไม่มี COMPANY เดิม=no leak) · contract suite **374/374** (openapi.yaml ไม่แตะ · listDocNumbering op ผ่าน invariants) · **G1 schema** drizzle-kit check "Everything's fine" (ไม่แก้ schema) + db typecheck ✓. **live G2/G4/G5 defer** — contract/live.spec.ts 48 skipped (ต้อง docker/API up · ไม่ fake) · G4 e2e + G5 visual = endpoint ไม่มีจอ + ต้อง compose up · re-verify ตอน compose ขึ้น.
   - ปลด P1-WEB-12 (จอ master.docnum) ได้เมื่อ merge เข้า dev (orch-B merge จาก main checkout — ไม่ merge เอง · ไม่รัน diff-reviewer).
+
+
+## 2026-07-14 · P1-BE-09 — §4 /models+/users+/roles (orchestrator-driven sacred round)
+- ทำอะไร: openapi §4 apply โดย orch-B (885d5e2) → subagent: schema superset (model/role/user) + migration 0010 ALTER-only (drizzle-kit gen · ไม่แตะ 0000-0009) + 7 handlers tenant-scoped + seed MODELS/ROLE_DEFS + regen TS + 21 tests. 6 commits.
+- ตัดสินใจอะไร: — (B-050/B-051 Wei อนุมัติ · SACRED_OVERRIDE=wei-approved:B-050 · Dart regen ปล่อย mobile zone กัน zone-gate)
+- เจออะไร: gates เขียวหมด รวม G2-live บน disposable PG16 · gate-4.5 PASS → orch-B merge · backend zone ว่างให้ B-052 wave
