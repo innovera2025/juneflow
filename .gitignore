@@ -39,3 +39,6 @@ juneflow-extract/
 /clear_layout_assets/
 /deck_assets_glam/
 BLOCKERS 2.md
+
+# Orchestrator coordination channel — filesystem-shared, never track (2026-07-14)
+/agents/channel.md
