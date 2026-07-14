@@ -492,3 +492,9 @@ Regenerated clients = **ไม่ sacred** (regen · ห้าม hand-edit) · 
 - **rules:** lvl ลูก = min(parent.lvl+1, 2) · dept ต้องมี parent · tax_id regex `\d{10,13}` (company · เฉพาะเมื่อส่ง) · DELETE cascade subtree · กัน circular (parent ใหม่ห้ามเป็น descendant ของตัวเอง) · PUT partial-merge
 - **project nodes:** ใช้ตาราง `project_nodes` ที่มีอยู่ (`projects.ts:102` อ้างแล้ว) · create block ผูก phase แรก/active · autogen N units status ว่าง · cap 200/บล็อก · unit code `{blockCode}-{NN}` padStart 2 · sold/built = count จาก query จริง (C10) · **impl `GET /projects/{id}/hierarchy`** (selectThrough ผ่าน project) ให้จอใช้ได้จริง
 - regen TS client · **flag mobile: Dart client regen รอบถัดไป** (append งานเข้า P1-MOB-01 ถ้ายังไม่ merge หรือเปิด task ใหม่)
+
+---
+
+## 9) `i18n-full.json` — key 3 จอ master (ptype/cc/docnum) · `SACRED_OVERRIDE=wei-approved:B-062` (task P1-PLAT-04 · **PENDING-COMPILE**)
+
+**Scope อนุมัติแล้ว (B-059/060/061/062 ✅ Wei 15 ก.ค.):** ~70 key — ptype 23 (`project-type-screen.jsx:5-218` รวม module near-miss 7 ตัว key ใหม่ verbatim + notify template 2) · cc ~20 (`master.jsx:584-731` รวม "ศูนย์ต้นทุน" ทั้งตระกูล + toast template + dropdown enum labels) · docnum ~30 (`master.jsx:737-889` รวมหัวตาราง 6 + RESET_OPTS/LOCK_OPTS enum labels + template 2) · กติกา: th verbatim · template แบบ §8 (curly quotes ตาม prototype) · en/zh/ar = th fallback (B-039) · เช็ค key เดิมก่อน ห้ามเพิ่มซ้ำ · ห้ามแตะ juneflow-extract · patch text จริงให้ P1-PLAT-04 compile ลง section นี้ก่อน apply
