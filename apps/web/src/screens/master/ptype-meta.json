@@ -1,0 +1,37 @@
+{
+  "_source": "Client presentation meta per project-type key, transcribed VERBATIM from pototype/project-types.jsx PROJECT_TYPES (L6-51). GET /project-types omits these 5 fields (nameEn / desc / icon / color / costTypes) — they are product-level presentation config, not tenant data — so the card reads them here, keyed by the server row's `key`. color is a prototype-verbatim per-type hex used for the card borderTop / icon-box color-mix / cost-tag (B-037: literal allowed — copied verbatim, no matching @juneflow/tokens token). icon is a ds.jsx Icon name. Kept in .json so Thai (desc / costTypes) never appears in the .tsx source (i18n-guard skips .json).",
+  "realestate": {
+    "nameEn": "Real Estate",
+    "desc": "บ้านจัดสรร / คอนโด / ทาวน์โฮม — ครบวงจรตั้งแต่ก่อสร้างถึงขายและบริการหลังการขาย",
+    "icon": "building",
+    "color": "#0B2A4A",
+    "costTypes": ["วัสดุ", "ค่าแรง", "สั่งจ้าง / เหมา", "ค่าใช้จ่ายอื่น"]
+  },
+  "solar": {
+    "nameEn": "Solar / Energy EPC",
+    "desc": "โรงไฟฟ้าพลังงานแสงอาทิตย์ — EPC, ขายไฟ/PPA, O&M, ROI และการขออนุญาต",
+    "icon": "sun",
+    "color": "#B45309",
+    "costTypes": [
+      "อุปกรณ์ (Module/Inverter)",
+      "งานติดตั้ง (EPC)",
+      "งานโยธา / ฐานราก",
+      "ค่าขนส่ง",
+      "ขออนุญาต / ที่ปรึกษา"
+    ]
+  },
+  "civil": {
+    "nameEn": "General / Civil",
+    "desc": "งานโยธา-ก่อสร้างทั่วไป — เน้น BOQ จัดซื้อ และบริหารผู้รับเหมา",
+    "icon": "hardhat",
+    "color": "#0F766E",
+    "costTypes": ["วัสดุ", "ค่าแรง", "เครื่องจักร", "สั่งจ้าง / เหมา"]
+  },
+  "service": {
+    "nameEn": "Service / General",
+    "desc": "งานบริการ / ที่ปรึกษา — เน้นงบประมาณและแผนงาน (Timeline) ไม่มีงานก่อสร้าง",
+    "icon": "briefcase",
+    "color": "#6D28D9",
+    "costTypes": ["ค่าบริการ / ที่ปรึกษา", "ค่าแรง", "ค่าใช้จ่ายอื่น"]
+  }
+}

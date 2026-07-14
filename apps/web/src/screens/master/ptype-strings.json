@@ -1,0 +1,15 @@
+{
+  "_source": "Verbatim Thai i18n keys for MasterProjectType (pototype/project-type-screen.jsx L5-108). Kept in .json (the i18n-guard hook skips .json) so Thai never appears in the .tsx source — same pattern as model-strings.json / project-strings.json. navCrumb is a nav_i18n key (tn(): breadcrumb crumb-2, project-type-screen.jsx:38). `mod` holds the 9 module labels whose text is a real PHRASE key (tp()): the other 7 module labels are stable ptype.mod.* DICT keys (t(), mapped in ptype-cards.ts MOD_DICT). Each value is a real i18n key (nav_i18n -> tn, phrases -> tp); th echoes the key.",
+  "navCrumb": "ประเภทโครงการ (Project Type)",
+  "mod": {
+    "land": "งานสำรวจ & จัดหาที่ดิน",
+    "boq": "BOQ & งบประมาณ",
+    "subcon": "ผู้รับเหมา (Progress)",
+    "inv": "คลังวัสดุ",
+    "petty": "เงินสดย่อย",
+    "ppa": "ขายไฟ / PPA",
+    "roi": "ROI & ผลตอบแทน",
+    "permit": "ขออนุญาต (PEA/MEA/COD)",
+    "warranty": "Warranty / รับประกัน"
+  }
+}
