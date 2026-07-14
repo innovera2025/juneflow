@@ -1,0 +1,9 @@
+{
+  "_source": "Verbatim Thai keys from pototype/master.jsx MasterModel (L507-578). Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx source — same pattern as project-strings.json / org-strings.json. navTitle is a nav_i18n key (tn(): the page title + breadcrumb crumb-2, master.jsx:525-526). statusActive('ใช้งาน') / statusDraft('ร่าง') render the card badge (master.jsx:545); sqm('ตร.ม.') the spec line (master.jsx:554); item('รายการ') the BOM cell (master.jsx:563); unit('ยูนิต') the bottom count line (master.jsx:570). Each value is a real i18n key (nav_i18n -> tn, phrases -> tp); th echoes the key.",
+  "navTitle": "Model / แบบบ้าน",
+  "statusActive": "ใช้งาน",
+  "statusDraft": "ร่าง",
+  "sqm": "ตร.ม.",
+  "item": "รายการ",
+  "unit": "ยูนิต"
+}
