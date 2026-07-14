@@ -177,6 +177,49 @@ export class TenantDb {
   }
 
   /**
+   * WRITE door for a parent-FK-scoped child table (project_node, ...) that
+   * carries no companyId column of its own — the insert counterpart to
+   * selectThrough(). Fail-closed BY CONSTRUCTION: it FIRST verifies this tenant
+   * owns the company_id-scoped parent row (parent.id = parentId AND
+   * parent.company_id = <tenant>) and throws TenantScopeError otherwise, so a
+   * child can never be written under another tenant's parent. Only then does it
+   * INSERT ... RETURNING. Callers MUST set every row's parent FK to `parentId`
+   * (e.g. project_node.project_id = the verified project) — the scope anchors on
+   * that verified parent exactly like selectThrough anchors its reads.
+   */
+  async insertThrough<T extends PgTable>(
+    table: T,
+    parent: TenantTable,
+    parentId: string,
+    rows: readonly T["$inferInsert"][],
+  ): Promise<T["$inferSelect"][]> {
+    const parentPk = (parent as PgTable & { id?: PgColumn }).id;
+    if (!parentPk) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_HOP_INVALID: insertThrough() parent must expose an id " +
+          "primary-key column to anchor the tenant scope on",
+      );
+    }
+    const owned = await this.#db
+      .select({ id: parentPk })
+      .from(parent)
+      .where(
+        and(eq(parentPk, parentId), eq(parent.companyId, this.companyId)) as SQL,
+      );
+    if (owned.length === 0) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_PARENT_DENIED: insertThrough() parent row is not owned " +
+          "by this tenant — a child cannot be written under a foreign parent",
+      );
+    }
+    const created = await this.#db
+      .insert(table)
+      .values(rows as T["$inferInsert"][])
+      .returning();
+    return created as T["$inferSelect"][];
+  }
+
+  /**
    * Read a platform-global REFERENCE table (no `companyId` column exists, so no
    * tenant predicate is possible — exactly: package, project_type, company).
    * Read-only, and gated TWICE: the ReferenceTable type blocks companyId-column
