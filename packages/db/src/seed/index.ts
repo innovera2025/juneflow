@@ -74,12 +74,6 @@ import { PACKAGES } from "./packages.js";
 /** money → fixed 2-decimal string (drizzle numeric maps to string). */
 const m = (n: number): string => Math.abs(n).toFixed(2);
 
-/** parse a leading integer out of a mock running-number string, fallback 1. */
-const runInt = (s: string): number => {
-  const n = parseInt(String(s).replace(/[^0-9]/g, ""), 10);
-  return Number.isFinite(n) && n > 0 ? n : 1;
-};
-
 /**
  * Cyclic array pick that is guaranteed non-undefined (satisfies the repo's
  * `noUncheckedIndexedAccess` strictness for FK/enum wiring). Wraps the index so
@@ -254,15 +248,17 @@ const BLOCK_SEED = [
   { code: "D", name: "Block D", modelKey: "D-1" },
 ];
 
-// master.jsx:584 CC_SEED (7 cost centers)
+// master.jsx:584 CC_SEED (7 cost centers) — B-059 (P1-BE-11): full superset
+// columns type/link/owner/budget/status transcribed verbatim from the mock;
+// budget is FULL baht (numeric + currency_code THB via the column default).
 const CC_SEED = [
-  { code: "CC-CONS-RJP-01", name: "โครงการ ราชพฤกษ์ เฟส 1" },
-  { code: "CC-CONS-RJP-02", name: "โครงการ ราชพฤกษ์ เฟส 2" },
-  { code: "CC-CONS-RJP-03", name: "โครงการ ราชพฤกษ์ เฟส 3" },
-  { code: "CC-CONS-OH", name: "Overhead งานก่อสร้าง" },
-  { code: "CC-PROC", name: "ฝ่ายจัดซื้อ" },
-  { code: "CC-SLS-RJP", name: "Sales · ราชพฤกษ์" },
-  { code: "CC-FIN", name: "ฝ่ายบัญชี-การเงิน" },
+  { code: "CC-CONS-RJP-01", name: "โครงการ ราชพฤกษ์ เฟส 1", type: "Project" as const, link: "เฟส 1 / Block A", owner: "สมชาย", budget: 84_400_000, status: "approved" as const },
+  { code: "CC-CONS-RJP-02", name: "โครงการ ราชพฤกษ์ เฟส 2", type: "Project" as const, link: "เฟส 2 / Block B+C", owner: "สมชาย", budget: 124_800_000, status: "approved" as const },
+  { code: "CC-CONS-RJP-03", name: "โครงการ ราชพฤกษ์ เฟส 3", type: "Project" as const, link: "เฟส 3 / Block D", owner: "สมชาย", budget: 75_300_000, status: "approved" as const },
+  { code: "CC-CONS-OH", name: "Overhead งานก่อสร้าง", type: "Overhead" as const, link: "ฝ่ายก่อสร้าง · ทุกโครงการ", owner: "ผอ.สมพร", budget: 8_400_000, status: "approved" as const },
+  { code: "CC-PROC", name: "ฝ่ายจัดซื้อ", type: "Dept" as const, link: "—", owner: "ธีรพงษ์", budget: 1_200_000, status: "approved" as const },
+  { code: "CC-SLS-RJP", name: "Sales · ราชพฤกษ์", type: "Project" as const, link: "ทุกเฟส", owner: "รุจิรา", budget: 4_800_000, status: "approved" as const },
+  { code: "CC-FIN", name: "ฝ่ายบัญชี-การเงิน", type: "Dept" as const, link: "—", owner: "ปรานี", budget: 800_000, status: "approved" as const },
 ];
 
 // master-party.jsx:6 VENDOR_SEED (6) — C6. B-026(ก): all seeded as kind=supplier (the 2
@@ -316,14 +312,16 @@ const ORG_SEED = [
   { lvl: 0, ic: "building", name: "juneflow Property จำกัด", code: "IPM", note: "บริษัทย่อย · บริหารชุมชน" },
 ];
 
-// master.jsx:737 DOCNUM_SEED (10 running-number counters)
+// master.jsx:737 DOCNUM_SEED (10 running-number counters) — B-060 (P1-BE-11):
+// `running` is stored as TEXT verbatim from the mock (leading zeros kept,
+// BOQ row = the non-numeric "B-02 v3").
 const DOCNUM_SEED = [
   { type: "Purchase Requisition", prefix: "PR", running: "0418", reset: "ทุกปีบัญชี", lock: false },
   { type: "Purchase Order", prefix: "PO", running: "0291", reset: "ทุกปีบัญชี", lock: true },
   { type: "Work Order", prefix: "WO", running: "0117", reset: "ทุกปีบัญชี", lock: true },
   { type: "Goods Receipt", prefix: "GR", running: "0148", reset: "ทุกปีบัญชี", lock: true },
   { type: "Return", prefix: "RT", running: "0014", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Bill of Quantities", prefix: "BOQ", running: "02", reset: "—", lock: true },
+  { type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset: "—", lock: true },
   { type: "Petty Cash", prefix: "PT", running: "0148", reset: "ทุกเดือน", lock: false },
   { type: "Stock Transfer", prefix: "TR", running: "0084", reset: "ทุกปีบัญชี", lock: false },
   { type: "Issue (เบิก)", prefix: "IS", running: "0218", reset: "ทุกปีบัญชี", lock: false },
@@ -914,7 +912,12 @@ async function seed(): Promise<void> {
       await tx.insert(schema.projectNodes).values(nodeRows);
 
       await tx.insert(schema.costCenters).values(
-        CC_SEED.map((c) => ({ id: det(`cc:${c.code}`), projectId: det("project:rjp"), code: c.code, name: c.name })),
+        // B-059: full mock columns; budget = FULL baht numeric (m() 2-decimal
+        // string), currency_code = THB via the column default.
+        CC_SEED.map((c) => ({
+          id: det(`cc:${c.code}`), projectId: det("project:rjp"), code: c.code, name: c.name,
+          type: c.type, link: c.link, owner: c.owner, budget: m(c.budget), status: c.status,
+        })),
       );
 
       // B-023(ก)+B-026(ก): master-party VENDOR_SEED (6, all supplier) + 7 subcon firms.
@@ -959,7 +962,8 @@ async function seed(): Promise<void> {
       await tx.insert(schema.docNumberings).values(
         DOCNUM_SEED.map((d) => ({
           id: det(`docnum:${d.prefix}`), companyId: CO1, type: d.type, prefix: d.prefix,
-          running: runInt(d.running), resetRule: d.reset, locked: d.lock,
+          // B-060: verbatim mock string (leading zeros / "B-02 v3" preserved).
+          running: d.running, resetRule: d.reset, locked: d.lock,
         })),
       );
 
