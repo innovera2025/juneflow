@@ -93,12 +93,13 @@ async function buildTestApp(
 
 // --- seed-shaped canned rows (doc_numbering schema / DOCNUM_SEED). The stub
 // returns post-WHERE rows, so these transcribe the schema columns the route
-// reads: running is the stored integer (the seed's "0291" leading-zero string
-// is mock-only display formatting), reset_rule/locked are the renamed columns.
+// reads: running is the stored TEXT verbatim from the mock — leading zeros
+// kept ("0418") and non-numeric values allowed (BOQ "B-02 v3") per B-060(ก),
+// reset_rule/locked are the renamed columns.
 const docRow = (
   type: string,
   prefix: string,
-  running: number,
+  running: string,
   resetRule: string,
   locked: boolean,
 ) => ({
@@ -113,9 +114,9 @@ const docRow = (
   updatedAt: new Date(),
 });
 const seedDocNumbering = [
-  docRow("Purchase Requisition", "PR", 418, "ทุกปีบัญชี", false),
-  docRow("Purchase Order", "PO", 291, "ทุกปีบัญชี", true),
-  docRow("Work Order", "WO", 117, "ทุกปีบัญชี", true),
+  docRow("Purchase Requisition", "PR", "0418", "ทุกปีบัญชี", false),
+  docRow("Purchase Order", "PO", "0291", "ทุกปีบัญชี", true),
+  docRow("Bill of Quantities", "BOQ", "B-02 v3", "—", true),
 ];
 
 describe("GET /api/v1/doc-numbering — auth", () => {
@@ -132,7 +133,7 @@ describe("GET /api/v1/doc-numbering — auth", () => {
 });
 
 describe("GET /api/v1/doc-numbering — counters in the B-014 list envelope", () => {
-  it("wraps the counters with {id, type, prefix, running, reset_rule, locked}", async () => {
+  it("wraps the counters with {id, type, prefix, running, reset_rule, locked} — running is a verbatim STRING (B-060)", async () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -142,11 +143,14 @@ describe("GET /api/v1/doc-numbering — counters in the B-014 list envelope", ()
 
     expect(res.statusCode).toBe(200);
     // B-014: 3 rows returned as a single full page (page_size = max(3, 50) = 50).
+    // B-060: running goes on the wire as the stored text — the leading zeros
+    // survive ("0418" stays "0418", never 418) and the BOQ row carries the
+    // non-numeric "B-02 v3" verbatim (master.jsx:743/874).
     expect(res.json()).toEqual({
       data: [
-        { id: "docnum-PR", type: "Purchase Requisition", prefix: "PR", running: 418, reset_rule: "ทุกปีบัญชี", locked: false },
-        { id: "docnum-PO", type: "Purchase Order", prefix: "PO", running: 291, reset_rule: "ทุกปีบัญชี", locked: true },
-        { id: "docnum-WO", type: "Work Order", prefix: "WO", running: 117, reset_rule: "ทุกปีบัญชี", locked: true },
+        { id: "docnum-PR", type: "Purchase Requisition", prefix: "PR", running: "0418", reset_rule: "ทุกปีบัญชี", locked: false },
+        { id: "docnum-PO", type: "Purchase Order", prefix: "PO", running: "0291", reset_rule: "ทุกปีบัญชี", locked: true },
+        { id: "docnum-BOQ", type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset_rule: "—", locked: true },
       ],
       page: 1,
       page_size: 50,
