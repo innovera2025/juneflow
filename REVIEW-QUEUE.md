@@ -19,6 +19,8 @@
 
 ## คิวรอ promote
 
+> 🔍 **AUDIT batch 3 — PROMOTABLE** (orch-A · 2026-07-14 · pinned `fde14e6` · workflow 14 agents): 21 แถว = **20 PASS + 1 WARN** (§8/B-054 — org.toast* ใช้ ASCII quotes ต่างจาก curly quotes ใน pototype · ตรงกับ option ก ที่ Wei อนุมัติทุกตัวอักษร = approved deviation · minor · แนะ glyph fix ก่อน toast โดน G5) · cross-cut: sacred integrity ทุกไฟล์ trace ครบ ✓ · turbo 28/29 (แดงเดียว = smoke ECONNREFUSED ต้อง docker stack — pre-existing ไม่ใช่ของ batch) · live PG16 migrations 0000-0011 + seed idempotent ×2 ✓ (83 ตาราง) · board consistency ✓ · adversarial verify ทุก finding → **0 blocker-level defect** · ของแถมพบ 1: prod compose env mismatch → B-055
+
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
 | P0-DEV-06 | devops · infra/docker-compose.yml — BETTER_AUTH_SECRET dev-default (B-038ก) | commit `10171ea` (feature/devops→dev merge `4b7ead3`) — เพิ่ม `BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-juneflow-dev-secret}` ใน api+worker (mirror POSTGRES_PASSWORD) · prod compose fail-fast ไม่แตะ · self gate-4.5: sacred untouched · zone infra ล้วน · ไม่มี secret literal (dev-default placeholder) | — (infra config · ไม่มีจอ) · หลักฐาน: `docker compose config` = CONFIG_OK · api boot ได้เมื่อ compose up (ปลด P1-BE-01 fail-fast) | 2026-07-13 |
