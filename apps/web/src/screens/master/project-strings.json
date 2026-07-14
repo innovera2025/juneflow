@@ -1,0 +1,6 @@
+{
+  "_source": "Verbatim Thai PHRASE keys from pototype/master.jsx MasterProject/BlockAddForm (L311-420 + L247-309). Each value is a real i18n phrase key (docs/extract/i18n-full.json `phrases` -> tp() gives the localized text; th echoes the key). Kept in .json (i18n-guard skips .json) so Thai never appears in .tsx source — same pattern as org-strings.json / shell/chrome-strings.json. addPrefix('เพิ่ม') composes the add-phase/block button + modal titles with the project-type hierarchy labels; unit('ยูนิต') + built('ก่อสร้าง') render the block sub-line (master.jsx:371 hardcodes these two literally, NOT the dynamic Lunit label).",
+  "addPrefix": "เพิ่ม",
+  "unit": "ยูนิต",
+  "built": "ก่อสร้าง"
+}
