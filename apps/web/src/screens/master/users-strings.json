@@ -1,0 +1,11 @@
+{
+  "_source": "Verbatim Thai keys from pototype/master.jsx UsersPermissions / UserAddForm / RoleAddForm (L895-1116). Kept in .json (the i18n-guard hook skips .json) so Thai never appears in the .tsx source — same pattern as model-strings.json / org-strings.json. navSystem ('ระบบ') + navTitle ('ผู้ใช้ & สิทธิ์') are nav_i18n keys (tn(): the two breadcrumb crumbs, master.jsx:927). permCreate/permEdit/permApprove/permCancel are the 4 phrase keys (tp()) for permission columns 2-5 (master.jsx PERMS[1..4]:907) — column 1 'ดู' uses the perm.view DICT key, so the two translators are NOT merged. deptCons ('CONS — ฝ่ายก่อสร้าง') is a phrase key (tp()); the other 5 dept labels PROC/FIN/SLS/ADM/WH resolve via their dept.* DICT keys (t()) since only CONS lacks a dict key — mixed routing is faithful (each label has exactly one existing key, none invented). phoneLabel ('เบอร์โทร') is a phrase key (tp()). Each value is a real i18n key; th echoes the key.",
+  "navSystem": "ระบบ",
+  "navTitle": "ผู้ใช้ & สิทธิ์",
+  "permCreate": "สร้าง",
+  "permEdit": "แก้ไข",
+  "permApprove": "อนุมัติ",
+  "permCancel": "ยกเลิก",
+  "deptCons": "CONS — ฝ่ายก่อสร้าง",
+  "phoneLabel": "เบอร์โทร"
+}
