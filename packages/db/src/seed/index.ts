@@ -173,15 +173,18 @@ const permsFrom = (matrix: Matrix): schema.RolePerms => {
   });
   return out;
 };
-const ROLE_DEFS: { key: string; name: string; limit: number | null; perms: Matrix }[] = [
-  { key: "pm", name: "Project Manager", limit: 1000000, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,0,0,0,0]] },
-  { key: "dir", name: "Director · CONS", limit: null, perms: [[1,0,0,0,0],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]] },
-  { key: "proc", name: "Procurement Mgr", limit: 500000, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,1,0,0],[0,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
-  { key: "site", name: "Site Engineer", limit: 200000, perms: [[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
-  { key: "acc", name: "Accounting", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,0,0,0,0]] },
-  { key: "sale", name: "Sales / REM", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0]] },
-  { key: "wh", name: "Warehouse", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0],[1,1,1,1,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
-  { key: "exec", name: "ผู้บริหาร / ดูได้อย่างเดียว", limit: null, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
+// B-051 (P1-BE-09): `level` is the master.jsx ROLE_PRESETS approval tier (0..4);
+// `limit` is the single blanket approval ceiling in REAL baht (the mock's
+// "1,000,000 ฿" / "ไม่จำกัด" / "—" display strings → numeric | null).
+const ROLE_DEFS: { key: string; name: string; limit: number | null; level: number; perms: Matrix }[] = [
+  { key: "pm", name: "Project Manager", limit: 1000000, level: 3, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,0,0,0,0]] },
+  { key: "dir", name: "Director · CONS", limit: null, level: 4, perms: [[1,0,0,0,0],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]] },
+  { key: "proc", name: "Procurement Mgr", limit: 500000, level: 2, perms: [[1,0,0,0,0],[1,1,1,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,1,1,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,1,0,0],[0,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
+  { key: "site", name: "Site Engineer", limit: 200000, level: 1, perms: [[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,0,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
+  { key: "acc", name: "Accounting", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,0,0,0,0]] },
+  { key: "sale", name: "Sales / REM", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[1,1,1,0,0],[1,1,1,0,0],[1,0,0,0,0]] },
+  { key: "wh", name: "Warehouse", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0],[1,1,1,1,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
+  { key: "exec", name: "ผู้บริหาร / ดูได้อย่างเดียว", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
 ];
 
 // subscription-admin.jsx:19 COMPANY_USERS["T-1001"] (12 users)
@@ -229,13 +232,19 @@ const GROUP_COMPANIES = [
   { key: "JC", name: "บจก. จูนโฟลว์ คอนสตรัคชั่น", short: "JC", taxId: "0-1055-58033-22-1", color: "#0F766E", docPrefix: "JC", biz: "รับเหมาก่อสร้าง & บริการ" },
 ] as const;
 
-// master.jsx:426 MODELS (5)
+// master.jsx:426 MODELS (5) — B-050 (P1-BE-09): full house-model attributes.
+// `code`/`type`(=name, pure display, no "A-1 · " prefix now that code is its own
+// column)/area/bed/bath/parking/status/color transcribed verbatim; `price` is
+// converted from the mock's millions (8.24) to REAL full baht (8_240_000 — the
+// schema stores baht + currency_code, FE divides by 1e6 for "M ฿"). The mock's
+// hardcoded `count` (unit count) is NOT seeded — unit_count/bom_item_count are
+// derived at query time (C10).
 const MODELS = [
-  { key: "A-1", name: "A-1 · บ้านเดี่ยว 2 ชั้น", area: "168.00" },
-  { key: "B-1", name: "B-1 · ทาวน์โฮม 2 ชั้น", area: "92.00" },
-  { key: "C-1", name: "C-1 · ทาวน์โฮม 3 ชั้น", area: "138.00" },
-  { key: "D-1", name: "D-1 · บ้านแฝด 2 ชั้น", area: "142.00" },
-  { key: "E-1", name: "E-1 · ทาวน์โฮม 4 ห้องนอน (ใหม่)", area: "145.00" },
+  { code: "A-1", type: "บ้านเดี่ยว 2 ชั้น", area: "168.00", bed: 4, bath: 4, parking: 2, price: 8_240_000, status: "active" as const, color: "#0B2A4A" },
+  { code: "B-1", type: "ทาวน์โฮม 2 ชั้น", area: "92.00", bed: 3, bath: 2, parking: 1, price: 4_850_000, status: "active" as const, color: "#0F766E" },
+  { code: "C-1", type: "ทาวน์โฮม 3 ชั้น", area: "138.00", bed: 4, bath: 3, parking: 2, price: 5_650_000, status: "active" as const, color: "#1D4ED8" },
+  { code: "D-1", type: "บ้านแฝด 2 ชั้น", area: "142.00", bed: 3, bath: 3, parking: 2, price: 6_420_000, status: "active" as const, color: "#B45309" },
+  { code: "E-1", type: "ทาวน์โฮม 4 ห้องนอน (ใหม่)", area: "145.00", bed: 4, bath: 3, parking: 2, price: 5_950_000, status: "draft" as const, color: "#7C3AED" },
 ];
 
 // master.jsx:240 BLOCK_SEED (3 blocks — project_node kind='block')
@@ -806,6 +815,10 @@ async function seed(): Promise<void> {
           id: det(`role:${r.key}`), companyId: CO1, name: r.name,
           approvalLimits: r.limit == null ? {} : { default: r.limit },
           perms: permsFrom(r.perms),
+          // B-051 superset: single blanket limit as real baht (null = unlimited /
+          // no ceiling) + the approval tier. currency_code defaults to THB.
+          approvalLevel: r.level,
+          approvalLimit: r.limit == null ? null : m(r.limit),
         })),
       );
 
@@ -861,7 +874,13 @@ async function seed(): Promise<void> {
       );
 
       await tx.insert(schema.models).values(
-        MODELS.map((mo) => ({ id: det(`model:${mo.key}`), companyId: CO1, name: mo.name, area: mo.area })),
+        MODELS.map((mo) => ({
+          id: det(`model:${mo.code}`), companyId: CO1,
+          // name = pure display name (mock `type`); code is its own column now.
+          name: mo.type, code: mo.code, area: mo.area,
+          bed: mo.bed, bath: mo.bath, parking: mo.parking,
+          price: m(mo.price), status: mo.status, color: mo.color,
+        })),
       );
 
       // project_node tree: 16 phase nodes + 3 block nodes + 84 unit nodes (B-01..B-84).

@@ -99,7 +99,27 @@ export const platformInvoiceStatus = pgEnum("platform_invoice_status", [
   "pending",
   "overdue",
 ]);
-export const userStatus = pgEnum("user_status", ["active", "blocked"]);
+// `invited` (B-051, P1-BE-09) is the post-invite / pre-activation state — a user
+// invited by email who has not yet set a password (master.jsx UserAddForm:1033-1045
+// "ส่งคำเชิญทางอีเมล + ผู้ใช้ตั้งรหัสผ่านเอง"). Appended after the original
+// active|blocked pair so the enum ordinal of existing values never shifts.
+export const userStatus = pgEnum("user_status", ["active", "blocked", "invited"]);
+
+/**
+ * User.department — the org unit a user belongs to (B-051, P1-BE-09). The 6
+ * codes are the master.jsx:1025 UserAddForm dropdown values (CONS ฝ่ายก่อสร้าง /
+ * PROC ฝ่ายจัดซื้อ / FIN ฝ่ายบัญชี-การเงิน / SLS ฝ่ายขาย-การตลาด / ADM ฝ่ายบริหาร /
+ * WH คลังวัสดุ) — only the stable code is stored; the Thai label is an i18n
+ * display concern.
+ */
+export const department = pgEnum("department", [
+  "CONS",
+  "PROC",
+  "FIN",
+  "SLS",
+  "ADM",
+  "WH",
+]);
 
 // ---------------------------------------------------------------------------
 // Tables
@@ -256,6 +276,16 @@ export const roles = pgTable("role", {
     .default({}),
   // Appendix B item 13 — 11-module x 5-permission matrix (master.jsx ROLE_PRESETS).
   perms: jsonb("perms").$type<RolePerms>().notNull().default({}),
+  // B-051 (P1-BE-09) role superset — the master.jsx ROLE_PRESETS single-limit
+  // fields the perms matrix screen shows/edits, kept alongside the dictionary
+  // per-doc-type approval_limits json above:
+  //   approval_level = the approval tier 0..4 (mock `level`; 0 = no approval
+  //     rights). approval_limit = the single blanket approval ceiling as REAL
+  //     money (numeric + currency_code — NEVER the mock's "1,000,000 ฿" /
+  //     "ไม่จำกัด" display strings); null = unlimited or no ceiling.
+  approvalLevel: integer("approval_level").notNull().default(0),
+  approvalLimit: numeric("approval_limit", { precision: 16, scale: 2 }),
+  currencyCode: text("currency_code").notNull().default("THB"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -281,6 +311,10 @@ export const users = pgTable(
     name: text("name").notNull(),
     roleId: uuid("role_id").references(() => roles.id, { onDelete: "set null" }),
     status: userStatus("status").notNull().default("active"),
+    // B-051 (P1-BE-09): the user's org unit (master.jsx:1025). Nullable — the
+    // seeded T-1001 members (subscription-admin.jsx) carry no department, and it
+    // is only required on the invite form, not by any tenant-scope rule.
+    department: department("department"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
