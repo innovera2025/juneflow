@@ -1,6 +1,7 @@
 // GET /companies — the tenant's affiliated group companies (P1-BE-03, B-041(ก+)).
 //
-// Contract (openapi.yaml /companies → Company[]): bare array (B-014) of
+// Contract (openapi.yaml /companies): the B-014 paginated list envelope
+// {data, page, page_size, total} where each `data` row is a Company
 // {id, name, short, color, biz, tax_id, doc_prefix, project_count} — the
 // Multi-Company switcher rows (company-accept.jsx COMPANIES / PLAN.md
 // Appendix B item 14).
@@ -21,6 +22,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { companies, projects } from "@juneflow/db/schema";
 import { loadOwnCompany } from "./profile-data.js";
+import { listEnvelope } from "./list-envelope.js";
 
 /** Register GET /companies on the given (already /api/v1-prefixed) scope. */
 export function registerCompaniesRoute(app: FastifyInstance): void {
@@ -55,16 +57,21 @@ export function registerCompaniesRoute(app: FastifyInstance): void {
     }
 
     return reply.code(200).send(
-      members.map((c) => ({
-        id: c.id,
-        name: c.name,
-        short: c.short,
-        color: c.color,
-        biz: c.biz,
-        tax_id: c.taxId,
-        doc_prefix: c.docPrefix,
-        project_count: projectCount.get(c.id) ?? 0,
-      })),
+      // B-014: wrap the group members in the paginated list envelope
+      // ({data, page, page_size, total}). The full group is returned as one
+      // page — see list-envelope.ts.
+      listEnvelope(
+        members.map((c) => ({
+          id: c.id,
+          name: c.name,
+          short: c.short,
+          color: c.color,
+          biz: c.biz,
+          tax_id: c.taxId,
+          doc_prefix: c.docPrefix,
+          project_count: projectCount.get(c.id) ?? 0,
+        })),
+      ),
     );
   });
 }
