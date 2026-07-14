@@ -29,6 +29,7 @@ import { LoginScreen } from "./screens/login/login-screen";
 import { MasterCompany } from "./screens/master/master-company";
 import { MasterModel } from "./screens/master/master-model";
 import { MasterProject } from "./screens/master/master-project";
+import { MasterProjectType } from "./screens/master/master-project-type";
 import { UsersPermissions } from "./screens/master/users-permissions";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
@@ -43,6 +44,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "master.company": MasterCompany,
   "master.model": MasterModel,
   "master.project": MasterProject,
+  "master.ptype": MasterProjectType,
   users: UsersPermissions,
 };
 
