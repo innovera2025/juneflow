@@ -6,6 +6,12 @@ import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 
 import '../models/entity.dart';
+import '../models/get_land_plots_response.dart';
+import '../models/get_sales_bookings_response.dart';
+import '../models/get_sales_contracts_response.dart';
+import '../models/get_sales_downs_response.dart';
+import '../models/get_sales_leads_response.dart';
+import '../models/get_sales_loans_response.dart';
 import '../models/land_plots_id_dd_request_body.dart';
 import '../models/land_plots_id_deal_request_body.dart';
 
@@ -21,7 +27,7 @@ abstract class LandSalesApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/land/plots')
-  Future<List<Entity>> listLandPlots({
+  Future<GetLandPlotsResponse> listLandPlots({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -58,7 +64,7 @@ abstract class LandSalesApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/sales/leads')
-  Future<List<Entity>> listSalesLeads({
+  Future<GetSalesLeadsResponse> listSalesLeads({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -75,7 +81,7 @@ abstract class LandSalesApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/sales/bookings')
-  Future<List<Entity>> listSalesBookings({
+  Future<GetSalesBookingsResponse> listSalesBookings({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -92,7 +98,7 @@ abstract class LandSalesApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/sales/contracts')
-  Future<List<Entity>> listSalesContracts({
+  Future<GetSalesContractsResponse> listSalesContracts({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -109,7 +115,7 @@ abstract class LandSalesApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/sales/downs')
-  Future<List<Entity>> listSalesDowns({
+  Future<GetSalesDownsResponse> listSalesDowns({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -126,7 +132,7 @@ abstract class LandSalesApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/sales/loans')
-  Future<List<Entity>> listSalesLoans({
+  Future<GetSalesLoansResponse> listSalesLoans({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });

@@ -6,6 +6,13 @@ import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 
 import '../models/entity.dart';
+import '../models/get_companies_response.dart';
+import '../models/get_cost_centers_response.dart';
+import '../models/get_customers_response.dart';
+import '../models/get_doc_numbering_response.dart';
+import '../models/get_project_types_response.dart';
+import '../models/get_projects_response.dart';
+import '../models/get_vendors_response.dart';
 import '../models/kind.dart';
 import '../models/project.dart';
 import '../models/project_input.dart';
@@ -16,15 +23,24 @@ part 'master_api.g.dart';
 abstract class MasterApi {
   factory MasterApi(Dio dio, {String? baseUrl}) = _MasterApi;
 
+  /// List the tenant's affiliated group companies (Multi-Company).
+  ///
+  /// B-041(ก+): the บริษัทในเครือ rows behind the CompanySwitcher (company-accept.jsx COMPANIES / PLAN.md Appendix B item 14). Returns the members of the tenant's company group — companies linked via group_parent_id to the tenant's group head. Tenant-scoped: a tenant can only ever see its own group.
+  @GET('/companies')
+  Future<GetCompaniesResponse> listCompanies();
+
   /// List projects (GET /x?filter&page pattern).
   ///
   /// [filter] - Free-text/structured filter (GET /x?filter&page pattern).
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
+  ///
+  /// [pageSize] - Rows per page (B-014). Server applies a default when omitted.
   @GET('/projects')
-  Future<List<Project>> listProjects({
+  Future<GetProjectsResponse> listProjects({
     @Query('filter') String? filter,
     @Query('page') int? page,
+    @Query('page_size') int? pageSize,
   });
 
   /// Create project (POST /x pattern)
@@ -60,7 +76,7 @@ abstract class MasterApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/project-types')
-  Future<List<Entity>> listProjectTypes({
+  Future<GetProjectTypesResponse> listProjectTypes({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -90,7 +106,7 @@ abstract class MasterApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/vendors')
-  Future<List<Entity>> listVendors({
+  Future<GetVendorsResponse> listVendors({
     @Query('kind') Kind? kind,
     @Query('filter') String? filter,
     @Query('page') int? page,
@@ -121,7 +137,7 @@ abstract class MasterApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/customers')
-  Future<List<Entity>> listCustomers({
+  Future<GetCustomersResponse> listCustomers({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -151,7 +167,7 @@ abstract class MasterApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/cost-centers')
-  Future<List<Entity>> listCostCenters({
+  Future<GetCostCentersResponse> listCostCenters({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -181,7 +197,7 @@ abstract class MasterApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/doc-numbering')
-  Future<List<Entity>> listDocNumbering({
+  Future<GetDocNumberingResponse> listDocNumbering({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });

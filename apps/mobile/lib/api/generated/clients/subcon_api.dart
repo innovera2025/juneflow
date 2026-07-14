@@ -8,6 +8,9 @@ import 'package:retrofit/retrofit.dart';
 import '../models/defects_id_fix_request_body.dart';
 import '../models/defects_id_recheck_request_body.dart';
 import '../models/entity.dart';
+import '../models/get_acceptance_center_response.dart';
+import '../models/get_subcon_contracts_id_periods_response.dart';
+import '../models/get_subcon_contracts_response.dart';
 import '../models/periods_id_deliver_request_body.dart';
 import '../models/periods_id_inspect_request_body.dart';
 import '../models/type.dart';
@@ -24,7 +27,7 @@ abstract class SubconApi {
   ///
   /// [page] - 1-based page index (GET /x?filter&page pattern).
   @GET('/subcon-contracts')
-  Future<List<Entity>> listSubconContracts({
+  Future<GetSubconContractsResponse> listSubconContracts({
     @Query('filter') String? filter,
     @Query('page') int? page,
   });
@@ -37,7 +40,7 @@ abstract class SubconApi {
 
   /// List work periods of a subcon contract
   @GET('/subcon-contracts/{id}/periods')
-  Future<List<Entity>> listSubconContractPeriods({
+  Future<GetSubconContractsIdPeriodsResponse> listSubconContractPeriods({
     @Path('id') required String id,
   });
 
@@ -77,7 +80,7 @@ abstract class SubconApi {
 
   /// Acceptance center (GET ?type=gr|period|house&status=)
   @GET('/acceptance-center')
-  Future<List<Entity>> listAcceptanceCenter({
+  Future<GetAcceptanceCenterResponse> listAcceptanceCenter({
     @Query('type') Type? type,
     @Query('status') String? status,
   });
