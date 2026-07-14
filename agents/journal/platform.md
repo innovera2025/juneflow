@@ -84,3 +84,9 @@
 - ทำอะไร: compile §5 (subagent draft) → apply 59 dict key ลง i18n 2 สำเนา (b667562) · dept.CONS ตัด (no-dup)
 - ตัดสินใจอะไร: — (Wei อนุมัติ B-050/B-051 · th verbatim ตาม B-039 pattern)
 - เจออะไร: cmp byte-identical · i18n 19/19 · gate-4.5 PASS → orch-B merge
+
+
+## 2026-07-14 · P1-PLAT-03 — §7 i18n (62 keys master.company+project · B-052=ก prep · orchestrator-driven)
+- ทำอะไร: compile §7 (subagent draft · cite ทุก line) → apply 62 dict key ลง i18n 2 สำเนา (8bccc0e) · org/project/block/createProj
+- ตัดสินใจอะไร: — (B-052=ก Wei อนุมัติ · SACRED_OVERRIDE=wei-approved:B-052 · th verbatim B-039 pattern · org.* แยกจาก company.*)
+- เจออะไร: cmp byte-identical · i18n 19/19 · gate-4.5 PASS → orch-B merge · เหลือ §6 org-hierarchy contract (orch-A) ปลด web master
