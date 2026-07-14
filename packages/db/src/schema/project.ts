@@ -189,6 +189,13 @@ export const projectNodes = pgTable("project_node", {
   }),
   kind: text("kind").notNull(),
   name: text("name").notNull(),
+  // Node code (B-053): the block/unit code surfaced as HierarchyNode.code.
+  // Blocks carry the user-entered code (e.g. "B"); units carry the generated
+  // "{blockCode}-{NN}" (padStart 2); phases have none. Nullable (phase nodes +
+  // pre-existing rows). Block-code uniqueness within a project is enforced by
+  // the createProjectNode handler, not a DB constraint (project_node has no
+  // company_id — see tenant scope), so no unique index here.
+  code: text("code"),
   saleStatus: text("sale_status"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()

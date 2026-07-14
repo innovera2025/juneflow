@@ -898,7 +898,8 @@ async function seed(): Promise<void> {
           id: det(`block:${b.code}`), projectId: det("project:rjp"),
           // blocks live under เฟส 2 (Block B+C) of ราชพฤกษ์
           parentId: det("node:rjp:p2"), modelId: det(`model:${b.modelKey}`),
-          kind: "block", name: b.name, saleStatus: null,
+          // B-053: the block code (HierarchyNode.code / unit-code prefix).
+          kind: "block", name: b.name, code: b.code, saleStatus: null,
         });
       }
       // 84 unit leaf nodes under Block B (B-009: persist the sales-process generator).
@@ -906,7 +907,8 @@ async function seed(): Promise<void> {
         nodeRows.push({
           id: det(`unitnode:${i}`), projectId: det("project:rjp"),
           parentId: det("block:B"), modelId: det("model:B-1"),
-          kind: "unit", name: unitCode(i), saleStatus: unitStage(i),
+          // B-053: unit code = "{blockCode}-{NN}" (= its name).
+          kind: "unit", name: unitCode(i), code: unitCode(i), saleStatus: unitStage(i),
         });
       }
       await tx.insert(schema.projectNodes).values(nodeRows);
@@ -936,14 +938,19 @@ async function seed(): Promise<void> {
         CUSTOMER_SEED.map((c) => ({ id: det(`customer:${c.code}`), companyId: CO1, name: c.name, taxId: c.taxId })),
       );
 
-      // org tree — parent = last-seen node one level up.
+      // org tree — parent = last-seen node one level up. createdAt is staggered
+      // by array index (all rows would otherwise share the transaction's now())
+      // so GET /org-units can return the ORG_SEED document order via a
+      // (created_at, id) sibling sort — the mock renders ORG_SEED in array order.
       const orgRows: (typeof schema.orgUnits.$inferInsert)[] = [];
       const lastAtLevel: Record<number, string> = {};
-      ORG_SEED.forEach((o) => {
+      const ORG_EPOCH = Date.UTC(2024, 0, 1, 0, 0, 0);
+      ORG_SEED.forEach((o, i) => {
         const id = det(`org:${o.code}`);
         orgRows.push({
           id, companyId: CO1, parentId: o.lvl === 0 ? null : (lastAtLevel[o.lvl - 1] ?? null),
           level: o.lvl, icon: o.ic, name: o.name, code: o.code, note: o.note,
+          createdAt: new Date(ORG_EPOCH + i * 1000),
         });
         lastAtLevel[o.lvl] = id;
       });

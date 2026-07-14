@@ -410,6 +410,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/org-units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List org structure nodes (flat ordered tree, lvl 0-2) */
+        get: operations["listOrgUnits"];
+        put?: never;
+        /** Create org node (company lvl0 or department/team lvl 1-2) */
+        post: operations["createOrgUnit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/org-units/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Update org node (partial merge - omitted fields keep current values) */
+        put: operations["updateOrgUnit"];
+        post?: never;
+        /** Delete org node (cascades to the whole subtree) */
+        delete: operations["deleteOrgUnit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create block node under the first/active phase (auto-generates N unit nodes, status empty, max 200) */
+        post: operations["createProjectNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/project-types": {
         parameters: {
             query?: never;
@@ -2098,6 +2155,26 @@ export interface components {
         Entity: {
             [key: string]: unknown;
         };
+        /** @description One node of a project's structure tree (B-053). kind follows the project type's hierarchy labels; unit nodes carry sale/build status. */
+        HierarchyNode: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parent_id?: string;
+            /** @enum {string} */
+            kind: "phase" | "block" | "unit";
+            code?: string;
+            name: string;
+            /** Format: uuid */
+            model_id?: string;
+            units?: number;
+            sold?: number;
+            built?: number;
+            color?: string;
+            status?: string;
+        } & {
+            [key: string]: unknown;
+        };
         /** @description Standard list envelope (B-014). Every list endpoint returns this wrapper: data is the page of rows (item type set per endpoint via allOf), the rest is pagination metadata. Tenant scope still applies. */
         Paginated: {
             data: unknown[];
@@ -2207,6 +2284,12 @@ export interface components {
             type: "realestate" | "solar" | "civil" | "service";
             budget?: number;
             currency_code?: string;
+            short?: string;
+            units?: number;
+            phases?: {
+                label?: string;
+                units?: number;
+            }[];
         };
     };
     responses: {
@@ -2833,7 +2916,108 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Flat ordered tree of hierarchy nodes (phase/block/unit). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["HierarchyNode"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listOrgUnits: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createOrgUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateOrgUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
             200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteOrgUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createProjectNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };

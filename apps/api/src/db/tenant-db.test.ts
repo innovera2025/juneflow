@@ -22,6 +22,10 @@ import {
   users,
   workPeriods,
 } from "@juneflow/db";
+import { projectNodes } from "@juneflow/db";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { Db } from "@juneflow/db/client";
 import { TenantDb, TenantScopeError } from "./tenant-db.js";
 
 const COMPANY = "11111111-1111-1111-1111-111111111111";
@@ -237,6 +241,60 @@ describe("selectThrough scopes parent-FK child tables via their tenant root (P1-
         { fk: workPeriods.contractId, parent: subconContracts },
       ]),
     ).toThrow(/TENANT_SCOPE_ROOT_UNSCOPED/);
+  });
+});
+
+describe("insertThrough is the fail-closed WRITE door for parent-FK child tables (P1-BE-10)", () => {
+  const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+  // A minimal fake base Db: the ownership SELECT returns `ownedRows`; the INSERT
+  // captures its rows. We also capture the SELECT predicate to prove it is
+  // anchored on company_id + the parent id.
+  function fakeDb(ownedRows: unknown[], sink: { where?: SQL; inserted?: unknown[] }): Db {
+    return {
+      select: () => ({
+        from: () => ({
+          where: (where: SQL) => {
+            sink.where = where;
+            return Promise.resolve(ownedRows);
+          },
+        }),
+      }),
+      insert: () => ({
+        values: (rows: unknown[]) => ({
+          returning: () => {
+            sink.inserted = rows;
+            return Promise.resolve(rows);
+          },
+        }),
+      }),
+    } as unknown as Db;
+  }
+
+  it("throws (writes NOTHING) when the parent is not owned by this tenant", async () => {
+    const sink: { where?: SQL; inserted?: unknown[] } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+    await expect(
+      t.insertThrough(projectNodes, projects, PROJECT, [
+        { projectId: PROJECT, kind: "block", name: "B" } as never,
+      ]),
+    ).rejects.toThrow(/TENANT_SCOPE_PARENT_DENIED/);
+    expect(sink.inserted).toBeUndefined();
+    // ownership check is scoped by company_id AND the parent id.
+    const params = new PgDialect().sqlToQuery(sink.where!).params;
+    expect(params).toContain(COMPANY);
+    expect(params).toContain(PROJECT);
+  });
+
+  it("inserts the rows once the parent is proven tenant-owned", async () => {
+    const sink: { where?: SQL; inserted?: unknown[] } = {};
+    const t = new TenantDb(fakeDb([{ id: PROJECT }], sink), COMPANY);
+    const rows = [
+      { projectId: PROJECT, kind: "block", name: "B" } as never,
+      { projectId: PROJECT, kind: "unit", name: "B-01" } as never,
+    ];
+    await t.insertThrough(projectNodes, projects, PROJECT, rows);
+    expect(sink.inserted).toHaveLength(2);
   });
 });
 

@@ -560,7 +560,99 @@ paths:
       operationId: getProjectHierarchy
       responses:
         "200":
+          description: Flat ordered tree of hierarchy nodes (phase/block/unit).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HierarchyNode"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /org-units:
+    get:
+      tags: [master]
+      summary: List org structure nodes (flat ordered tree, lvl 0-2)
+      operationId: listOrgUnits
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create org node (company lvl0 or department/team lvl 1-2)
+      operationId: createOrgUnit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /org-units/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [master]
+      summary: Update org node (partial merge - omitted fields keep current values)
+      operationId: updateOrgUnit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
           $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [master]
+      summary: Delete org node (cascades to the whole subtree)
+      operationId: deleteOrgUnit
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{id}/nodes:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [master]
+      summary: Create block node under the first/active phase (auto-generates N unit nodes, status empty, max 200)
+      operationId: createProjectNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -2936,6 +3028,43 @@ components:
         fields (e.g. AuthLoginInput).
       additionalProperties: true
 
+    HierarchyNode:
+      type: object
+      description: >-
+        One node of a project's structure tree (B-053). kind follows the
+        project type's hierarchy labels; unit nodes carry sale/build status.
+      required: [id, kind, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [phase, block, unit]
+        code:
+          type: string
+        name:
+          type: string
+        model_id:
+          type: string
+          format: uuid
+        units:
+          type: integer
+          minimum: 0
+        sold:
+          type: integer
+          minimum: 0
+        built:
+          type: integer
+          minimum: 0
+        color:
+          type: string
+        status:
+          type: string
+      additionalProperties: true
     Paginated:
       type: object
       description: >-
@@ -3168,3 +3297,18 @@ components:
           type: number
         currency_code:
           type: string
+        short:
+          type: string
+        units:
+          type: integer
+          minimum: 0
+        phases:
+          type: array
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              units:
+                type: integer
+                minimum: 0

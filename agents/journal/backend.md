@@ -472,3 +472,9 @@
 - ทำอะไร: openapi §4 apply โดย orch-B (885d5e2) → subagent: schema superset (model/role/user) + migration 0010 ALTER-only (drizzle-kit gen · ไม่แตะ 0000-0009) + 7 handlers tenant-scoped + seed MODELS/ROLE_DEFS + regen TS + 21 tests. 6 commits.
 - ตัดสินใจอะไร: — (B-050/B-051 Wei อนุมัติ · SACRED_OVERRIDE=wei-approved:B-050 · Dart regen ปล่อย mobile zone กัน zone-gate)
 - เจออะไร: gates เขียวหมด รวม G2-live บน disposable PG16 · gate-4.5 PASS → orch-B merge · backend zone ว่างให้ B-052 wave
+
+
+## 2026-07-14 · P1-BE-10 — §6 org-hierarchy + project-tree (orchestrator-driven sacred round)
+- ทำอะไร: openapi §6 apply โดย orch-B (c6b46a6) → subagent: schema + migration 0011 ALTER-only + /org-units CRUD (rules) + /projects/{id}/nodes + insertThrough door + impl GET hierarchy + seed + regen + 28 tests. 9 commits.
+- ตัดสินใจอะไร: — (B-052/B-053 Wei ratify · SACRED_OVERRIDE=wei-approved:B-052 · in-spec: project_node.code column ใหม่)
+- เจออะไร: gates เขียว (api 176 · drizzle live PG16) · gate-4.5 subagent โดน session-limit → orch-B inline verify PASS
