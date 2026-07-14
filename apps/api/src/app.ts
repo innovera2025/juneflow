@@ -35,6 +35,7 @@ import { registerCountsRoute } from "./routes/counts.js";
 import { registerCompaniesRoute } from "./routes/companies.js";
 import { registerProjectTypesRoute } from "./routes/project-types.js";
 import { registerCostCentersRoute } from "./routes/cost-centers.js";
+import { registerDocNumberingRoute } from "./routes/doc-numbering.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -121,6 +122,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerCompaniesRoute(v1);
       registerProjectTypesRoute(v1);
       registerCostCentersRoute(v1);
+      registerDocNumberingRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,
