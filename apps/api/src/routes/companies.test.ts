@@ -169,28 +169,35 @@ describe("GET /api/v1/companies — group members with the Company shape", () =>
     ).inject({ url: "/api/v1/companies" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual([
-      {
-        id: JF,
-        name: "บจก. จูนโฟลว์ ดีเวลลอปเมนท์",
-        short: "JF",
-        color: "#0B2A4A",
-        biz: "พัฒนาอสังหาริมทรัพย์",
-        tax_id: "0-1055-61012-34-5",
-        doc_prefix: "JF",
-        project_count: 1,
-      },
-      {
-        id: JE,
-        name: "บจก. จูนโฟลว์ เอ็นเนอร์ยี",
-        short: "JE",
-        color: "#B45309",
-        biz: "โรงไฟฟ้าพลังงานแสงอาทิตย์",
-        tax_id: "0-1055-64067-89-0",
-        doc_prefix: "JE",
-        project_count: 0,
-      },
-    ]);
+    // B-014: the group members are wrapped in the paginated list envelope.
+    // Two rows returned as a single full page (page_size = max(2, 50) = 50).
+    expect(res.json()).toEqual({
+      data: [
+        {
+          id: JF,
+          name: "บจก. จูนโฟลว์ ดีเวลลอปเมนท์",
+          short: "JF",
+          color: "#0B2A4A",
+          biz: "พัฒนาอสังหาริมทรัพย์",
+          tax_id: "0-1055-61012-34-5",
+          doc_prefix: "JF",
+          project_count: 1,
+        },
+        {
+          id: JE,
+          name: "บจก. จูนโฟลว์ เอ็นเนอร์ยี",
+          short: "JE",
+          color: "#B45309",
+          biz: "โรงไฟฟ้าพลังงานแสงอาทิตย์",
+          tax_id: "0-1055-64067-89-0",
+          doc_prefix: "JE",
+          project_count: 0,
+        },
+      ],
+      page: 1,
+      page_size: 50,
+      total: 2,
+    });
   });
 
   it("derives the group head from the tenant's own row (head = own id when ungrouped)", async () => {
