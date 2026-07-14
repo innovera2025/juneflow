@@ -149,6 +149,85 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /users:
+    get:
+      tags: [auth]
+      summary: List tenant users (GET /users?filter&page)
+      operationId: listUsers
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [auth]
+      summary: Invite tenant user (email invite; username generated from email; status starts invited)
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /roles:
+    get:
+      tags: [auth]
+      summary: List tenant roles with permission matrix (GET /roles?filter&page)
+      operationId: listRoles
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [auth]
+      summary: Create tenant role (name + approval limit + approval level + permission matrix)
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /roles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    put:
+      tags: [auth]
+      summary: Update tenant role (permission matrix save)
+      operationId: updateRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ============================ Platform Admin ==============================
   /admin/packages:
     get:
@@ -792,6 +871,35 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /models:
+    get:
+      tags: [master]
+      summary: List house models (GET /models?filter&page)
+      operationId: listModels
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [master]
+      summary: Create house model (new model starts as draft)
+      operationId: createModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ============================ BOQ / Procurement ===========================
   /boq:
