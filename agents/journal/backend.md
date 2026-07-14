@@ -429,3 +429,16 @@
 - ทำอะไร: openapi §2 (Paginated + EntityList 40 + 2 inline + PageSize) apply โดย orchestrator (9cf8185) → backend subagent regen TS/Dart + wrap /companies+/projects (listEnvelope) + sweep web shell (res.data) + tests. 6 commits.
 - ตัดสินใจอะไร: — (B-014=ข Wei อนุมัติ · cross-zone apps/web+mobile อนุมัติ atomic · SACRED_OVERRIDE=wei-approved:B-014)
 - เจออะไร: gates เขียวหมด (contract 374 · api 109 · web unit 53 · web build PASS · mobile 16) · gate-4.5 PASS · live G2/G4/G5 defer (no docker) → รอ orchestrator merge + wave-release
+
+
+## 2026-07-14 · P1-BE-06 — GET /project-types (orchestrator-directed loop round)
+- ทำอะไร: `git merge dev` (6f55a29 fast-forward) → impl GET /project-types. route ใหม่ `apps/api/src/routes/project-types.ts` + register บน /api/v1 scope (app.ts) + G3 test `project-types.test.ts` (6 tests). mirror /projects+/companies pattern: อ่าน project_type ผ่าน `TenantDb.selectReference` (reference table ไม่มี company_id) → map {id,key,name,hierarchy,modules} → `listEnvelope(...)`. 2 logical commits (39a4254 route · d19aa0c tests).
+- ตัดสินใจอะไร:
+  - **project_type = platform-global reference table** (erd ไม่มี company_id · REFERENCE_TABLES allowlist ใน tenant-db.ts ครอบ package/project_type/company อยู่แล้ว) → ใช้ `selectReference` ไม่ใช่ `select` scoped · ไม่มี per-tenant filter แต่ยัง fail-closed 401 เมื่อไม่มี request.db (posture เดียวกับ /projects · /companies) → no scope leak เพราะไม่แตะ tenant-owned table ใดเลย.
+  - **seed ไม่ต้องแตะ** — project_types seed มีครบ 4 type แล้ว (seed/index.ts:848 · id=`det("ptype:"+key)` deterministic/persist ตาม P0-BE-10) → task บอก "persist, don't regenerate" = ไม่มีอะไรต้องทำ.
+  - **modules คืน string[] verbatim ไม่ reshape เป็น {}** — pototype `project-types.jsx` เก็บ modules เป็น object `{land:1,...}` แต่ DB schema (`jsonb $type<string[]>`) + seed persist เป็น array ของ enabled keys (P0-BE-10 ตัดสินไว้). Entity opaque (`additionalProperties:true`) ไม่บังคับ shape · openapi summary "modules{}" เป็น prose ไม่ใช่ schema constraint. คืนตามที่ persist จริง = ไม่ประดิษฐ์ transformation (PLAN.md §0 rule 4). ถ้า FE ต้องการ map form = FE-derive หรือ blocker แยก ไม่ reshape ใน backend.
+  - **icon/color/nameEn/desc/costTypes ใน pototype ไม่คืน** — ไม่มีใน schema (P0-BE-10 เก็บแค่ key/name/hierarchy/modules) · คืนเฉพาะ column ที่ persist จริง เหมือน /projects·/companies ไม่คืน timestamps.
+- เจออะไร:
+  - P1-BE-05 (dependency envelope) ยัง status=review แต่ code (`list-envelope.ts`) merge เข้า dev แล้วและมีใน worktree (ใช้โดย /projects·/companies) → dependency พร้อมในระดับ code ตามที่ orchestrator ยืนยัน "B-014 §2 merged".
+  - gates เขียวหมด: contract lint ✓ · api typecheck ✓ · api build ✓ · api unit 115/115 (6 ใหม่) · contract suite 374/374 (openapi ไม่แตะ). **live re-verify deferred** — contract/live.spec.ts 48 skipped เพราะไม่มี docker/API up (ไม่ fake) · re-verify ตอน compose ขึ้น.
+  - ปลด P1-WEB-10 (จอ master.ptype) ได้เมื่อ merge เข้า dev (orch-B merge จาก main checkout — ไม่ merge เอง · ไม่รัน diff-reviewer).
