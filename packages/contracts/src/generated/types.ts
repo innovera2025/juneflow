@@ -72,6 +72,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tenant users (GET /users?filter&page) */
+        get: operations["listUsers"];
+        put?: never;
+        /** Invite tenant user (email invite; username generated from email; status starts invited) */
+        post: operations["createUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tenant roles with permission matrix (GET /roles?filter&page) */
+        get: operations["listRoles"];
+        put?: never;
+        /** Create tenant role (name + approval limit + approval level + permission matrix) */
+        post: operations["createRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Update tenant role (permission matrix save) */
+        put: operations["updateRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/packages": {
         parameters: {
             query?: never;
@@ -539,6 +594,24 @@ export interface paths {
         /** Update doc-numbering rule */
         put: operations["updateDocNumbering"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List house models (GET /models?filter&page) */
+        get: operations["listModels"];
+        put?: never;
+        /** Create house model (new model starts as draft) */
+        post: operations["createModel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2298,6 +2371,96 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    listUsers: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listAdminPackages: {
         parameters: {
             query?: {
@@ -3029,6 +3192,41 @@ export interface operations {
             200: components["responses"]["EntityOk"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listModels: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     listBoq: {
