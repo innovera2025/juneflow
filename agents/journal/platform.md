@@ -90,3 +90,9 @@
 - ทำอะไร: compile §7 (subagent draft · cite ทุก line) → apply 62 dict key ลง i18n 2 สำเนา (8bccc0e) · org/project/block/createProj
 - ตัดสินใจอะไร: — (B-052=ก Wei อนุมัติ · SACRED_OVERRIDE=wei-approved:B-052 · th verbatim B-039 pattern · org.* แยกจาก company.*)
 - เจออะไร: cmp byte-identical · i18n 19/19 · gate-4.5 PASS → orch-B merge · เหลือ §6 org-hierarchy contract (orch-A) ปลด web master
+
+
+## 2026-07-14 · §8 (B-054 residual) — 11 i18n key master.company (orchestrator · Wei ✅ ก)
+- ทำอะไร: apply 11 residual dict key ที่ §7 ตกหล่น (visible + note + toast template) commit 0348ee7 · resolves B-054
+- ตัดสินใจอะไร: toast = dict template {name}/{code} (web compose) ไม่ใช่ phrase_pattern · org.noteTaxLabel ตัด (reuse company.taxLabel)
+- เจออะไร: cmp byte-identical · i18n 19/19 · gate-4.5 inline PASS → unblock WEB-08 re-port
