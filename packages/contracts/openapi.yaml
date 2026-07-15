@@ -77,6 +77,8 @@ tags:
     description: Async export jobs
   - name: line
     description: LINE OA webhook
+  - name: dashboard
+    description: Dashboard (aggregation/read — KPIs, budget vs actual, approvals inbox, alerts, cashflow forecast, contractors)
 
 paths:
   # ============================ Auth & Tenant ================================
@@ -2912,6 +2914,88 @@ paths:
       responses:
         "200":
           description: Event acknowledged.
+
+  # ===== Dashboard (B-049) =====
+  /dashboard/summary:
+    get:
+      tags: [dashboard]
+      summary: Dashboard summary — header meta + type-aware KPIs + health donut
+      operationId: getDashboardSummary
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dashboard/budget-actual:
+    get:
+      tags: [dashboard]
+      summary: Budget vs actual vs plan time-series + cost-category breakdown
+      operationId: getDashboardBudgetActual
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dashboard/approvals-inbox:
+    get:
+      tags: [dashboard]
+      summary: Approval inbox — pending PR+PO+WO where caller is an approver
+      operationId: listDashboardApprovals
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dashboard/phase-progress:
+    get:
+      tags: [dashboard]
+      summary: Phase/zone/section progress (built% · budget-used% · status, type-aware)
+      operationId: listDashboardPhaseProgress
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dashboard/alerts:
+    get:
+      tags: [dashboard]
+      summary: Rule-based risk alerts (over-budget, price rise, overdue PO)
+      operationId: listDashboardAlerts
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dashboard/cashflow-forecast:
+    get:
+      tags: [dashboard]
+      summary: 7-day forward cashflow net + signed line items
+      operationId: getDashboardCashflowForecast
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dashboard/contractors:
+    get:
+      tags: [dashboard]
+      summary: Active subcontractor contracts + progress% + retention
+      operationId: listDashboardContractors
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
 components:
   securitySchemes:
