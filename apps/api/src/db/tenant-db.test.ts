@@ -158,10 +158,47 @@ describe("selectReference reads platform-global reference tables (P1-BE-01)", ()
     expect(() => tdb.selectReference(workPeriods)).toThrow(TenantScopeError);
   });
 
-  it("allows exactly the platform-global allowlist: package, project_type, company", () => {
+  it("allows exactly the platform-global allowlist: package, company", () => {
     expect(() => tdb.selectReference(packages)).not.toThrow();
-    expect(() => tdb.selectReference(projectTypes)).not.toThrow();
     expect(() => tdb.selectReference(companies)).not.toThrow();
+  });
+
+  // B-065 (P1-BE-14): project_type gained a nullable company_id (hybrid
+  // global/tenant table), so it LEFT the reference allowlist — it must be read
+  // through selectGlobalOrOwned(), never bare through selectReference().
+  it("rejects project_type — hybrid table since B-065 (read via selectGlobalOrOwned)", () => {
+    expect(() =>
+      // @ts-expect-error — project_type now carries a nullable companyId, so it
+      // is NOT a ReferenceTable; the hybrid read door is the only one.
+      tdb.selectReference(projectTypes),
+    ).toThrow(TenantScopeError);
+  });
+});
+
+describe("selectGlobalOrOwned reads global defaults + own rows (B-065, P1-BE-14)", () => {
+  it("scopes to (company_id IS NULL OR company_id = this tenant)", () => {
+    const { sql, params } = tdb.selectGlobalOrOwned(projectTypes).toSQL();
+    // hybrid scope: shared global defaults (NULL) unioned with this tenant's own.
+    expect(sql).toContain('"company_id" is null');
+    expect(sql).toContain('"company_id" = $');
+    expect(sql).toContain(" or ");
+    expect(params).toContain(COMPANY);
+  });
+
+  it("never binds another tenant's id — foreign custom types are unreachable", () => {
+    const { params } = tdb.selectGlobalOrOwned(projectTypes).toSQL();
+    expect(params).not.toContain(OTHER);
+  });
+
+  it("AND-s a caller predicate onto the hybrid scope (never replaces it)", () => {
+    const { sql, params } = tdb
+      .selectGlobalOrOwned(projectTypes, eq(projectTypes.key, "realestate"))
+      .toSQL();
+    expect(sql).toContain('"company_id" is null');
+    expect(sql).toContain('"key" = $');
+    expect(sql).toContain(" and ");
+    expect(params).toContain(COMPANY);
+    expect(params).toContain("realestate");
   });
 });
 

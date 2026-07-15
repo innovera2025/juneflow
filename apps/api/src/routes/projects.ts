@@ -6,10 +6,13 @@
 // ProjectSwitcher extensions {short, color, company_id, units, phases[]} —
 // required [id, name, type, status].
 //
-// `type` is the project_type KEY (realestate|solar|civil|service): the table
-// stores type_id → project_type (erd.html), so we resolve keys via the
-// reference table. Every project read is tenant-scoped through request.db —
-// project_node rows (no company_id column) go through the scoped
+// `type` is the project_type KEY (realestate|solar|civil|service, or a tenant's
+// custom "custom_…"): the table stores type_id → project_type (erd.html), so we
+// resolve keys via project_type. Since B-065 project_type is a HYBRID table
+// (global defaults + tenant-owned custom types), it is read through the
+// TenantDb.selectGlobalOrOwned() door (global OR own — never another tenant's),
+// NOT the old reference door. Every project read is tenant-scoped through
+// request.db — project_node rows (no company_id column) go through the scoped
 // selectThrough door anchored on project.
 //
 // Derived fields (B-041(ก+), numbers come from seed rows — never hardcoded):
@@ -122,7 +125,9 @@ export function registerProjectsRoute(
 
     const [rows, typeRows, nodeRows, saleRows] = await Promise.all([
       db.select(projects),
-      db.selectReference(projectTypes),
+      // project_type is a hybrid table (B-065) — read global defaults + own
+      // custom types (never another tenant's) to resolve every project's key.
+      db.selectGlobalOrOwned(projectTypes),
       // project_node carries no company_id — scoped through its project root.
       db.selectThrough(projectNodes, [
         { fk: projectNodes.projectId, parent: projects },
@@ -258,8 +263,10 @@ export function registerProjectsRoute(
     }
 
     // Resolve the project_type key → type_id (NOT-NULL FK). project_type is a
-    // platform-global reference table (selectReference door).
-    const typeRows = await db.selectReference(projectTypes);
+    // hybrid table (B-065): a project may reference a global default OR this
+    // tenant's own custom type, so resolve against global + own (the hybrid
+    // door), never another tenant's types.
+    const typeRows = await db.selectGlobalOrOwned(projectTypes);
     const typeId = typeRows.find((t) => t.key === typeKey)?.id;
     if (!typeId) {
       return reply.code(400).send({

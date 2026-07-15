@@ -1,10 +1,19 @@
-// G3 unit tests (PLAN.md §9) — GET /project-types (P1-BE-06,
-// docs/extract/PROJECT-TYPES.md): the 4 product project types with their
-// {id, key, name, hierarchy, modules} wire shape, wrapped in the B-014 list
-// envelope, fail-closed 401 without a tenant, and reference-only reads (the
-// platform-global project_type table has no company_id — no tenant-owned table
-// is ever touched, so there is no scope to leak).
+// G3 unit tests (PLAN.md §9) — GET/POST/PUT /project-types.
+//
+// GET (P1-BE-06): the 4 product project types with their {id, key, name,
+// hierarchy, modules} wire shape, wrapped in the B-014 list envelope,
+// fail-closed 401 without a tenant.
+//
+// TENANT SCOPE (P1-BE-14, B-065): project_type is now a HYBRID global/tenant
+// table — GET reads global defaults (company_id IS NULL) + this tenant's own
+// custom types (never another tenant's) via selectGlobalOrOwned(); POST creates
+// a tenant-OWNED custom type (company_id force-set); PUT edits ONLY an own type
+// and 404s on a global default / another tenant's type. The scoping SQL is
+// proven in db/tenant-db.test.ts; these tests drive the handler logic
+// (validation, dup-key 409, 404-on-default, wire shape, tenant-ownership).
 import { afterEach, describe, expect, it } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import type { FastifyInstance } from "fastify";
 import { companies, projectTypes, projects } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
@@ -217,7 +226,7 @@ describe("GET /api/v1/project-types — the 4 types in the B-014 list envelope",
 });
 
 describe("GET /api/v1/project-types — tenant scope (no leak)", () => {
-  it("reads ONLY the project_type reference table (no tenant-owned table touched)", async () => {
+  it("reads ONLY project_type (via the hybrid door — no other table touched)", async () => {
     const readTables: unknown[] = [];
     await (
       await buildTestApp({
@@ -226,14 +235,14 @@ describe("GET /api/v1/project-types — tenant scope (no leak)", () => {
       })
     ).inject({ url: "/api/v1/project-types" });
 
-    // The only table the handler reads is the platform-global reference table.
-    // No company/project (tenant-owned) read happens — so nothing can leak.
+    // The only table the handler reads is project_type (through the hybrid
+    // selectGlobalOrOwned door). No company/project read happens.
     expect(readTables).toEqual([projectTypes]);
     expect(readTables).not.toContain(companies);
     expect(readTables).not.toContain(projects);
   });
 
-  it("is tenant-independent: a different tenant sees the same 4 global types", async () => {
+  it("shows the shared global defaults to any tenant (company_id IS NULL rows)", async () => {
     const other = {
       companyId: "99999999-9999-9999-9999-999999999999",
       user: { id: "au-9", email: "other@x.co.th", name: "อื่น" },
@@ -253,5 +262,217 @@ describe("GET /api/v1/project-types — tenant scope (no leak)", () => {
       "civil",
       "service",
     ]);
+  });
+});
+
+// --- read-write stub: canned selectGlobalOrOwned rows + captured insert/update -
+interface WriteSink {
+  inserted?: Record<string, unknown>[];
+  updateWhere?: SQL;
+}
+function rwStub(opts: {
+  visible?: unknown[];
+  updateRows?: unknown[];
+  sink?: WriteSink;
+} = {}): Db {
+  const visible = opts.visible ?? [];
+  const updateRows = opts.updateRows ?? [];
+  const sink = opts.sink ?? {};
+  let seq = 0;
+  return {
+    // selectGlobalOrOwned → select().from(table).where(hybridScope)
+    select: () => ({
+      from: () => ({ where: () => Promise.resolve(visible) }),
+    }),
+    // TenantDb.insert force-sets company_id; the route chains .returning()
+    insert: () => ({
+      values: (values: Record<string, unknown>) => ({
+        returning: () => {
+          sink.inserted = [values];
+          return Promise.resolve([{ id: `pt-new-${seq++}`, ...values }]);
+        },
+      }),
+    }),
+    // TenantDb.update scopes WHERE company_id = tenant AND id = :id; .returning()
+    update: () => ({
+      set: () => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            sink.updateWhere = where;
+            return Promise.resolve(updateRows);
+          },
+        }),
+      }),
+    }),
+  } as unknown as Db;
+}
+
+function paramsOf(where: SQL | undefined): unknown[] {
+  if (!where) return [];
+  return new PgDialect().sqlToQuery(where).params;
+}
+
+describe("POST /api/v1/project-types — create a tenant-owned custom type", () => {
+  it("401s without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/project-types",
+      payload: { name: "คลังสินค้า", hierarchy: ["โครงการ", "โซน"] },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("creates a custom type: 201, company_id force-set (tenant-owned), wire shape", async () => {
+    const sink: WriteSink = {};
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ visible: allTypes, sink }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/project-types",
+      payload: {
+        key: "custom_warehouse",
+        name: "คลังสินค้า / โรงงาน",
+        hierarchy: ["โครงการ", "โซน", "งาน"],
+        // the mock submits `modules` as a {navId: boolean} map — truthy keys win.
+        modules: { land: true, boq: false, proc: true, timeline: true },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    // Tenant ownership: the insert row carries THIS tenant's company_id.
+    expect(sink.inserted?.[0]?.companyId).toBe(COMPANY);
+    // Wire row is the opaque {id, key, name, hierarchy, modules} — no company_id.
+    const body = res.json();
+    expect(Object.keys(body).sort()).toEqual(["hierarchy", "id", "key", "modules", "name"]);
+    expect(body.key).toBe("custom_warehouse");
+    expect(body.name).toBe("คลังสินค้า / โรงงาน");
+    expect(body.hierarchy).toEqual(["โครงการ", "โซน", "งาน"]);
+    expect(body.modules).toEqual(["land", "proc", "timeline"]);
+  });
+
+  it("rejects a duplicate key against the tenant's visible set (409)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // "realestate" is a visible global default — a custom type may not shadow it.
+        db: rwStub({ visible: allTypes }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/project-types",
+      payload: { key: "realestate", name: "ซ้ำ", hierarchy: ["a", "b"] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("DUPLICATE_KEY");
+  });
+
+  it("400s when name is missing", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ visible: [] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/project-types",
+      payload: { hierarchy: ["a", "b"] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+  });
+
+  it("400s when hierarchy is empty", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ visible: [] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/project-types",
+      payload: { name: "ไม่มีลำดับชั้น" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+  });
+});
+
+describe("PUT /api/v1/project-types/:id — edit only an OWN custom type", () => {
+  const OWN_ID = "pt-own-0000-0000-0000-000000000001";
+  const ownUpdated = {
+    id: OWN_ID,
+    companyId: COMPANY,
+    key: "custom_warehouse",
+    name: "คลังสินค้า (แก้ไข)",
+    hierarchy: ["โครงการ", "โซน"],
+    modules: ["land", "proc"],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it("401s without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "PUT",
+      url: `/api/v1/project-types/${OWN_ID}`,
+      payload: { name: "x", hierarchy: ["a"] },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("updates an own type: 200, scoped by company_id, wire shape", async () => {
+    const sink: WriteSink = {};
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ updateRows: [ownUpdated], sink }),
+      })
+    ).inject({
+      method: "PUT",
+      url: `/api/v1/project-types/${OWN_ID}`,
+      payload: { name: "คลังสินค้า (แก้ไข)", hierarchy: ["โครงการ", "โซน"], modules: ["land", "proc"] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // The scoped update WHERE binds THIS tenant (company_id) + the id.
+    expect(paramsOf(sink.updateWhere)).toContain(COMPANY);
+    expect(paramsOf(sink.updateWhere)).toContain(OWN_ID);
+    const body = res.json();
+    expect(Object.keys(body).sort()).toEqual(["hierarchy", "id", "key", "modules", "name"]);
+    expect(body.name).toBe("คลังสินค้า (แก้ไข)");
+  });
+
+  it("404s on a global default / another tenant's type (scoped update matches 0 rows)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // A global default (company_id NULL) is outside the tenant scope, so the
+        // scoped update returns NO rows — the handler answers 404 (no-leak-safe).
+        db: rwStub({ updateRows: [] }),
+      })
+    ).inject({
+      method: "PUT",
+      url: "/api/v1/project-types/pt-realestate",
+      payload: { name: "hijack", hierarchy: ["a", "b"] },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("NOT_FOUND");
+  });
+
+  it("400s on invalid body (missing name)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ updateRows: [] }),
+      })
+    ).inject({
+      method: "PUT",
+      url: `/api/v1/project-types/${OWN_ID}`,
+      payload: { hierarchy: ["a"] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
   });
 });

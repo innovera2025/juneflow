@@ -383,7 +383,8 @@ describe("GET /api/v1/projects", () => {
     const saleCalls = capturedFor(captured, salesUnits);
     expect(saleCalls.length).toBe(1);
     expect(paramsOf(saleCalls[0]?.where)).toContain(COMPANY);
-    // project_type is a global reference read (no company_id column exists).
+    // project_type is a hybrid table (B-065): read once through the
+    // selectGlobalOrOwned door (global defaults + this tenant's own types).
     expect(capturedFor(captured, projectTypes).length).toBe(1);
   });
 });
