@@ -2008,6 +2008,426 @@
       "en": "{ปี}",
       "zh": "{ปี}",
       "ar": "{ปี}"
+    },
+    "dashboard.reportNotify": {
+      "th": "เปิดหน้ารายงาน Dashboard",
+      "en": "เปิดหน้ารายงาน Dashboard",
+      "zh": "เปิดหน้ารายงาน Dashboard",
+      "ar": "เปิดหน้ารายงาน Dashboard"
+    },
+    "dashboard.syncSource": {
+      "th": "Sync SAP/REM",
+      "en": "Sync SAP/REM",
+      "zh": "Sync SAP/REM",
+      "ar": "Sync SAP/REM"
+    },
+    "dashboard.syncOnline": {
+      "th": "● online",
+      "en": "● online",
+      "zh": "● online",
+      "ar": "● online"
+    },
+    "dashboard.roleExec": {
+      "th": "ผู้บริหาร",
+      "en": "ผู้บริหาร",
+      "zh": "ผู้บริหาร",
+      "ar": "ผู้บริหาร"
+    },
+    "dashboard.roleEngineer": {
+      "th": "ช่าง/หน้างาน",
+      "en": "ช่าง/หน้างาน",
+      "zh": "ช่าง/หน้างาน",
+      "ar": "ช่าง/หน้างาน"
+    },
+    "dashboard.roleBannerExec": {
+      "th": "มุมมองผู้บริหาร — เน้นงบรวม สุขภาพโครงการ และเอกสารที่ต้องตัดสินใจ",
+      "en": "มุมมองผู้บริหาร — เน้นงบรวม สุขภาพโครงการ และเอกสารที่ต้องตัดสินใจ",
+      "zh": "มุมมองผู้บริหาร — เน้นงบรวม สุขภาพโครงการ และเอกสารที่ต้องตัดสินใจ",
+      "ar": "มุมมองผู้บริหาร — เน้นงบรวม สุขภาพโครงการ และเอกสารที่ต้องตัดสินใจ"
+    },
+    "dashboard.roleBannerManager": {
+      "th": "มุมมองผู้จัดการโครงการ — ครบทุกด้าน: ความคืบหน้า อนุมัติ และกระแสเงินสด",
+      "en": "มุมมองผู้จัดการโครงการ — ครบทุกด้าน: ความคืบหน้า อนุมัติ และกระแสเงินสด",
+      "zh": "มุมมองผู้จัดการโครงการ — ครบทุกด้าน: ความคืบหน้า อนุมัติ และกระแสเงินสด",
+      "ar": "มุมมองผู้จัดการโครงการ — ครบทุกด้าน: ความคืบหน้า อนุมัติ และกระแสเงินสด"
+    },
+    "dashboard.roleBannerAccountant": {
+      "th": "มุมมองบัญชี-การเงิน — เน้นงบประมาณ กระแสเงินสด และเอกสารรออนุมัติ",
+      "en": "มุมมองบัญชี-การเงิน — เน้นงบประมาณ กระแสเงินสด และเอกสารรออนุมัติ",
+      "zh": "มุมมองบัญชี-การเงิน — เน้นงบประมาณ กระแสเงินสด และเอกสารรออนุมัติ",
+      "ar": "มุมมองบัญชี-การเงิน — เน้นงบประมาณ กระแสเงินสด และเอกสารรออนุมัติ"
+    },
+    "dashboard.roleBannerEngineer": {
+      "th": "มุมมองช่าง/หน้างาน — เน้นความคืบหน้างานก่อสร้างและการแจ้งเตือนหน้างาน",
+      "en": "มุมมองช่าง/หน้างาน — เน้นความคืบหน้างานก่อสร้างและการแจ้งเตือนหน้างาน",
+      "zh": "มุมมองช่าง/หน้างาน — เน้นความคืบหน้างานก่อสร้างและการแจ้งเตือนหน้างาน",
+      "ar": "มุมมองช่าง/หน้างาน — เน้นความคืบหน้างานก่อสร้างและการแจ้งเตือนหน้างาน"
+    },
+    "dashboard.statusSolarCOD": {
+      "th": "จ่ายไฟเชิงพาณิชย์ (COD)",
+      "en": "จ่ายไฟเชิงพาณิชย์ (COD)",
+      "zh": "จ่ายไฟเชิงพาณิชย์ (COD)",
+      "ar": "จ่ายไฟเชิงพาณิชย์ (COD)"
+    },
+    "dashboard.statusOperating": {
+      "th": "กำลังดำเนินงาน",
+      "en": "กำลังดำเนินงาน",
+      "zh": "กำลังดำเนินงาน",
+      "ar": "กำลังดำเนินงาน"
+    },
+    "dashboard.progressTitleSolar": {
+      "th": "ความคืบหน้ารายโซน / Array",
+      "en": "ความคืบหน้ารายโซน / Array",
+      "zh": "ความคืบหน้ารายโซน / Array",
+      "ar": "ความคืบหน้ารายโซน / Array"
+    },
+    "dashboard.progressTitleCivil": {
+      "th": "ความคืบหน้ารายส่วนงาน",
+      "en": "ความคืบหน้ารายส่วนงาน",
+      "zh": "ความคืบหน้ารายส่วนงาน",
+      "ar": "ความคืบหน้ารายส่วนงาน"
+    },
+    "dashboard.progressTitleService": {
+      "th": "ความคืบหน้ารายเฟส (WBS)",
+      "en": "ความคืบหน้ารายเฟส (WBS)",
+      "zh": "ความคืบหน้ารายเฟส (WBS)",
+      "ar": "ความคืบหน้ารายเฟส (WBS)"
+    },
+    "dashboard.progressTitleDefault": {
+      "th": "ความคืบหน้า",
+      "en": "ความคืบหน้า",
+      "zh": "ความคืบหน้า",
+      "ar": "ความคืบหน้า"
+    },
+    "dashboard.progressSubSolar": {
+      "th": "แยกตามโซน/Array · % ติดตั้ง-จ่ายไฟ",
+      "en": "แยกตามโซน/Array · % ติดตั้ง-จ่ายไฟ",
+      "zh": "แยกตามโซน/Array · % ติดตั้ง-จ่ายไฟ",
+      "ar": "แยกตามโซน/Array · % ติดตั้ง-จ่ายไฟ"
+    },
+    "dashboard.progressSubCivil": {
+      "th": "แยกตามส่วนงาน · % ความคืบหน้า / งบที่ใช้",
+      "en": "แยกตามส่วนงาน · % ความคืบหน้า / งบที่ใช้",
+      "zh": "แยกตามส่วนงาน · % ความคืบหน้า / งบที่ใช้",
+      "ar": "แยกตามส่วนงาน · % ความคืบหน้า / งบที่ใช้"
+    },
+    "dashboard.progressSubService": {
+      "th": "แยกตามเฟส/งาน · % ความคืบหน้า",
+      "en": "แยกตามเฟส/งาน · % ความคืบหน้า",
+      "zh": "แยกตามเฟส/งาน · % ความคืบหน้า",
+      "ar": "แยกตามเฟส/งาน · % ความคืบหน้า"
+    },
+    "dashboard.rangeTitleWeek": {
+      "th": "รายวันสัปดาห์นี้",
+      "en": "รายวันสัปดาห์นี้",
+      "zh": "รายวันสัปดาห์นี้",
+      "ar": "รายวันสัปดาห์นี้"
+    },
+    "dashboard.rangeTitleMonth": {
+      "th": "รายสัปดาห์ในเดือน พ.ค. 2569",
+      "en": "รายสัปดาห์ในเดือน พ.ค. 2569",
+      "zh": "รายสัปดาห์ในเดือน พ.ค. 2569",
+      "ar": "รายสัปดาห์ในเดือน พ.ค. 2569"
+    },
+    "dashboard.rangeTitleQuarter": {
+      "th": "รายเดือนใน Q2/2569",
+      "en": "รายเดือนใน Q2/2569",
+      "zh": "รายเดือนใน Q2/2569",
+      "ar": "รายเดือนใน Q2/2569"
+    },
+    "dashboard.rangeTitleYear": {
+      "th": "รายเดือน ปีงบประมาณ 2569 · ทุกหมวดงาน",
+      "en": "รายเดือน ปีงบประมาณ 2569 · ทุกหมวดงาน",
+      "zh": "รายเดือน ปีงบประมาณ 2569 · ทุกหมวดงาน",
+      "ar": "รายเดือน ปีงบประมาณ 2569 · ทุกหมวดงาน"
+    },
+    "dashboard.legendBudgetShort": {
+      "th": "งบ",
+      "en": "งบ",
+      "zh": "งบ",
+      "ar": "งบ"
+    },
+    "dashboard.costOverhead": {
+      "th": "Overhead",
+      "en": "Overhead",
+      "zh": "Overhead",
+      "ar": "Overhead"
+    },
+    "dashboard.phaseOnTrack": {
+      "th": "● ตรงแผน",
+      "en": "● ตรงแผน",
+      "zh": "● ตรงแผน",
+      "ar": "● ตรงแผน"
+    },
+    "dashboard.phaseLate": {
+      "th": "● ล่าช้า 8 วัน",
+      "en": "● ล่าช้า 8 วัน",
+      "zh": "● ล่าช้า 8 วัน",
+      "ar": "● ล่าช้า 8 วัน"
+    },
+    "dashboard.phaseSoon": {
+      "th": "● ใกล้กำหนด",
+      "en": "● ใกล้กำหนด",
+      "zh": "● ใกล้กำหนด",
+      "ar": "● ใกล้กำหนด"
+    },
+    "dashboard.activitySyncSAP": {
+      "th": "Sync จาก SAP",
+      "en": "Sync จาก SAP",
+      "zh": "Sync จาก SAP",
+      "ar": "Sync จาก SAP"
+    },
+    "dashboard.activityRejectRevise": {
+      "th": "ปฏิเสธ + ขอแก้",
+      "en": "ปฏิเสธ + ขอแก้",
+      "zh": "ปฏิเสธ + ขอแก้",
+      "ar": "ปฏิเสธ + ขอแก้"
+    },
+    "dashboard.activityAutoBudget": {
+      "th": "ตัดงบอัตโนมัติ",
+      "en": "ตัดงบอัตโนมัติ",
+      "zh": "ตัดงบอัตโนมัติ",
+      "ar": "ตัดงบอัตโนมัติ"
+    },
+    "dashboard.deltaBudgetWeek": {
+      "th": "งบสัปดาห์",
+      "en": "งบสัปดาห์",
+      "zh": "งบสัปดาห์",
+      "ar": "งบสัปดาห์"
+    },
+    "dashboard.deltaBudgetMonth": {
+      "th": "งบเดือน",
+      "en": "งบเดือน",
+      "zh": "งบเดือน",
+      "ar": "งบเดือน"
+    },
+    "dashboard.deltaBudgetQuarter": {
+      "th": "งบไตรมาส",
+      "en": "งบไตรมาส",
+      "zh": "งบไตรมาส",
+      "ar": "งบไตรมาส"
+    },
+    "dashboard.deltaBelowPlan": {
+      "th": "ต่ำกว่าแผน",
+      "en": "ต่ำกว่าแผน",
+      "zh": "ต่ำกว่าแผน",
+      "ar": "ต่ำกว่าแผน"
+    },
+    "dashboard.kpiSolarCapacity": {
+      "th": "กำลังผลิตติดตั้ง",
+      "en": "กำลังผลิตติดตั้ง",
+      "zh": "กำลังผลิตติดตั้ง",
+      "ar": "กำลังผลิตติดตั้ง"
+    },
+    "dashboard.unitMWp": {
+      "th": "MWp",
+      "en": "MWp",
+      "zh": "MWp",
+      "ar": "MWp"
+    },
+    "dashboard.deltaCOD": {
+      "th": "COD แล้ว",
+      "en": "COD แล้ว",
+      "zh": "COD แล้ว",
+      "ar": "COD แล้ว"
+    },
+    "dashboard.kpiSolarEnergy": {
+      "th": "พลังงานสะสม (YTD)",
+      "en": "พลังงานสะสม (YTD)",
+      "zh": "พลังงานสะสม (YTD)",
+      "ar": "พลังงานสะสม (YTD)"
+    },
+    "dashboard.unitMWh": {
+      "th": "MWh",
+      "en": "MWh",
+      "zh": "MWh",
+      "ar": "MWh"
+    },
+    "dashboard.kpiSolarPR": {
+      "th": "Performance Ratio",
+      "en": "Performance Ratio",
+      "zh": "Performance Ratio",
+      "ar": "Performance Ratio"
+    },
+    "dashboard.deltaPass": {
+      "th": "ผ่านเกณฑ์",
+      "en": "ผ่านเกณฑ์",
+      "zh": "ผ่านเกณฑ์",
+      "ar": "ผ่านเกณฑ์"
+    },
+    "dashboard.kpiWorkProgress": {
+      "th": "ความคืบหน้างาน",
+      "en": "ความคืบหน้างาน",
+      "zh": "ความคืบหน้างาน",
+      "ar": "ความคืบหน้างาน"
+    },
+    "dashboard.kpiNextMilestone": {
+      "th": "Milestone ถัดไป",
+      "en": "Milestone ถัดไป",
+      "zh": "Milestone ถัดไป",
+      "ar": "Milestone ถัดไป"
+    },
+    "dashboard.deltaPerContract": {
+      "th": "ตามสัญญา",
+      "en": "ตามสัญญา",
+      "zh": "ตามสัญญา",
+      "ar": "ตามสัญญา"
+    },
+    "dashboard.milestoneUAT": {
+      "th": "UAT",
+      "en": "UAT",
+      "zh": "UAT",
+      "ar": "UAT"
+    },
+    "dashboard.remainSubLoss": {
+      "th": "ขาดทุน · ต้องขออนุมัติเพิ่ม",
+      "en": "ขาดทุน · ต้องขออนุมัติเพิ่ม",
+      "zh": "ขาดทุน · ต้องขออนุมัติเพิ่ม",
+      "ar": "ขาดทุน · ต้องขออนุมัติเพิ่ม"
+    },
+    "dashboard.tplRangeLabel": {
+      "th": "ช่วง: {range}",
+      "en": "ช่วง: {range}",
+      "zh": "ช่วง: {range}",
+      "ar": "ช่วง: {range}"
+    },
+    "dashboard.tplAvgPhase": {
+      "th": "เฉลี่ยทุกเฟส ({n})",
+      "en": "เฉลี่ยทุกเฟส ({n})",
+      "zh": "เฉลี่ยทุกเฟส ({n})",
+      "ar": "เฉลี่ยทุกเฟส ({n})"
+    },
+    "dashboard.tplAvgSection": {
+      "th": "เฉลี่ยทุกส่วนงาน ({n})",
+      "en": "เฉลี่ยทุกส่วนงาน ({n})",
+      "zh": "เฉลี่ยทุกส่วนงาน ({n})",
+      "ar": "เฉลี่ยทุกส่วนงาน ({n})"
+    },
+    "dashboard.tplDocCount": {
+      "th": "{n} ฉบับ",
+      "en": "{n} ฉบับ",
+      "zh": "{n} ฉบับ",
+      "ar": "{n} ฉบับ"
+    },
+    "dashboard.tplTimeAgo": {
+      "th": "{t} ที่แล้ว",
+      "en": "{t} ที่แล้ว",
+      "zh": "{t} ที่แล้ว",
+      "ar": "{t} ที่แล้ว"
+    },
+    "dashboard.tplAsOf": {
+      "th": "ข้อมูล ณ {date} (อัปเดต {time} น.)",
+      "en": "ข้อมูล ณ {date} (อัปเดต {time} น.)",
+      "zh": "ข้อมูล ณ {date} (อัปเดต {time} น.)",
+      "ar": "ข้อมูล ณ {date} (อัปเดต {time} น.)"
+    },
+    "dashboard.tplDeltaMoM": {
+      "th": "+{p}% MoM",
+      "en": "+{p}% MoM",
+      "zh": "+{p}% MoM",
+      "ar": "+{p}% MoM"
+    },
+    "dashboard.tplDeltaYoY": {
+      "th": "+{p}% YoY",
+      "en": "+{p}% YoY",
+      "zh": "+{p}% YoY",
+      "ar": "+{p}% YoY"
+    },
+    "dashboard.tplDeltaOverBudget": {
+      "th": "+{p}% เกินงบ",
+      "en": "+{p}% เกินงบ",
+      "zh": "+{p}% เกินงบ",
+      "ar": "+{p}% เกินงบ"
+    },
+    "dashboard.tplInDays": {
+      "th": "ใน {n} วัน",
+      "en": "ใน {n} วัน",
+      "zh": "ใน {n} วัน",
+      "ar": "ใน {n} วัน"
+    },
+    "dashboard.tplPctOfWeekBudget": {
+      "th": "{p}% ของงบสัปดาห์",
+      "en": "{p}% ของงบสัปดาห์",
+      "zh": "{p}% ของงบสัปดาห์",
+      "ar": "{p}% ของงบสัปดาห์"
+    },
+    "dashboard.tplPctOfMonthBudget": {
+      "th": "{p}% ของงบเดือน",
+      "en": "{p}% ของงบเดือน",
+      "zh": "{p}% ของงบเดือน",
+      "ar": "{p}% ของงบเดือน"
+    },
+    "dashboard.tplOverQuarterBudget": {
+      "th": "เกินงบไตรมาส {p}%",
+      "en": "เกินงบไตรมาส {p}%",
+      "zh": "เกินงบไตรมาส {p}%",
+      "ar": "เกินงบไตรมาส {p}%"
+    },
+    "dashboard.tplPctOfTotalBudget": {
+      "th": "{p}% ของงบทั้งหมด",
+      "en": "{p}% ของงบทั้งหมด",
+      "zh": "{p}% ของงบทั้งหมด",
+      "ar": "{p}% ของงบทั้งหมด"
+    },
+    "dashboard.tplRemainDays": {
+      "th": "{p}% · เหลือ {n} วัน",
+      "en": "{p}% · เหลือ {n} วัน",
+      "zh": "{p}% · เหลือ {n} วัน",
+      "ar": "{p}% · เหลือ {n} วัน"
+    },
+    "dashboard.tplRemainMonths": {
+      "th": "{p}% · พอใช้ {n} เดือน",
+      "en": "{p}% · พอใช้ {n} เดือน",
+      "zh": "{p}% · พอใช้ {n} เดือน",
+      "ar": "{p}% · พอใช้ {n} เดือน"
+    },
+    "dashboard.tplEditCount": {
+      "th": "แก้ไข {n} ครั้ง",
+      "en": "แก้ไข {n} ครั้ง",
+      "zh": "แก้ไข {n} ครั้ง",
+      "ar": "แก้ไข {n} ครั้ง"
+    },
+    "dashboard.tplInverterPanels": {
+      "th": "{n} Inverter · {m} แผง",
+      "en": "{n} Inverter · {m} แผง",
+      "zh": "{n} Inverter · {m} แผง",
+      "ar": "{n} Inverter · {m} แผง"
+    },
+    "dashboard.tplTargetGte": {
+      "th": "เป้าหมาย ≥ {n}%",
+      "en": "เป้าหมาย ≥ {n}%",
+      "zh": "เป้าหมาย ≥ {n}%",
+      "ar": "เป้าหมาย ≥ {n}%"
+    },
+    "dashboard.tplFiTRate": {
+      "th": "FiT {rate} ฿/kWh",
+      "en": "FiT {rate} ฿/kWh",
+      "zh": "FiT {rate} ฿/kWh",
+      "ar": "FiT {rate} ฿/kWh"
+    },
+    "dashboard.tplIrrNpv": {
+      "th": "IRR {irr}% · NPV +{npv} ลบ.",
+      "en": "IRR {irr}% · NPV +{npv} ลบ.",
+      "zh": "IRR {irr}% · NPV +{npv} ลบ.",
+      "ar": "IRR {irr}% · NPV +{npv} ลบ."
+    },
+    "dashboard.tplMilestoneInspection": {
+      "th": "ตรวจรับงวด {n}",
+      "en": "ตรวจรับงวด {n}",
+      "zh": "ตรวจรับงวด {n}",
+      "ar": "ตรวจรับงวด {n}"
+    },
+    "dashboard.tplGoLive": {
+      "th": "Go-Live {date}",
+      "en": "Go-Live {date}",
+      "zh": "Go-Live {date}",
+      "ar": "Go-Live {date}"
+    },
+    "dashboard.tplDeliver": {
+      "th": "ส่งมอบ {date}",
+      "en": "ส่งมอบ {date}",
+      "zh": "ส่งมอบ {date}",
+      "ar": "ส่งมอบ {date}"
     }
   },
   "nav_i18n": {
