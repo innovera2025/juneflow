@@ -2923,6 +2923,13 @@ paths:
       operationId: getDashboardSummary
       parameters:
         - $ref: "#/components/parameters/Period"
+        - name: project_id
+          in: query
+          required: false
+          description: Active project scope (from the project switcher; omit for tenant-wide)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           $ref: "#/components/responses/EntityOk"
@@ -2936,6 +2943,13 @@ paths:
       operationId: getDashboardBudgetActual
       parameters:
         - $ref: "#/components/parameters/Period"
+        - name: project_id
+          in: query
+          required: false
+          description: Active project scope (from the project switcher; omit for tenant-wide)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           $ref: "#/components/responses/EntityOk"
@@ -2947,6 +2961,14 @@ paths:
       tags: [dashboard]
       summary: Approval inbox — pending PR+PO+WO where caller is an approver
       operationId: listDashboardApprovals
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          description: Active project scope (from the project switcher; omit for tenant-wide)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           $ref: "#/components/responses/EntityList"
@@ -2958,6 +2980,14 @@ paths:
       tags: [dashboard]
       summary: Phase/zone/section progress (built% · budget-used% · status, type-aware)
       operationId: listDashboardPhaseProgress
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          description: Active project scope (from the project switcher; omit for tenant-wide)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           $ref: "#/components/responses/EntityList"
@@ -2969,6 +2999,14 @@ paths:
       tags: [dashboard]
       summary: Rule-based risk alerts (over-budget, price rise, overdue PO)
       operationId: listDashboardAlerts
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          description: Active project scope (from the project switcher; omit for tenant-wide)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           $ref: "#/components/responses/EntityList"
@@ -2980,6 +3018,14 @@ paths:
       tags: [dashboard]
       summary: 7-day forward cashflow net + signed line items
       operationId: getDashboardCashflowForecast
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          description: Active project scope (from the project switcher; omit for tenant-wide)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           $ref: "#/components/responses/EntityOk"
@@ -2991,6 +3037,14 @@ paths:
       tags: [dashboard]
       summary: Active subcontractor contracts + progress% + retention
       operationId: listDashboardContractors
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          description: Active project scope (from the project switcher; omit for tenant-wide)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           $ref: "#/components/responses/EntityList"
