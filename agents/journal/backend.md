@@ -483,3 +483,7 @@
 - migration 0012_grey_slipstream: drizzle-kit ไม่ emit USING เอง — hand-edit DROP DEFAULT → SET DATA TYPE text USING ::text → SET DEFAULT '1' แล้วพิสูจน์บน populated column จริง
 - POST /cost-centers ต้อง impl ด้วย (กติกา default draft ต้องมี create path) · project_id required — web ส่ง active project id (form ไม่มี picker)
 - columns ใหม่ nullable ระดับ column (B-050 precedent — ALTER ลงบนแถวเก่า) · presence คุมที่ seed + POST
+
+## 2026-07-15 · orch-A subagent · P1-BE-12 (B-067 docnum locked boolean→text)
+- migration 0013: drizzle-kit generate emitted bare ::text (wrong for bool→text) → hand-CASE per §B-067 · lock codes all|dept|warehouse|none mirror reset_rule
+- 3 i18n keys (lockAll/lockWarehouse/fmtYear) applied by orch-A direct (platform zone) · WEB-12 maps code→key on table cell, none→literal '—'
