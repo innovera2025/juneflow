@@ -22,6 +22,7 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P1-WEB-15 | web (ui infra) | feature/web (pending orch gate-4.5 + merge) | **— NO G5 (charts primitive = infra ไม่ใช่ screen · ไม่มี gallery ref)** · หลักฐาน gate แทน: typecheck 0 · vite build 242 mod ✓ (chart.js ^4.5.1 tree-shaken จาก app bundle — consumer dashboard B-049 ยัง defer · proven bundles ผ่าน lib-probe = 241kB มี chart.js internals) · vitest 134/134 incl. 12 chart tests (chartTheme token+fallback · baseChartOpts themed+merge · createThemedChart mount/unmount/rebuild via chart.js mock · ChartCanvas SSR render) · dashboard prereq (B-049) | 2026-07-15 |
 
 > ✅ **batch #4 (9 งาน) promoted → `main` `433dda5` เมื่อ 2026-07-15** — master wave web 6/7 (WEB-08 company/09 project/10 ptype/11 cc/13 model/14 users · recon-first + residual keys B-054/057/063/064/068 + §9) + MOB-02 (Dart §6) + PLAT-04 (§9 i18n 91 keys) + BE-11 (cc/docnum schema · migration 0012) · gate-4.5 + G5 PASS ทุก task · promote `git merge --squash -X theirs 1bbcaba` = main tree == dev 0 diff · queue เคลียร์ · **WEB-12 docnum ยัง blocked B-067 (backend lock column)**
 > ✅ **batch #3 (21 งาน) promoted → `main` `43e0b70` เมื่อ 2026-07-14** — sacred rounds 4 (i18n §1/§5/§7/§8 + envelope B-014 + contract §4/§6) · routes 6 · shell 5b · Dart regen · audit อิสระ 14-agent = 0 blocker (main tree == fde14e6 เป๊ะ · diff ว่าง) · queue เคลียร์ · **batch #4 เริ่มสะสมจาก WEB-08 (master.company กำลัง port)**
