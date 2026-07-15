@@ -94,14 +94,15 @@ async function buildTestApp(
 // --- seed-shaped canned rows (doc_numbering schema / DOCNUM_SEED). The stub
 // returns post-WHERE rows, so these transcribe the schema columns the route
 // reads: running is the stored TEXT verbatim from the mock — leading zeros
-// kept ("0418") and non-numeric values allowed (BOQ "B-02 v3") per B-060(ก),
-// reset_rule/locked are the renamed columns.
+// kept ("0418") and non-numeric values allowed (BOQ "B-02 v3") per B-060(ก).
+// locked is the lock-mode CODE (B-067(ข), P1-BE-12 — was boolean): one of the
+// 4 mock LOCK_OPTS modes all | dept | warehouse | none.
 const docRow = (
   type: string,
   prefix: string,
   running: string,
   resetRule: string,
-  locked: boolean,
+  locked: string,
 ) => ({
   id: `docnum-${prefix}`,
   companyId: COMPANY,
@@ -113,10 +114,15 @@ const docRow = (
   createdAt: new Date(),
   updatedAt: new Date(),
 });
+// Covers all 4 lock-mode codes (dept · all · warehouse · none) so the route is
+// proven to pass each through verbatim (B-067(ข) — the boolean it replaced
+// collapsed dept+warehouse into false).
 const seedDocNumbering = [
-  docRow("Purchase Requisition", "PR", "0418", "ทุกปีบัญชี", false),
-  docRow("Purchase Order", "PO", "0291", "ทุกปีบัญชี", true),
-  docRow("Bill of Quantities", "BOQ", "B-02 v3", "—", true),
+  docRow("Purchase Requisition", "PR", "0418", "ทุกปีบัญชี", "dept"),
+  docRow("Purchase Order", "PO", "0291", "ทุกปีบัญชี", "all"),
+  docRow("Bill of Quantities", "BOQ", "B-02 v3", "—", "all"),
+  docRow("Stock Transfer", "TR", "0084", "ทุกปีบัญชี", "warehouse"),
+  docRow("Return", "RT", "0014", "ทุกปีบัญชี", "none"),
 ];
 
 describe("GET /api/v1/doc-numbering — auth", () => {
@@ -133,7 +139,7 @@ describe("GET /api/v1/doc-numbering — auth", () => {
 });
 
 describe("GET /api/v1/doc-numbering — counters in the B-014 list envelope", () => {
-  it("wraps the counters with {id, type, prefix, running, reset_rule, locked} — running is a verbatim STRING (B-060)", async () => {
+  it("wraps the counters with {id, type, prefix, running, reset_rule, locked} — running is a verbatim STRING (B-060), locked is the lock-mode CODE (B-067)", async () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -142,19 +148,23 @@ describe("GET /api/v1/doc-numbering — counters in the B-014 list envelope", ()
     ).inject({ url: "/api/v1/doc-numbering" });
 
     expect(res.statusCode).toBe(200);
-    // B-014: 3 rows returned as a single full page (page_size = max(3, 50) = 50).
+    // B-014: 5 rows returned as a single full page (page_size = max(5, 50) = 50).
     // B-060: running goes on the wire as the stored text — the leading zeros
     // survive ("0418" stays "0418", never 418) and the BOQ row carries the
     // non-numeric "B-02 v3" verbatim (master.jsx:743/874).
+    // B-067: locked is the lock-mode code passed through verbatim — all 4 modes
+    // (dept · all · warehouse · none) reach the wire distinctly.
     expect(res.json()).toEqual({
       data: [
-        { id: "docnum-PR", type: "Purchase Requisition", prefix: "PR", running: "0418", reset_rule: "ทุกปีบัญชี", locked: false },
-        { id: "docnum-PO", type: "Purchase Order", prefix: "PO", running: "0291", reset_rule: "ทุกปีบัญชี", locked: true },
-        { id: "docnum-BOQ", type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset_rule: "—", locked: true },
+        { id: "docnum-PR", type: "Purchase Requisition", prefix: "PR", running: "0418", reset_rule: "ทุกปีบัญชี", locked: "dept" },
+        { id: "docnum-PO", type: "Purchase Order", prefix: "PO", running: "0291", reset_rule: "ทุกปีบัญชี", locked: "all" },
+        { id: "docnum-BOQ", type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset_rule: "—", locked: "all" },
+        { id: "docnum-TR", type: "Stock Transfer", prefix: "TR", running: "0084", reset_rule: "ทุกปีบัญชี", locked: "warehouse" },
+        { id: "docnum-RT", type: "Return", prefix: "RT", running: "0014", reset_rule: "ทุกปีบัญชี", locked: "none" },
       ],
       page: 1,
       page_size: 50,
-      total: 3,
+      total: 5,
     });
   });
 
