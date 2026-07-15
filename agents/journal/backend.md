@@ -487,3 +487,6 @@
 ## 2026-07-15 · orch-A subagent · P1-BE-12 (B-067 docnum locked boolean→text)
 - migration 0013: drizzle-kit generate emitted bare ::text (wrong for bool→text) → hand-CASE per §B-067 · lock codes all|dept|warehouse|none mirror reset_rule
 - 3 i18n keys (lockAll/lockWarehouse/fmtYear) applied by orch-A direct (platform zone) · WEB-12 maps code→key on table cell, none→literal '—'
+
+## 2026-07-15 · orch-A subagent · P1-BE-14 (B-065 project_type tenant-scope)
+- migration 0014: +company_id nullable FK · key enum→text + unique(company_id,key) · hybrid read selectGlobalOrOwned · PUT global default=404 no-leak · live PG cross-tenant proof
