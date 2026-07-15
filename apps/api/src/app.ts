@@ -122,7 +122,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     async (v1) => {
       await registerAuthRoutes(v1, { db: deps.db, signIn: deps.signIn });
       registerMeRoute(v1);
-      registerProjectsRoute(v1);
+      registerProjectsRoute(v1, { quota: deps.quota });
       registerCountsRoute(v1);
       registerCompaniesRoute(v1);
       registerProjectTypesRoute(v1);
