@@ -5535,6 +5535,8 @@ export interface operations {
             query?: {
                 /** @description Accounting period selector (e.g. YYYY-MM). */
                 period?: components["parameters"]["Period"];
+                /** @description Active project scope (from the project switcher; omit for tenant-wide) */
+                project_id?: string;
             };
             header?: never;
             path?: never;
@@ -5551,6 +5553,8 @@ export interface operations {
             query?: {
                 /** @description Accounting period selector (e.g. YYYY-MM). */
                 period?: components["parameters"]["Period"];
+                /** @description Active project scope (from the project switcher; omit for tenant-wide) */
+                project_id?: string;
             };
             header?: never;
             path?: never;
@@ -5564,7 +5568,10 @@ export interface operations {
     };
     listDashboardApprovals: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Active project scope (from the project switcher; omit for tenant-wide) */
+                project_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5577,7 +5584,10 @@ export interface operations {
     };
     listDashboardPhaseProgress: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Active project scope (from the project switcher; omit for tenant-wide) */
+                project_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5590,7 +5600,10 @@ export interface operations {
     };
     listDashboardAlerts: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Active project scope (from the project switcher; omit for tenant-wide) */
+                project_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5603,7 +5616,10 @@ export interface operations {
     };
     getDashboardCashflowForecast: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Active project scope (from the project switcher; omit for tenant-wide) */
+                project_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5616,7 +5632,10 @@ export interface operations {
     };
     listDashboardContractors: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Active project scope (from the project switcher; omit for tenant-wide) */
+                project_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
