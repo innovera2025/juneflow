@@ -498,3 +498,24 @@ Regenerated clients = **ไม่ sacred** (regen · ห้าม hand-edit) · 
 ## 9) `i18n-full.json` — key 3 จอ master (ptype/cc/docnum) · `SACRED_OVERRIDE=wei-approved:B-062` (task P1-PLAT-04 · **APPLIED 15 ก.ค.**)
 
 **Scope อนุมัติแล้ว (B-059/060/061/062 ✅ Wei 15 ก.ค.):** ~70 key — ptype 23 (`project-type-screen.jsx:5-218` รวม module near-miss 7 ตัว key ใหม่ verbatim + notify template 2) · cc ~20 (`master.jsx:584-731` รวม "ศูนย์ต้นทุน" ทั้งตระกูล + toast template + dropdown enum labels) · docnum ~30 (`master.jsx:737-889` รวมหัวตาราง 6 + RESET_OPTS/LOCK_OPTS enum labels + template 2) · กติกา: th verbatim · template แบบ §8 (curly quotes ตาม prototype) · en/zh/ar = th fallback (B-039) · เช็ค key เดิมก่อน ห้ามเพิ่มซ้ำ · ห้ามแตะ juneflow-extract · **APPLIED**: 91 keys (ptype 34 · cc 24 · docnum 33 · skipped-existing 24 ตรวจแล้ว) · ทุก key verify verbatim/prefix กับ jsx ต้นทางก่อนเขียน · dict 221→312 · เนื้อ patch เต็ม = commit diff (feat i18n P1-PLAT-04)
+
+---
+
+## §B-067 — docnum lock boolean→text-code (WEB-12 unblock · Wei sacred round · override B-067)
+
+**Ruling status:** B-060 already ruled "enum reset/lock = code + i18n key" → **option ข is the mandated continuation** (BE-11 deviated to boolean). ก (raw Thai in DB) / ค (boolean, loses dept+warehouse, fails G5) = reopen closed B-060. Wei only ratifies ข + fires the round (migration 0013 + i18n = sacred, hook-blocked from worktree · needs `SACRED_OVERRIDE=wei-approved:B-067`).
+
+**Backend (packages/db + apps/api):**
+1. `packages/db/src/schema/extensions.ts` (~L599): `locked: boolean("locked")` → `locked: text("locked").notNull().default("none")` (keep boolean import — other tables use it).
+2. `pnpm --filter @juneflow/db exec drizzle-kit generate` → `0013_*.sql`, then **HAND-CORRECT the USING** (drizzle emits `::text` = 'true'/'false' — wrong) to mirror 0012's 3-statement pattern:
+   `ALTER TABLE doc_numbering ALTER COLUMN locked DROP DEFAULT;`
+   `ALTER TABLE doc_numbering ALTER COLUMN locked SET DATA TYPE text USING (CASE WHEN locked THEN 'all' ELSE 'none' END);`
+   `ALTER TABLE doc_numbering ALTER COLUMN locked SET DEFAULT 'none';`
+   regen the drizzle meta snapshot.
+3. re-seed `DOCNUM_SEED` (`packages/db/src/seed/index.ts` ~L318-329) lock boolean→code in row order: **PR=dept · PO=all · WO=all · GR=all · RT=none · BOQ=all · PT=none · TR=warehouse · IS=warehouse · JV=all** (insert `locked: d.lock` at ~L966 stays; DO NOT touch ~L1166 `locked:false` = bankStatements, different table).
+4. `apps/api/src/routes/doc-numbering.ts` GET — **no logic edit** (map already passes `locked` through) · update comments: `locked` = lock-mode CODE (all|dept|warehouse|none) resolved to i18n on FE. Contract tests assert the 4 code strings.
+5. **NO openapi change** (/doc-numbering rows Entity-opaque additionalProperties → locked:string not a sacred-contract change).
+
+**Platform (i18n-full.json both copies · same override batch):** add 3 keys (docnum.lockDept + all 4 optLock* already shipped in §9): `docnum.lockAll`="ทุกใบ" · `docnum.lockWarehouse`="ตามคลัง" · `docnum.fmtYear`="{ปี}" (Format-column token master.jsx:869). th verbatim · en/zh/ar fallback.
+
+**After merge → WEB-12 port (web zone):** map GET `locked` code→i18n on the table cell: all→docnum.lockAll · dept→docnum.lockDept · warehouse→docnum.lockWarehouse · none→literal "—" (no key · §0/B-064 precedent) · Format cell uses docnum.fmtYear. B-060 pure-logic ready. DocNumForm write DEFERRED (B-066 · button stub). Visual gate g2/35 → **master wave 7/7 COMPLETE**.
