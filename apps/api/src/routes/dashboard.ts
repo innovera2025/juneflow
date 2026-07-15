@@ -8,12 +8,23 @@
 // tenant-scoped through request.db (the TenantDb doors) and 401s without a
 // tenant (fail closed), exactly like counts.ts / projects.ts.
 //
-// DESIGN — "which project?": the mock dashboard is scoped to the ProjectSwitcher
-// active project, but the contract carries NO project_id param (only ?range /
-// ?period). So the per-project widgets (summary, budget-actual) resolve a single
-// PRIMARY project = the tenant's first project ordered by (created_at ASC, id
-// ASC) — deterministic per seed. The list widgets (approvals, phase-progress,
-// alerts, contractors) aggregate TENANT-WIDE across all projects.
+// PROJECT SCOPE — the ?project_id (uuid) param (contract amendment, B-049): the
+// mock dashboard follows the ProjectSwitcher active project, so every op takes
+// an OPTIONAL project_id. When PROVIDED, the op's aggregation is scoped to that
+// ONE project — and it is TENANT-VERIFIED: the project id is resolved through
+// the company_id-scoped select door (a foreign/absent id resolves to nothing),
+// and every downstream read anchors its tenant scope on the same project root,
+// so a caller can NEVER read another tenant's project by passing its id. A
+// foreign/absent id → 404 (EntityOk ops) or an empty envelope (EntityList ops).
+// When OMITTED, behaviour is unchanged: summary/budget-actual resolve a PRIMARY
+// project (first by created_at ASC, id ASC — deterministic) and the list ops
+// aggregate TENANT-WIDE across every project.
+//
+// Two ops can only be PARTIALLY project-scoped by the data model — noted where
+// they occur: ap_billing carries NO project_id column, so the alerts
+// overdue-payable rule and the cashflow payables leg cannot be attributed to a
+// project and are omitted when project_id is set (only project-attributable rows
+// remain).
 //
 // C10 DISCIPLINE (critical): every number here derives from a live query over
 // the seed — NONE of the mock's hardcoded values (17 pending, 24 contracts, 3
@@ -50,6 +61,19 @@ import { listEnvelope } from "./list-envelope.js";
 type ProjectRow = typeof projects.$inferSelect;
 type NodeRow = typeof projectNodes.$inferSelect;
 
+/** Per-request context parsed off the query string. */
+interface DashCtx {
+  range: string;
+  /** Active-project scope (uuid) or null for the default (primary/tenant-wide). */
+  projectId: string | null;
+}
+
+/** Uniform handler result so the wrapper can send any status (200 / 404). */
+interface Result {
+  status: number;
+  body: unknown;
+}
+
 /** Sale stages that count a unit as SOLD (sales_unit.stage) — same as projects.ts. */
 const SOLD_STAGES = new Set(["sold", "soldBuilt"]);
 /** Sale stages that count a unit as physically BUILT (distinct real metric, NOT
@@ -75,9 +99,34 @@ function unauthenticated(reply: FastifyReply): FastifyReply {
     .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
 }
 
+/** Flat 404 (contract Error shape) for a project the caller does not own. */
+function projectNotFound(): Result {
+  return {
+    status: 404,
+    body: { code: "NOT_FOUND", message: "Project not found" },
+  };
+}
+
 /**
- * The tenant's PRIMARY project (see module header): first by (created_at ASC,
- * id ASC), deterministic. undefined when the tenant has no projects.
+ * Resolve a project id THIS tenant owns, or null. The select door ANDs
+ * company_id, so a foreign/absent id can never resolve — this is the ownership
+ * gate for ?project_id (no cross-tenant read is possible).
+ */
+async function ownedProject(
+  db: TenantDb,
+  projectId: string,
+): Promise<ProjectRow | null> {
+  const rows = (await db.select(
+    projects,
+    eq(projects.id, projectId),
+  )) as ProjectRow[];
+  return rows[0] ?? null;
+}
+
+/**
+ * The tenant's PRIMARY project (?project_id omitted default): first by
+ * (created_at ASC, id ASC), deterministic. undefined when the tenant has no
+ * projects.
  */
 async function resolvePrimaryProject(
   db: TenantDb,
@@ -91,8 +140,14 @@ async function resolvePrimaryProject(
   })[0];
 }
 
-/** cbs_budget rows for ONE project, scoped group → boq_doc → project. */
-function cbsForProject(db: TenantDb, projectId: string) {
+/** AND `extra` onto `base` (either may be undefined). */
+function both(base: SQL | undefined, extra: SQL | undefined): SQL | undefined {
+  if (base && extra) return and(base, extra) as SQL;
+  return base ?? extra;
+}
+
+/** cbs_budget rows scoped group → boq_doc → project, optionally to one project. */
+function cbsScoped(db: TenantDb, projectId?: string | null) {
   return db.selectThrough(
     cbsBudgets,
     [
@@ -100,7 +155,19 @@ function cbsForProject(db: TenantDb, projectId: string) {
       { fk: boqGroups.boqId, parent: boqDocs },
       { fk: boqDocs.projectId, parent: projects },
     ],
-    eq(boqDocs.projectId, projectId),
+    projectId ? eq(boqDocs.projectId, projectId) : undefined,
+  );
+}
+
+/** boq_group rows scoped doc → project, optionally to one project. */
+function boqGroupsScoped(db: TenantDb, projectId?: string | null) {
+  return db.selectThrough(
+    boqGroups,
+    [
+      { fk: boqGroups.boqId, parent: boqDocs },
+      { fk: boqDocs.projectId, parent: projects },
+    ],
+    projectId ? eq(boqDocs.projectId, projectId) : undefined,
   );
 }
 
@@ -109,54 +176,67 @@ function cbsForProject(db: TenantDb, projectId: string) {
 // ---------------------------------------------------------------------------
 // Real sources: project + project_type (hybrid door) + project_node (phase) +
 // cbs_budget (budget/used/committed) OR solar_inverter/ppa_invoice for solar.
+// project_id → that project (404 if not owned); omitted → PRIMARY project.
 // DATA GAPS: as_of is the live server time (the mock's fixed 25 พ.ค. is a mock
 // constant); status_label is the raw project.status (FE maps to a display label
 // — the mock's Thai STATUS_LABEL is presentational i18n). health_score is a
 // single real budget-utilisation ratio, NOT the mock's opaque "5-indicator" 71.
-async function summary(db: TenantDb, range: string) {
-  const primary = await resolvePrimaryProject(db);
+async function summary(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const asOf = new Date().toISOString();
-  if (!primary) {
+
+  let target: ProjectRow | undefined;
+  if (ctx.projectId) {
+    const owned = await ownedProject(db, ctx.projectId);
+    if (!owned) return projectNotFound();
+    target = owned;
+  } else {
+    target = await resolvePrimaryProject(db);
+  }
+
+  if (!target) {
+    // Tenant has no projects (only possible for the omitted/primary path).
     return {
-      project_id: null,
-      project_name: null,
-      project_type: null,
-      active_phase_label: null,
-      as_of: asOf,
-      status_label: null,
-      kpi_kind: "budget",
-      budget_total: 0,
-      actual_total: 0,
-      committed_total: 0,
-      remaining_total: 0,
-      currency_code: null,
-      health_score: 0,
-      range,
+      status: 200,
+      body: {
+        project_id: null,
+        project_name: null,
+        project_type: null,
+        active_phase_label: null,
+        as_of: asOf,
+        status_label: null,
+        kpi_kind: "budget",
+        budget_total: 0,
+        actual_total: 0,
+        committed_total: 0,
+        remaining_total: 0,
+        currency_code: null,
+        health_score: 0,
+        range: ctx.range,
+      },
     };
   }
 
   // project_type key via the B-065 hybrid door (global defaults OR own custom).
   const types = await db.selectGlobalOrOwned(projectTypes);
-  const typeKey =
-    types.find((t) => t.id === primary.typeId)?.key ?? null;
+  const typeKey = types.find((t) => t.id === target.typeId)?.key ?? null;
 
   // active_phase_label = first phase node of the project (project_node has no
   // company_id — scoped through its project root).
   const nodes = (await db.selectThrough(
     projectNodes,
     [{ fk: projectNodes.projectId, parent: projects }],
-    eq(projectNodes.projectId, primary.id),
+    eq(projectNodes.projectId, target.id),
   )) as NodeRow[];
   const activePhase = nodes.find((n) => n.kind === "phase");
 
   const header = {
-    project_id: primary.id,
-    project_name: primary.name,
+    project_id: target.id,
+    project_name: target.name,
     project_type: typeKey,
     active_phase_label: activePhase?.name ?? null,
     as_of: asOf,
-    status_label: primary.status,
-    range,
+    status_label: target.status,
+    range: ctx.range,
   };
 
   // Solar KPI branch — ONLY when the project is solar AND real solar data exists
@@ -164,8 +244,8 @@ async function summary(db: TenantDb, range: string) {
   // zeros for a solar project with no inverters/ppa yet).
   if (typeKey === "solar") {
     const [inverters, ppa] = await Promise.all([
-      db.select(solarInverters, eq(solarInverters.projectId, primary.id)),
-      db.select(ppaInvoices, eq(ppaInvoices.projectId, primary.id)),
+      db.select(solarInverters, eq(solarInverters.projectId, target.id)),
+      db.select(ppaInvoices, eq(ppaInvoices.projectId, target.id)),
     ]);
     if (inverters.length > 0 || ppa.length > 0) {
       const installedCapacity = inverters.reduce((s, r) => s + num(r.kw), 0);
@@ -174,21 +254,24 @@ async function summary(db: TenantDb, range: string) {
       const perfRatio =
         inverters.length > 0 ? round2(perfSum / inverters.length) : 0;
       return {
-        ...header,
-        kpi_kind: "solar",
-        installed_capacity: round2(installedCapacity),
-        energy_ytd: round2(energyYtd),
-        performance_ratio: perfRatio,
-        currency_code: primary.currencyCode,
-        // Solar health = mean performance ratio (a single real indicator).
-        health_score: Math.min(100, Math.max(0, Math.round(perfRatio))),
+        status: 200,
+        body: {
+          ...header,
+          kpi_kind: "solar",
+          installed_capacity: round2(installedCapacity),
+          energy_ytd: round2(energyYtd),
+          performance_ratio: perfRatio,
+          currency_code: target.currencyCode,
+          // Solar health = mean performance ratio (a single real indicator).
+          health_score: Math.min(100, Math.max(0, Math.round(perfRatio))),
+        },
       };
     }
   }
 
   // Budget KPI branch (realestate / civil / service, and solar-without-data):
   // the cbs_budget control totals for this project.
-  const cbs = await cbsForProject(db, primary.id);
+  const cbs = await cbsScoped(db, target.id);
   const budgetTotal = cbs.reduce((s, r) => s + num(r.budget), 0);
   const actualTotal = cbs.reduce((s, r) => s + num(r.used), 0);
   const committedTotal = cbs.reduce((s, r) => s + num(r.committed), 0);
@@ -199,14 +282,17 @@ async function summary(db: TenantDb, range: string) {
       : 0;
 
   return {
-    ...header,
-    kpi_kind: "budget",
-    budget_total: round2(budgetTotal),
-    actual_total: round2(actualTotal),
-    committed_total: round2(committedTotal),
-    remaining_total: round2(remainingTotal),
-    currency_code: primary.currencyCode,
-    health_score: healthScore,
+    status: 200,
+    body: {
+      ...header,
+      kpi_kind: "budget",
+      budget_total: round2(budgetTotal),
+      actual_total: round2(actualTotal),
+      committed_total: round2(committedTotal),
+      remaining_total: round2(remainingTotal),
+      currency_code: target.currencyCode,
+      health_score: healthScore,
+    },
   };
 }
 
@@ -214,37 +300,42 @@ async function summary(db: TenantDb, range: string) {
 // 2. GET /dashboard/budget-actual — time-series + cost-category breakdown
 // ---------------------------------------------------------------------------
 // Real source: cost_categories = per-boq_group cbs_budget (category_label =
-// group name, actual_value = used, plan_value = budget) for the PRIMARY project.
+// group name, actual_value = used, plan_value = budget). project_id → that
+// project (404 if not owned); omitted → PRIMARY project.
 // DATA GAP: the period time-series (per week/month/quarter/year bars) has NO
 // backing data — there is no time-bucketed cost-posting table (jv_line rows all
 // carry the seed's single created_at, cbs_budget has no time axis). Returning
 // fabricated bars would violate C10, so the series is honestly EMPTY; the real,
 // non-fabricated part of the widget is the cost_categories breakdown.
-async function budgetActual(db: TenantDb, range: string) {
-  const primary = await resolvePrimaryProject(db);
-  if (!primary) {
+async function budgetActual(db: TenantDb, ctx: DashCtx): Promise<Result> {
+  let target: ProjectRow | undefined;
+  if (ctx.projectId) {
+    const owned = await ownedProject(db, ctx.projectId);
+    if (!owned) return projectNotFound();
+    target = owned;
+  } else {
+    target = await resolvePrimaryProject(db);
+  }
+
+  if (!target) {
     return {
-      range,
-      range_label: range,
-      period_label: [],
-      budget_amount: [],
-      actual_amount: [],
-      plan_amount: [],
-      cost_categories: [],
-      currency_code: null,
+      status: 200,
+      body: {
+        range: ctx.range,
+        range_label: ctx.range,
+        period_label: [],
+        budget_amount: [],
+        actual_amount: [],
+        plan_amount: [],
+        cost_categories: [],
+        currency_code: null,
+      },
     };
   }
 
   const [cbs, groups] = await Promise.all([
-    cbsForProject(db, primary.id),
-    db.selectThrough(
-      boqGroups,
-      [
-        { fk: boqGroups.boqId, parent: boqDocs },
-        { fk: boqDocs.projectId, parent: projects },
-      ],
-      eq(boqDocs.projectId, primary.id),
-    ),
+    cbsScoped(db, target.id),
+    boqGroupsScoped(db, target.id),
   ]);
   const nameByGroup = new Map(groups.map((g) => [g.id, g.name]));
 
@@ -255,15 +346,18 @@ async function budgetActual(db: TenantDb, range: string) {
   }));
 
   return {
-    range,
-    range_label: range,
-    // GAP: no time-bucketed cost data in seed → honest empty series.
-    period_label: [],
-    budget_amount: [],
-    actual_amount: [],
-    plan_amount: [],
-    cost_categories: costCategories,
-    currency_code: primary.currencyCode,
+    status: 200,
+    body: {
+      range: ctx.range,
+      range_label: ctx.range,
+      // GAP: no time-bucketed cost data in seed → honest empty series.
+      period_label: [],
+      budget_amount: [],
+      actual_amount: [],
+      plan_amount: [],
+      cost_categories: costCategories,
+      currency_code: target.currencyCode,
+    },
   };
 }
 
@@ -272,20 +366,22 @@ async function budgetActual(db: TenantDb, range: string) {
 // ---------------------------------------------------------------------------
 // Real source: pr rows with status = 'pending' (the only procurement doc with an
 // approval state machine — counts.ts uses the same pending semantics), amount
-// derived from the PR's lines (pr_item.qty × boq_item.price).
+// derived from the PR's lines (pr_item.qty × boq_item.price). project_id → only
+// that project's pending PRs; omitted → tenant-wide.
 // DATA GAPS: (a) po/wo carry NO status column and NO doc-number column, so they
 // have no "pending approval" state to filter on and are honestly EXCLUDED — the
 // mock's PO/WO inbox rows have no schema backing. (b) pr has no title / requester
 // (created_by) / urgency column, so those are null (NOT fabricated). amount is a
 // real derived line total (null when a PR has no priced BOQ lines).
-async function approvalsInbox(db: TenantDb) {
+async function approvalsInbox(db: TenantDb, ctx: DashCtx): Promise<Result> {
+  const pendingFilter = both(
+    eq(prs.status, "pending"),
+    ctx.projectId ? eq(prs.projectId, ctx.projectId) : undefined,
+  );
   const [pending, prLines, boqAll] = await Promise.all([
-    db.selectThrough(
-      prs,
-      [{ fk: prs.projectId, parent: projects }],
-      eq(prs.status, "pending"),
-    ),
-    // pr_item scoped pr → project; boq_item scoped group → doc → project.
+    db.selectThrough(prs, [{ fk: prs.projectId, parent: projects }], pendingFilter),
+    // pr_item scoped pr → project; boq_item scoped group → doc → project. Kept
+    // tenant-wide (they only feed the price/amount maps — a superset is harmless).
     db.selectThrough(prItems, [
       { fk: prItems.prId, parent: prs },
       { fk: prs.projectId, parent: projects },
@@ -323,23 +419,26 @@ async function approvalsInbox(db: TenantDb) {
       urgent: false, // GAP: no priority/age column to derive urgency honestly.
     };
   });
-  return listEnvelope(rows);
+  return { status: 200, body: listEnvelope(rows) };
 }
 
 // ---------------------------------------------------------------------------
 // 4. GET /dashboard/phase-progress — per-phase built/sold % (EntityList)
 // ---------------------------------------------------------------------------
-// Real source: every project_node kind='phase' across the tenant; units = count
-// of unit descendants (parent_id tree, same walk as projects.ts derivePhases);
-// sold% and built% from the distinct sales_unit.stage sets.
+// Real source: every project_node kind='phase' (project_id → one project;
+// omitted → tenant-wide); units = count of unit descendants (parent_id tree,
+// same walk as projects.ts derivePhases); sold% and built% from the distinct
+// sales_unit.stage sets.
 // DATA GAPS: budget_used has no per-phase budget link (cost_center attaches to
 // the project, cbs_budget to boq_group — neither to a phase node) → null (NOT the
 // mock's forbidden round(sold*0.92)). status has no per-phase schedule → null.
-async function phaseProgress(db: TenantDb) {
+async function phaseProgress(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const [nodes, sales] = await Promise.all([
-    db.selectThrough(projectNodes, [
-      { fk: projectNodes.projectId, parent: projects },
-    ]) as Promise<NodeRow[]>,
+    db.selectThrough(
+      projectNodes,
+      [{ fk: projectNodes.projectId, parent: projects }],
+      ctx.projectId ? eq(projectNodes.projectId, ctx.projectId) : undefined,
+    ) as Promise<NodeRow[]>,
     db.select(salesUnits),
   ]);
 
@@ -397,7 +496,7 @@ async function phaseProgress(db: TenantDb) {
         status: null, // GAP: no per-phase schedule/status data.
       };
     });
-  return listEnvelope(rows);
+  return { status: 200, body: listEnvelope(rows) };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,21 +505,18 @@ async function phaseProgress(db: TenantDb) {
 // Two real rules computed over seed:
 //   - over-budget category: cbs_budget where used + committed > budget
 //   - overdue payable: ap_billing with a due_date in the past, not yet settled
+// project_id → the over-budget rule is scoped to that project; the overdue-
+// payable rule is OMITTED (ap_billing has no project_id column, so an alert can't
+// be attributed to a project). omitted → both rules tenant-wide.
 // On the current seed NEITHER trips (cbs used+committed always < budget;
 // ap_billing.due_date is null for every row), so the list is honestly EMPTY —
 // the mock's 3 hardcoded alerts are NOT reproduced.
-async function alerts(db: TenantDb) {
+async function alerts(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const [cbs, groups, bills] = await Promise.all([
-    db.selectThrough(cbsBudgets, [
-      { fk: cbsBudgets.groupId, parent: boqGroups },
-      { fk: boqGroups.boqId, parent: boqDocs },
-      { fk: boqDocs.projectId, parent: projects },
-    ]),
-    db.selectThrough(boqGroups, [
-      { fk: boqGroups.boqId, parent: boqDocs },
-      { fk: boqDocs.projectId, parent: projects },
-    ]),
-    db.select(apBillings),
+    cbsScoped(db, ctx.projectId),
+    boqGroupsScoped(db, ctx.projectId),
+    // ap_billing has no project_id column → only queried for the tenant-wide case.
+    ctx.projectId ? Promise.resolve([]) : db.select(apBillings),
   ]);
   const nameByGroup = new Map(groups.map((g) => [g.id, g.name]));
 
@@ -447,7 +543,8 @@ async function alerts(db: TenantDb) {
     }
   }
 
-  // Rule 2 — overdue payable (due_date in the past, not settled/paid).
+  // Rule 2 — overdue payable (due_date in the past, not settled/paid). Skipped
+  // under project scope: ap_billing carries no project_id (GAP).
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   for (const b of bills) {
@@ -465,7 +562,7 @@ async function alerts(db: TenantDb) {
     }
   }
 
-  return listEnvelope(out);
+  return { status: 200, body: listEnvelope(out) };
 }
 
 // ---------------------------------------------------------------------------
@@ -473,15 +570,26 @@ async function alerts(db: TenantDb) {
 // ---------------------------------------------------------------------------
 // Real sources: ap_billing (payables, negative) with a due_date in [today,
 // today+7d]; ar_invoice (receivables, positive) whose due = created_at +
-// credit_term days falls in the same window.
+// credit_term days falls in the same window. project_id → that project (404 if
+// not owned): only ar_invoice.project_id is filtered — payables are OMITTED
+// (ap_billing has no project_id column). omitted → both legs tenant-wide.
 // DATA GAP: on the current seed the window catches nothing — ap_billing.due_date
 // is null for every row, and every ar_invoice due date is created_at + 30d (well
 // outside 7 days) — so rows is honestly EMPTY and net_total = 0 rather than the
 // mock's hardcoded -18.4M.
-async function cashflowForecast(db: TenantDb) {
+async function cashflowForecast(db: TenantDb, ctx: DashCtx): Promise<Result> {
+  if (ctx.projectId) {
+    const owned = await ownedProject(db, ctx.projectId);
+    if (!owned) return projectNotFound();
+  }
+
   const [bills, invoices] = await Promise.all([
-    db.select(apBillings),
-    db.select(arInvoices),
+    // ap_billing has no project_id column → payables leg only in the tenant-wide case.
+    ctx.projectId ? Promise.resolve([]) : db.select(apBillings),
+    db.select(
+      arInvoices,
+      ctx.projectId ? eq(arInvoices.projectId, ctx.projectId) : undefined,
+    ),
   ]);
 
   const start = new Date();
@@ -520,28 +628,35 @@ async function cashflowForecast(db: TenantDb) {
 
   rows.sort((a, b) => a.due_date.localeCompare(b.due_date));
   const netTotal = round2(rows.reduce((s, r) => s + r.amount, 0));
-  return { net_total: netTotal, currency_code: "THB", rows };
+  return { status: 200, body: { net_total: netTotal, currency_code: "THB", rows } };
 }
 
 // ---------------------------------------------------------------------------
 // 7. GET /dashboard/contractors — active subcontracts + progress (EntityList)
 // ---------------------------------------------------------------------------
-// Real sources: subcon_contract (scoped project), vendor name (company master),
-// progress = Σ(work_period.amount where status='passed') / contract.value ×100,
-// retention_amount = contract.value × retention_pct / 100.
+// Real sources: subcon_contract (scoped project; project_id → one project,
+// omitted → tenant-wide), vendor name (company master), progress = Σ(work_period
+// .amount where status='passed') / contract.value ×100, retention_amount =
+// contract.value × retention_pct / 100.
 // DATA GAP: subcon_contract has NO work-scope column (the mock's "งานโครงสร้าง
 // B-1..B-24" text is not stored) → work_scope is null. "active" is by end-date
 // (>= today) since subcon_contract has no status column. (retention_ledger.scope
 // / .withheld exist as an alternative real source — noted for review.)
-async function contractors(db: TenantDb) {
+async function contractors(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const [contracts, periods, vendorRows] = await Promise.all([
-    db.selectThrough(subconContracts, [
-      { fk: subconContracts.projectId, parent: projects },
-    ]),
-    db.selectThrough(workPeriods, [
-      { fk: workPeriods.contractId, parent: subconContracts },
-      { fk: subconContracts.projectId, parent: projects },
-    ]),
+    db.selectThrough(
+      subconContracts,
+      [{ fk: subconContracts.projectId, parent: projects }],
+      ctx.projectId ? eq(subconContracts.projectId, ctx.projectId) : undefined,
+    ),
+    db.selectThrough(
+      workPeriods,
+      [
+        { fk: workPeriods.contractId, parent: subconContracts },
+        { fk: subconContracts.projectId, parent: projects },
+      ],
+      ctx.projectId ? eq(subconContracts.projectId, ctx.projectId) : undefined,
+    ),
     db.select(vendors),
   ]);
   const nameByVendor = new Map(vendorRows.map((v) => [v.id, v.name]));
@@ -574,7 +689,7 @@ async function contractors(db: TenantDb) {
         currency_code: c.currencyCode,
       };
     });
-  return listEnvelope(rows);
+  return { status: 200, body: listEnvelope(rows) };
 }
 
 /** Parse ?range / ?period (contract Period param); default 'year'. */
@@ -583,32 +698,37 @@ function parseRange(raw: unknown): string {
   return s.length > 0 ? s : "year";
 }
 
+/** Parse ?project_id (contract uuid scope param); null when absent/blank. */
+function parseProjectId(raw: unknown): string | null {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  return s.length > 0 ? s : null;
+}
+
 /** Register the 7 GET /dashboard/* routes on the /api/v1-prefixed scope. */
 export function registerDashboardRoute(app: FastifyInstance): void {
   const withTenant =
-    (run: (db: TenantDb, range: string) => Promise<unknown>) =>
-    async (
-      request: { db?: TenantDb; query?: unknown },
-      reply: FastifyReply,
-    ) => {
+    (run: (db: TenantDb, ctx: DashCtx) => Promise<Result>) =>
+    async (request: { db?: TenantDb; query?: unknown }, reply: FastifyReply) => {
       const db = request.db;
       if (!db) return unauthenticated(reply);
-      const q = (request.query ?? {}) as { range?: unknown; period?: unknown };
-      const range = parseRange(q.range ?? q.period);
-      return reply.code(200).send(await run(db, range));
+      const q = (request.query ?? {}) as {
+        range?: unknown;
+        period?: unknown;
+        project_id?: unknown;
+      };
+      const ctx: DashCtx = {
+        range: parseRange(q.range ?? q.period),
+        projectId: parseProjectId(q.project_id),
+      };
+      const result = await run(db, ctx);
+      return reply.code(result.status).send(result.body);
     };
 
-  app.get("/dashboard/summary", withTenant((db, range) => summary(db, range)));
-  app.get(
-    "/dashboard/budget-actual",
-    withTenant((db, range) => budgetActual(db, range)),
-  );
-  app.get("/dashboard/approvals-inbox", withTenant((db) => approvalsInbox(db)));
-  app.get("/dashboard/phase-progress", withTenant((db) => phaseProgress(db)));
-  app.get("/dashboard/alerts", withTenant((db) => alerts(db)));
-  app.get(
-    "/dashboard/cashflow-forecast",
-    withTenant((db) => cashflowForecast(db)),
-  );
-  app.get("/dashboard/contractors", withTenant((db) => contractors(db)));
+  app.get("/dashboard/summary", withTenant(summary));
+  app.get("/dashboard/budget-actual", withTenant(budgetActual));
+  app.get("/dashboard/approvals-inbox", withTenant(approvalsInbox));
+  app.get("/dashboard/phase-progress", withTenant(phaseProgress));
+  app.get("/dashboard/alerts", withTenant(alerts));
+  app.get("/dashboard/cashflow-forecast", withTenant(cashflowForecast));
+  app.get("/dashboard/contractors", withTenant(contractors));
 }

@@ -540,3 +540,137 @@ describe("GET /api/v1/dashboard/contractors", () => {
     expect(captured.find((c) => c.table === vendors)?.joins.length).toBe(0);
   });
 });
+
+// ===========================================================================
+// project_id scope (contract amendment, B-049): provided → that project,
+// tenant-verified; foreign/absent → 404 (EntityOk) / empty (EntityList);
+// omitted → default behaviour (covered by the suites above).
+// ===========================================================================
+describe("GET /api/v1/dashboard/* — ?project_id scope + ownership", () => {
+  const RJP = "f84b0f07-ed67-522c-8ced-df72a883aaee";
+  const FOREIGN = "99999999-9999-9999-9999-999999999999";
+
+  // summary/budget-actual data-bearing project (rjp) — ownership select returns it.
+  const rjpDb = (captured: Captured[] = []) =>
+    stubJoinDb(
+      [
+        [projects, [{ id: RJP, companyId: COMPANY, typeId: "t-re", name: "ราชพฤกษ์", status: "active", currencyCode: "THB", createdAt: D }]],
+        [projectTypes, [{ id: "t-re", key: "realestate", name: "อสังหาฯ" }]],
+        [projectNodes, [{ id: "ph", kind: "phase", name: "เฟส 1", parentId: null, projectId: RJP }]],
+        [cbsBudgets, [
+          { groupId: "g1", budget: "10000000.00", used: "2000000.00", committed: "1000000.00" },
+          { groupId: "g2", budget: "11000000.00", used: "2200000.00", committed: "1100000.00" },
+        ]],
+        [boqGroups, [{ id: "g1", name: "งานเตรียม" }, { id: "g2", name: "งานโครงสร้าง" }]],
+      ],
+      captured,
+    );
+
+  it("summary?project_id=<owned> → non-empty budget KPIs for that project", async () => {
+    const captured: Captured[] = [];
+    const res = await get(`/api/v1/dashboard/summary?project_id=${RJP}`, rjpDb(captured));
+    expect(res.statusCode).toBe(200);
+    const b = res.json();
+    expect(b).toMatchObject({
+      project_id: RJP,
+      project_name: "ราชพฤกษ์",
+      kpi_kind: "budget",
+      budget_total: 21000000,
+      actual_total: 4200000,
+      committed_total: 2100000,
+      remaining_total: 14700000,
+      health_score: 70,
+    });
+    // the cbs aggregation is bound to BOTH company_id and the requested project.
+    const cbsWhere = paramsOf(captured.find((c) => c.table === cbsBudgets)?.where);
+    expect(cbsWhere).toContain(COMPANY);
+    expect(cbsWhere).toContain(RJP);
+  });
+
+  it("summary?project_id=<foreign/absent> → 404 (ownership select returns nothing)", async () => {
+    const res = await get(`/api/v1/dashboard/summary?project_id=${FOREIGN}`, stubJoinDb([[projects, []]]));
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ code: "NOT_FOUND", message: "Project not found" });
+  });
+
+  it("budget-actual?project_id=<owned> → cost_categories for that project (scope bound)", async () => {
+    const captured: Captured[] = [];
+    const res = await get(`/api/v1/dashboard/budget-actual?project_id=${RJP}`, rjpDb(captured));
+    expect(res.statusCode).toBe(200);
+    expect(res.json().cost_categories).toEqual([
+      { category_label: "งานเตรียม", actual_value: 2000000, plan_value: 10000000 },
+      { category_label: "งานโครงสร้าง", actual_value: 2200000, plan_value: 11000000 },
+    ]);
+    expect(paramsOf(captured.find((c) => c.table === cbsBudgets)?.where)).toContain(RJP);
+  });
+
+  it("budget-actual?project_id=<foreign> → 404", async () => {
+    const res = await get(`/api/v1/dashboard/budget-actual?project_id=${FOREIGN}`, stubJoinDb([[projects, []]]));
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("cashflow-forecast?project_id=<owned> → ar scoped to project, payables leg omitted", async () => {
+    const captured: Captured[] = [];
+    const res = await get(
+      `/api/v1/dashboard/cashflow-forecast?project_id=${RJP}`,
+      stubJoinDb([[projects, [{ id: RJP, companyId: COMPANY, createdAt: D }]], [arInvoices, []]], captured),
+    );
+    expect(res.statusCode).toBe(200);
+    // ar_invoice read is scoped to the project; ap_billing is NOT read (no project_id column).
+    expect(paramsOf(captured.find((c) => c.table === arInvoices)?.where)).toContain(RJP);
+    expect(captured.find((c) => c.table === apBillings)).toBeUndefined();
+  });
+
+  it("cashflow-forecast?project_id=<foreign> → 404", async () => {
+    const res = await get(`/api/v1/dashboard/cashflow-forecast?project_id=${FOREIGN}`, stubJoinDb([[projects, []]]));
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("approvals-inbox?project_id binds company + project + pending on the pr query", async () => {
+    const captured: Captured[] = [];
+    await get(
+      `/api/v1/dashboard/approvals-inbox?project_id=${RJP}`,
+      stubJoinDb([[prs, []], [prItems, []], [boqItems, []]], captured),
+    );
+    const w = paramsOf(captured.find((c) => c.table === prs)?.where);
+    expect(w).toContain(COMPANY);
+    expect(w).toContain(RJP);
+    expect(w).toContain("pending");
+  });
+
+  it("phase-progress?project_id binds company + project on the project_node query", async () => {
+    const captured: Captured[] = [];
+    await get(
+      `/api/v1/dashboard/phase-progress?project_id=${RJP}`,
+      stubJoinDb([[projectNodes, []], [salesUnits, []]], captured),
+    );
+    const w = paramsOf(captured.find((c) => c.table === projectNodes)?.where);
+    expect(w).toContain(COMPANY);
+    expect(w).toContain(RJP);
+  });
+
+  it("alerts?project_id scopes cbs to project + omits the ap_billing (no project link)", async () => {
+    const captured: Captured[] = [];
+    await get(
+      `/api/v1/dashboard/alerts?project_id=${RJP}`,
+      stubJoinDb([[cbsBudgets, []], [boqGroups, []], [apBillings, []]], captured),
+    );
+    expect(paramsOf(captured.find((c) => c.table === cbsBudgets)?.where)).toContain(RJP);
+    // ap_billing has no project_id column → not read under project scope (GAP).
+    expect(captured.find((c) => c.table === apBillings)).toBeUndefined();
+  });
+
+  it("contractors?project_id binds project on subcon_contract AND work_period (no cross-tenant leak)", async () => {
+    const captured: Captured[] = [];
+    await get(
+      `/api/v1/dashboard/contractors?project_id=${FOREIGN}`,
+      stubJoinDb([[subconContracts, []], [workPeriods, []], [vendors, []]], captured),
+    );
+    // a foreign project id is bound alongside company_id on every scoped read →
+    // in real PG the join yields zero rows (empty list), never another tenant's data.
+    const sc = paramsOf(captured.find((c) => c.table === subconContracts)?.where);
+    const wp = paramsOf(captured.find((c) => c.table === workPeriods)?.where);
+    expect(sc).toEqual(expect.arrayContaining([COMPANY, FOREIGN]));
+    expect(wp).toEqual(expect.arrayContaining([COMPANY, FOREIGN]));
+  });
+});
