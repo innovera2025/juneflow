@@ -490,3 +490,8 @@
 
 ## 2026-07-15 · orch-A subagent · P1-BE-14 (B-065 project_type tenant-scope)
 - migration 0014: +company_id nullable FK · key enum→text + unique(company_id,key) · hybrid read selectGlobalOrOwned · PUT global default=404 no-leak · live PG cross-tenant proof
+
+## 2026-07-15 · orch-A subagent · P1-BE-15 (B-049 dashboard 7 endpoints)
+- openapi §10 (7 ops + project_id) applied by orch-A; subagent impl handlers only (no sacred touch)
+- C10 honest aggregation: real where seed has data (budget/contractors/approvals/phase), honest-empty where schema lacks source (time-series/alerts/cashflow)
+- project_id active-project scope: 404 foreign (EntityOk) / empty (EntityList), no cross-tenant leak
