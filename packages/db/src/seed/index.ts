@@ -315,17 +315,22 @@ const ORG_SEED = [
 // master.jsx:737 DOCNUM_SEED (10 running-number counters) — B-060 (P1-BE-11):
 // `running` is stored as TEXT verbatim from the mock (leading zeros kept,
 // BOQ row = the non-numeric "B-02 v3").
+// `lock` is the lock-mode CODE (B-067(ข), P1-BE-12 — was boolean): the mock
+// LOCK_OPTS `v` value is verbatim-mapped to a short stable code —
+// ทุกใบ→all · ตามแผนก→dept · ตามคลัง→warehouse · —→none (master.jsx:737-756).
+// A boolean lost dept+warehouse (TR/IS were flattened to false); the code
+// preserves all 4 modes so the FE can resolve each to its i18n label.
 const DOCNUM_SEED = [
-  { type: "Purchase Requisition", prefix: "PR", running: "0418", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Purchase Order", prefix: "PO", running: "0291", reset: "ทุกปีบัญชี", lock: true },
-  { type: "Work Order", prefix: "WO", running: "0117", reset: "ทุกปีบัญชี", lock: true },
-  { type: "Goods Receipt", prefix: "GR", running: "0148", reset: "ทุกปีบัญชี", lock: true },
-  { type: "Return", prefix: "RT", running: "0014", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset: "—", lock: true },
-  { type: "Petty Cash", prefix: "PT", running: "0148", reset: "ทุกเดือน", lock: false },
-  { type: "Stock Transfer", prefix: "TR", running: "0084", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Issue (เบิก)", prefix: "IS", running: "0218", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Journal Voucher", prefix: "JV", running: "0418", reset: "ทุกปีบัญชี", lock: true },
+  { type: "Purchase Requisition", prefix: "PR", running: "0418", reset: "ทุกปีบัญชี", lock: "dept" },
+  { type: "Purchase Order", prefix: "PO", running: "0291", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Work Order", prefix: "WO", running: "0117", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Goods Receipt", prefix: "GR", running: "0148", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Return", prefix: "RT", running: "0014", reset: "ทุกปีบัญชี", lock: "none" },
+  { type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset: "—", lock: "all" },
+  { type: "Petty Cash", prefix: "PT", running: "0148", reset: "ทุกเดือน", lock: "none" },
+  { type: "Stock Transfer", prefix: "TR", running: "0084", reset: "ทุกปีบัญชี", lock: "warehouse" },
+  { type: "Issue (เบิก)", prefix: "IS", running: "0218", reset: "ทุกปีบัญชี", lock: "warehouse" },
+  { type: "Journal Voucher", prefix: "JV", running: "0418", reset: "ทุกปีบัญชี", lock: "all" },
 ];
 
 // accounting-extra.jsx:14 COA_SEED (23 GL accounts)

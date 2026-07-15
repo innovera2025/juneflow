@@ -584,7 +584,12 @@ export const orgUnits = pgTable("org_unit", {
  * non-numeric strings as-is); the mock table's "เลขถัดไป" +1 display is
  * FE-side and applies to all-digit values only. Real issuing-time semantics
  * land with the Phase-2 numbering service. `reset_rule` is the reset cadence
- * (yearly/monthly/never per mock RESET_OPTS); `locked` freezes the format.
+ * (yearly/monthly/never per mock RESET_OPTS); `locked` is the lock-mode CODE
+ * (B-067(ข): boolean -> text — the mock LOCK_OPTS has 4 modes ทุกใบ/ตามแผนก/
+ * ตามคลัง/ไม่ล็อก, so a boolean loses dept+warehouse and fails the G5 g2/35
+ * table cell). Stored as a short stable code — all | dept | warehouse | none —
+ * resolved to the i18n label on the FE (same code+i18n rule B-060 set for
+ * reset). Mirrors reset_rule's plain-text column shape (not a pg enum).
  * Unique per (company, type).
  */
 export const docNumberings = pgTable("doc_numbering", {
@@ -596,7 +601,7 @@ export const docNumberings = pgTable("doc_numbering", {
   prefix: text("prefix"),
   running: text("running").notNull().default("1"),
   resetRule: text("reset_rule"),
-  locked: boolean("locked").notNull().default(false),
+  locked: text("locked").notNull().default("none"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
