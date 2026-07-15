@@ -3,7 +3,7 @@
 > คิวการแก้ **sacred files** ที่ Wei อนุมัติแล้ว แต่ยังไม่ apply (hook `protect-files.sh` ล็อกไว้ · ปลดผ่าน `SACRED_OVERRIDE=wei-approved:B-xxx` ในรอบ loop เท่านั้น)
 > ที่มา: batch B blocker closeout — Wei เคลียร 14 blocker (2026-07-13). Draft โดย workflow `blocker-batch-closeout` (read-only · ไม่มีไฟล์ถูกแก้ตอน draft)
 > **กฎ:** ทุก Thai string ด้านล่าง = verbatim จาก prototype ที่อ้าง · ห้ามแปลใหม่ · zh/en/ar = th fallback เฉพาะ key ใหม่ (ตาม B-035/B-039 precedent)
-> งานที่ apply แต่ละก้อนถูกผูกเป็น task ใน `TASKS.md`: **P1-PLAT-01** (§1 i18n) · **P1-BE-05** (§2 openapi envelope) · B-007 (§3 · Phase 3 pending) · **P1-BE-09** (§4 openapi `/models`+`/users`+`/roles`) · **P1-PLAT-02** (§5 i18n จอ master.model+users · pending-compile) · **P1-BE-10** (§6 org-hierarchy + project-tree) · **P1-PLAT-03** (§7 i18n จอ master.company+project · pending-compile)
+> งานที่ apply แต่ละก้อนถูกผูกเป็น task ใน `TASKS.md`: **P1-PLAT-01** (§1 i18n) · **P1-BE-05** (§2 openapi envelope) · B-007 (§3 · Phase 3 pending) · **P1-BE-09** (§4 openapi `/models`+`/users`+`/roles`) · **P1-PLAT-02** (§5 i18n จอ master.model+users · pending-compile) · **P1-BE-10** (§6 org-hierarchy) · **P1-PLAT-03** (§7) · **P1-PLAT-04** (§9 i18n 3 จอ master) · **P1-BE-12** (§B-067 docnum) · **P1-BE-15** (§10 dashboard openapi) · **P1-PLAT-06** (§11 dashboard i18n)
 
 ---
 
@@ -519,3 +519,31 @@ Regenerated clients = **ไม่ sacred** (regen · ห้าม hand-edit) · 
 **Platform (i18n-full.json both copies · same override batch):** add 3 keys (docnum.lockDept + all 4 optLock* already shipped in §9): `docnum.lockAll`="ทุกใบ" · `docnum.lockWarehouse`="ตามคลัง" · `docnum.fmtYear`="{ปี}" (Format-column token master.jsx:869). th verbatim · en/zh/ar fallback.
 
 **After merge → WEB-12 port (web zone):** map GET `locked` code→i18n on the table cell: all→docnum.lockAll · dept→docnum.lockDept · warehouse→docnum.lockWarehouse · none→literal "—" (no key · §0/B-064 precedent) · Format cell uses docnum.fmtYear. B-060 pure-logic ready. DocNumForm write DEFERRED (B-066 · button stub). Visual gate g2/35 → **master wave 7/7 COMPLETE**.
+
+---
+
+## 10) `openapi.yaml` — B-049 dashboard endpoints · `SACRED_OVERRIDE=wei-approved:B-049` (task P1-BE-15)
+
+**Decision (Wei ✅ 15 ก.ค. — B-049 UN-DEFER→GO):** dashboard build ปลดล็อก · เพิ่ม 7 read/aggregation endpoints (Entity-opaque ตาม convention · ไม่มี named schema) + tag `dashboard` · reuse /audit-log,/counts,/me,/projects · **ห้ามแตะส่วนอื่น**
+
+**เพิ่ม `- name: dashboard` ใน tags block (~L55-79) + 7 paths ก่อน `components:` (~L2916):**
+
+| operationId | path · method | response | tenant door | widgets |
+|---|---|---|---|---|
+| `getDashboardSummary` | GET /dashboard/summary?range= | EntityOk | selectThrough(project→company)+selectReference(project_type) | header + type-aware KPIs (budget/solar/civil) + health donut |
+| `getDashboardBudgetActual` | GET /dashboard/budget-actual?range= | EntityOk | selectThrough(cost→project) | budget/actual/plan time-series + cost-category |
+| `listDashboardApprovals` | GET /dashboard/approvals-inbox | EntityList | select per PR/PO/WO (company_id) | union pending ที่ user เป็นผู้อนุมัติ |
+| `listDashboardPhaseProgress` | GET /dashboard/phase-progress | EntityList | selectThrough(phases→project) | built%/budget_used%/status type-aware |
+| `listDashboardAlerts` | GET /dashboard/alerts | EntityList | selectThrough(project) | rule-based risk |
+| `getDashboardCashflowForecast` | GET /dashboard/cashflow-forecast | EntityOk | selectThrough(cashflow→project) | 7-วัน forward net + rows |
+| `listDashboardContractors` | GET /dashboard/contractors | EntityList | selectThrough(contracts→project) | active subcon + progress% + retention |
+
+- `range` param = reuse `$ref: "#/components/parameters/Period"` (มีอยู่ ~L2948) บน summary + budget-actual
+- **ไม่ reuse** `/gl/reports/cashflow` (historical ≠ 7-วัน forecast) → cashflow-forecast แยก
+- YAML expand ตาม convention §4/§6 (tags:[dashboard] · EntityOk/EntityList · 401 Unauthorized)
+- **impl (P1-BE-15):** aggregation handlers อ่าน seed จริง (C10 — ห้าม hardcode 17/24/3/71/38 · derive จาก query) · type-aware summary (realestate/civil/service=budget KPIs · solar=capacity/energy/PR) · ไม่มี migration (read-only aggregation)
+
+## 11) `i18n-full.json` — B-049 dashboard keys · `SACRED_OVERRIDE=wei-approved:B-049` (task P1-PLAT-06 · **PENDING-COMPILE**)
+
+**Scope (~64 keys · จาก dashboard recon):** Bucket A **42 static** (role banners 4 · solar/civil/service branch labels · phase-status late/soon · chart range titles + `งบ` legend · activity verbs) + Bucket B **22 template/phrase_pattern** (number/date-bearing: `ช่วง: {r}` · `เฉลี่ยทุกเฟส ({n})` · `{n} ฉบับ` · `ข้อมูล ณ {date} (อัปเดต {time} น.)` · `+{p}% MoM` · KPI-subs...). **verbatim rule (§0):** term อังกฤษใน prototype (Performance Ratio · UAT · online · Overhead · MWp/MWh/kWp) = th value อังกฤษตามต้นฉบับ — **ไม่ต้องถาม Wei** (fidelity = ตามที่ prototype แสดง) · fix 2 glyph near-miss (`● ตรงแผน` prefix · `Sync SAP / REM` spacing) byte-for-byte · **exclude Bucket C ~22** (mock/seed literals: approval titles/phase names/alert bodies → seed layer, ไม่ใช่ i18n) · exclude weekday/month abbrev → date helper
+
