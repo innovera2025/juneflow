@@ -1,0 +1,6 @@
+{
+  "_source": "Verbatim Thai keys from pototype/master.jsx MasterCC (L666-731) + the ds.jsx STATUS labels the prototype's <StatusBadge> renders. Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx source — same pattern as model-strings.json / project-strings.json. navTitle is a nav_i18n key (tn(): the breadcrumb crumb-2, master.jsx:685 == the 'Cost Center' NAV label). statusApproved('อนุมัติแล้ว') / statusDraft('ร่าง') render the status badge (ds.jsx STATUS.approved.label / STATUS.draft.label). Each value is a real i18n key (nav_i18n -> tn, phrases -> tp).",
+  "navTitle": "Cost Center",
+  "statusDraft": "ร่าง",
+  "statusApproved": "อนุมัติแล้ว"
+}

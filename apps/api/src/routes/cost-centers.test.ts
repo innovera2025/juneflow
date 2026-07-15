@@ -1,9 +1,14 @@
-// G3 unit tests (PLAN.md §9) — GET /cost-centers (P1-BE-07, master.jsx CC_SEED):
-// the tenant's cost centers with their {id, code, name, project_id} wire shape,
-// wrapped in the B-014 list envelope, fail-closed 401 without a tenant, and
-// tenant-scoped THROUGH the project root (cost_center has no company_id — it is
-// a parent-FK-scoped table read via selectThrough with an INNER JOIN onto
-// project WHERE project.company_id = <tenant>, never a bare read → no leak).
+// G3 unit tests (PLAN.md §9) — GET + POST /cost-centers (P1-BE-07 + P1-BE-11,
+// B-059; master.jsx MasterCC/CCAddForm): the tenant's cost centers with the
+// B-059 full wire shape {id, code, name, project_id, type, link, owner, budget,
+// currency_code, status}, wrapped in the B-014 list envelope, fail-closed 401
+// without a tenant, and tenant-scoped THROUGH the project root (cost_center has
+// no company_id — reads join onto project WHERE project.company_id = <tenant>,
+// writes go through insertThrough's verified parent, never bare → no leak).
+// Create rules: the server owns status (a new cost center ALWAYS starts
+// `draft`), CCAddForm defaults (type Project, link/owner "—", budget 0), the
+// mock's comma-stripped numeric budget, and code uniqueness across the
+// tenant's list (409).
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
@@ -21,21 +26,29 @@ const SESSION = {
 };
 
 // --- join-capable capturing stub Db: records the table, its join hops, and the
-// WHERE predicate for every selectThrough read (cost_center joins onto project).
+// WHERE predicate for every read (cost_center reads join onto project; the
+// insertThrough parent verify is a bare scoped select on project), plus every
+// inserted row set.
 interface Captured {
   table: unknown;
   joins: unknown[];
   where: SQL | undefined;
 }
+interface Inserted {
+  table: unknown;
+  values: Record<string, unknown>[];
+}
 
 function stubJoinDb(
   rows: Array<[unknown, unknown[]]>,
   captured: Captured[] = [],
+  inserted: Inserted[] = [],
 ): Db {
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
   };
+  let seq = 0;
   return {
     select: () => ({
       from: (table: unknown) => {
@@ -60,6 +73,18 @@ function stubJoinDb(
         };
         return builder;
       },
+    }),
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>[]) => ({
+        returning: () => {
+          inserted.push({ table, values });
+          // Echo the inserted rows + a synthetic id + column defaults a real
+          // INSERT ... RETURNING would fill (currency_code).
+          return Promise.resolve(
+            values.map((v) => ({ id: `new-${seq++}`, currencyCode: "THB", ...v })),
+          );
+        },
+      }),
     }),
   } as unknown as Db;
 }
@@ -94,22 +119,38 @@ async function buildTestApp(
   return app;
 }
 
-// --- seed-shaped canned rows (cost_center schema / CC_SEED). The stub returns
-// post-JOIN/WHERE rows, so these transcribe the schema columns the route reads.
+// --- seed-shaped canned rows (cost_center schema / CC_SEED — B-059 superset).
+// The stub returns post-JOIN/WHERE rows, so these transcribe the schema columns
+// the route reads (budget = the numeric column's 2-decimal string).
 const PROJECT_RJP = "pr-rjp-0000-0000-0000-000000000001";
-const ccRow = (code: string, name: string) => ({
+const PROJECT_ROW = { id: PROJECT_RJP, companyId: COMPANY, name: "ราชพฤกษ์" };
+const ccRow = (
+  code: string,
+  name: string,
+  type: "Project" | "Overhead" | "Dept",
+  link: string,
+  owner: string,
+  budget: string,
+  status: "draft" | "approved",
+) => ({
   id: `cc-${code}`,
   projectId: PROJECT_RJP,
   code,
   name,
+  type,
+  link,
+  owner,
+  budget,
+  currencyCode: "THB",
+  status,
   createdAt: new Date(),
   updatedAt: new Date(),
 });
 const seedCostCenters = [
-  ccRow("CC-CONS-RJP-01", "โครงการ ราชพฤกษ์ เฟส 1"),
-  ccRow("CC-CONS-RJP-02", "โครงการ ราชพฤกษ์ เฟส 2"),
-  ccRow("CC-CONS-OH", "Overhead งานก่อสร้าง"),
-  ccRow("CC-PROC", "ฝ่ายจัดซื้อ"),
+  ccRow("CC-CONS-RJP-01", "โครงการ ราชพฤกษ์ เฟส 1", "Project", "เฟส 1 / Block A", "สมชาย", "84400000.00", "approved"),
+  ccRow("CC-CONS-RJP-02", "โครงการ ราชพฤกษ์ เฟส 2", "Project", "เฟส 2 / Block B+C", "สมชาย", "124800000.00", "approved"),
+  ccRow("CC-CONS-OH", "Overhead งานก่อสร้าง", "Overhead", "ฝ่ายก่อสร้าง · ทุกโครงการ", "ผอ.สมพร", "8400000.00", "approved"),
+  ccRow("CC-PROC", "ฝ่ายจัดซื้อ", "Dept", "—", "ธีรพงษ์", "1200000.00", "approved"),
 ];
 
 describe("GET /api/v1/cost-centers — auth", () => {
@@ -123,10 +164,23 @@ describe("GET /api/v1/cost-centers — auth", () => {
       message: "Missing tenant context",
     });
   });
+
+  it("401s flat on POST without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/cost-centers",
+      payload: { code: "CC-X", name: "x", project_id: PROJECT_RJP },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Missing tenant context",
+    });
+  });
 });
 
 describe("GET /api/v1/cost-centers — cost centers in the B-014 list envelope", () => {
-  it("wraps the cost centers with {id, code, name, project_id}", async () => {
+  it("wraps the cost centers with the B-059 full field set", async () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -136,12 +190,13 @@ describe("GET /api/v1/cost-centers — cost centers in the B-014 list envelope",
 
     expect(res.statusCode).toBe(200);
     // B-014: 4 rows returned as a single full page (page_size = max(4, 50) = 50).
+    // budget goes on the wire as a Number in FULL baht (like GET /projects).
     expect(res.json()).toEqual({
       data: [
-        { id: "cc-CC-CONS-RJP-01", code: "CC-CONS-RJP-01", name: "โครงการ ราชพฤกษ์ เฟส 1", project_id: PROJECT_RJP },
-        { id: "cc-CC-CONS-RJP-02", code: "CC-CONS-RJP-02", name: "โครงการ ราชพฤกษ์ เฟส 2", project_id: PROJECT_RJP },
-        { id: "cc-CC-CONS-OH", code: "CC-CONS-OH", name: "Overhead งานก่อสร้าง", project_id: PROJECT_RJP },
-        { id: "cc-CC-PROC", code: "CC-PROC", name: "ฝ่ายจัดซื้อ", project_id: PROJECT_RJP },
+        { id: "cc-CC-CONS-RJP-01", code: "CC-CONS-RJP-01", name: "โครงการ ราชพฤกษ์ เฟส 1", project_id: PROJECT_RJP, type: "Project", link: "เฟส 1 / Block A", owner: "สมชาย", budget: 84400000, currency_code: "THB", status: "approved" },
+        { id: "cc-CC-CONS-RJP-02", code: "CC-CONS-RJP-02", name: "โครงการ ราชพฤกษ์ เฟส 2", project_id: PROJECT_RJP, type: "Project", link: "เฟส 2 / Block B+C", owner: "สมชาย", budget: 124800000, currency_code: "THB", status: "approved" },
+        { id: "cc-CC-CONS-OH", code: "CC-CONS-OH", name: "Overhead งานก่อสร้าง", project_id: PROJECT_RJP, type: "Overhead", link: "ฝ่ายก่อสร้าง · ทุกโครงการ", owner: "ผอ.สมพร", budget: 8400000, currency_code: "THB", status: "approved" },
+        { id: "cc-CC-PROC", code: "CC-PROC", name: "ฝ่ายจัดซื้อ", project_id: PROJECT_RJP, type: "Dept", link: "—", owner: "ธีรพงษ์", budget: 1200000, currency_code: "THB", status: "approved" },
       ],
       page: 1,
       page_size: 50,
@@ -149,7 +204,7 @@ describe("GET /api/v1/cost-centers — cost centers in the B-014 list envelope",
     });
   });
 
-  it("returns only the schema columns (no timestamp / extra columns leak)", async () => {
+  it("returns only the wire fields (no timestamp / scope-column leak)", async () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -158,7 +213,9 @@ describe("GET /api/v1/cost-centers — cost centers in the B-014 list envelope",
     ).inject({ url: "/api/v1/cost-centers" });
 
     const row = res.json().data[0];
-    expect(Object.keys(row).sort()).toEqual(["code", "id", "name", "project_id"]);
+    expect(Object.keys(row).sort()).toEqual([
+      "budget", "code", "currency_code", "id", "link", "name", "owner", "project_id", "status", "type",
+    ]);
   });
 
   it("empty set still yields a valid one-page envelope (page_size >= 1)", async () => {
@@ -214,5 +271,168 @@ describe("GET /api/v1/cost-centers — tenant scope (no leak)", () => {
     expect(captured).toHaveLength(1);
     expect(paramsOf(captured[0].where)).toContain(other.companyId);
     expect(paramsOf(captured[0].where)).not.toContain(COMPANY);
+  });
+});
+
+describe("POST /api/v1/cost-centers — create is Add-only, server-owned draft status", () => {
+  it("creates with status draft — the server ignores a client-sent status", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubJoinDb(
+          [[costCenters, seedCostCenters], [projects, [PROJECT_ROW]]],
+          captured,
+          inserted,
+        ),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/cost-centers",
+      payload: {
+        code: "CC-CONS-RJP-04",
+        name: "โครงการ ราชพฤกษ์ เฟส 4",
+        type: "Project",
+        link: "เฟส 4 / Block E",
+        owner: "สมชาย",
+        budget: "5,000,000", // mock input keeps thousands commas
+        project_id: PROJECT_RJP,
+        status: "approved", // must be ignored — creation ALWAYS lands draft
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    // server-owned fields on the INSERT: status draft (B-059 — no approval
+    // flow), budget = comma-stripped FULL baht as the numeric 2-decimal string.
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]!.table).toBe(costCenters);
+    const values = inserted[0]!.values[0]!;
+    expect(values.status).toBe("draft");
+    expect(values.budget).toBe("5000000.00");
+    expect(values.projectId).toBe(PROJECT_RJP);
+    // insertThrough verified the parent project ownership before writing:
+    // a scoped read on project carrying BOTH the project id and the tenant.
+    const parentVerify = captured.filter(
+      (c) => c.table === projects && paramsOf(c.where).includes(PROJECT_RJP),
+    );
+    expect(parentVerify.length).toBeGreaterThan(0);
+    for (const call of parentVerify) {
+      expect(paramsOf(call.where)).toContain(COMPANY);
+    }
+    // response echoes the created row in the B-059 full wire shape.
+    expect(res.json()).toMatchObject({
+      code: "CC-CONS-RJP-04",
+      name: "โครงการ ราชพฤกษ์ เฟส 4",
+      project_id: PROJECT_RJP,
+      type: "Project",
+      link: "เฟส 4 / Block E",
+      owner: "สมชาย",
+      budget: 5000000,
+      currency_code: "THB",
+      status: "draft",
+    });
+  });
+
+  it("applies the CCAddForm defaults: type Project, link/owner —, budget 0", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubJoinDb(
+          [[costCenters, []], [projects, [PROJECT_ROW]]],
+          [],
+          inserted,
+        ),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/cost-centers",
+      payload: { code: "CC-NEW", name: "ศูนย์ใหม่", project_id: PROJECT_RJP },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const values = inserted[0]!.values[0]!;
+    expect(values).toMatchObject({
+      type: "Project",
+      link: "—",
+      owner: "—",
+      budget: "0.00",
+      status: "draft",
+    });
+  });
+
+  it("409s a duplicate code (checked across the tenant's full list, like the mock)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubJoinDb([[costCenters, seedCostCenters], [projects, [PROJECT_ROW]]]),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/cost-centers",
+      payload: { code: "CC-CONS-RJP-01", name: "ซ้ำ", project_id: PROJECT_RJP },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("DUPLICATE_CODE");
+  });
+
+  it("400s on missing code (or the untouched CC- prefill) / name / project_id / bad type / bad budget", async () => {
+    const build = async () =>
+      buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubJoinDb([[costCenters, []], [projects, [PROJECT_ROW]]]),
+      });
+
+    const noCode = await (await build()).inject({ method: "POST", url: "/api/v1/cost-centers", payload: { code: "CC-", name: "x", project_id: PROJECT_RJP } });
+    expect(noCode.statusCode).toBe(400);
+    await app.close();
+
+    const noName = await (await build()).inject({ method: "POST", url: "/api/v1/cost-centers", payload: { code: "CC-X", project_id: PROJECT_RJP } });
+    expect(noName.statusCode).toBe(400);
+    await app.close();
+
+    const noProject = await (await build()).inject({ method: "POST", url: "/api/v1/cost-centers", payload: { code: "CC-X", name: "x" } });
+    expect(noProject.statusCode).toBe(400);
+    await app.close();
+
+    const badType = await (await build()).inject({ method: "POST", url: "/api/v1/cost-centers", payload: { code: "CC-X", name: "x", type: "Workflow", project_id: PROJECT_RJP } });
+    expect(badType.statusCode).toBe(400);
+    await app.close();
+
+    const badBudget = await (await build()).inject({ method: "POST", url: "/api/v1/cost-centers", payload: { code: "CC-X", name: "x", budget: "ไม่ใช่เลข", project_id: PROJECT_RJP } });
+    expect(badBudget.statusCode).toBe(400);
+  });
+
+  it("rejects a project outside the tenant (scoped read finds nothing — no leak)", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // No project row canned → the scoped project read resolves nothing,
+        // exactly what a foreign tenant's project id looks like through the
+        // scoped door.
+        db: stubJoinDb([[costCenters, seedCostCenters]], captured, inserted),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/cost-centers",
+      payload: {
+        code: "CC-EVIL",
+        name: "ข้ามเขต",
+        project_id: "pr-foreign-0000-0000-000000000009",
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ code: "VALIDATION", message: "project not found" });
+    // nothing was written.
+    expect(inserted).toHaveLength(0);
+    // the project lookup was tenant-scoped (carried company_id = <this tenant>).
+    const projectRead = captured.find((c) => c.table === projects);
+    expect(projectRead).toBeTruthy();
+    expect(paramsOf(projectRead!.where)).toContain(COMPANY);
+    expect(paramsOf(projectRead!.where)).toContain("pr-foreign-0000-0000-000000000009");
   });
 });

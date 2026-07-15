@@ -1,5 +1,5 @@
 // GET /doc-numbering — the tenant's running-number counters per document type
-// (P1-BE-08, master.jsx DOCNUM_SEED / docs/extract/MOCK-DATA.md:54).
+// (P1-BE-08 + P1-BE-11, master.jsx DOCNUM_SEED / docs/extract/MOCK-DATA.md:54).
 //
 // Contract (openapi.yaml /doc-numbering GET, ~L736): the B-014 paginated list
 // envelope {data, page, page_size, total} (EntityList) where each `data` row is
@@ -9,9 +9,11 @@
 // seed DOCNUM_SEED) — {id, type, prefix, running, reset_rule, locked}.
 //   type       = document type (e.g. "Purchase Order", "Work Order").
 //   prefix     = the running-number prefix (e.g. "PO"); nullable.
-//   running    = next sequence value (integer — the seed's leading-zero string
-//                "0291" is mock-only display formatting, not the stored value,
-//                so the integer 291 goes on the wire).
+//   running    = the LAST-used running number as a STRING, verbatim from the
+//                mock incl. leading zeros ("0291") and non-numeric values (BOQ
+//                row "B-02 v3") — B-060(ก), P1-BE-11 (was integer). The FE pads
+//                / +1s all-digit values only (master.jsx:874); issuing-time
+//                semantics land with the Phase-2 numbering service.
 //   reset_rule = the reset cadence (mock `reset` — yearly/monthly/never per
 //                RESET_OPTS); nullable.
 //   locked     = whether the format is frozen (mock `lock`).

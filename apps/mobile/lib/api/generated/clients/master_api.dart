@@ -11,7 +11,9 @@ import '../models/get_cost_centers_response.dart';
 import '../models/get_customers_response.dart';
 import '../models/get_doc_numbering_response.dart';
 import '../models/get_models_response.dart';
+import '../models/get_org_units_response.dart';
 import '../models/get_project_types_response.dart';
+import '../models/get_projects_id_hierarchy_response.dart';
 import '../models/get_projects_response.dart';
 import '../models/get_vendors_response.dart';
 import '../models/kind.dart';
@@ -67,8 +69,45 @@ abstract class MasterApi {
 
   /// Project hierarchy tree (phase/block/unit)
   @GET('/projects/{id}/hierarchy')
-  Future<Entity> getProjectHierarchy({
+  Future<GetProjectsIdHierarchyResponse> getProjectHierarchy({
     @Path('id') required String id,
+  });
+
+  /// List org structure nodes (flat ordered tree, lvl 0-2).
+  ///
+  /// [filter] - Free-text/structured filter (GET /x?filter&page pattern).
+  ///
+  /// [page] - 1-based page index (GET /x?filter&page pattern).
+  @GET('/org-units')
+  Future<GetOrgUnitsResponse> listOrgUnits({
+    @Query('filter') String? filter,
+    @Query('page') int? page,
+  });
+
+  /// Create org node (company lvl0 or department/team lvl 1-2)
+  @POST('/org-units')
+  Future<Entity> createOrgUnit({
+    @Body() required Entity body,
+  });
+
+  /// Update org node (partial merge - omitted fields keep current values)
+  @PUT('/org-units/{id}')
+  Future<Entity> updateOrgUnit({
+    @Path('id') required String id,
+    @Body() required Entity body,
+  });
+
+  /// Delete org node (cascades to the whole subtree)
+  @DELETE('/org-units/{id}')
+  Future<Entity> deleteOrgUnit({
+    @Path('id') required String id,
+  });
+
+  /// Create block node under the first/active phase (auto-generates N unit nodes, status empty, max 200)
+  @POST('/projects/{id}/nodes')
+  Future<Entity> createProjectNode({
+    @Path('id') required String id,
+    @Body() required Entity body,
   });
 
   /// List project types (hierarchy[], modules{} — Full only).

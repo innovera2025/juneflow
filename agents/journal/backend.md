@@ -478,3 +478,8 @@
 - ทำอะไร: openapi §6 apply โดย orch-B (c6b46a6) → subagent: schema + migration 0011 ALTER-only + /org-units CRUD (rules) + /projects/{id}/nodes + insertThrough door + impl GET hierarchy + seed + regen + 28 tests. 9 commits.
 - ตัดสินใจอะไร: — (B-052/B-053 Wei ratify · SACRED_OVERRIDE=wei-approved:B-052 · in-spec: project_node.code column ใหม่)
 - เจออะไร: gates เขียว (api 176 · drizzle live PG16) · gate-4.5 subagent โดน session-limit → orch-B inline verify PASS
+
+## 2026-07-15 · orch-A subagent · P1-BE-11 (B-059 cc superset + B-060 docnum running→text)
+- migration 0012_grey_slipstream: drizzle-kit ไม่ emit USING เอง — hand-edit DROP DEFAULT → SET DATA TYPE text USING ::text → SET DEFAULT '1' แล้วพิสูจน์บน populated column จริง
+- POST /cost-centers ต้อง impl ด้วย (กติกา default draft ต้องมี create path) · project_id required — web ส่ง active project id (form ไม่มี picker)
+- columns ใหม่ nullable ระดับ column (B-050 precedent — ALTER ลงบนแถวเก่า) · presence คุมที่ seed + POST

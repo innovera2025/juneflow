@@ -4,6 +4,7 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
+import 'phases.dart';
 import 'project_input_type.dart';
 
 part 'project_input.g.dart';
@@ -16,6 +17,9 @@ class ProjectInput {
     required this.type,
     this.budget,
     this.currencyCode,
+    this.short,
+    this.units,
+    this.phases,
   });
   
   factory ProjectInput.fromJson(Map<String, Object?> json) => _$ProjectInputFromJson(json);
@@ -25,6 +29,9 @@ class ProjectInput {
   final num? budget;
   @JsonKey(name: 'currency_code')
   final String? currencyCode;
+  final String? short;
+  final int? units;
+  final List<Phases>? phases;
 
   Map<String, Object?> toJson() => _$ProjectInputToJson(this);
 }
