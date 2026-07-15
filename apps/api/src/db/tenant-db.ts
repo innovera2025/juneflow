@@ -15,15 +15,22 @@
 // Scoped operations accept only tables that carry a `companyId` column (the
 // TenantTable generic). The one unscoped door, selectReference(), is runtime-
 // allowlisted to exactly the platform-global reference tables
-// (package/project_type/company) and throws for everything else — including
-// parent-FK-scoped tenant tables that have no companyId column of their own.
+// (package/company) and throws for everything else — including parent-FK-scoped
+// tenant tables that have no companyId column of their own.
+//
+// project_type is a HYBRID table (B-065, P1-BE-14): its 4 product defaults are
+// global (company_id IS NULL) but tenant-created custom types are owned
+// (company_id = tenant). It now carries a nullable companyId column, so it is
+// read through the dedicated selectGlobalOrOwned() door (global OR own — never
+// another tenant's) and written through the scoped insert()/update() doors. It
+// is NO LONGER on the selectReference() allowlist.
 //
 // G3: src/db/tenant-db.test.ts proves the predicate/value is present on every
 // operation by inspecting the generated SQL (drizzle `.toSQL()`), and that a
 // missing companyId fails closed.
-import { and, eq, getTableColumns, type SQL } from "drizzle-orm";
+import { and, eq, getTableColumns, isNull, or, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
-import { companies, packages, projectTypes } from "@juneflow/db/schema";
+import { companies, packages } from "@juneflow/db/schema";
 import type { Db } from "@juneflow/db/client";
 
 /** A tenant-owned table: any Drizzle table exposing a `companyId` column. */
@@ -31,25 +38,26 @@ export type TenantTable = PgTable & { companyId: PgColumn };
 
 /**
  * A platform-global reference table: one WITHOUT a `companyId` column
- * (package, project_type, company). NOTE the type gate is only a first line of
- * defense: it blocks tables that carry a companyId column, but tables scoped
- * via a PARENT FK (boq_doc → project, work_period → subcon_contract, ...) also
- * have no companyId column and would compile through. The REAL enforcement is
- * the REFERENCE_TABLES runtime allowlist in selectReference() — anything not
- * on it throws TenantScopeError (gate 4.5 finding, P1-BE-01 rework).
+ * (package, company). NOTE the type gate is only a first line of defense: it
+ * blocks tables that carry a companyId column, but tables scoped via a PARENT
+ * FK (boq_doc → project, work_period → subcon_contract, ...) also have no
+ * companyId column and would compile through. The REAL enforcement is the
+ * REFERENCE_TABLES runtime allowlist in selectReference() — anything not on it
+ * throws TenantScopeError (gate 4.5 finding, P1-BE-01 rework).
  */
 export type ReferenceTable = PgTable & { companyId?: never };
 
 /**
  * The ONLY tables selectReference() may read: genuinely platform-global
- * reference data with no tenant owner at all. Parent-FK-scoped tenant tables
+ * reference data with NO tenant owner at all. Parent-FK-scoped tenant tables
  * (BOQ, subcon, acceptance, ...) are NOT reference tables — they must be read
- * through predicates that anchor on a company_id-scoped root. Extend this list
- * only for tables the erd shows with no company linkage at any depth.
+ * through predicates that anchor on a company_id-scoped root. project_type left
+ * this list in B-065 (it gained a nullable company_id — a hybrid global/tenant
+ * table, read via selectGlobalOrOwned()). Extend this list only for tables the
+ * erd shows with no company linkage at any depth.
  */
 const REFERENCE_TABLES: ReadonlySet<PgTable> = new Set<PgTable>([
   packages,
-  projectTypes,
   companies,
 ]);
 
@@ -221,24 +229,48 @@ export class TenantDb {
 
   /**
    * Read a platform-global REFERENCE table (no `companyId` column exists, so no
-   * tenant predicate is possible — exactly: package, project_type, company).
-   * Read-only, and gated TWICE: the ReferenceTable type blocks companyId-column
-   * tables at compile time, and the REFERENCE_TABLES allowlist rejects every
-   * other table at runtime (parent-FK-scoped tenant tables like
-   * boq_doc/work_period have no companyId column and would otherwise compile
-   * through — gate 4.5 finding). Callers must only resolve reference rows the
-   * tenant already points at (e.g. its own subscription's package_id) — never
-   * enumerate other tenants.
+   * tenant predicate is possible — exactly: package, company). Read-only, and
+   * gated TWICE: the ReferenceTable type blocks companyId-column tables at
+   * compile time, and the REFERENCE_TABLES allowlist rejects every other table
+   * at runtime (parent-FK-scoped tenant tables like boq_doc/work_period have no
+   * companyId column and would otherwise compile through — gate 4.5 finding).
+   * Callers must only resolve reference rows the tenant already points at (e.g.
+   * its own subscription's package_id) — never enumerate other tenants.
    */
   selectReference<T extends ReferenceTable>(table: T, where?: SQL) {
     if (!REFERENCE_TABLES.has(table)) {
       throw new TenantScopeError(
         "TENANT_SCOPE_REFERENCE_DENIED: not a platform-global reference table " +
-          "(allowlist: package, project_type, company) — tenant-owned data, " +
-          "including parent-FK-scoped tables, must go through the scoped select()",
+          "(allowlist: package, company) — tenant-owned data, including " +
+          "parent-FK-scoped and hybrid tables (project_type), must go through " +
+          "the scoped select()/selectGlobalOrOwned()",
       );
     }
     const query = this.#db.select().from(table);
     return where ? query.where(where) : query;
+  }
+
+  /**
+   * Read a HYBRID global/tenant table (B-065, P1-BE-14 — currently project_type):
+   * rows are EITHER platform-global defaults (company_id IS NULL, shared/seeded)
+   * OR this tenant's own custom rows (company_id = <tenant>). Returns their
+   * UNION and NEVER another tenant's rows.
+   *
+   * Unlike select(), which hard-filters company_id = <tenant> (and would hide
+   * the shared globals), the scope here is
+   *   (company_id IS NULL OR company_id = <tenant>) [AND extra].
+   * Writes still flow through the scoped insert()/update() doors (force-set /
+   * hard-filter company_id = <tenant>), so a tenant can only ever create or
+   * mutate its OWN rows — the global defaults are read-only to every tenant.
+   */
+  selectGlobalOrOwned<T extends TenantTable>(table: T, where?: SQL) {
+    const scope = or(
+      isNull(table.companyId),
+      eq(table.companyId, this.companyId),
+    ) as SQL;
+    return this.#db
+      .select()
+      .from(table)
+      .where(where ? (and(scope, where) as SQL) : scope);
   }
 }
