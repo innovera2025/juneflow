@@ -861,9 +861,12 @@ async function seed(): Promise<void> {
       );
 
       // === Master / โครงการ ================================================
+      // B-065: the 4 product defaults are GLOBAL (company_id null) — shared by
+      // every tenant. Custom types (company_id = tenant) are created at runtime
+      // via POST /project-types, never seeded.
       await tx.insert(schema.projectTypes).values(
         PROJECT_TYPES.map((t) => ({
-          id: det(`ptype:${t.key}`), key: t.key, name: t.name,
+          id: det(`ptype:${t.key}`), companyId: null, key: t.key, name: t.name,
           hierarchy: t.hierarchy, modules: t.modules,
         })),
       );
