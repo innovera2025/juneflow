@@ -41,8 +41,9 @@ import {
   type ChartTheme,
 } from "./chart";
 
-// Navy-theme token values (distinct from the prototype hex fallbacks so a read is
-// provable). One value carries surrounding whitespace to prove the .trim().
+// Token values chosen distinct from the prototype/Fiori fallbacks so every read is
+// provable (colors from the navy theme; font/size/radius carry deliberately non-default
+// values). Two values carry surrounding whitespace / a px suffix to prove .trim()/parse.
 const TOKENS: Record<string, string> = {
   "--text-2": "  #5A6B82  ",
   "--surface-3": "#EEF2F6",
@@ -54,6 +55,10 @@ const TOKENS: Record<string, string> = {
   "--danger": "#B4453C",
   "--surface": "#FFFFFF",
   "--border": "#E4E9F0",
+  "--font": '  "Noto Sans Thai", "Inter", system-ui, sans-serif  ',
+  "--fs-table": "12.5px",
+  "--fs-th": "9.5px",
+  "--r-md": "6px",
 };
 
 function stubTokens(values: Record<string, string>): void {
@@ -74,6 +79,10 @@ const SAMPLE_THEME: ChartTheme = {
   danger: "#B4453C",
   surface: "#FFFFFF",
   border: "#E4E9F0",
+  font: '"Noto Sans Thai", "Inter", system-ui, sans-serif',
+  fsTable: 12.5,
+  fsTh: 9.5,
+  radius: 6,
 };
 
 describe("chartTheme", () => {
@@ -84,7 +93,7 @@ describe("chartTheme", () => {
     expect(chartTheme()).toEqual(SAMPLE_THEME);
   });
 
-  it("falls back to the prototype hex literals when a var is empty", () => {
+  it("falls back to the prototype/Fiori literals when a var is empty", () => {
     stubTokens({});
     expect(chartTheme()).toEqual({
       text: "#475569",
@@ -97,6 +106,10 @@ describe("chartTheme", () => {
       danger: "#B91C1C",
       surface: "#FFFFFF",
       border: "#E4E8EC",
+      font: '"Inter", "Noto Sans Thai", "Noto Sans Arabic", "Noto Sans SC", system-ui, sans-serif',
+      fsTable: 12,
+      fsTh: 10.5,
+      radius: 8,
     });
   });
 });
@@ -110,7 +123,17 @@ describe("baseChartOpts", () => {
     expect(o.plugins?.tooltip?.backgroundColor).toBe(SAMPLE_THEME.surface);
     expect(o.plugins?.tooltip?.borderColor).toBe(SAMPLE_THEME.border);
     expect(o.plugins?.tooltip?.titleColor).toBe(SAMPLE_THEME.text);
-    expect(o.plugins?.tooltip?.titleFont).toMatchObject({ weight: 700, size: 12 });
+    // Font family / sizes / corner radius are token-driven (not hardcoded literals).
+    expect(o.plugins?.tooltip?.cornerRadius).toBe(SAMPLE_THEME.radius);
+    expect(o.plugins?.tooltip?.titleFont).toMatchObject({
+      family: SAMPLE_THEME.font,
+      size: SAMPLE_THEME.fsTable,
+      weight: 700,
+    });
+    expect(o.plugins?.tooltip?.bodyFont).toMatchObject({
+      family: SAMPLE_THEME.font,
+      size: SAMPLE_THEME.fsTable,
+    });
     expect(o.interaction?.mode).toBe("index");
     expect(o.interaction?.intersect).toBe(false);
   });
@@ -123,12 +146,12 @@ describe("baseChartOpts", () => {
       x: {
         grid: { display: false },
         border: { display: false },
-        ticks: { color: SAMPLE_THEME.text },
+        ticks: { color: SAMPLE_THEME.text, font: { family: SAMPLE_THEME.font, size: SAMPLE_THEME.fsTh } },
       },
       y: {
         grid: { color: SAMPLE_THEME.grid },
         border: { display: false },
-        ticks: { color: SAMPLE_THEME.text },
+        ticks: { color: SAMPLE_THEME.text, font: { family: SAMPLE_THEME.font, size: SAMPLE_THEME.fsTh } },
       },
     });
   });

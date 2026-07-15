@@ -7,10 +7,15 @@
  * sole consumer is the dashboard's BudgetActualChart (dashboard.jsx L43+), which
  * is a later task (B-049). No visual gate (G5) applies to a non-screen primitive.
  *
- * §0 fidelity: colors come from the @juneflow/tokens CSS vars via chartTheme()
- * (never hardcoded). The only literals are the hex fallbacks that charts.jsx
- * itself hardcodes verbatim (B-037(a): copied verbatim from the prototype AND with
- * no matching @juneflow/tokens value at that call site — they are pure fallbacks).
+ * §0 fidelity: every rendered value — colors, font family, font sizes, and corner
+ * radius — is resolved from the @juneflow/tokens CSS vars via chartTheme() (never
+ * hardcoded). The only literals here are the resolve-time fallbacks used when a CSS
+ * var reads empty (e.g. the stylesheet-free node test env): the hex color fallbacks
+ * are copied verbatim from the prototype (B-037(a): no matching @juneflow/tokens
+ * value at that call site), and the font/size/radius fallbacks mirror the mandated
+ * Fiori theme (--font / --fs-table / --fs-th / --r-md, tokens.css). The prototype's
+ * stale "IBM Plex Sans Thai" literal (pototype/charts.jsx) is intentionally dropped —
+ * §0 rule 5 mandates the Fiori theme, whose --font is "Inter", "Noto Sans Thai", … .
  *
  * chart.js v4 migration of two v3-era API details from charts.jsx (identical
  * rendered result, required for the v4 types the plan mandates):
@@ -49,7 +54,11 @@ Chart.register(
   Filler,
 );
 
-/** Themed color set resolved from the active @juneflow/tokens CSS vars (charts.jsx:3-17). */
+/**
+ * Themed values resolved from the active @juneflow/tokens CSS vars (charts.jsx:3-17):
+ * the color set plus the font family (--font), font sizes (--fs-table / --fs-th),
+ * and tooltip corner radius (--r-md). Sizes/radius are parsed to numbers for Chart.js.
+ */
 export interface ChartTheme {
   text: string;
   grid: string;
@@ -61,14 +70,29 @@ export interface ChartTheme {
   danger: string;
   surface: string;
   border: string;
+  /** --font family stack (replaces the prototype's stale "IBM Plex Sans Thai"). */
+  font: string;
+  /** --fs-table (px, as a number) — tooltip title/body font size. */
+  fsTable: number;
+  /** --fs-th (px, as a number) — axis tick font size. */
+  fsTh: number;
+  /** --r-md (px, as a number) — tooltip corner radius. */
+  radius: number;
 }
 
 /**
- * Read the current token colors off :root (charts.jsx:3-17, verbatim behavior).
- * The hardcoded hex fallbacks are the prototype's own literals (B-037(a)).
+ * Read the current token values off :root once per build (charts.jsx:3-17, verbatim
+ * behavior). Colors are strings; sizes/radius are parsed from their px token values to
+ * the numbers Chart.js requires. All fallbacks fire only when a var reads empty
+ * (B-037(a): hex fallbacks are the prototype's literals; the font/size/radius
+ * fallbacks mirror the mandated Fiori theme).
  */
 export function chartTheme(): ChartTheme {
   const cs = getComputedStyle(document.documentElement);
+  const px = (name: string, fallback: number): number => {
+    const n = parseFloat(cs.getPropertyValue(name));
+    return Number.isNaN(n) ? fallback : n;
+  };
   return {
     text: cs.getPropertyValue("--text-2").trim() || "#475569",
     grid: cs.getPropertyValue("--surface-3").trim() || "#EEF2F5",
@@ -80,6 +104,12 @@ export function chartTheme(): ChartTheme {
     danger: cs.getPropertyValue("--danger").trim() || "#B91C1C",
     surface: cs.getPropertyValue("--surface").trim() || "#FFFFFF",
     border: cs.getPropertyValue("--border").trim() || "#E4E8EC",
+    font:
+      cs.getPropertyValue("--font").trim() ||
+      '"Inter", "Noto Sans Thai", "Noto Sans Arabic", "Noto Sans SC", system-ui, sans-serif',
+    fsTable: px("--fs-table", 12),
+    fsTh: px("--fs-th", 10.5),
+    radius: px("--r-md", 8),
   };
 }
 
@@ -107,11 +137,11 @@ export function baseChartOpts(t: ChartTheme, opts: BaseChartOverrides = {}): Cha
         borderColor: t.border,
         borderWidth: 1,
         padding: 10,
-        cornerRadius: 8,
+        cornerRadius: t.radius,
         boxPadding: 4,
         usePointStyle: true,
-        titleFont: { family: "IBM Plex Sans Thai", size: 12, weight: 700 },
-        bodyFont: { family: "IBM Plex Sans Thai", size: 12 },
+        titleFont: { family: t.font, size: t.fsTable, weight: 700 },
+        bodyFont: { family: t.font, size: t.fsTable },
         ...opts.tooltip,
       },
     },
@@ -119,12 +149,12 @@ export function baseChartOpts(t: ChartTheme, opts: BaseChartOverrides = {}): Cha
       x: {
         grid: { display: false },
         border: { display: false },
-        ticks: { color: t.text, font: { family: "IBM Plex Sans Thai", size: 10.5 } },
+        ticks: { color: t.text, font: { family: t.font, size: t.fsTh } },
       },
       y: {
         grid: { color: t.grid },
         border: { display: false },
-        ticks: { color: t.text, font: { family: "IBM Plex Sans Thai", size: 10.5 } },
+        ticks: { color: t.text, font: { family: t.font, size: t.fsTh } },
       },
     },
     interaction: { intersect: false, mode: "index" },
