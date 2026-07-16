@@ -26,6 +26,7 @@
 import { createDb } from "@juneflow/db/client";
 import { buildApp } from "./app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "./plugins/quota.js";
+import { SubscriptionQuotaResolver } from "./plugins/subscription-quota.js";
 import { createFakeR2Storage } from "./routes/files.js";
 import {
   resolveAuthContext,
@@ -44,10 +45,16 @@ resolveAuthSecret();
 // tenant-scope hook wraps it per-request into a company_id-scoped TenantDb.
 const db = createDb();
 
-// Quota mechanism. Usage counting is wired with the resource routes; until then
-// the resolver reports unlimited so dev stays green, while the 402 path is live.
+// Quota mechanism. Production enforces the tenant's real subscription-backed
+// limits (B-082 F2 — the unlimited stub allowed seat/AI/project abuse); non-prod
+// keeps the unlimited/dev resolver so the local stack stays green. The 402 path
+// is identical either way.
+const quotaResolver =
+  process.env.NODE_ENV === "production"
+    ? new SubscriptionQuotaResolver(db)
+    : unlimitedQuotaResolver;
 const quota = new QuotaGuard({
-  resolver: unlimitedQuotaResolver,
+  resolver: quotaResolver,
   upgradeUrl:
     process.env.BILLING_UPGRADE_URL ??
     "https://app.juneflow.local/settings/subscription",

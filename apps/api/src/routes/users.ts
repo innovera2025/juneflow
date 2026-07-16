@@ -29,6 +29,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { users, roles } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
 
 /** Department codes accepted on invite (master.jsx:1025 UserAddForm dropdown). */
 const DEPARTMENTS = ["CONS", "PROC", "FIN", "SLS", "ADM", "WH"] as const;
@@ -90,6 +91,18 @@ export function registerUsersRoute(app: FastifyInstance): void {
       return reply.code(401).send({
         code: "UNAUTHENTICATED",
         message: "Missing tenant context",
+      });
+    }
+
+    // F1: inviting/creating a user (and assigning it a role) is master-data
+    // administration — require the caller's role to carry master.create.
+    // Fail-closed: any caller whose perms cannot be resolved is denied, so a
+    // low-privilege member can no longer create a backdoor admin.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, MANAGEMENT_MODULE, "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `requires ${MANAGEMENT_MODULE}.create permission`,
       });
     }
 
