@@ -264,13 +264,15 @@ const CC_SEED = [
 // master-party.jsx:6 VENDOR_SEED (6) — C6. B-026(ก): all seeded as kind=supplier (the 2
 // "รับเหมา" V-0031/V-0045 are master-party contractors, NOT the subcon.jsx register). `type`
 // kept verbatim from the mock for reference.
+// B-071 (P2-BE-08): addr / bank / status carried verbatim from master-party.jsx:6-13
+// (new superset columns). V-0061 is inactive in the mock; the rest are active.
 const VENDOR_SEED = [
-  { code: "V-0012", name: "บจก. รุ่งเรืองวัสดุก่อสร้าง", type: "วัสดุ", taxId: "0105545012345", term: 30 },
-  { code: "V-0024", name: "หจก. ช่างเหล็กไทย", type: "วัสดุ", taxId: "0103539008765", term: 45 },
-  { code: "V-0031", name: "บจก. ไฟฟ้าอุตสาหกรรม", type: "รับเหมา", taxId: "0105549112233", term: 60 },
-  { code: "V-0045", name: "นายสมศักดิ์ รับเหมาก่อสร้าง", type: "รับเหมา", taxId: "1102003456789", term: 30 },
-  { code: "V-0052", name: "บมจ. แม็กซ์เทค เซอร์วิส", type: "บริการ", taxId: "0107536000999", term: 30 },
-  { code: "V-0061", name: "บจก. หัวเว่ย เทคโนโลยี", type: "วัสดุ", taxId: "0105556778899", term: 0 },
+  { code: "V-0012", name: "บจก. รุ่งเรืองวัสดุก่อสร้าง", type: "วัสดุ", taxId: "0105545012345", term: 30, addr: "ถ.พหลโยธิน กทม.", bank: "KBANK 012-3-45678-9", status: "active" },
+  { code: "V-0024", name: "หจก. ช่างเหล็กไทย", type: "วัสดุ", taxId: "0103539008765", term: 45, addr: "ถ.รังสิต ปทุมธานี", bank: "SCB 111-2-33445-6", status: "active" },
+  { code: "V-0031", name: "บจก. ไฟฟ้าอุตสาหกรรม", type: "รับเหมา", taxId: "0105549112233", term: 60, addr: "ถ.บางนา กทม.", bank: "BBL 222-1-55667-8", status: "active" },
+  { code: "V-0045", name: "นายสมศักดิ์ รับเหมาก่อสร้าง", type: "รับเหมา", taxId: "1102003456789", term: 30, addr: "ต.บางพระ นนทบุรี", bank: "KTB 333-4-77889-0", status: "active" },
+  { code: "V-0052", name: "บมจ. แม็กซ์เทค เซอร์วิส", type: "บริการ", taxId: "0107536000999", term: 30, addr: "ถ.รัชดาภิเษก กทม.", bank: "KBANK 444-5-99001-2", status: "active" },
+  { code: "V-0061", name: "บจก. หัวเว่ย เทคโนโลยี", type: "วัสดุ", taxId: "0105556778899", term: 0, addr: "ถ.วิภาวดี กทม.", bank: "SCB 555-6-11223-4", status: "inactive" },
 ];
 
 // subcon.jsx:3 SUBCONS (6 register, SC-01..SC-06) + subcon-accept.jsx unique counterparty
@@ -315,17 +317,22 @@ const ORG_SEED = [
 // master.jsx:737 DOCNUM_SEED (10 running-number counters) — B-060 (P1-BE-11):
 // `running` is stored as TEXT verbatim from the mock (leading zeros kept,
 // BOQ row = the non-numeric "B-02 v3").
+// `lock` is the lock-mode CODE (B-067(ข), P1-BE-12 — was boolean): the mock
+// LOCK_OPTS `v` value is verbatim-mapped to a short stable code —
+// ทุกใบ→all · ตามแผนก→dept · ตามคลัง→warehouse · —→none (master.jsx:737-756).
+// A boolean lost dept+warehouse (TR/IS were flattened to false); the code
+// preserves all 4 modes so the FE can resolve each to its i18n label.
 const DOCNUM_SEED = [
-  { type: "Purchase Requisition", prefix: "PR", running: "0418", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Purchase Order", prefix: "PO", running: "0291", reset: "ทุกปีบัญชี", lock: true },
-  { type: "Work Order", prefix: "WO", running: "0117", reset: "ทุกปีบัญชี", lock: true },
-  { type: "Goods Receipt", prefix: "GR", running: "0148", reset: "ทุกปีบัญชี", lock: true },
-  { type: "Return", prefix: "RT", running: "0014", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset: "—", lock: true },
-  { type: "Petty Cash", prefix: "PT", running: "0148", reset: "ทุกเดือน", lock: false },
-  { type: "Stock Transfer", prefix: "TR", running: "0084", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Issue (เบิก)", prefix: "IS", running: "0218", reset: "ทุกปีบัญชี", lock: false },
-  { type: "Journal Voucher", prefix: "JV", running: "0418", reset: "ทุกปีบัญชี", lock: true },
+  { type: "Purchase Requisition", prefix: "PR", running: "0418", reset: "ทุกปีบัญชี", lock: "dept" },
+  { type: "Purchase Order", prefix: "PO", running: "0291", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Work Order", prefix: "WO", running: "0117", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Goods Receipt", prefix: "GR", running: "0148", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Return", prefix: "RT", running: "0014", reset: "ทุกปีบัญชี", lock: "none" },
+  { type: "Bill of Quantities", prefix: "BOQ", running: "B-02 v3", reset: "—", lock: "all" },
+  { type: "Petty Cash", prefix: "PT", running: "0148", reset: "ทุกเดือน", lock: "none" },
+  { type: "Stock Transfer", prefix: "TR", running: "0084", reset: "ทุกปีบัญชี", lock: "warehouse" },
+  { type: "Issue (เบิก)", prefix: "IS", running: "0218", reset: "ทุกปีบัญชี", lock: "warehouse" },
+  { type: "Journal Voucher", prefix: "JV", running: "0418", reset: "ทุกปีบัญชี", lock: "all" },
 ];
 
 // accounting-extra.jsx:14 COA_SEED (23 GL accounts)
@@ -426,12 +433,25 @@ const PR_ROWS = [
   { no: "PR-2026-0409", type: "expense", status: "rejected", step: 1 },
 ] as const;
 
-// po-wo.jsx:3 PO_ROWS (6) — real totals (vendorId cycles suppliers; no "no" column).
+// po-wo.jsx:3 PO_ROWS (6) — real totals + verbatim doc `no` + `status`
+// (P2-BE-05, B-070: pos gained no/status/approval_step in migration 0015).
 const PO_TOTALS = [1268000, 902475, 612400, 96800, 268000, 1840000];
-// po-wo.jsx:272 WO_ROWS (5) — real values.
+const PO_NOS = ["PO-2026-0291", "PO-2026-0290", "PO-2026-0289", "PO-2026-0288", "PO-2026-0287", "PO-2026-0286"];
+const PO_STATUS = ["approved", "pending", "approved", "approved", "approved", "approved"];
+// po-wo.jsx:272 WO_ROWS (5) — real values + verbatim `no`/`status` + retention_pct.
+// retention_pct is the mock's retention÷value ratio verbatim (215000/2150000 = 10%,
+// … WO-0113 = 0%); scale-3 to mirror subcon_contract.retention_pct.
 const WO_VALUES = [2150000, 845000, 2840000, 985000, 425000];
-// gr.jsx:3 GR_ROWS (5) received %/amount; :11 RETURN_ROWS handled via rejected qty.
+const WO_NOS = ["WO-2026-0117", "WO-2026-0116", "WO-2026-0115", "WO-2026-0114", "WO-2026-0113"];
+const WO_STATUS = ["pending", "approved", "approved", "approved", "approved"];
+const WO_RETENTION_PCTS = ["10.000", "10.000", "10.000", "10.000", "0.000"];
+// gr.jsx:3 GR_ROWS (5) received %/amount + verbatim GR `no` (P2-BE-06, B-070:
+// gr gained no/status/wo_id in migration 0016); :11 RETURN_ROWS handled via
+// rejected qty. All 5 seed rows are PO receipts (poId); status defaults to
+// `received`. (A seeded WO receipt is deferred to keep the ap_billing 3-way
+// match gr:i↔po:i 1:1 — GR-from-WO is exercised by the gr.ts handler + tests.)
 const GR_RECEIVED = [320, 240, 120, 92, 920];
+const GR_NOS = ["GR-2026-0148", "GR-2026-0147", "GR-2026-0146", "GR-2026-0145", "GR-2026-0144"];
 
 // subcon-accept.jsx:8 SUBC_CONTRACTS (4 contracts / 16 periods = 4/4/3/5).
 // C3 state map: accepted→passed, requested→delivered, rejected/pending kept.
@@ -856,9 +876,12 @@ async function seed(): Promise<void> {
       );
 
       // === Master / โครงการ ================================================
+      // B-065: the 4 product defaults are GLOBAL (company_id null) — shared by
+      // every tenant. Custom types (company_id = tenant) are created at runtime
+      // via POST /project-types, never seeded.
       await tx.insert(schema.projectTypes).values(
         PROJECT_TYPES.map((t) => ({
-          id: det(`ptype:${t.key}`), key: t.key, name: t.name,
+          id: det(`ptype:${t.key}`), companyId: null, key: t.key, name: t.name,
           hierarchy: t.hierarchy, modules: t.modules,
         })),
       );
@@ -923,15 +946,18 @@ async function seed(): Promise<void> {
       // B-023(ก)+B-026(ก): master-party VENDOR_SEED (6, all supplier) + 7 subcon firms.
       // Only the 6 register firms (SC-01..SC-06) are kind=subcon → จอทะเบียนผู้รับเหมา = 6;
       // SC-07 is a contract counterparty outside the register → supplier. Total vendors = 13.
+      // B-071 (P2-BE-08): master-party rows carry code/addr/bank/status verbatim from the
+      // mock; subcon firms carry their SC-xx code (from SUBCON_FIRMS) and default status
+      // 'active' — the mock has no addr/bank for them → null (honest, never invented).
       await tx.insert(schema.vendors).values([
         ...VENDOR_SEED.map((v) => ({
-          id: det(`vendor:${v.code}`), companyId: CO1, name: v.name, taxId: v.taxId,
-          kind: "supplier" as const, creditTerm: v.term,
+          id: det(`vendor:${v.code}`), companyId: CO1, name: v.name, code: v.code, taxId: v.taxId,
+          kind: "supplier" as const, creditTerm: v.term, addr: v.addr, bank: v.bank, status: v.status,
         })),
         ...SUBCON_FIRMS.map((f) => ({
-          id: det(`vendor:${f.code}`), companyId: CO1, name: f.name, taxId: null,
+          id: det(`vendor:${f.code}`), companyId: CO1, name: f.name, code: f.code, taxId: null,
           kind: (f.code === "SC-07" ? "supplier" : "subcon") as "subcon" | "supplier",
-          creditTerm: null,
+          creditTerm: null, addr: null, bank: null, status: "active" as const,
         })),
       ]);
       // All master-party vendors are suppliers now (B-026) → PO/AP pull from here.
@@ -1019,7 +1045,8 @@ async function seed(): Promise<void> {
       await tx.insert(schema.pos).values(
         PO_TOTALS.map((total, i) => ({
           id: det(`po:${i}`), prId: det(`pr:${i}`), vendorId: at(SUPPLIER_VENDORS, i),
-          total: m(total), vat: m(total * 0.07), creditTerm: 30,
+          no: at(PO_NOS, i), total: m(total), vat: m(total * 0.07), creditTerm: 30,
+          status: at(PO_STATUS, i),
         })),
       );
 
@@ -1031,13 +1058,14 @@ async function seed(): Promise<void> {
         WO_VALUES.map((value, i) => ({
           id: det(`wo:${i}`), prId: det(`pr:${i + 1}`),
           vendorId: det(`vendor:SC-0${i + 1}`),
-          value: m(value),
+          no: at(WO_NOS, i), value: m(value),
+          retentionPct: at(WO_RETENTION_PCTS, i), status: at(WO_STATUS, i),
         })),
       );
 
       await tx.insert(schema.grs).values(
         GR_RECEIVED.map((received, i) => ({
-          id: det(`gr:${i}`), poId: det(`po:${i}`), received: m(received), rejected: m(i), photos: [],
+          id: det(`gr:${i}`), poId: det(`po:${i}`), no: at(GR_NOS, i), received: m(received), rejected: m(i), photos: [],
         })),
       );
 

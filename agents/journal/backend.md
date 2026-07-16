@@ -483,3 +483,25 @@
 - migration 0012_grey_slipstream: drizzle-kit ไม่ emit USING เอง — hand-edit DROP DEFAULT → SET DATA TYPE text USING ::text → SET DEFAULT '1' แล้วพิสูจน์บน populated column จริง
 - POST /cost-centers ต้อง impl ด้วย (กติกา default draft ต้องมี create path) · project_id required — web ส่ง active project id (form ไม่มี picker)
 - columns ใหม่ nullable ระดับ column (B-050 precedent — ALTER ลงบนแถวเก่า) · presence คุมที่ seed + POST
+
+## 2026-07-15 · orch-A subagent · P1-BE-12 (B-067 docnum locked boolean→text)
+- migration 0013: drizzle-kit generate emitted bare ::text (wrong for bool→text) → hand-CASE per §B-067 · lock codes all|dept|warehouse|none mirror reset_rule
+- 3 i18n keys (lockAll/lockWarehouse/fmtYear) applied by orch-A direct (platform zone) · WEB-12 maps code→key on table cell, none→literal '—'
+
+## 2026-07-15 · orch-A subagent · P1-BE-14 (B-065 project_type tenant-scope)
+- migration 0014: +company_id nullable FK · key enum→text + unique(company_id,key) · hybrid read selectGlobalOrOwned · PUT global default=404 no-leak · live PG cross-tenant proof
+
+## 2026-07-15 · orch-A subagent · P1-BE-15 (B-049 dashboard 7 endpoints)
+- openapi §10 (7 ops + project_id) applied by orch-A; subagent impl handlers only (no sacred touch)
+- C10 honest aggregation: real where seed has data (budget/contractors/approvals/phase), honest-empty where schema lacks source (time-series/alerts/cashflow)
+- project_id active-project scope: 404 foreign (EntityOk) / empty (EntityList), no cross-tenant leak
+
+## 2026-07-16 · orch-A subagent · P2-BE-02 (B-070 BOQ handlers)
+- state machine draft/pending/approved(lock)/revise(v+1) · approval flows.html 3-tier no-threshold (approve=MD level 4 lock)
+- NEW TenantDb.updateThrough door (parent-FK child mutation, fail-closed like insertThrough) — security-core, gate-4.5 scrutiny
+- gaps flagged (no invent): boq_doc no approval_step (terminal MD lock only) · GET /boq/{id} added to contract by orch-A · action 403/409 undocumented
+
+## 2026-07-16 · orch-A subagent · P2-BE-05 (B-070 po/wo · migration 0015)
+- CORRECTION: B-070 'no migration' wrong for po/wo — schema lacked status/approval_step/no/retention_pct; orch-A authorized additive 0015 (precedent 0012-0014)
+- tiered approval PO/WO 1M/5M (differs from PR); variation-order; retention=value×pct; PO/WO tenant-anchored via pr_id (POST requires approved PR of tenant)
+- live-PG not run (no stack) — flag for batch-6 audit

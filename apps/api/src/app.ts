@@ -37,10 +37,18 @@ import { registerProjectTypesRoute } from "./routes/project-types.js";
 import { registerCostCentersRoute } from "./routes/cost-centers.js";
 import { registerDocNumberingRoute } from "./routes/doc-numbering.js";
 import { registerModelsRoute } from "./routes/models.js";
+import { registerVendorsRoute } from "./routes/vendors.js";
 import { registerUsersRoute } from "./routes/users.js";
 import { registerRolesRoute } from "./routes/roles.js";
 import { registerOrgUnitsRoute } from "./routes/org-units.js";
 import { registerProjectNodesRoute } from "./routes/project-nodes.js";
+import { registerBoqRoute } from "./routes/boq.js";
+import { registerAiQtoRoute } from "./routes/ai-qto.js";
+import { registerPrRoute } from "./routes/pr.js";
+import { registerPoRoute } from "./routes/po.js";
+import { registerWoRoute } from "./routes/wo.js";
+import { registerGrRoute } from "./routes/gr.js";
+import { registerDashboardRoute } from "./routes/dashboard.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -122,17 +130,25 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     async (v1) => {
       await registerAuthRoutes(v1, { db: deps.db, signIn: deps.signIn });
       registerMeRoute(v1);
-      registerProjectsRoute(v1);
+      registerProjectsRoute(v1, { quota: deps.quota });
       registerCountsRoute(v1);
       registerCompaniesRoute(v1);
       registerProjectTypesRoute(v1);
       registerCostCentersRoute(v1);
       registerDocNumberingRoute(v1);
       registerModelsRoute(v1);
+      registerVendorsRoute(v1);
       registerUsersRoute(v1);
       registerRolesRoute(v1);
       registerOrgUnitsRoute(v1);
       registerProjectNodesRoute(v1);
+      registerBoqRoute(v1);
+      registerAiQtoRoute(v1, { quota: deps.quota });
+      registerPrRoute(v1);
+      registerPoRoute(v1);
+      registerWoRoute(v1);
+      registerGrRoute(v1);
+      registerDashboardRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,

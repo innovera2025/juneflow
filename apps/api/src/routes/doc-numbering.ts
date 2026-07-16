@@ -16,7 +16,12 @@
 //                semantics land with the Phase-2 numbering service.
 //   reset_rule = the reset cadence (mock `reset` — yearly/monthly/never per
 //                RESET_OPTS); nullable.
-//   locked     = whether the format is frozen (mock `lock`).
+//   locked     = the lock-mode CODE (mock `lock`, LOCK_OPTS): all | dept |
+//                warehouse | none — B-067(ข), P1-BE-12 (was boolean; a boolean
+//                dropped the dept/warehouse modes and failed the G5 g2/35 cell).
+//                Passed through as the stored text; the FE resolves each code to
+//                its i18n label (all→docnum.lockAll · dept→docnum.lockDept ·
+//                warehouse→docnum.lockWarehouse · none→literal "—").
 // Timestamps are dropped and company_id is NOT echoed on the wire: it is the
 // tenant's own scope (implied by the authenticated request, not a per-row datum
 // the mock ever showed), so echoing it would add an un-approved field — exactly

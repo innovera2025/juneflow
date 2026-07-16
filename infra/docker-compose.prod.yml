@@ -142,7 +142,7 @@ services:
       # PLAN.md §10): better-auth secret, Cloudflare R2 credentials, LINE Login/LIFF keys.
       # Listed as required so a deploy missing any of them fails fast instead of booting
       # a half-configured api.
-      AUTH_SECRET: ${AUTH_SECRET:?set on host}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set on host}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set on host}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set on host}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set on host}
@@ -174,7 +174,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?set on host}
       REDIS_URL: ${REDIS_URL:?set on host}
-      AUTH_SECRET: ${AUTH_SECRET:?set on host}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set on host}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set on host}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set on host}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set on host}

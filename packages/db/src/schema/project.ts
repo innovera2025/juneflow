@@ -36,17 +36,12 @@ import { companies } from "./platform.js";
 // Enums
 // ---------------------------------------------------------------------------
 
-/**
- * ProjectType.key — the 4 product project types (data-dictionary Project.type:
- * "realestate | solar | civil | service"). Lives on project_type; a Project
- * references its type via type_id (erd.html: Project.type_id -> ProjectType).
- */
-export const projectTypeKey = pgEnum("project_type_key", [
-  "realestate",
-  "solar",
-  "civil",
-  "service",
-]);
+// NOTE: project_type.key was the `project_type_key` enum (realestate | solar |
+// civil | service). B-065 (P1-BE-14) relaxed it to `text` because a tenant's
+// CUSTOM project type carries a free-form key (the mock generates
+// "custom_<base36 ts>", project-type-screen.jsx:135) — a 4-value enum could
+// only ever hold the product defaults. The enum type is dropped in migration
+// 0014 (same enum→text pattern as doc_numbering.running/locked, 0012/0013).
 
 /**
  * Vendor.kind — a vendor is either a supplier (materials, AP) or a subcon
@@ -92,12 +87,38 @@ export const costCenterStatus = pgEnum("cost_center_status", [
  * ProjectType — WBS + module config per product type (erd.html "ProjectType",
  * note "Full only"). hierarchy is the ordered WBS label list per type (e.g.
  * [site, zone/Array, string, inverter]); modules is the nav-id set opened for
- * the type, stacked on top of the package menus. Product-level reference config
- * (no company_id — erd.html shows none), seeded from docs/extract/PROJECT-TYPES.md.
+ * the type, stacked on top of the package menus. Seeded from
+ * docs/extract/PROJECT-TYPES.md.
+ *
+ * B-065 (P1-BE-14) — TENANT-SCOPED, hybrid ownership. The master.ptype screen
+ * (project-type-screen.jsx ProjectTypeForm, POST/PUT /project-types) lets a
+ * user CREATE/EDIT project types; before B-065 this was a platform-global
+ * reference table, so a tenant's custom type would have leaked to ALL tenants
+ * (tenant-leak). Wei ruling: tenant-scope it via a NULLABLE company_id:
+ *   - company_id IS NULL  → a GLOBAL product default (realestate/solar/civil/
+ *     service): shared, seeded once, read by every tenant, and READ-ONLY to
+ *     tenants (a tenant cannot edit a shared default — the scoped update door
+ *     matches zero rows → 404).
+ *   - company_id = <tenant> → a CUSTOM type OWNED by that tenant. It must NEVER
+ *     leak to another tenant.
+ * Reads go through the hybrid TenantDb.selectGlobalOrOwned() door
+ * (company_id IS NULL OR company_id = <tenant>); writes go through the scoped
+ * insert()/update() doors (force-set / hard-filter company_id = <tenant>).
+ *
+ * key is `text` (was the project_type_key enum) so a custom type's free-form
+ * key fits; uniqueness is now per owner: unique(company_id, key). Postgres
+ * treats NULLs as distinct, so the 4 global keys stay unique via the seed (one
+ * row each) while each tenant's custom keys are unique within that tenant.
  */
 export const projectTypes = pgTable("project_type", {
   id: uuid("id").primaryKey().defaultRandom(),
-  key: projectTypeKey("key").notNull().unique(),
+  // NULL = a platform-global product default (shared, seeded); a company id =
+  // a custom type owned by that tenant (B-065). onDelete cascade drops a
+  // tenant's custom types with the tenant; the NULL globals are unaffected.
+  companyId: uuid("company_id").references(() => companies.id, {
+    onDelete: "cascade",
+  }),
+  key: text("key").notNull(),
   name: text("name").notNull(),
   hierarchy: jsonb("hierarchy").$type<string[]>().notNull().default([]),
   modules: jsonb("modules").$type<string[]>().notNull().default([]),
@@ -107,7 +128,10 @@ export const projectTypes = pgTable("project_type", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  index("project_type_company_idx").on(t.companyId),
+  unique("project_type_company_key_uq").on(t.companyId, t.key),
+]);
 
 /**
  * Project — a construction/service project owned by a company.
@@ -269,6 +293,25 @@ export const costCenters = pgTable(
  * Vendor — supplier / subcon master; AP pulls from here (data-dictionary
  * "master แยกชัด: vendor(ผู้ขาย|ผู้รับเหมา flag)"). Company-scoped master.
  * creditTerm = payment credit term in days (erd.html Vendor.credit_term).
+ *
+ * addr / bank / status / code — B-071 (P2-BE-08) approved additive superset,
+ * mirroring the B-059(ก)/cost_center pattern (P1-BE-11): the master.vendor
+ * screen (master-party.jsx MasterVendor + VendorForm L137-183) renders columns
+ * the base table lacked. addr = the registered-address display text; bank = the
+ * bank-account display string ("KBANK 012-3-45678-9"); code = the "V-00xx"
+ * display code the mock generates (now persisted — before B-071 there was no
+ * column so it was omitted from the wire). addr/bank/code are nullable at the
+ * column level so the new-column migration lands on the 13 pre-existing rows
+ * (B-050 precedent); presence is populated by the seed + POST /vendors.
+ *   status = active | inactive (VendorForm status dropdown, master-party.jsx:175).
+ * Plain text (not an enum) — matches the most recent same-wave precedent
+ * (gr.status, migration 0016) and the task's ALTER-only additive shape; the
+ * active|inactive closed set is enforced at the handler layer (POST/PUT). A new
+ * vendor starts `active` (the mock's VendorForm default).
+ *   `type` is NOT a column — the mock's 4-way type badge (วัสดุ/บริการ/ที่ดิน/
+ * รับเหมา) is display-derived from `kind` on the web (B-070), never stored.
+ *   `spend` is NOT a column — the per-vendor purchase total has no AP source
+ * yet (honest gap), so it stays computed/omitted rather than fabricated.
  */
 export const vendors = pgTable("vendor", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -276,9 +319,16 @@ export const vendors = pgTable("vendor", {
     .notNull()
     .references(() => companies.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  // Display code ("V-00xx") from VendorForm; nullable (new column on old rows).
+  code: text("code"),
   taxId: text("tax_id"),
   kind: vendorKind("kind").notNull().default("supplier"),
   creditTerm: integer("credit_term"),
+  // Registered-address + bank-account display strings from VendorForm; nullable.
+  addr: text("addr"),
+  bank: text("bank"),
+  // active | inactive (VendorForm dropdown); closed set enforced by the handler.
+  status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

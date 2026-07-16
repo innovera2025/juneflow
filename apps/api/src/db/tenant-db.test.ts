@@ -11,6 +11,8 @@ import { eq } from "drizzle-orm";
 import { createDb } from "@juneflow/db/client";
 import {
   boqDocs,
+  boqGroups,
+  boqItems,
   companies,
   packages,
   pmAssets,
@@ -158,10 +160,47 @@ describe("selectReference reads platform-global reference tables (P1-BE-01)", ()
     expect(() => tdb.selectReference(workPeriods)).toThrow(TenantScopeError);
   });
 
-  it("allows exactly the platform-global allowlist: package, project_type, company", () => {
+  it("allows exactly the platform-global allowlist: package, company", () => {
     expect(() => tdb.selectReference(packages)).not.toThrow();
-    expect(() => tdb.selectReference(projectTypes)).not.toThrow();
     expect(() => tdb.selectReference(companies)).not.toThrow();
+  });
+
+  // B-065 (P1-BE-14): project_type gained a nullable company_id (hybrid
+  // global/tenant table), so it LEFT the reference allowlist — it must be read
+  // through selectGlobalOrOwned(), never bare through selectReference().
+  it("rejects project_type — hybrid table since B-065 (read via selectGlobalOrOwned)", () => {
+    expect(() =>
+      // @ts-expect-error — project_type now carries a nullable companyId, so it
+      // is NOT a ReferenceTable; the hybrid read door is the only one.
+      tdb.selectReference(projectTypes),
+    ).toThrow(TenantScopeError);
+  });
+});
+
+describe("selectGlobalOrOwned reads global defaults + own rows (B-065, P1-BE-14)", () => {
+  it("scopes to (company_id IS NULL OR company_id = this tenant)", () => {
+    const { sql, params } = tdb.selectGlobalOrOwned(projectTypes).toSQL();
+    // hybrid scope: shared global defaults (NULL) unioned with this tenant's own.
+    expect(sql).toContain('"company_id" is null');
+    expect(sql).toContain('"company_id" = $');
+    expect(sql).toContain(" or ");
+    expect(params).toContain(COMPANY);
+  });
+
+  it("never binds another tenant's id — foreign custom types are unreachable", () => {
+    const { params } = tdb.selectGlobalOrOwned(projectTypes).toSQL();
+    expect(params).not.toContain(OTHER);
+  });
+
+  it("AND-s a caller predicate onto the hybrid scope (never replaces it)", () => {
+    const { sql, params } = tdb
+      .selectGlobalOrOwned(projectTypes, eq(projectTypes.key, "realestate"))
+      .toSQL();
+    expect(sql).toContain('"company_id" is null');
+    expect(sql).toContain('"key" = $');
+    expect(sql).toContain(" and ");
+    expect(params).toContain(COMPANY);
+    expect(params).toContain("realestate");
   });
 });
 
@@ -295,6 +334,139 @@ describe("insertThrough is the fail-closed WRITE door for parent-FK child tables
     ];
     await t.insertThrough(projectNodes, projects, PROJECT, rows);
     expect(sink.inserted).toHaveLength(2);
+  });
+});
+
+describe("updateThrough is the fail-closed UPDATE door for parent-FK child tables (P2-BE-02)", () => {
+  const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+  // ownership SELECT returns `ownedRows`; the UPDATE captures its set + WHERE.
+  function fakeDb(
+    ownedRows: unknown[],
+    sink: { ownWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> },
+  ): Db {
+    return {
+      select: () => ({
+        from: () => ({
+          where: (where: SQL) => {
+            sink.ownWhere = where;
+            return Promise.resolve(ownedRows);
+          },
+        }),
+      }),
+      update: () => ({
+        set: (set: Record<string, unknown>) => ({
+          where: (where: SQL) => ({
+            returning: () => {
+              sink.set = set;
+              sink.setWhere = where;
+              return Promise.resolve([{ id: "d0", ...set }]);
+            },
+          }),
+        }),
+      }),
+    } as unknown as Db;
+  }
+
+  it("throws (updates NOTHING) when the parent is not owned by this tenant", async () => {
+    const sink: { ownWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+    await expect(
+      t.updateThrough(boqDocs, projects, boqDocs.projectId, PROJECT, { status: "approved" }, eq(boqDocs.id, "d0")),
+    ).rejects.toThrow(/TENANT_SCOPE_PARENT_DENIED/);
+    expect(sink.set).toBeUndefined();
+    // ownership check is scoped by company_id AND the parent id.
+    const params = new PgDialect().sqlToQuery(sink.ownWhere!).params;
+    expect(params).toContain(COMPANY);
+    expect(params).toContain(PROJECT);
+  });
+
+  it("updates the row (scoped by the verified parent FK) once the parent is proven owned", async () => {
+    const sink: { ownWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([{ id: PROJECT }], sink), COMPANY);
+    const rows = await t.updateThrough(
+      boqDocs, projects, boqDocs.projectId, PROJECT, { status: "approved" }, eq(boqDocs.id, "d0"),
+    );
+    expect(rows).toHaveLength(1);
+    expect(sink.set).toEqual({ status: "approved" });
+    // the write is additionally scoped BY the verified parent id (project_id),
+    // so a row whose parent FK points elsewhere is never touched.
+    const params = new PgDialect().sqlToQuery(sink.setWhere!).params;
+    expect(params).toContain(PROJECT);
+  });
+});
+
+describe("updateThroughChain is the fail-closed UPDATE door for MULTI-HOP child tables (P2-BE-03)", () => {
+  // boq_item → boq_group → boq_doc → project (the deepest scoped write chain).
+  const ITEM_HOPS = [
+    { fk: boqItems.groupId, parent: boqGroups },
+    { fk: boqGroups.boqId, parent: boqDocs },
+    { fk: boqDocs.projectId, parent: projects },
+  ];
+
+  // The selectThrough ownership resolution returns `scopedRows`; the UPDATE
+  // captures its set + WHERE and echoes the resolved rows merged with the set.
+  function fakeDb(
+    scopedRows: unknown[],
+    sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> },
+  ): Db {
+    const builder = {
+      $dynamic: () => builder,
+      innerJoin: () => builder,
+      where: (where: SQL) => {
+        sink.selWhere = where;
+        return Promise.resolve(scopedRows);
+      },
+    };
+    return {
+      select: () => ({ from: () => builder }),
+      update: () => ({
+        set: (set: Record<string, unknown>) => ({
+          where: (where: SQL) => ({
+            returning: () => {
+              sink.set = set;
+              sink.setWhere = where;
+              return Promise.resolve(
+                scopedRows.map((r) => ({ ...(r as object), ...set })),
+              );
+            },
+          }),
+        }),
+      }),
+    } as unknown as Db;
+  }
+
+  it("resolves scoped ids via the hop chain (company_id anchored) then updates ONLY those ids", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([{ id: "it-1" }, { id: "it-2" }], sink), COMPANY);
+    const rows = await t.updateThroughChain(
+      boqItems,
+      ITEM_HOPS,
+      { remainQty: "5" },
+      eq(boqItems.id, "it-1"),
+    );
+    expect(rows).toHaveLength(2);
+    expect(sink.set).toEqual({ remainQty: "5" });
+    // ownership resolution is anchored on company_id (via the project root).
+    expect(new PgDialect().sqlToQuery(sink.selWhere!).params).toContain(COMPANY);
+    // the UPDATE is scoped by id IN (<the RESOLVED scoped ids>), never by the
+    // raw caller `where` alone — a foreign id could never slip through.
+    const setParams = new PgDialect().sqlToQuery(sink.setWhere!).params;
+    expect(setParams).toContain("it-1");
+    expect(setParams).toContain("it-2");
+  });
+
+  it("updates NOTHING (returns []) when `where` resolves to no tenant-owned rows", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+    const rows = await t.updateThroughChain(
+      boqItems,
+      ITEM_HOPS,
+      { remainQty: "0" },
+      eq(boqItems.id, "foreign"),
+    );
+    expect(rows).toEqual([]);
+    expect(sink.set).toBeUndefined(); // no UPDATE issued at all
   });
 });
 
