@@ -1,0 +1,15 @@
+{
+  "_source": "Verbatim Thai i18n keys from pototype/master-party.jsx MasterVendor (L56-135) + VendorForm (L137-183). Kept in .json (the i18n-guard hook skips .json) so Thai never appears in the .tsx/.ts source — same pattern as cc-strings.json / model-strings.json. navTitle is a nav_i18n key (tn(): breadcrumb crumb-2 == the 'ผู้ขาย / ผู้รับเหมา' NAV label, NAV-ROUTES.md L98). Every other value is a phrases key (tp()): the type badges (วัสดุ/รับเหมา, display-derived from kind per B-070), the filter-tab labels the vendor.* dict does not cover (ผู้รับเหมา/บริการ), the KPI units (ราย/ล้านบาท), the active-status badge (ใช้งาน), two table headers (ประเภท/รหัส) and two credit-term option labels (เงินสด/ตามงวดงาน). All confirmed present in i18n-full.json phrases (B-071: 'มีใน phrases แล้ว').",
+  "navTitle": "ผู้ขาย / ผู้รับเหมา",
+  "typeMaterialBadge": "วัสดุ",
+  "typeContractorBadge": "รับเหมา",
+  "tabContractor": "ผู้รับเหมา",
+  "tabService": "บริการ",
+  "unitRecords": "ราย",
+  "unitMillionBaht": "ล้านบาท",
+  "statusActive": "ใช้งาน",
+  "thType": "ประเภท",
+  "thCode": "รหัส",
+  "termCash": "เงินสด",
+  "termMilestone": "ตามงวดงาน"
+}
