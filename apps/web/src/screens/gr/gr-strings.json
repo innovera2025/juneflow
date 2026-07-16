@@ -1,0 +1,22 @@
+{
+  "_source": "Verbatim Thai keys from pototype/gr.jsx GRList (L17-205) + forms.jsx GRCreateForm (L381-517) + the ds.jsx STATUS labels (L84-92). Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx/.ts source — same pattern as boq-strings.json. navGrList is the 'รับสินค้า (GR)' nav_i18n label (tn); every other value is a phrases key (tp) that has NO dedicated gr.* dict key (the gr.list*/gr.create* DICT keys cover the rest of the screen and are used via t()). statusApproved/statusCancelled/statusRejected are the ds.jsx STATUS.<status>.label strings the wire statuses map onto (received->approved badge per apps/api/src/routes/gr.ts; cancelled->cancelled; rejected label reused for the rejected-qty count).",
+  "navGrList": "รับสินค้า (GR)",
+  "tabPo": "รับจาก PO",
+  "tabWo": "รับงาน WO",
+  "kpiWoPending": "งวด WO รออนุมัติ",
+  "exportToast": "Export ข้อมูลเป็น Excel แล้ว",
+  "filterPeriod": "ช่วงเวลา",
+  "thValue": "มูลค่า (฿)",
+  "thDate": "วันที่",
+  "vendor": "ผู้ขาย",
+  "dateReceived": "วันที่รับ",
+  "deliveryNote": "ใบส่งของ",
+  "thNo": "เลขที่",
+  "thReason": "เหตุผล",
+  "thQty": "จำนวน",
+  "note": "หมายเหตุ",
+  "thUnit": "หน่วย",
+  "statusApproved": "อนุมัติแล้ว",
+  "statusCancelled": "ยกเลิก",
+  "statusRejected": "ปฏิเสธ"
+}
