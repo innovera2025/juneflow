@@ -172,7 +172,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P2-PLAT-02 | platform | done | **[R2] i18n BOQ core** — ~140 keys (boq.list/overview/editor) · compile+apply | P2-PLAT-01 | cmp identical + i18n test · gate 4.5 | 3 ชม. |
 | P2-PLAT-03 | platform | done | **[R3] i18n BOQ aux** — ~105 keys (bom/approval/archive/reports/aiqto) | P2-PLAT-02 | cmp + i18n test · gate 4.5 | 2.5 ชม. |
 | P2-PLAT-04 | platform | done | **[R4] i18n proc docs** — ~55 keys (pr/po/wo/gr) | P2-PLAT-03 | cmp + i18n test · gate 4.5 | 2 ชม. |
-| P2-WEB-01 | web | doing | **master.vendor** port (`master-party.jsx:56` · ref NAV g2-vendor · CRUD add/edit · type display-map) · G5 | P2-BE-01, P2-PLAT-01 | G5 + CI · gate 4.5 | 3 ชม. |
+| P2-WEB-01 | web | review | **master.vendor** port (`master-party.jsx:56` · ref NAV g2-vendor · CRUD add/edit · type display-map) · G5 | P2-BE-01, P2-PLAT-01 | G5 + CI · gate 4.5 | 3 ชม. |
 | P2-WEB-02 | web | done | **boq.list** port (`boq-list.jsx` +NewBOQForm/Excel import · g1/08) | P2-BE-02, P2-PLAT-02 | G5 g1/08 · gate 4.5 | 3 ชม. |
 | P2-WEB-03 | web | doing | **boq.overview** port (`boq.jsx:52` · g1/07 · waterfall live · tabs 2-5 empty-state) | P2-BE-02, P2-BE-03, P2-PLAT-02 | G5 g1/07 · gate 4.5 | 3 ชม. |
 | P2-WEB-04 | web | ready | **boq.editor** port (`boq.jsx:362` +boq-extra CBS/item · g1/11 · lock-after-approve · Revise v+1) | P2-BE-02, P2-BE-03, P2-PLAT-02 | G5 g1/11 · gate 4.5 | 4 ชม. |
@@ -180,7 +180,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P2-WEB-06 | web | ready | **boq.approval** port (`boq.jsx:1108` · g1/12 · ApprovalChain จาก matrix จริง B-070) | P2-BE-02, P2-BE-07, P2-PLAT-03 | G5 g1/12 · gate 4.5 | 3 ชม. |
 | P2-WEB-07 | web | ready | **boq.archive + boq.reports** port (`boq.jsx:1468/1637` · g1/13-14 · read-view match-prototype B-070) | P2-BE-02, P2-PLAT-03 | G5 g1/13-14 · gate 4.5 | 3 ชม. |
 | P2-WEB-08 | web | ready | **boq.aiqto** port (`ai-qto.jsx:47` · g1/09 · 4-step wizard vs stub job + quota chip) | P2-BE-03, P2-PLAT-03 | G5 g1/09 · gate 4.5 | 2.5 ชม. |
-| P2-WEB-09 | web | ready | **pr.list + pr.form** port (`pr-list.jsx`+`pr-form.jsx` · ApprovalChain matrix · capture ref ถ้าไม่มี) | P2-BE-04, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
+| P2-WEB-09 | web | doing | **pr.list + pr.form** port (`pr-list.jsx`+`pr-form.jsx` · ApprovalChain matrix · capture ref ถ้าไม่มี) | P2-BE-04, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
 | P2-WEB-10 | web | ready | **po + wo** port (`po-wo.jsx` · WO งวดงาน/retention/VO) | P2-BE-05, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
 | P2-WEB-11 | web | doing | **gr** port (`gr.jsx:17` +create modal · PO+WO receipt tabs · GR-from-WO B-070) | P2-BE-06, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
 | P2-BE-08 | backend | done | **[B-071] vendor schema extend** — additive migration เพิ่ม vendor.{addr text · bank text · status enum(active|inactive) · code text} (mirror cc B-059 · 0000-nn byte-identical) · handler /vendors คืน field ครบ · type display-derive จาก kind · **spend honest-empty** (ไม่มี AP) · seed CC/vendor ตาม `master-party.jsx:6-13` · dep BE-05 (backend worktree serialize) · driven by orch-A | P2-BE-05 | G1 drizzle · G3 · gate 4.5 | 2 ชม. |
