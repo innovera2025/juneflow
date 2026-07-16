@@ -27,6 +27,7 @@ import {
 } from "./routes/registry";
 import { LoginScreen } from "./screens/login/login-screen";
 import { BOQList } from "./screens/boq/boq-list";
+import { PRList } from "./screens/pr/pr-list";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
 import { MasterCompany } from "./screens/master/master-company";
@@ -46,6 +47,7 @@ import { Placeholder } from "./shell/page";
 const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
   "boq.list": BOQList,
+  "pr.list": PRList,
   "master.cc": MasterCC,
   "master.docnum": MasterDocNum,
   "master.company": MasterCompany,
