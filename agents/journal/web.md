@@ -276,3 +276,16 @@
 - **1 FAIL: gr.list(g1/18)** = data-wire ไม่ครบ (GET /gr subset) → B-074 (orch-A/backend zone · ไม่แก้ = QA zone)
 - flags: GET /api/v1/notifications 404 (bell · backend gap) · derived-field em-dash (boq ผู้รับผิดชอบ/อัปเดต · model BOM/ยูนิต · vendor ยอดซื้อ = honest-empty backend ไม่คืน)
 - git: qa worktree clean · stack down · ไม่แตะ screen code · ไม่ commit code
+
+## 2026-07-16 21:34 · qa (orch-B) · LIVE-G5 QA ROUND 2 — 5 procurement screens · 0 regression · systemic data-wire finding
+- ทำอะไร: live compose (5433) + pixel เทียบ gallery จริง บน 5 จอ merged ใหม่ (qa worktree synced dev) — boq.overview(g1/07) · boq.editor(g1/11) · po.list(g1/16) · pr.list(g1/15) · wo.list(g1/17)
+- ผล: **0 PASS · 5 FAIL(data-wire) · 0 FAIL(regression)** — ports orch-A สะอาดเชิงโครงสร้างทุกจอ (layout/token/label/column-order/position ตรง ref หมด) · FAIL = honest em-dash จาก field ที่ backend ไม่คืน (แบบ gr.list/B-074)
+- **SYSTEMIC insight (key): root cause = SCHEMA-level ไม่ใช่ wire-projection.** route wire คืน column จริงของ table ครบแล้ว — field ที่ ref ต้องการ = **column/line-table ที่ไม่มีใน schema** → extend GET เฉยๆ คืน null · ต้อง add column/table + seed ก่อน. per-endpoint gap:
+  - GET /pr: ขาด requester/title/phase/doc_date/budget%/approval-timestamps/urgent (pr_item SEEDED ✓ · amount จริง · gap = doc-level columns)
+  - GET /po: **ไม่มี po_item line-table** + ขาด deposit/paid/GR%/doc_date/installment-schedule/closed
+  - GET /wo: **ไม่มี wo installment table** (งวดงาน) + ขาด scope/progress/doc_date/variation/warranty (retention wired ✓)
+  - GET /gr (B-074): **ไม่มี gr_item + money column** + vendor ไม่ join + ขาด date/ordered-qty/status-label
+  - GET /boq/items: ขาด `detail` column (รายละเอียด) · waterfall GR-bar inherit gr money gap
+  - recommendation: **1 backend task** = migration (add columns + po_item/wo-installment/gr_item tables + boq_item.detail) + seed FLOW-A + extend GET → re-run live-G5 → 6 จอ PASS. **hand เข้า orch-A data-completeness packet** (ไม่ file blocker ซ้ำ · B-074/075 มีแล้ว)
+- **pr.list DESIGN flag (แยกจาก data-wire):** ref g1/15 = 4 filter pills (โครงการ/ช่วงเวลา/ประเภท/วงเงิน) · port = 2 (โครงการ/ประเภท · pr-list.tsx L451-452 ตัด period/amount เป็น decorative). period ไม่มี wire source (data-wire) แต่ **วงเงิน/amount อยู่บน wire จริง** → droppable-but-implementable · §0 กฎ 1 (visual 100%) vs กฎ 3 (ไม่ลอก mock) → Wei adjudicate (เข้า packet)
+- git: qa worktree clean · stack down · ไม่แตะ screen code
