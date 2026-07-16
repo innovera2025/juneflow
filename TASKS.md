@@ -181,6 +181,6 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P2-WEB-07 | web | ready | **boq.archive + boq.reports** port (`boq.jsx:1468/1637` · g1/13-14 · read-view match-prototype B-070) | P2-BE-02, P2-PLAT-03 | G5 g1/13-14 · gate 4.5 | 3 ชม. |
 | P2-WEB-08 | web | ready | **boq.aiqto** port (`ai-qto.jsx:47` · g1/09 · 4-step wizard vs stub job + quota chip) | P2-BE-03, P2-PLAT-03 | G5 g1/09 · gate 4.5 | 2.5 ชม. |
 | P2-WEB-09 | web | doing | **pr.list + pr.form** port (`pr-list.jsx`+`pr-form.jsx` · ApprovalChain matrix · capture ref ถ้าไม่มี) | P2-BE-04, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
-| P2-WEB-10 | web | ready | **po + wo** port (`po-wo.jsx` · WO งวดงาน/retention/VO) | P2-BE-05, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
-| P2-WEB-11 | web | doing | **gr** port (`gr.jsx:17` +create modal · PO+WO receipt tabs · GR-from-WO B-070) | P2-BE-06, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
+| P2-WEB-10 | web | doing | **po + wo** port (`po-wo.jsx` · WO งวดงาน/retention/VO) | P2-BE-05, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
+| P2-WEB-11 | web | review | **gr** port (`gr.jsx:17` +create modal · PO+WO receipt tabs · GR-from-WO B-070) | P2-BE-06, P2-PLAT-04 | G5 + CI · gate 4.5 | 3 ชม. |
 | P2-BE-08 | backend | done | **[B-071] vendor schema extend** — additive migration เพิ่ม vendor.{addr text · bank text · status enum(active|inactive) · code text} (mirror cc B-059 · 0000-nn byte-identical) · handler /vendors คืน field ครบ · type display-derive จาก kind · **spend honest-empty** (ไม่มี AP) · seed CC/vendor ตาม `master-party.jsx:6-13` · dep BE-05 (backend worktree serialize) · driven by orch-A | P2-BE-05 | G1 drizzle · G3 · gate 4.5 | 2 ชม. |
