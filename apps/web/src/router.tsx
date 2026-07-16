@@ -27,6 +27,7 @@ import {
 } from "./routes/registry";
 import { LoginScreen } from "./screens/login/login-screen";
 import { MasterCC } from "./screens/master/master-cc";
+import { MasterDocNum } from "./screens/master/master-docnum";
 import { MasterCompany } from "./screens/master/master-company";
 import { MasterModel } from "./screens/master/master-model";
 import { MasterProject } from "./screens/master/master-project";
@@ -43,6 +44,7 @@ import { Placeholder } from "./shell/page";
 const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
   "master.cc": MasterCC,
+  "master.docnum": MasterDocNum,
   "master.company": MasterCompany,
   "master.model": MasterModel,
   "master.project": MasterProject,
