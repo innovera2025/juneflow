@@ -3946,6 +3946,1530 @@
       "en": "สร้าง {no} {ver} (ร่าง-รออนุมัติ Revise) แล้ว",
       "zh": "สร้าง {no} {ver} (ร่าง-รออนุมัติ Revise) แล้ว",
       "ar": "สร้าง {no} {ver} (ร่าง-รออนุมัติ Revise) แล้ว"
+    },
+    "boq.bomCatSubcon": {
+      "th": "Subcontractor · ผู้รับเหมาช่วง",
+      "en": "Subcontractor · ผู้รับเหมาช่วง",
+      "zh": "Subcontractor · ผู้รับเหมาช่วง",
+      "ar": "Subcontractor · ผู้รับเหมาช่วง"
+    },
+    "boq.bomCatShortMat": {
+      "th": "MAT",
+      "en": "MAT",
+      "zh": "MAT",
+      "ar": "MAT"
+    },
+    "boq.bomCatShortSub": {
+      "th": "SUB",
+      "en": "SUB",
+      "zh": "SUB",
+      "ar": "SUB"
+    },
+    "boq.bomCatShortLab": {
+      "th": "LAB",
+      "en": "LAB",
+      "zh": "LAB",
+      "ar": "LAB"
+    },
+    "boq.bomBreadcrumbLeaf": {
+      "th": "BOM · สูตรต่อหลัง",
+      "en": "BOM · สูตรต่อหลัง",
+      "zh": "BOM · สูตรต่อหลัง",
+      "ar": "BOM · สูตรต่อหลัง"
+    },
+    "boq.bomTitle": {
+      "th": "BOM · สูตรวัสดุ-แรงงานต่อหลัง",
+      "en": "BOM · สูตรวัสดุ-แรงงานต่อหลัง",
+      "zh": "BOM · สูตรวัสดุ-แรงงานต่อหลัง",
+      "ar": "BOM · สูตรวัสดุ-แรงงานต่อหลัง"
+    },
+    "boq.bomSubtitle": {
+      "th": "ต้นแบบต้นทุนต่อ 1 หลัง แยกตามแบบบ้าน (Model) · เป็นต้นทางของ BOQ — BOQ = BOM × จำนวนยูนิต",
+      "en": "ต้นแบบต้นทุนต่อ 1 หลัง แยกตามแบบบ้าน (Model) · เป็นต้นทางของ BOQ — BOQ = BOM × จำนวนยูนิต",
+      "zh": "ต้นแบบต้นทุนต่อ 1 หลัง แยกตามแบบบ้าน (Model) · เป็นต้นทางของ BOQ — BOQ = BOM × จำนวนยูนิต",
+      "ar": "ต้นแบบต้นทุนต่อ 1 หลัง แยกตามแบบบ้าน (Model) · เป็นต้นทางของ BOQ — BOQ = BOM × จำนวนยูนิต"
+    },
+    "boq.bomImport": {
+      "th": "นำเข้า BOM",
+      "en": "นำเข้า BOM",
+      "zh": "นำเข้า BOM",
+      "ar": "นำเข้า BOM"
+    },
+    "boq.bomGenBoq": {
+      "th": "สร้าง BOQ จาก BOM",
+      "en": "สร้าง BOQ จาก BOM",
+      "zh": "สร้าง BOQ จาก BOM",
+      "ar": "สร้าง BOQ จาก BOM"
+    },
+    "boq.bomGenTitle": {
+      "th": "สร้าง BOQ จาก BOM · {code}",
+      "en": "สร้าง BOQ จาก BOM · {code}",
+      "zh": "สร้าง BOQ จาก BOM · {code}",
+      "ar": "สร้าง BOQ จาก BOM · {code}"
+    },
+    "boq.bomGenMsgLine1": {
+      "th": "ระบบจะสร้างรายการ BOQ จากสูตร BOM ต่อหลัง คูณด้วยจำนวนยูนิตของบล็อกที่เลือก",
+      "en": "ระบบจะสร้างรายการ BOQ จากสูตร BOM ต่อหลัง คูณด้วยจำนวนยูนิตของบล็อกที่เลือก",
+      "zh": "ระบบจะสร้างรายการ BOQ จากสูตร BOM ต่อหลัง คูณด้วยจำนวนยูนิตของบล็อกที่เลือก",
+      "ar": "ระบบจะสร้างรายการ BOQ จากสูตร BOM ต่อหลัง คูณด้วยจำนวนยูนิตของบล็อกที่เลือก"
+    },
+    "boq.bomGenMsgLine2": {
+      "th": "{n} รายการ/หลัง × {units} ยูนิต = {value} ฿ (มูลค่า BOQ รวมโดยประมาณ)",
+      "en": "{n} รายการ/หลัง × {units} ยูนิต = {value} ฿ (มูลค่า BOQ รวมโดยประมาณ)",
+      "zh": "{n} รายการ/หลัง × {units} ยูนิต = {value} ฿ (มูลค่า BOQ รวมโดยประมาณ)",
+      "ar": "{n} รายการ/หลัง × {units} ยูนิต = {value} ฿ (มูลค่า BOQ รวมโดยประมาณ)"
+    },
+    "boq.bomGenToast": {
+      "th": "สร้าง BOQ จาก BOM {code} แล้ว · ลง BOQ-2026-B-02 v5 (รออนุมัติ)",
+      "en": "สร้าง BOQ จาก BOM {code} แล้ว · ลง BOQ-2026-B-02 v5 (รออนุมัติ)",
+      "zh": "สร้าง BOQ จาก BOM {code} แล้ว · ลง BOQ-2026-B-02 v5 (รออนุมัติ)",
+      "ar": "สร้าง BOQ จาก BOM {code} แล้ว · ลง BOQ-2026-B-02 v5 (รออนุมัติ)"
+    },
+    "boq.bomModelMeta": {
+      "th": "{area} ตร.ม. · {units} ยูนิต",
+      "en": "{area} ตร.ม. · {units} ยูนิต",
+      "zh": "{area} ตร.ม. · {units} ยูนิต",
+      "ar": "{area} ตร.ม. · {units} ยูนิต"
+    },
+    "boq.bomEmptyTitle": {
+      "th": "ยังไม่มี BOM สำหรับ {type} ({code})",
+      "en": "ยังไม่มี BOM สำหรับ {type} ({code})",
+      "zh": "ยังไม่มี BOM สำหรับ {type} ({code})",
+      "ar": "ยังไม่มี BOM สำหรับ {type} ({code})"
+    },
+    "boq.bomEmptyDesc": {
+      "th": "เริ่มจากนำเข้าสูตรจาก Excel หรือคัดลอกจากแบบบ้านที่ใกล้เคียง แล้วปรับรายการให้ตรงสเปก",
+      "en": "เริ่มจากนำเข้าสูตรจาก Excel หรือคัดลอกจากแบบบ้านที่ใกล้เคียง แล้วปรับรายการให้ตรงสเปก",
+      "zh": "เริ่มจากนำเข้าสูตรจาก Excel หรือคัดลอกจากแบบบ้านที่ใกล้เคียง แล้วปรับรายการให้ตรงสเปก",
+      "ar": "เริ่มจากนำเข้าสูตรจาก Excel หรือคัดลอกจากแบบบ้านที่ใกล้เคียง แล้วปรับรายการให้ตรงสเปก"
+    },
+    "boq.bomCopyOther": {
+      "th": "คัดลอกจากแบบอื่น",
+      "en": "คัดลอกจากแบบอื่น",
+      "zh": "คัดลอกจากแบบอื่น",
+      "ar": "คัดลอกจากแบบอื่น"
+    },
+    "boq.bomCopyToast": {
+      "th": "คัดลอก BOM จากแบบ B-1",
+      "en": "คัดลอก BOM จากแบบ B-1",
+      "zh": "คัดลอก BOM จากแบบ B-1",
+      "ar": "คัดลอก BOM จากแบบ B-1"
+    },
+    "boq.bomKpiCostPerHouse": {
+      "th": "ต้นทุนต่อหลัง",
+      "en": "ต้นทุนต่อหลัง",
+      "zh": "ต้นทุนต่อหลัง",
+      "ar": "ต้นทุนต่อหลัง"
+    },
+    "boq.bomKpiItemsVer": {
+      "th": "{n} รายการ · {ver}",
+      "en": "{n} รายการ · {ver}",
+      "zh": "{n} รายการ · {ver}",
+      "ar": "{n} รายการ · {ver}"
+    },
+    "boq.bomKpiCatMaterial": {
+      "th": "หมวด Material",
+      "en": "หมวด Material",
+      "zh": "หมวด Material",
+      "ar": "หมวด Material"
+    },
+    "boq.bomKpiCatSubcon": {
+      "th": "หมวด Subcon",
+      "en": "หมวด Subcon",
+      "zh": "หมวด Subcon",
+      "ar": "หมวด Subcon"
+    },
+    "boq.bomKpiCatLabor": {
+      "th": "หมวด Labor",
+      "en": "หมวด Labor",
+      "zh": "หมวด Labor",
+      "ar": "หมวด Labor"
+    },
+    "boq.bomListHeader": {
+      "th": "รายการ BOM · {type} ({code})",
+      "en": "รายการ BOM · {type} ({code})",
+      "zh": "รายการ BOM · {type} ({code})",
+      "ar": "รายการ BOM · {type} ({code})"
+    },
+    "boq.bomUpdatedAt": {
+      "th": "อัปเดต {date}",
+      "en": "อัปเดต {date}",
+      "zh": "อัปเดต {date}",
+      "ar": "อัปเดต {date}"
+    },
+    "boq.bomExportToast": {
+      "th": "Export BOM เป็น Excel แล้ว",
+      "en": "Export BOM เป็น Excel แล้ว",
+      "zh": "Export BOM เป็น Excel แล้ว",
+      "ar": "Export BOM เป็น Excel แล้ว"
+    },
+    "boq.bomEditItemTitle": {
+      "th": "แก้ไขรายการ BOM",
+      "en": "แก้ไขรายการ BOM",
+      "zh": "แก้ไขรายการ BOM",
+      "ar": "แก้ไขรายการ BOM"
+    },
+    "boq.bomCatGroupSummary": {
+      "th": "· {n} รายการ · {value} ฿",
+      "en": "· {n} รายการ · {value} ฿",
+      "zh": "· {n} รายการ · {value} ฿",
+      "ar": "· {n} รายการ · {value} ฿"
+    },
+    "boq.bomFootTotal": {
+      "th": "รวมต้นทุนต่อ 1 หลัง · {type}",
+      "en": "รวมต้นทุนต่อ 1 หลัง · {type}",
+      "zh": "รวมต้นทุนต่อ 1 หลัง · {type}",
+      "ar": "รวมต้นทุนต่อ 1 หลัง · {type}"
+    },
+    "boq.bomInfoFormula": {
+      "th": "BOQ ของบล็อกนี้ = ต้นทุน BOM ต่อหลัง {total} ฿ × {units} ยูนิต = {grand} ฿",
+      "en": "BOQ ของบล็อกนี้ = ต้นทุน BOM ต่อหลัง {total} ฿ × {units} ยูนิต = {grand} ฿",
+      "zh": "BOQ ของบล็อกนี้ = ต้นทุน BOM ต่อหลัง {total} ฿ × {units} ยูนิต = {grand} ฿",
+      "ar": "BOQ ของบล็อกนี้ = ต้นทุน BOM ต่อหลัง {total} ฿ × {units} ยูนิต = {grand} ฿"
+    },
+    "boq.aprFilesTitle": {
+      "th": "ไฟล์แนบ · {no}",
+      "en": "ไฟล์แนบ · {no}",
+      "zh": "ไฟล์แนบ · {no}",
+      "ar": "ไฟล์แนบ · {no}"
+    },
+    "boq.aprFilesSubtitle": {
+      "th": "{n} ไฟล์ · {ver}",
+      "en": "{n} ไฟล์ · {ver}",
+      "zh": "{n} ไฟล์ · {ver}",
+      "ar": "{n} ไฟล์ · {ver}"
+    },
+    "boq.aprPrintTitle": {
+      "th": "พิมพ์ BOQ {no}",
+      "en": "พิมพ์ BOQ {no}",
+      "zh": "พิมพ์ BOQ {no}",
+      "ar": "พิมพ์ BOQ {no}"
+    },
+    "boq.aprPrintMsg": {
+      "th": "เลือกรูปแบบการพิมพ์: PDF เปรียบเทียบ Revise หรือ BOQ ฉบับเต็ม",
+      "en": "เลือกรูปแบบการพิมพ์: PDF เปรียบเทียบ Revise หรือ BOQ ฉบับเต็ม",
+      "zh": "เลือกรูปแบบการพิมพ์: PDF เปรียบเทียบ Revise หรือ BOQ ฉบับเต็ม",
+      "ar": "เลือกรูปแบบการพิมพ์: PDF เปรียบเทียบ Revise หรือ BOQ ฉบับเต็ม"
+    },
+    "boq.aprPrintConfirm": {
+      "th": "ส่งพิมพ์",
+      "en": "ส่งพิมพ์",
+      "zh": "ส่งพิมพ์",
+      "ar": "ส่งพิมพ์"
+    },
+    "boq.aprPrintToast": {
+      "th": "ส่งคำสั่งพิมพ์ {no}",
+      "en": "ส่งคำสั่งพิมพ์ {no}",
+      "zh": "ส่งคำสั่งพิมพ์ {no}",
+      "ar": "ส่งคำสั่งพิมพ์ {no}"
+    },
+    "boq.aprTitle": {
+      "th": "อนุมัติ BOM / BOQ",
+      "en": "อนุมัติ BOM / BOQ",
+      "zh": "อนุมัติ BOM / BOQ",
+      "ar": "อนุมัติ BOM / BOQ"
+    },
+    "boq.aprSubtitle": {
+      "th": "เปรียบเทียบ Revise — ดูรายการที่เพิ่ม/ลด เทียบกับเวอร์ชั่นก่อน — อนุมัติ/ปฏิเสธพร้อมเหตุผล",
+      "en": "เปรียบเทียบ Revise — ดูรายการที่เพิ่ม/ลด เทียบกับเวอร์ชั่นก่อน — อนุมัติ/ปฏิเสธพร้อมเหตุผล",
+      "zh": "เปรียบเทียบ Revise — ดูรายการที่เพิ่ม/ลด เทียบกับเวอร์ชั่นก่อน — อนุมัติ/ปฏิเสธพร้อมเหตุผล",
+      "ar": "เปรียบเทียบ Revise — ดูรายการที่เพิ่ม/ลด เทียบกับเวอร์ชั่นก่อน — อนุมัติ/ปฏิเสธพร้อมเหตุผล"
+    },
+    "boq.aprPendingSort": {
+      "th": "เรียงตามเวลาส่งอนุมัติ · ล่าสุดก่อน",
+      "en": "เรียงตามเวลาส่งอนุมัติ · ล่าสุดก่อน",
+      "zh": "เรียงตามเวลาส่งอนุมัติ · ล่าสุดก่อน",
+      "ar": "เรียงตามเวลาส่งอนุมัติ · ล่าสุดก่อน"
+    },
+    "boq.aprAgeAgo": {
+      "th": "{age} ที่แล้ว",
+      "en": "{age} ที่แล้ว",
+      "zh": "{age} ที่แล้ว",
+      "ar": "{age} ที่แล้ว"
+    },
+    "boq.aprVerFirstSuffix": {
+      "th": "· ใหม่",
+      "en": "· ใหม่",
+      "zh": "· ใหม่",
+      "ar": "· ใหม่"
+    },
+    "boq.aprReviseVer": {
+      "th": "Revise · {ver}",
+      "en": "Revise · {ver}",
+      "zh": "Revise · {ver}",
+      "ar": "Revise · {ver}"
+    },
+    "boq.aprFilesBtn": {
+      "th": "ไฟล์แนบ ({n})",
+      "en": "ไฟล์แนบ ({n})",
+      "zh": "ไฟล์แนบ ({n})",
+      "ar": "ไฟล์แนบ ({n})"
+    },
+    "boq.aprDiffOldValue": {
+      "th": "มูลค่า BOQ เดิม ({ver})",
+      "en": "มูลค่า BOQ เดิม ({ver})",
+      "zh": "มูลค่า BOQ เดิม ({ver})",
+      "ar": "มูลค่า BOQ เดิม ({ver})"
+    },
+    "boq.aprDiffNewValue": {
+      "th": "มูลค่า BOQ ใหม่ ({ver})",
+      "en": "มูลค่า BOQ ใหม่ ({ver})",
+      "zh": "มูลค่า BOQ ใหม่ ({ver})",
+      "ar": "มูลค่า BOQ ใหม่ ({ver})"
+    },
+    "boq.aprDiffNet": {
+      "th": "ส่วนต่าง (Net)",
+      "en": "ส่วนต่าง (Net)",
+      "zh": "ส่วนต่าง (Net)",
+      "ar": "ส่วนต่าง (Net)"
+    },
+    "boq.aprDiffNewBoq": {
+      "th": "BOQ ใหม่",
+      "en": "BOQ ใหม่",
+      "zh": "BOQ ใหม่",
+      "ar": "BOQ ใหม่"
+    },
+    "boq.aprDiffChanged": {
+      "th": "รายการที่เปลี่ยน",
+      "en": "รายการที่เปลี่ยน",
+      "zh": "รายการที่เปลี่ยน",
+      "ar": "รายการที่เปลี่ยน"
+    },
+    "boq.aprNewItemsCount": {
+      "th": "{n} รายการใหม่",
+      "en": "{n} รายการใหม่",
+      "zh": "{n} รายการใหม่",
+      "ar": "{n} รายการใหม่"
+    },
+    "boq.aprChangedOf": {
+      "th": "{a} จาก {b}",
+      "en": "{a} จาก {b}",
+      "zh": "{a} จาก {b}",
+      "ar": "{a} จาก {b}"
+    },
+    "boq.aprFirstEdition": {
+      "th": "ฉบับแรก",
+      "en": "ฉบับแรก",
+      "zh": "ฉบับแรก",
+      "ar": "ฉบับแรก"
+    },
+    "boq.aprChangeBreakdown": {
+      "th": "{add} เพิ่มใหม่ · {del} ลบ · {edit} แก้ราคา/จำนวน",
+      "en": "{add} เพิ่มใหม่ · {del} ลบ · {edit} แก้ราคา/จำนวน",
+      "zh": "{add} เพิ่มใหม่ · {del} ลบ · {edit} แก้ราคา/จำนวน",
+      "ar": "{add} เพิ่มใหม่ · {del} ลบ · {edit} แก้ราคา/จำนวน"
+    },
+    "boq.aprTabInc": {
+      "th": "เพิ่ม / Increase",
+      "en": "เพิ่ม / Increase",
+      "zh": "เพิ่ม / Increase",
+      "ar": "เพิ่ม / Increase"
+    },
+    "boq.aprTabDec": {
+      "th": "ลด / Decrease",
+      "en": "ลด / Decrease",
+      "zh": "ลด / Decrease",
+      "ar": "ลด / Decrease"
+    },
+    "boq.aprCompareVer": {
+      "th": "เปรียบเทียบ {vA} ({dateA}) กับ {vB} ({dateB})",
+      "en": "เปรียบเทียบ {vA} ({dateA}) กับ {vB} ({dateB})",
+      "zh": "เปรียบเทียบ {vA} ({dateA}) กับ {vB} ({dateB})",
+      "ar": "เปรียบเทียบ {vA} ({dateA}) กับ {vB} ({dateB})"
+    },
+    "boq.aprThEdit": {
+      "th": "การแก้ไข",
+      "en": "การแก้ไข",
+      "zh": "การแก้ไข",
+      "ar": "การแก้ไข"
+    },
+    "boq.aprThOldVal": {
+      "th": "ค่าเดิม",
+      "en": "ค่าเดิม",
+      "zh": "ค่าเดิม",
+      "ar": "ค่าเดิม"
+    },
+    "boq.aprThNewVal": {
+      "th": "ค่าใหม่",
+      "en": "ค่าใหม่",
+      "zh": "ค่าใหม่",
+      "ar": "ค่าใหม่"
+    },
+    "boq.aprThDeltaVal": {
+      "th": "มูลค่าเปลี่ยน",
+      "en": "มูลค่าเปลี่ยน",
+      "zh": "มูลค่าเปลี่ยน",
+      "ar": "มูลค่าเปลี่ยน"
+    },
+    "boq.aprNetDiffFoot": {
+      "th": "ส่วนต่างสุทธิ (เพิ่ม {inc} · ลด {dec})",
+      "en": "ส่วนต่างสุทธิ (เพิ่ม {inc} · ลด {dec})",
+      "zh": "ส่วนต่างสุทธิ (เพิ่ม {inc} · ลด {dec})",
+      "ar": "ส่วนต่างสุทธิ (เพิ่ม {inc} · ลด {dec})"
+    },
+    "boq.aprChainTitle": {
+      "th": "ลำดับอนุมัติ",
+      "en": "ลำดับอนุมัติ",
+      "zh": "ลำดับอนุมัติ",
+      "ar": "ลำดับอนุมัติ"
+    },
+    "boq.aprChainRequester": {
+      "th": "วิภา (ผู้ขอ)",
+      "en": "วิภา (ผู้ขอ)",
+      "zh": "วิภา (ผู้ขอ)",
+      "ar": "วิภา (ผู้ขอ)"
+    },
+    "boq.aprChainPurchasing": {
+      "th": "หน. จัดซื้อ",
+      "en": "หน. จัดซื้อ",
+      "zh": "หน. จัดซื้อ",
+      "ar": "หน. จัดซื้อ"
+    },
+    "boq.aprChainDirector": {
+      "th": "ผอ.ก่อสร้าง",
+      "en": "ผอ.ก่อสร้าง",
+      "zh": "ผอ.ก่อสร้าง",
+      "ar": "ผอ.ก่อสร้าง"
+    },
+    "boq.aprNotifyInApp": {
+      "th": "ในระบบ",
+      "en": "ในระบบ",
+      "zh": "ในระบบ",
+      "ar": "ในระบบ"
+    },
+    "boq.aprNotifyInAppWho": {
+      "th": "ผู้ขอ + ผู้อนุมัติชั้นถัดไป",
+      "en": "ผู้ขอ + ผู้อนุมัติชั้นถัดไป",
+      "zh": "ผู้ขอ + ผู้อนุมัติชั้นถัดไป",
+      "ar": "ผู้ขอ + ผู้อนุมัติชั้นถัดไป"
+    },
+    "boq.aprNotifyLine": {
+      "th": "LINE Notify",
+      "en": "LINE Notify",
+      "zh": "LINE Notify",
+      "ar": "LINE Notify"
+    },
+    "boq.aprNotifyLineWho": {
+      "th": "กลุ่ม ICON-Construction-PM",
+      "en": "กลุ่ม ICON-Construction-PM",
+      "zh": "กลุ่ม ICON-Construction-PM",
+      "ar": "กลุ่ม ICON-Construction-PM"
+    },
+    "boq.aprNotifyEmailWho": {
+      "th": "ผู้อนุมัติ + cc.ผู้ขอ",
+      "en": "ผู้อนุมัติ + cc.ผู้ขอ",
+      "zh": "ผู้อนุมัติ + cc.ผู้ขอ",
+      "ar": "ผู้อนุมัติ + cc.ผู้ขอ"
+    },
+    "boq.aprReasonLabel": {
+      "th": "เหตุผล / ความเห็น",
+      "en": "เหตุผล / ความเห็น",
+      "zh": "เหตุผล / ความเห็น",
+      "ar": "เหตุผล / ความเห็น"
+    },
+    "boq.aprReasonHint": {
+      "th": "(จำเป็นถ้า \"ปฏิเสธ\")",
+      "en": "(จำเป็นถ้า \"ปฏิเสธ\")",
+      "zh": "(จำเป็นถ้า \"ปฏิเสธ\")",
+      "ar": "(จำเป็นถ้า \"ปฏิเสธ\")"
+    },
+    "boq.aprReasonPh": {
+      "th": "พิมพ์เหตุผลการอนุมัติ/ปฏิเสธ...",
+      "en": "พิมพ์เหตุผลการอนุมัติ/ปฏิเสธ...",
+      "zh": "พิมพ์เหตุผลการอนุมัติ/ปฏิเสธ...",
+      "ar": "พิมพ์เหตุผลการอนุมัติ/ปฏิเสธ..."
+    },
+    "boq.aprEscalateInfo": {
+      "th": "การอนุมัติจะส่งต่อเป็น {tier} เนื่องจาก Net Increase ≥ 500K",
+      "en": "การอนุมัติจะส่งต่อเป็น {tier} เนื่องจาก Net Increase ≥ 500K",
+      "zh": "การอนุมัติจะส่งต่อเป็น {tier} เนื่องจาก Net Increase ≥ 500K",
+      "ar": "การอนุมัติจะส่งต่อเป็น {tier} เนื่องจาก Net Increase ≥ 500K"
+    },
+    "boq.aprTier4": {
+      "th": "ชั้น 4 (ผอ.ก่อสร้าง)",
+      "en": "ชั้น 4 (ผอ.ก่อสร้าง)",
+      "zh": "ชั้น 4 (ผอ.ก่อสร้าง)",
+      "ar": "ชั้น 4 (ผอ.ก่อสร้าง)"
+    },
+    "boq.aprApproveForward": {
+      "th": "อนุมัติ → ส่งต่อ ผอ.",
+      "en": "อนุมัติ → ส่งต่อ ผอ.",
+      "zh": "อนุมัติ → ส่งต่อ ผอ.",
+      "ar": "อนุมัติ → ส่งต่อ ผอ."
+    },
+    "boq.aprFilesCloudNote": {
+      "th": "ไฟล์ทั้งหมดถูกเก็บใน Cloud Storage · มีการเข้ารหัส · ผู้อนุมัติสามารถดู/ดาวน์โหลดได้",
+      "en": "ไฟล์ทั้งหมดถูกเก็บใน Cloud Storage · มีการเข้ารหัส · ผู้อนุมัติสามารถดู/ดาวน์โหลดได้",
+      "zh": "ไฟล์ทั้งหมดถูกเก็บใน Cloud Storage · มีการเข้ารหัส · ผู้อนุมัติสามารถดู/ดาวน์โหลดได้",
+      "ar": "ไฟล์ทั้งหมดถูกเก็บใน Cloud Storage · มีการเข้ารหัส · ผู้อนุมัติสามารถดู/ดาวน์โหลดได้"
+    },
+    "boq.aprAddFileToast": {
+      "th": "เปิด File browser เพื่อเพิ่มไฟล์...",
+      "en": "เปิด File browser เพื่อเพิ่มไฟล์...",
+      "zh": "เปิด File browser เพื่อเพิ่มไฟล์...",
+      "ar": "เปิด File browser เพื่อเพิ่มไฟล์..."
+    },
+    "boq.aprDownloadAll": {
+      "th": "ดาวน์โหลดทั้งหมด",
+      "en": "ดาวน์โหลดทั้งหมด",
+      "zh": "ดาวน์โหลดทั้งหมด",
+      "ar": "ดาวน์โหลดทั้งหมด"
+    },
+    "boq.aprDownloadAllToast": {
+      "th": "ดาวน์โหลดทั้งหมด {n} ไฟล์ (ZIP)",
+      "en": "ดาวน์โหลดทั้งหมด {n} ไฟล์ (ZIP)",
+      "zh": "ดาวน์โหลดทั้งหมด {n} ไฟล์ (ZIP)",
+      "ar": "ดาวน์โหลดทั้งหมด {n} ไฟล์ (ZIP)"
+    },
+    "boq.aprOpenNewTab": {
+      "th": "เปิด {file} ในแท็บใหม่",
+      "en": "เปิด {file} ในแท็บใหม่",
+      "zh": "เปิด {file} ในแท็บใหม่",
+      "ar": "เปิด {file} ในแท็บใหม่"
+    },
+    "boq.arcTitle": {
+      "th": "BOQ Archive",
+      "en": "BOQ Archive",
+      "zh": "BOQ Archive",
+      "ar": "BOQ Archive"
+    },
+    "boq.arcSubtitle": {
+      "th": "ค้นหา BOQ ทุกฉบับ · ดูประวัติ Revise พร้อมผู้อนุมัติและไฟล์แนบ",
+      "en": "ค้นหา BOQ ทุกฉบับ · ดูประวัติ Revise พร้อมผู้อนุมัติและไฟล์แนบ",
+      "zh": "ค้นหา BOQ ทุกฉบับ · ดูประวัติ Revise พร้อมผู้อนุมัติและไฟล์แนบ",
+      "ar": "ค้นหา BOQ ทุกฉบับ · ดูประวัติ Revise พร้อมผู้อนุมัติและไฟล์แนบ"
+    },
+    "boq.arcFilterTitle": {
+      "th": "ตัวกรอง BOQ Archive",
+      "en": "ตัวกรอง BOQ Archive",
+      "zh": "ตัวกรอง BOQ Archive",
+      "ar": "ตัวกรอง BOQ Archive"
+    },
+    "boq.arcFilterSubtitle": {
+      "th": "กรองตามโครงการ / สถานะ / ปี / ผู้อนุมัติ",
+      "en": "กรองตามโครงการ / สถานะ / ปี / ผู้อนุมัติ",
+      "zh": "กรองตามโครงการ / สถานะ / ปี / ผู้อนุมัติ",
+      "ar": "กรองตามโครงการ / สถานะ / ปี / ผู้อนุมัติ"
+    },
+    "boq.arcExportTitle": {
+      "th": "Export BOQ Archive",
+      "en": "Export BOQ Archive",
+      "zh": "Export BOQ Archive",
+      "ar": "Export BOQ Archive"
+    },
+    "boq.arcExportSubtitle": {
+      "th": "เลือกขอบเขต + รูปแบบไฟล์",
+      "en": "เลือกขอบเขต + รูปแบบไฟล์",
+      "zh": "เลือกขอบเขต + รูปแบบไฟล์",
+      "ar": "เลือกขอบเขต + รูปแบบไฟล์"
+    },
+    "boq.arcSearchPh": {
+      "th": "ค้นหา BOQ no, โครงการ, Block...",
+      "en": "ค้นหา BOQ no, โครงการ, Block...",
+      "zh": "ค้นหา BOQ no, โครงการ, Block...",
+      "ar": "ค้นหา BOQ no, โครงการ, Block..."
+    },
+    "boq.arcThCodeBoq": {
+      "th": "เลขที่ BOQ",
+      "en": "เลขที่ BOQ",
+      "zh": "เลขที่ BOQ",
+      "ar": "เลขที่ BOQ"
+    },
+    "boq.arcThVersion": {
+      "th": "เวอร์ชั่น",
+      "en": "เวอร์ชั่น",
+      "zh": "เวอร์ชั่น",
+      "ar": "เวอร์ชั่น"
+    },
+    "boq.arcThApprover": {
+      "th": "ผู้อนุมัติล่าสุด",
+      "en": "ผู้อนุมัติล่าสุด",
+      "zh": "ผู้อนุมัติล่าสุด",
+      "ar": "ผู้อนุมัติล่าสุด"
+    },
+    "boq.arcThApproveDate": {
+      "th": "วันที่อนุมัติ",
+      "en": "วันที่อนุมัติ",
+      "zh": "วันที่อนุมัติ",
+      "ar": "วันที่อนุมัติ"
+    },
+    "boq.arcThFileRevise": {
+      "th": "ไฟล์ · Revise",
+      "en": "ไฟล์ · Revise",
+      "zh": "ไฟล์ · Revise",
+      "ar": "ไฟล์ · Revise"
+    },
+    "boq.arcCopyMsg": {
+      "th": "คัดลอกโครงสร้างและรายการของ {no} ไปตั้งเป็น BOQ ใหม่ (สถานะ ร่าง) เพื่อใช้กับโครงการ/บล็อกอื่น",
+      "en": "คัดลอกโครงสร้างและรายการของ {no} ไปตั้งเป็น BOQ ใหม่ (สถานะ ร่าง) เพื่อใช้กับโครงการ/บล็อกอื่น",
+      "zh": "คัดลอกโครงสร้างและรายการของ {no} ไปตั้งเป็น BOQ ใหม่ (สถานะ ร่าง) เพื่อใช้กับโครงการ/บล็อกอื่น",
+      "ar": "คัดลอกโครงสร้างและรายการของ {no} ไปตั้งเป็น BOQ ใหม่ (สถานะ ร่าง) เพื่อใช้กับโครงการ/บล็อกอื่น"
+    },
+    "boq.arcCopyConfirm": {
+      "th": "Copy & สร้างใหม่",
+      "en": "Copy & สร้างใหม่",
+      "zh": "Copy & สร้างใหม่",
+      "ar": "Copy & สร้างใหม่"
+    },
+    "boq.arcCopyToast": {
+      "th": "สร้าง {no} จาก {from} แล้ว",
+      "en": "สร้าง {no} จาก {from} แล้ว",
+      "zh": "สร้าง {no} จาก {from} แล้ว",
+      "ar": "สร้าง {no} จาก {from} แล้ว"
+    },
+    "boq.arcHistoryTitle": {
+      "th": "ประวัติ Revise · {n} เวอร์ชั่น",
+      "en": "ประวัติ Revise · {n} เวอร์ชั่น",
+      "zh": "ประวัติ Revise · {n} เวอร์ชั่น",
+      "ar": "ประวัติ Revise · {n} เวอร์ชั่น"
+    },
+    "boq.arcExportHistoryToast": {
+      "th": "Export ประวัติ Revise (PDF)",
+      "en": "Export ประวัติ Revise (PDF)",
+      "zh": "Export ประวัติ Revise (PDF)",
+      "ar": "Export ประวัติ Revise (PDF)"
+    },
+    "boq.arcCompareVer": {
+      "th": "เปรียบเทียบ {vA} ↔ {vB}",
+      "en": "เปรียบเทียบ {vA} ↔ {vB}",
+      "zh": "เปรียบเทียบ {vA} ↔ {vB}",
+      "ar": "เปรียบเทียบ {vA} ↔ {vB}"
+    },
+    "boq.arcCompareToast": {
+      "th": "เปิดมุมมองเปรียบเทียบเวอร์ชั่น",
+      "en": "เปิดมุมมองเปรียบเทียบเวอร์ชั่น",
+      "zh": "เปิดมุมมองเปรียบเทียบเวอร์ชั่น",
+      "ar": "เปิดมุมมองเปรียบเทียบเวอร์ชั่น"
+    },
+    "boq.arcFldYearBe": {
+      "th": "ปี พ.ศ.",
+      "en": "ปี พ.ศ.",
+      "zh": "ปี พ.ศ.",
+      "ar": "ปี พ.ศ."
+    },
+    "boq.arcOptCancelled": {
+      "th": "ยกเลิก / Archive",
+      "en": "ยกเลิก / Archive",
+      "zh": "ยกเลิก / Archive",
+      "ar": "ยกเลิก / Archive"
+    },
+    "boq.arcToggleWithFiles": {
+      "th": "เฉพาะที่มีไฟล์แนบ",
+      "en": "เฉพาะที่มีไฟล์แนบ",
+      "zh": "เฉพาะที่มีไฟล์แนบ",
+      "ar": "เฉพาะที่มีไฟล์แนบ"
+    },
+    "boq.arcToggleWithFilesSub": {
+      "th": "กรอง BOQ ที่มีเอกสารแนบ ≥ 1 ไฟล์",
+      "en": "กรอง BOQ ที่มีเอกสารแนบ ≥ 1 ไฟล์",
+      "zh": "กรอง BOQ ที่มีเอกสารแนบ ≥ 1 ไฟล์",
+      "ar": "กรอง BOQ ที่มีเอกสารแนบ ≥ 1 ไฟล์"
+    },
+    "boq.arcApplyFilter": {
+      "th": "ใช้ตัวกรอง",
+      "en": "ใช้ตัวกรอง",
+      "zh": "ใช้ตัวกรอง",
+      "ar": "ใช้ตัวกรอง"
+    },
+    "boq.arcFilterToast": {
+      "th": "ตั้งตัวกรอง · {project} / {status} / {year}",
+      "en": "ตั้งตัวกรอง · {project} / {status} / {year}",
+      "zh": "ตั้งตัวกรอง · {project} / {status} / {year}",
+      "ar": "ตั้งตัวกรอง · {project} / {status} / {year}"
+    },
+    "boq.arcExportScopeFiltered": {
+      "th": "ตามตัวกรองปัจจุบัน ({n} รายการ)",
+      "en": "ตามตัวกรองปัจจุบัน ({n} รายการ)",
+      "zh": "ตามตัวกรองปัจจุบัน ({n} รายการ)",
+      "ar": "ตามตัวกรองปัจจุบัน ({n} รายการ)"
+    },
+    "boq.arcExportScopeAll": {
+      "th": "ทุกโครงการ / ทุกปี",
+      "en": "ทุกโครงการ / ทุกปี",
+      "zh": "ทุกโครงการ / ทุกปี",
+      "ar": "ทุกโครงการ / ทุกปี"
+    },
+    "boq.arcExportScopeYear": {
+      "th": "เฉพาะปี {year}",
+      "en": "เฉพาะปี {year}",
+      "zh": "เฉพาะปี {year}",
+      "ar": "เฉพาะปี {year}"
+    },
+    "boq.arcFmtExcel": {
+      "th": "Excel (.xlsx) — แนะนำ",
+      "en": "Excel (.xlsx) — แนะนำ",
+      "zh": "Excel (.xlsx) — แนะนำ",
+      "ar": "Excel (.xlsx) — แนะนำ"
+    },
+    "boq.arcFmtCsv": {
+      "th": "CSV (.csv)",
+      "en": "CSV (.csv)",
+      "zh": "CSV (.csv)",
+      "ar": "CSV (.csv)"
+    },
+    "boq.arcFmtPdfReport": {
+      "th": "PDF (รายงาน)",
+      "en": "PDF (รายงาน)",
+      "zh": "PDF (รายงาน)",
+      "ar": "PDF (รายงาน)"
+    },
+    "boq.arcToggleIncHist": {
+      "th": "รวมประวัติ Revise",
+      "en": "รวมประวัติ Revise",
+      "zh": "รวมประวัติ Revise",
+      "ar": "รวมประวัติ Revise"
+    },
+    "boq.arcToggleIncHistSub": {
+      "th": "แนบประวัติทุกเวอร์ชั่น (v1 → vN) ใน Workbook",
+      "en": "แนบประวัติทุกเวอร์ชั่น (v1 → vN) ใน Workbook",
+      "zh": "แนบประวัติทุกเวอร์ชั่น (v1 → vN) ใน Workbook",
+      "ar": "แนบประวัติทุกเวอร์ชั่น (v1 → vN) ใน Workbook"
+    },
+    "boq.arcExportToast": {
+      "th": "Export BOQ Archive · {format} สำเร็จ",
+      "en": "Export BOQ Archive · {format} สำเร็จ",
+      "zh": "Export BOQ Archive · {format} สำเร็จ",
+      "ar": "Export BOQ Archive · {format} สำเร็จ"
+    },
+    "boq.arcExportHistFlag": {
+      "th": "+ ประวัติ Revise",
+      "en": "+ ประวัติ Revise",
+      "zh": "+ ประวัติ Revise",
+      "ar": "+ ประวัติ Revise"
+    },
+    "boq.repFilterTitle": {
+      "th": "ตัวกรองรายงาน BOQ",
+      "en": "ตัวกรองรายงาน BOQ",
+      "zh": "ตัวกรองรายงาน BOQ",
+      "ar": "ตัวกรองรายงาน BOQ"
+    },
+    "boq.repFilterSubtitle": {
+      "th": "กำหนดเงื่อนไขก่อนสร้างรายงาน",
+      "en": "กำหนดเงื่อนไขก่อนสร้างรายงาน",
+      "zh": "กำหนดเงื่อนไขก่อนสร้างรายงาน",
+      "ar": "กำหนดเงื่อนไขก่อนสร้างรายงาน"
+    },
+    "boq.repPrintTitle": {
+      "th": "พิมพ์รายงาน BOQ",
+      "en": "พิมพ์รายงาน BOQ",
+      "zh": "พิมพ์รายงาน BOQ",
+      "ar": "พิมพ์รายงาน BOQ"
+    },
+    "boq.repPrintSubtitle": {
+      "th": "เลือกรายงาน + รูปแบบเอกสาร",
+      "en": "เลือกรายงาน + รูปแบบเอกสาร",
+      "zh": "เลือกรายงาน + รูปแบบเอกสาร",
+      "ar": "เลือกรายงาน + รูปแบบเอกสาร"
+    },
+    "boq.repExportBtn": {
+      "th": "Export Excel",
+      "en": "Export Excel",
+      "zh": "Export Excel",
+      "ar": "Export Excel"
+    },
+    "boq.repExportTitle": {
+      "th": "Export รายงาน BOQ เป็น Excel",
+      "en": "Export รายงาน BOQ เป็น Excel",
+      "zh": "Export รายงาน BOQ เป็น Excel",
+      "ar": "Export รายงาน BOQ เป็น Excel"
+    },
+    "boq.repExportSubtitle": {
+      "th": "เลือกรายงาน + ขอบเขต + รูปแบบไฟล์",
+      "en": "เลือกรายงาน + ขอบเขต + รูปแบบไฟล์",
+      "zh": "เลือกรายงาน + ขอบเขต + รูปแบบไฟล์",
+      "ar": "เลือกรายงาน + ขอบเขต + รูปแบบไฟล์"
+    },
+    "boq.repSubtitle": {
+      "th": "BOQ vs Non-BOQ Summary + ประวัติการ Revise — ใช้ตรวจสอบความถูกต้องของการประมาณราคา",
+      "en": "BOQ vs Non-BOQ Summary + ประวัติการ Revise — ใช้ตรวจสอบความถูกต้องของการประมาณราคา",
+      "zh": "BOQ vs Non-BOQ Summary + ประวัติการ Revise — ใช้ตรวจสอบความถูกต้องของการประมาณราคา",
+      "ar": "BOQ vs Non-BOQ Summary + ประวัติการ Revise — ใช้ตรวจสอบความถูกต้องของการประมาณราคา"
+    },
+    "boq.repScopeConditions": {
+      "th": "เงื่อนไขรายงาน",
+      "en": "เงื่อนไขรายงาน",
+      "zh": "เงื่อนไขรายงาน",
+      "ar": "เงื่อนไขรายงาน"
+    },
+    "boq.repScopeBlock": {
+      "th": "Block",
+      "en": "Block",
+      "zh": "Block",
+      "ar": "Block"
+    },
+    "boq.repRpt001": {
+      "th": "RPT-001",
+      "en": "RPT-001",
+      "zh": "RPT-001",
+      "ar": "RPT-001"
+    },
+    "boq.repSummaryTitle": {
+      "th": "BOQ และ Non-BOQ Summary Report",
+      "en": "BOQ และ Non-BOQ Summary Report",
+      "zh": "BOQ และ Non-BOQ Summary Report",
+      "ar": "BOQ และ Non-BOQ Summary Report"
+    },
+    "boq.repSummaryDesc": {
+      "th": "เปรียบเทียบมูลค่าที่อยู่ใน BOQ (ตามแผน) กับมูลค่าที่เกิดนอก BOQ (ใช้เกินแผน) ตามหมวดงาน",
+      "en": "เปรียบเทียบมูลค่าที่อยู่ใน BOQ (ตามแผน) กับมูลค่าที่เกิดนอก BOQ (ใช้เกินแผน) ตามหมวดงาน",
+      "zh": "เปรียบเทียบมูลค่าที่อยู่ใน BOQ (ตามแผน) กับมูลค่าที่เกิดนอก BOQ (ใช้เกินแผน) ตามหมวดงาน",
+      "ar": "เปรียบเทียบมูลค่าที่อยู่ใน BOQ (ตามแผน) กับมูลค่าที่เกิดนอก BOQ (ใช้เกินแผน) ตามหมวดงาน"
+    },
+    "boq.repIssuedAt": {
+      "th": "ออก ณ {datetime}",
+      "en": "ออก ณ {datetime}",
+      "zh": "ออก ณ {datetime}",
+      "ar": "ออก ณ {datetime}"
+    },
+    "boq.repValueByCat": {
+      "th": "มูลค่าตามหมวด (ล้านบาท)",
+      "en": "มูลค่าตามหมวด (ล้านบาท)",
+      "zh": "มูลค่าตามหมวด (ล้านบาท)",
+      "ar": "มูลค่าตามหมวด (ล้านบาท)"
+    },
+    "boq.repLegendBoqPlan": {
+      "th": "BOQ (ตามแผน)",
+      "en": "BOQ (ตามแผน)",
+      "zh": "BOQ (ตามแผน)",
+      "ar": "BOQ (ตามแผน)"
+    },
+    "boq.repLegendNonBoqOver": {
+      "th": "Non-BOQ (เกินแผน)",
+      "en": "Non-BOQ (เกินแผน)",
+      "zh": "Non-BOQ (เกินแผน)",
+      "ar": "Non-BOQ (เกินแผน)"
+    },
+    "boq.repThBoq": {
+      "th": "BOQ",
+      "en": "BOQ",
+      "zh": "BOQ",
+      "ar": "BOQ"
+    },
+    "boq.repThActualUsed": {
+      "th": "รวมใช้จริง",
+      "en": "รวมใช้จริง",
+      "zh": "รวมใช้จริง",
+      "ar": "รวมใช้จริง"
+    },
+    "boq.repThPctOver": {
+      "th": "% เกิน",
+      "en": "% เกิน",
+      "zh": "% เกิน",
+      "ar": "% เกิน"
+    },
+    "boq.repCat01": {
+      "th": "01 Site Work",
+      "en": "01 Site Work",
+      "zh": "01 Site Work",
+      "ar": "01 Site Work"
+    },
+    "boq.repCat04": {
+      "th": "04 งานระบบไฟฟ้า",
+      "en": "04 งานระบบไฟฟ้า",
+      "zh": "04 งานระบบไฟฟ้า",
+      "ar": "04 งานระบบไฟฟ้า"
+    },
+    "boq.repCat05Plumb": {
+      "th": "05 งานประปา/สุขาฯ",
+      "en": "05 งานประปา/สุขาฯ",
+      "zh": "05 งานประปา/สุขาฯ",
+      "ar": "05 งานประปา/สุขาฯ"
+    },
+    "boq.repCat06": {
+      "th": "06 งานเก็บงาน",
+      "en": "06 งานเก็บงาน",
+      "zh": "06 งานเก็บงาน",
+      "ar": "06 งานเก็บงาน"
+    },
+    "boq.repRpt002": {
+      "th": "RPT-002",
+      "en": "RPT-002",
+      "zh": "RPT-002",
+      "ar": "RPT-002"
+    },
+    "boq.repReviseTitle": {
+      "th": "BOQ Revise Report — ก่อน/หลังแก้ไข",
+      "en": "BOQ Revise Report — ก่อน/หลังแก้ไข",
+      "zh": "BOQ Revise Report — ก่อน/หลังแก้ไข",
+      "ar": "BOQ Revise Report — ก่อน/หลังแก้ไข"
+    },
+    "boq.repReviseDesc": {
+      "th": "สรุปการแก้ไข BOQ ในช่วงที่เลือก พร้อมส่วนต่างมูลค่า เพื่อตรวจสอบเหตุผลและผู้อนุมัติ",
+      "en": "สรุปการแก้ไข BOQ ในช่วงที่เลือก พร้อมส่วนต่างมูลค่า เพื่อตรวจสอบเหตุผลและผู้อนุมัติ",
+      "zh": "สรุปการแก้ไข BOQ ในช่วงที่เลือก พร้อมส่วนต่างมูลค่า เพื่อตรวจสอบเหตุผลและผู้อนุมัติ",
+      "ar": "สรุปการแก้ไข BOQ ในช่วงที่เลือก พร้อมส่วนต่างมูลค่า เพื่อตรวจสอบเหตุผลและผู้อนุมัติ"
+    },
+    "boq.repThBefore": {
+      "th": "ก่อนแก้ไข (฿)",
+      "en": "ก่อนแก้ไข (฿)",
+      "zh": "ก่อนแก้ไข (฿)",
+      "ar": "ก่อนแก้ไข (฿)"
+    },
+    "boq.repThAfter": {
+      "th": "หลังแก้ไข (฿)",
+      "en": "หลังแก้ไข (฿)",
+      "zh": "หลังแก้ไข (฿)",
+      "ar": "หลังแก้ไข (฿)"
+    },
+    "boq.repThDiff": {
+      "th": "ส่วนต่าง",
+      "en": "ส่วนต่าง",
+      "zh": "ส่วนต่าง",
+      "ar": "ส่วนต่าง"
+    },
+    "boq.repRpt003": {
+      "th": "RPT-003",
+      "en": "RPT-003",
+      "zh": "RPT-003",
+      "ar": "RPT-003"
+    },
+    "boq.repMslTitle": {
+      "th": "Material / Subcon / Labor Breakdown",
+      "en": "Material / Subcon / Labor Breakdown",
+      "zh": "Material / Subcon / Labor Breakdown",
+      "ar": "Material / Subcon / Labor Breakdown"
+    },
+    "boq.repMslDesc": {
+      "th": "สัดส่วนต้นทุนตามชนิด แยกตามหมวดงาน — ใช้วิเคราะห์โครงสร้างต้นทุน",
+      "en": "สัดส่วนต้นทุนตามชนิด แยกตามหมวดงาน — ใช้วิเคราะห์โครงสร้างต้นทุน",
+      "zh": "สัดส่วนต้นทุนตามชนิด แยกตามหมวดงาน — ใช้วิเคราะห์โครงสร้างต้นทุน",
+      "ar": "สัดส่วนต้นทุนตามชนิด แยกตามหมวดงาน — ใช้วิเคราะห์โครงสร้างต้นทุน"
+    },
+    "boq.repThSubcon": {
+      "th": "Subcon",
+      "en": "Subcon",
+      "zh": "Subcon",
+      "ar": "Subcon"
+    },
+    "boq.repRpt004": {
+      "th": "RPT-004",
+      "en": "RPT-004",
+      "zh": "RPT-004",
+      "ar": "RPT-004"
+    },
+    "boq.repVarTitle": {
+      "th": "Variance Report — Plan vs Actual",
+      "en": "Variance Report — Plan vs Actual",
+      "zh": "Variance Report — Plan vs Actual",
+      "ar": "Variance Report — Plan vs Actual"
+    },
+    "boq.repVarDesc": {
+      "th": "เปรียบเทียบงบตามแผน (BOQ) กับค่าใช้จ่ายจริงรายงวด พร้อมร้อยละเบี่ยงเบน",
+      "en": "เปรียบเทียบงบตามแผน (BOQ) กับค่าใช้จ่ายจริงรายงวด พร้อมร้อยละเบี่ยงเบน",
+      "zh": "เปรียบเทียบงบตามแผน (BOQ) กับค่าใช้จ่ายจริงรายงวด พร้อมร้อยละเบี่ยงเบน",
+      "ar": "เปรียบเทียบงบตามแผน (BOQ) กับค่าใช้จ่ายจริงรายงวด พร้อมร้อยละเบี่ยงเบน"
+    },
+    "boq.repThPlanBoq": {
+      "th": "Plan (BOQ)",
+      "en": "Plan (BOQ)",
+      "zh": "Plan (BOQ)",
+      "ar": "Plan (BOQ)"
+    },
+    "boq.repThActual": {
+      "th": "Actual",
+      "en": "Actual",
+      "zh": "Actual",
+      "ar": "Actual"
+    },
+    "boq.repThVariance": {
+      "th": "Variance",
+      "en": "Variance",
+      "zh": "Variance",
+      "ar": "Variance"
+    },
+    "boq.repThPctDev": {
+      "th": "% Dev.",
+      "en": "% Dev.",
+      "zh": "% Dev.",
+      "ar": "% Dev."
+    },
+    "boq.repStatusPending": {
+      "th": "รอดำเนิน",
+      "en": "รอดำเนิน",
+      "zh": "รอดำเนิน",
+      "ar": "รอดำเนิน"
+    },
+    "boq.repStatusDone": {
+      "th": "เสร็จ",
+      "en": "เสร็จ",
+      "zh": "เสร็จ",
+      "ar": "เสร็จ"
+    },
+    "boq.repRpt005": {
+      "th": "RPT-005",
+      "en": "RPT-005",
+      "zh": "RPT-005",
+      "ar": "RPT-005"
+    },
+    "boq.repEvmTitle": {
+      "th": "EVM — Earned Value Management",
+      "en": "EVM — Earned Value Management",
+      "zh": "EVM — Earned Value Management",
+      "ar": "EVM — Earned Value Management"
+    },
+    "boq.repEvmDesc": {
+      "th": "PV (แผน) · EV (มูลค่างานที่ทำได้) · AC (ค่าใช้จ่ายจริง) + ดัชนี SPI / CPI ตามงวดเวลา",
+      "en": "PV (แผน) · EV (มูลค่างานที่ทำได้) · AC (ค่าใช้จ่ายจริง) + ดัชนี SPI / CPI ตามงวดเวลา",
+      "zh": "PV (แผน) · EV (มูลค่างานที่ทำได้) · AC (ค่าใช้จ่ายจริง) + ดัชนี SPI / CPI ตามงวดเวลา",
+      "ar": "PV (แผน) · EV (มูลค่างานที่ทำได้) · AC (ค่าใช้จ่ายจริง) + ดัชนี SPI / CPI ตามงวดเวลา"
+    },
+    "boq.repEvmLegPv": {
+      "th": "PV (แผน)",
+      "en": "PV (แผน)",
+      "zh": "PV (แผน)",
+      "ar": "PV (แผน)"
+    },
+    "boq.repEvmLegEv": {
+      "th": "EV (ทำได้)",
+      "en": "EV (ทำได้)",
+      "zh": "EV (ทำได้)",
+      "ar": "EV (ทำได้)"
+    },
+    "boq.repEvmLegAc": {
+      "th": "AC (จ่ายจริง)",
+      "en": "AC (จ่ายจริง)",
+      "zh": "AC (จ่ายจริง)",
+      "ar": "AC (จ่ายจริง)"
+    },
+    "boq.repEvmSpi": {
+      "th": "SPI",
+      "en": "SPI",
+      "zh": "SPI",
+      "ar": "SPI"
+    },
+    "boq.repEvmCpi": {
+      "th": "CPI",
+      "en": "CPI",
+      "zh": "CPI",
+      "ar": "CPI"
+    },
+    "boq.repEvmSpiHint": {
+      "th": "Schedule Performance",
+      "en": "Schedule Performance",
+      "zh": "Schedule Performance",
+      "ar": "Schedule Performance"
+    },
+    "boq.repEvmCpiHint": {
+      "th": "Cost Performance",
+      "en": "Cost Performance",
+      "zh": "Cost Performance",
+      "ar": "Cost Performance"
+    },
+    "boq.repEvmGood": {
+      "th": "ตามแผน/ดีกว่าแผน",
+      "en": "ตามแผน/ดีกว่าแผน",
+      "zh": "ตามแผน/ดีกว่าแผน",
+      "ar": "ตามแผน/ดีกว่าแผน"
+    },
+    "boq.repEvmBad": {
+      "th": "ช้ากว่า/เกินงบ",
+      "en": "ช้ากว่า/เกินงบ",
+      "zh": "ช้ากว่า/เกินงบ",
+      "ar": "ช้ากว่า/เกินงบ"
+    },
+    "boq.repEvmFooter": {
+      "th": "ณ งวด {month} · EV {ev}M / PV {pv}M / AC {ac}M",
+      "en": "ณ งวด {month} · EV {ev}M / PV {pv}M / AC {ac}M",
+      "zh": "ณ งวด {month} · EV {ev}M / PV {pv}M / AC {ac}M",
+      "ar": "ณ งวด {month} · EV {ev}M / PV {pv}M / AC {ac}M"
+    },
+    "boq.repCat03ArchOpt": {
+      "th": "03 สถาปัตยกรรม",
+      "en": "03 สถาปัตยกรรม",
+      "zh": "03 สถาปัตยกรรม",
+      "ar": "03 สถาปัตยกรรม"
+    },
+    "boq.repCat05PlumbOpt": {
+      "th": "05 งานประปา-สุขาภิบาล",
+      "en": "05 งานประปา-สุขาภิบาล",
+      "zh": "05 งานประปา-สุขาภิบาล",
+      "ar": "05 งานประปา-สุขาภิบาล"
+    },
+    "boq.repFilterToggle": {
+      "th": "เฉพาะรายการที่ Revise",
+      "en": "เฉพาะรายการที่ Revise",
+      "zh": "เฉพาะรายการที่ Revise",
+      "ar": "เฉพาะรายการที่ Revise"
+    },
+    "boq.repFilterToggleSub": {
+      "th": "กรองเฉพาะ BOQ ที่มีประวัติแก้ไข ≥ 1 ครั้ง",
+      "en": "กรองเฉพาะ BOQ ที่มีประวัติแก้ไข ≥ 1 ครั้ง",
+      "zh": "กรองเฉพาะ BOQ ที่มีประวัติแก้ไข ≥ 1 ครั้ง",
+      "ar": "กรองเฉพาะ BOQ ที่มีประวัติแก้ไข ≥ 1 ครั้ง"
+    },
+    "boq.repFilterToast": {
+      "th": "ตั้งตัวกรอง · {project} / {phase} / {block} / {period}",
+      "en": "ตั้งตัวกรอง · {project} / {phase} / {block} / {period}",
+      "zh": "ตั้งตัวกรอง · {project} / {phase} / {block} / {period}",
+      "ar": "ตั้งตัวกรอง · {project} / {phase} / {block} / {period}"
+    },
+    "boq.repOptSummary": {
+      "th": "BOQ vs Non-BOQ Summary Report",
+      "en": "BOQ vs Non-BOQ Summary Report",
+      "zh": "BOQ vs Non-BOQ Summary Report",
+      "ar": "BOQ vs Non-BOQ Summary Report"
+    },
+    "boq.repOptRevisePrint": {
+      "th": "BOQ Revise Report (ก่อน/หลังแก้ไข)",
+      "en": "BOQ Revise Report (ก่อน/หลังแก้ไข)",
+      "zh": "BOQ Revise Report (ก่อน/หลังแก้ไข)",
+      "ar": "BOQ Revise Report (ก่อน/หลังแก้ไข)"
+    },
+    "boq.repOptBoth": {
+      "th": "ทั้ง 2 รายงาน",
+      "en": "ทั้ง 2 รายงาน",
+      "zh": "ทั้ง 2 รายงาน",
+      "ar": "ทั้ง 2 รายงาน"
+    },
+    "boq.repDocFormat": {
+      "th": "รูปแบบเอกสาร",
+      "en": "รูปแบบเอกสาร",
+      "zh": "รูปแบบเอกสาร",
+      "ar": "รูปแบบเอกสาร"
+    },
+    "boq.repFmtPdfPortrait": {
+      "th": "PDF · A4 แนวตั้ง",
+      "en": "PDF · A4 แนวตั้ง",
+      "zh": "PDF · A4 แนวตั้ง",
+      "ar": "PDF · A4 แนวตั้ง"
+    },
+    "boq.repFmtPdfLandscape": {
+      "th": "PDF · A4 แนวนอน",
+      "en": "PDF · A4 แนวนอน",
+      "zh": "PDF · A4 แนวนอน",
+      "ar": "PDF · A4 แนวนอน"
+    },
+    "boq.repFmtPrintNow": {
+      "th": "พิมพ์ออกเครื่องพิมพ์ทันที",
+      "en": "พิมพ์ออกเครื่องพิมพ์ทันที",
+      "zh": "พิมพ์ออกเครื่องพิมพ์ทันที",
+      "ar": "พิมพ์ออกเครื่องพิมพ์ทันที"
+    },
+    "boq.repCopies": {
+      "th": "จำนวนชุด",
+      "en": "จำนวนชุด",
+      "zh": "จำนวนชุด",
+      "ar": "จำนวนชุด"
+    },
+    "boq.repPrintInfo": {
+      "th": "ระบบจะสร้างไฟล์ตามตัวกรองปัจจุบัน · {n} รายงาน · {copies} ชุด",
+      "en": "ระบบจะสร้างไฟล์ตามตัวกรองปัจจุบัน · {n} รายงาน · {copies} ชุด",
+      "zh": "ระบบจะสร้างไฟล์ตามตัวกรองปัจจุบัน · {n} รายงาน · {copies} ชุด",
+      "ar": "ระบบจะสร้างไฟล์ตามตัวกรองปัจจุบัน · {n} รายงาน · {copies} ชุด"
+    },
+    "boq.repPrintToast": {
+      "th": "ส่งพิมพ์รายงาน · {format} × {copies} ชุด",
+      "en": "ส่งพิมพ์รายงาน · {format} × {copies} ชุด",
+      "zh": "ส่งพิมพ์รายงาน · {format} × {copies} ชุด",
+      "ar": "ส่งพิมพ์รายงาน · {format} × {copies} ชุด"
+    },
+    "boq.repOptReviseExport": {
+      "th": "BOQ Revise Report",
+      "en": "BOQ Revise Report",
+      "zh": "BOQ Revise Report",
+      "ar": "BOQ Revise Report"
+    },
+    "boq.repOptBothWorkbook": {
+      "th": "ทั้ง 2 รายงาน (Workbook เดียว)",
+      "en": "ทั้ง 2 รายงาน (Workbook เดียว)",
+      "zh": "ทั้ง 2 รายงาน (Workbook เดียว)",
+      "ar": "ทั้ง 2 รายงาน (Workbook เดียว)"
+    },
+    "boq.repExportScopeFiltered": {
+      "th": "ตามตัวกรองปัจจุบัน",
+      "en": "ตามตัวกรองปัจจุบัน",
+      "zh": "ตามตัวกรองปัจจุบัน",
+      "ar": "ตามตัวกรองปัจจุบัน"
+    },
+    "boq.repExportScopeAllPhase": {
+      "th": "ทุกโครงการ / ทุกเฟส",
+      "en": "ทุกโครงการ / ทุกเฟส",
+      "zh": "ทุกโครงการ / ทุกเฟส",
+      "ar": "ทุกโครงการ / ทุกเฟส"
+    },
+    "boq.repExportScopeYear": {
+      "th": "ปีงบประมาณ {year} ทั้งปี",
+      "en": "ปีงบประมาณ {year} ทั้งปี",
+      "zh": "ปีงบประมาณ {year} ทั้งปี",
+      "ar": "ปีงบประมาณ {year} ทั้งปี"
+    },
+    "boq.repFmtPdfShare": {
+      "th": "PDF (สำหรับดู/ส่งต่อ)",
+      "en": "PDF (สำหรับดู/ส่งต่อ)",
+      "zh": "PDF (สำหรับดู/ส่งต่อ)",
+      "ar": "PDF (สำหรับดู/ส่งต่อ)"
+    },
+    "boq.repExportToast": {
+      "th": "Export {reports} · {format} สำเร็จ",
+      "en": "Export {reports} · {format} สำเร็จ",
+      "zh": "Export {reports} · {format} สำเร็จ",
+      "ar": "Export {reports} · {format} สำเร็จ"
+    },
+    "boq.repReportsCount": {
+      "th": "{n} รายงาน",
+      "en": "{n} รายงาน",
+      "zh": "{n} รายงาน",
+      "ar": "{n} รายงาน"
+    },
+    "boq.aiqAccExact": {
+      "th": "แม่นสุด",
+      "en": "แม่นสุด",
+      "zh": "แม่นสุด",
+      "ar": "แม่นสุด"
+    },
+    "boq.aiqAccMedium": {
+      "th": "ปานกลาง",
+      "en": "ปานกลาง",
+      "zh": "ปานกลาง",
+      "ar": "ปานกลาง"
+    },
+    "boq.aiqAccCheck": {
+      "th": "ต้องตรวจ",
+      "en": "ต้องตรวจ",
+      "zh": "ต้องตรวจ",
+      "ar": "ต้องตรวจ"
+    },
+    "boq.aiqNoteIfc": {
+      "th": "ถอดปริมาณตรงจากโมเดล BIM",
+      "en": "ถอดปริมาณตรงจากโมเดล BIM",
+      "zh": "ถอดปริมาณตรงจากโมเดล BIM",
+      "ar": "ถอดปริมาณตรงจากโมเดล BIM"
+    },
+    "boq.aiqNoteRvt": {
+      "th": "Revit native · ถอดจาก parametric model",
+      "en": "Revit native · ถอดจาก parametric model",
+      "zh": "Revit native · ถอดจาก parametric model",
+      "ar": "Revit native · ถอดจาก parametric model"
+    },
+    "boq.aiqNoteDwg": {
+      "th": "AI ตีความเส้น 2D · ควรตรวจ",
+      "en": "AI ตีความเส้น 2D · ควรตรวจ",
+      "zh": "AI ตีความเส้น 2D · ควรตรวจ",
+      "ar": "AI ตีความเส้น 2D · ควรตรวจ"
+    },
+    "boq.aiqNotePdf": {
+      "th": "AI OCR + ตีความแบบแปลน · ตรวจละเอียด",
+      "en": "AI OCR + ตีความแบบแปลน · ตรวจละเอียด",
+      "zh": "AI OCR + ตีความแบบแปลน · ตรวจละเอียด",
+      "ar": "AI OCR + ตีความแบบแปลน · ตรวจละเอียด"
+    },
+    "boq.aiqProcRead": {
+      "th": "อ่าน / parse โมเดล",
+      "en": "อ่าน / parse โมเดล",
+      "zh": "อ่าน / parse โมเดล",
+      "ar": "อ่าน / parse โมเดล"
+    },
+    "boq.aiqProcDetect": {
+      "th": "ตรวจจับ element (Wall/Column/Beam/Slab…)",
+      "en": "ตรวจจับ element (Wall/Column/Beam/Slab…)",
+      "zh": "ตรวจจับ element (Wall/Column/Beam/Slab…)",
+      "ar": "ตรวจจับ element (Wall/Column/Beam/Slab…)"
+    },
+    "boq.aiqProcClassify": {
+      "th": "จำแนกประเภทงาน",
+      "en": "จำแนกประเภทงาน",
+      "zh": "จำแนกประเภทงาน",
+      "ar": "จำแนกประเภทงาน"
+    },
+    "boq.aiqProcMatch": {
+      "th": "จับคู่รายการ BOQ มาตรฐาน",
+      "en": "จับคู่รายการ BOQ มาตรฐาน",
+      "zh": "จับคู่รายการ BOQ มาตรฐาน",
+      "ar": "จับคู่รายการ BOQ มาตรฐาน"
+    },
+    "boq.aiqProcCompute": {
+      "th": "คำนวณปริมาณ + ประเมินราคา",
+      "en": "คำนวณปริมาณ + ประเมินราคา",
+      "zh": "คำนวณปริมาณ + ประเมินราคา",
+      "ar": "คำนวณปริมาณ + ประเมินราคา"
+    },
+    "boq.aiqTitle": {
+      "th": "นำเข้า CAD/BIM · AI ถอด BOQ",
+      "en": "นำเข้า CAD/BIM · AI ถอด BOQ",
+      "zh": "นำเข้า CAD/BIM · AI ถอด BOQ",
+      "ar": "นำเข้า CAD/BIM · AI ถอด BOQ"
+    },
+    "boq.aiqDemoBadge": {
+      "th": "DEMO / Preview",
+      "en": "DEMO / Preview",
+      "zh": "DEMO / Preview",
+      "ar": "DEMO / Preview"
+    },
+    "boq.aiqSubtitle": {
+      "th": "ถอดปริมาณงานอัตโนมัติจากโมเดล BIM/CAD ด้วย AI แล้วป้อนเข้าโมดูล BOQ — จำลองผลลัพธ์ (parse จริงต้องมี backend)",
+      "en": "ถอดปริมาณงานอัตโนมัติจากโมเดล BIM/CAD ด้วย AI แล้วป้อนเข้าโมดูล BOQ — จำลองผลลัพธ์ (parse จริงต้องมี backend)",
+      "zh": "ถอดปริมาณงานอัตโนมัติจากโมเดล BIM/CAD ด้วย AI แล้วป้อนเข้าโมดูล BOQ — จำลองผลลัพธ์ (parse จริงต้องมี backend)",
+      "ar": "ถอดปริมาณงานอัตโนมัติจากโมเดล BIM/CAD ด้วย AI แล้วป้อนเข้าโมดูล BOQ — จำลองผลลัพธ์ (parse จริงต้องมี backend)"
+    },
+    "boq.aiqStepUpload": {
+      "th": "อัปโหลดไฟล์",
+      "en": "อัปโหลดไฟล์",
+      "zh": "อัปโหลดไฟล์",
+      "ar": "อัปโหลดไฟล์"
+    },
+    "boq.aiqStepProcessing": {
+      "th": "AI กำลังถอดปริมาณ",
+      "en": "AI กำลังถอดปริมาณ",
+      "zh": "AI กำลังถอดปริมาณ",
+      "ar": "AI กำลังถอดปริมาณ"
+    },
+    "boq.aiqStepReview": {
+      "th": "ตรวจ & แก้การจับคู่",
+      "en": "ตรวจ & แก้การจับคู่",
+      "zh": "ตรวจ & แก้การจับคู่",
+      "ar": "ตรวจ & แก้การจับคู่"
+    },
+    "boq.aiqStepSummary": {
+      "th": "สรุป & สร้าง BOQ",
+      "en": "สรุป & สร้าง BOQ",
+      "zh": "สรุป & สร้าง BOQ",
+      "ar": "สรุป & สร้าง BOQ"
+    },
+    "boq.aiqDropzone": {
+      "th": "ลากไฟล์ CAD/BIM มาวาง หรือคลิกเพื่อเลือก",
+      "en": "ลากไฟล์ CAD/BIM มาวาง หรือคลิกเพื่อเลือก",
+      "zh": "ลากไฟล์ CAD/BIM มาวาง หรือคลิกเพื่อเลือก",
+      "ar": "ลากไฟล์ CAD/BIM มาวาง หรือคลิกเพื่อเลือก"
+    },
+    "boq.aiqSupportFormats": {
+      "th": "รองรับ IFC · RVT (Revit) · DWG · DXF · PDF",
+      "en": "รองรับ IFC · RVT (Revit) · DWG · DXF · PDF",
+      "zh": "รองรับ IFC · RVT (Revit) · DWG · DXF · PDF",
+      "ar": "รองรับ IFC · RVT (Revit) · DWG · DXF · PDF"
+    },
+    "boq.aiqSampleIfc": {
+      "th": "ไฟล์ตัวอย่าง IFC",
+      "en": "ไฟล์ตัวอย่าง IFC",
+      "zh": "ไฟล์ตัวอย่าง IFC",
+      "ar": "ไฟล์ตัวอย่าง IFC"
+    },
+    "boq.aiqSampleDwg": {
+      "th": "ไฟล์ตัวอย่าง DWG",
+      "en": "ไฟล์ตัวอย่าง DWG",
+      "zh": "ไฟล์ตัวอย่าง DWG",
+      "ar": "ไฟล์ตัวอย่าง DWG"
+    },
+    "boq.aiqLodLabel": {
+      "th": "ระดับความละเอียดโมเดล (LOD)",
+      "en": "ระดับความละเอียดโมเดล (LOD)",
+      "zh": "ระดับความละเอียดโมเดล (LOD)",
+      "ar": "ระดับความละเอียดโมเดล (LOD)"
+    },
+    "boq.aiqLod100": {
+      "th": "LOD 100 (แนวคิด)",
+      "en": "LOD 100 (แนวคิด)",
+      "zh": "LOD 100 (แนวคิด)",
+      "ar": "LOD 100 (แนวคิด)"
+    },
+    "boq.aiqLod200": {
+      "th": "LOD 200 (ประมาณ)",
+      "en": "LOD 200 (ประมาณ)",
+      "zh": "LOD 200 (ประมาณ)",
+      "ar": "LOD 200 (ประมาณ)"
+    },
+    "boq.aiqLod400": {
+      "th": "LOD 400 (ผลิต)",
+      "en": "LOD 400 (ผลิต)",
+      "zh": "LOD 400 (ผลิต)",
+      "ar": "LOD 400 (ผลิต)"
+    },
+    "boq.aiqAccuracyByType": {
+      "th": "ระดับความแม่นยำต่อชนิดไฟล์",
+      "en": "ระดับความแม่นยำต่อชนิดไฟล์",
+      "zh": "ระดับความแม่นยำต่อชนิดไฟล์",
+      "ar": "ระดับความแม่นยำต่อชนิดไฟล์"
+    },
+    "boq.aiqInfoAccuracy": {
+      "th": "IFC/Revit ถอดปริมาณตรงจากโมเดล (แม่นสุด) · DWG/PDF 2D ใช้ AI ตีความ ควรตรวจทาน",
+      "en": "IFC/Revit ถอดปริมาณตรงจากโมเดล (แม่นสุด) · DWG/PDF 2D ใช้ AI ตีความ ควรตรวจทาน",
+      "zh": "IFC/Revit ถอดปริมาณตรงจากโมเดล (แม่นสุด) · DWG/PDF 2D ใช้ AI ตีความ ควรตรวจทาน",
+      "ar": "IFC/Revit ถอดปริมาณตรงจากโมเดล (แม่นสุด) · DWG/PDF 2D ใช้ AI ตีความ ควรตรวจทาน"
+    },
+    "boq.aiqStartExtract": {
+      "th": "เริ่มถอดปริมาณด้วย AI",
+      "en": "เริ่มถอดปริมาณด้วย AI",
+      "zh": "เริ่มถอดปริมาณด้วย AI",
+      "ar": "เริ่มถอดปริมาณด้วย AI"
+    },
+    "boq.aiqProcessingTitle": {
+      "th": "AI กำลังถอดปริมาณ...",
+      "en": "AI กำลังถอดปริมาณ...",
+      "zh": "AI กำลังถอดปริมาณ...",
+      "ar": "AI กำลังถอดปริมาณ..."
+    },
+    "boq.aiqProcActive": {
+      "th": "กำลังทำ…",
+      "en": "กำลังทำ…",
+      "zh": "กำลังทำ…",
+      "ar": "กำลังทำ…"
+    },
+    "boq.aiqElementsFound": {
+      "th": "Element ที่ตรวจพบ",
+      "en": "Element ที่ตรวจพบ",
+      "zh": "Element ที่ตรวจพบ",
+      "ar": "Element ที่ตรวจพบ"
+    },
+    "boq.aiqElemPieces": {
+      "th": "{n} ชิ้น",
+      "en": "{n} ชิ้น",
+      "zh": "{n} ชิ้น",
+      "ar": "{n} ชิ้น"
+    },
+    "boq.aiqReviewTitle": {
+      "th": "ตรวจ & แก้การจับคู่รายการ BOQ",
+      "en": "ตรวจ & แก้การจับคู่รายการ BOQ",
+      "zh": "ตรวจ & แก้การจับคู่รายการ BOQ",
+      "ar": "ตรวจ & แก้การจับคู่รายการ BOQ"
+    },
+    "boq.aiqLowConfBadge": {
+      "th": "⚠ {n} รายการ confidence ต่ำ ควรตรวจ",
+      "en": "⚠ {n} รายการ confidence ต่ำ ควรตรวจ",
+      "zh": "⚠ {n} รายการ confidence ต่ำ ควรตรวจ",
+      "ar": "⚠ {n} รายการ confidence ต่ำ ควรตรวจ"
+    },
+    "boq.aiqSuggestSpec": {
+      "th": "AI แนะนำ spec",
+      "en": "AI แนะนำ spec",
+      "zh": "AI แนะนำ spec",
+      "ar": "AI แนะนำ spec"
+    },
+    "boq.aiqSuggestSpecToast": {
+      "th": "AI แนะนำ spec วัสดุตามมาตรฐาน มยผ. แล้ว",
+      "en": "AI แนะนำ spec วัสดุตามมาตรฐาน มยผ. แล้ว",
+      "zh": "AI แนะนำ spec วัสดุตามมาตรฐาน มยผ. แล้ว",
+      "ar": "AI แนะนำ spec วัสดุตามมาตรฐาน มยผ. แล้ว"
+    },
+    "boq.aiqCheckDup": {
+      "th": "ตรวจซ้ำ/ขาด",
+      "en": "ตรวจซ้ำ/ขาด",
+      "zh": "ตรวจซ้ำ/ขาด",
+      "ar": "ตรวจซ้ำ/ขาด"
+    },
+    "boq.aiqCheckDupToast": {
+      "th": "AI ตรวจรายการซ้ำ/ขาด: ไม่พบรายการซ้ำ · แนะนำเพิ่มงานฉาบปูน",
+      "en": "AI ตรวจรายการซ้ำ/ขาด: ไม่พบรายการซ้ำ · แนะนำเพิ่มงานฉาบปูน",
+      "zh": "AI ตรวจรายการซ้ำ/ขาด: ไม่พบรายการซ้ำ · แนะนำเพิ่มงานฉาบปูน",
+      "ar": "AI ตรวจรายการซ้ำ/ขาด: ไม่พบรายการซ้ำ · แนะนำเพิ่มงานฉาบปูน"
+    },
+    "boq.aiqThElement": {
+      "th": "Element (AI ถอด)",
+      "en": "Element (AI ถอด)",
+      "zh": "Element (AI ถอด)",
+      "ar": "Element (AI ถอด)"
+    },
+    "boq.aiqThQty": {
+      "th": "ปริมาณ",
+      "en": "ปริมาณ",
+      "zh": "ปริมาณ",
+      "ar": "ปริมาณ"
+    },
+    "boq.aiqThAi": {
+      "th": "AI",
+      "en": "AI",
+      "zh": "AI",
+      "ar": "AI"
+    },
+    "boq.aiqManualElem": {
+      "th": "เพิ่มเอง (manual)",
+      "en": "เพิ่มเอง (manual)",
+      "zh": "เพิ่มเอง (manual)",
+      "ar": "เพิ่มเอง (manual)"
+    },
+    "boq.aiqManualName": {
+      "th": "รายการใหม่",
+      "en": "รายการใหม่",
+      "zh": "รายการใหม่",
+      "ar": "รายการใหม่"
+    },
+    "boq.aiqAddRow": {
+      "th": "เพิ่มรายการเอง",
+      "en": "เพิ่มรายการเอง",
+      "zh": "เพิ่มรายการเอง",
+      "ar": "เพิ่มรายการเอง"
+    },
+    "boq.aiqViewerHeader": {
+      "th": "โมเดล CAD/BIM (preview)",
+      "en": "โมเดล CAD/BIM (preview)",
+      "zh": "โมเดล CAD/BIM (preview)",
+      "ar": "โมเดล CAD/BIM (preview)"
+    },
+    "boq.aiqRestart": {
+      "th": "เริ่มใหม่",
+      "en": "เริ่มใหม่",
+      "zh": "เริ่มใหม่",
+      "ar": "เริ่มใหม่"
+    },
+    "boq.aiqConfirmMatch": {
+      "th": "ยืนยันการจับคู่ · ไปสรุป",
+      "en": "ยืนยันการจับคู่ · ไปสรุป",
+      "zh": "ยืนยันการจับคู่ · ไปสรุป",
+      "ar": "ยืนยันการจับคู่ · ไปสรุป"
+    },
+    "boq.aiqKpiExtracted": {
+      "th": "รายการที่ถอดได้",
+      "en": "รายการที่ถอดได้",
+      "zh": "รายการที่ถอดได้",
+      "ar": "รายการที่ถอดได้"
+    },
+    "boq.aiqKpiValue": {
+      "th": "มูลค่าประเมินรวม",
+      "en": "มูลค่าประเมินรวม",
+      "zh": "มูลค่าประเมินรวม",
+      "ar": "มูลค่าประเมินรวม"
+    },
+    "boq.aiqKpiConf": {
+      "th": "ความเชื่อมั่นเฉลี่ย",
+      "en": "ความเชื่อมั่นเฉลี่ย",
+      "zh": "ความเชื่อมั่นเฉลี่ย",
+      "ar": "ความเชื่อมั่นเฉลี่ย"
+    },
+    "boq.aiqKpiNeedCheck": {
+      "th": "ต้องตรวจ (conf<80%)",
+      "en": "ต้องตรวจ (conf<80%)",
+      "zh": "ต้องตรวจ (conf<80%)",
+      "ar": "ต้องตรวจ (conf<80%)"
+    },
+    "boq.aiqCreateToast": {
+      "th": "สร้าง {no} จากผลถอด AI แล้ว · เพิ่ม {n} รายการ (ผูก element id เพื่อ traceability)",
+      "en": "สร้าง {no} จากผลถอด AI แล้ว · เพิ่ม {n} รายการ (ผูก element id เพื่อ traceability)",
+      "zh": "สร้าง {no} จากผลถอด AI แล้ว · เพิ่ม {n} รายการ (ผูก element id เพื่อ traceability)",
+      "ar": "สร้าง {no} จากผลถอด AI แล้ว · เพิ่ม {n} รายการ (ผูก element id เพื่อ traceability)"
+    },
+    "boq.aiqModelCostShare": {
+      "th": "โมเดล + สัดส่วนต้นทุน",
+      "en": "โมเดล + สัดส่วนต้นทุน",
+      "zh": "โมเดล + สัดส่วนต้นทุน",
+      "ar": "โมเดล + สัดส่วนต้นทุน"
+    },
+    "boq.aiqGroupWork": {
+      "th": "จัดกลุ่มงาน (3 ระดับ)",
+      "en": "จัดกลุ่มงาน (3 ระดับ)",
+      "zh": "จัดกลุ่มงาน (3 ระดับ)",
+      "ar": "จัดกลุ่มงาน (3 ระดับ)"
+    },
+    "boq.aiqGroup02": {
+      "th": "02 งานโครงสร้าง (Structural)",
+      "en": "02 งานโครงสร้าง (Structural)",
+      "zh": "02 งานโครงสร้าง (Structural)",
+      "ar": "02 งานโครงสร้าง (Structural)"
+    },
+    "boq.aiqGroup0304": {
+      "th": "03-04 งานสถาปัตยกรรม (Architectural)",
+      "en": "03-04 งานสถาปัตยกรรม (Architectural)",
+      "zh": "03-04 งานสถาปัตยกรรม (Architectural)",
+      "ar": "03-04 งานสถาปัตยกรรม (Architectural)"
+    },
+    "boq.aiqGroup05": {
+      "th": "05 งานระบบ (MEP)",
+      "en": "05 งานระบบ (MEP)",
+      "zh": "05 งานระบบ (MEP)",
+      "ar": "05 งานระบบ (MEP)"
+    },
+    "boq.aiqCreateBoq": {
+      "th": "สร้าง BOQ จากผลถอด ({n} รายการ)",
+      "en": "สร้าง BOQ จากผลถอด ({n} รายการ)",
+      "zh": "สร้าง BOQ จากผลถอด ({n} รายการ)",
+      "ar": "สร้าง BOQ จากผลถอด ({n} รายการ)"
     }
   },
   "nav_i18n": {
