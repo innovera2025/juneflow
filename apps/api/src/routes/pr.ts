@@ -190,8 +190,13 @@ function sumLines(
   return { amount, currency };
 }
 
-/** The lowest role.approvalLevel that may give the PR's terminal approval. */
-function requiredApprovalLevel(amount: number): number {
+/**
+ * The lowest role.approvalLevel that may give the PR's terminal approval.
+ * Exported so the dashboard approvals-inbox (dashboard.ts, P2-BE-07) filters PRs
+ * by the SAME tier authority the approve handler enforces — a single source of
+ * truth for the PR thresholds, so the inbox and the approve gate can never drift.
+ */
+export function requiredApprovalLevel(amount: number): number {
   if (amount > PR_TIER_MD_THRESHOLD) return APPROVAL_LEVEL_MD;
   if (amount > PR_TIER_PM_THRESHOLD) return APPROVAL_LEVEL_PM;
   return APPROVAL_LEVEL_PROC;
