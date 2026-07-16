@@ -1,0 +1,21 @@
+{
+  "_source": "Verbatim strings for pototype/boq.jsx BOQEditor (L362-848) + BOQEditorRow (L857-919) + BOQItemForm (L922-1035) + boq-extra.jsx BudgetControlBar (L201-258) that do NOT have a dedicated boq.ed* DICT key. Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx/.ts source — same pattern as boq-overview-strings.json / boq-strings.json. Each value is a REAL i18n key: navBoqEditor / navBoqList are nav_i18n labels (tn); every other value is a phrases-bucket key (tp) where the Thai phrase IS the key, verified present in docs/extract/i18n-full.json (phrases). The boq.ed* DICT keys cover the titles/labels/toasts/templates and are used via t(). No string here is invented (§0 rule 2).",
+  "navBoqEditor": "BOQ Editor",
+  "navBoqList": "BOQ List",
+  "auditHistory": "ประวัติการแก้ไข",
+  "addItem": "เพิ่มรายการ",
+  "thCode": "รหัส",
+  "thType": "ประเภท",
+  "thDetail": "รายละเอียด",
+  "startExcel": "นำเข้าจาก Excel",
+  "duplicate": "ทำซ้ำ",
+  "deleteItem": "ลบรายการ",
+  "statusApproved": "อนุมัติแล้ว",
+  "statusDraft": "ร่าง",
+  "cbsRemain": "คงเหลือ",
+  "cbsOver": "เกินงบ",
+  "cbsRemainUsable": "คงเหลือใช้ได้",
+  "catWordMaterial": "วัสดุ",
+  "catWordLabor": "ค่าแรง",
+  "fldUnit": "หน่วย"
+}
