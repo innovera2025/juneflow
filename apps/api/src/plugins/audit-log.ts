@@ -57,8 +57,14 @@ export type AuditSink = (record: AuditRecord) => Promise<void> | void;
 export interface AuditLogOptions {
   /** Where records are persisted (default in prod: createDbAuditSink). */
   sink: AuditSink;
-  /** Resolve the acting user id from the request (null when unknown). */
-  resolveUserId?: (request: FastifyRequest) => string | null;
+  /**
+   * Resolve the acting user id from the request (null when unknown). May be
+   * async: the production wiring (app.ts) resolves the DICTIONARY user id from
+   * the session — audit_log.user_id is FK-bound to the dictionary `user` table
+   * (packages/db misc.ts), so the better-auth auth_user id must NOT be stored
+   * here (it would violate the FK). null falls through to a null actor.
+   */
+  resolveUserId?: (request: FastifyRequest) => string | null | Promise<string | null>;
 }
 
 /**
@@ -98,7 +104,7 @@ export async function registerAuditLog(
       const routePath = request.routeOptions?.url ?? request.url;
       const record: AuditRecord = {
         companyId,
-        userId: resolveUserId(request),
+        userId: await resolveUserId(request),
         action: resolveAction(request.method, routePath),
         entity: routePath.split("?", 1)[0]!,
         after: request.body ?? undefined,

@@ -33,6 +33,12 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { roles, users, type RolePerms } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import {
+  grantsBeyond,
+  loadCaller,
+  MANAGEMENT_MODULE,
+  permAllowed,
+} from "./authz.js";
 
 /**
  * The 11 permission modules in matrix order (master.jsx MODULES_LBL:908 /
@@ -204,6 +210,17 @@ export function registerRolesRoute(app: FastifyInstance): void {
       });
     }
 
+    // F1: creating a role is master-data administration — require the caller's
+    // role to carry the master.create permission (fail-closed for any caller
+    // whose perms cannot be resolved).
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, MANAGEMENT_MODULE, "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `requires ${MANAGEMENT_MODULE}.create permission`,
+      });
+    }
+
     const parsed = parseRoleBody((request.body ?? {}) as Record<string, unknown>);
     if ("error" in parsed) {
       return reply.code(400).send({ code: "VALIDATION", message: parsed.error });
@@ -232,9 +249,38 @@ export function registerRolesRoute(app: FastifyInstance): void {
     }
 
     const { id } = request.params as { id: string };
+
+    // F1: editing a role is master-data administration — require master.edit.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, MANAGEMENT_MODULE, "edit")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `requires ${MANAGEMENT_MODULE}.edit permission`,
+      });
+    }
+
     const parsed = parseRoleBody((request.body ?? {}) as Record<string, unknown>);
     if ("error" in parsed) {
       return reply.code(400).send({ code: "VALIDATION", message: parsed.error });
+    }
+
+    // F1 (self-elevation): a caller editing its OWN role must not be able to
+    // raise its effective authority — neither its approval tier nor a perm it
+    // does not already hold. This blocks the escalation chain even for a caller
+    // that legitimately holds master.edit but a lower approval_level.
+    if (caller && caller.roleId === id) {
+      if (parsed.approvalLevel > caller.approvalLevel) {
+        return reply.code(403).send({
+          code: "FORBIDDEN",
+          message: "cannot raise your own role's approval_level",
+        });
+      }
+      if (grantsBeyond(caller.perms, parsed.perms)) {
+        return reply.code(403).send({
+          code: "FORBIDDEN",
+          message: "cannot grant your own role permissions you do not hold",
+        });
+      }
     }
 
     // Scoped update — company_id is AND-ed into the WHERE, so a foreign tenant's
