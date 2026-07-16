@@ -335,6 +335,65 @@ describe("insertThrough is the fail-closed WRITE door for parent-FK child tables
   });
 });
 
+describe("updateThrough is the fail-closed UPDATE door for parent-FK child tables (P2-BE-02)", () => {
+  const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+  // ownership SELECT returns `ownedRows`; the UPDATE captures its set + WHERE.
+  function fakeDb(
+    ownedRows: unknown[],
+    sink: { ownWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> },
+  ): Db {
+    return {
+      select: () => ({
+        from: () => ({
+          where: (where: SQL) => {
+            sink.ownWhere = where;
+            return Promise.resolve(ownedRows);
+          },
+        }),
+      }),
+      update: () => ({
+        set: (set: Record<string, unknown>) => ({
+          where: (where: SQL) => ({
+            returning: () => {
+              sink.set = set;
+              sink.setWhere = where;
+              return Promise.resolve([{ id: "d0", ...set }]);
+            },
+          }),
+        }),
+      }),
+    } as unknown as Db;
+  }
+
+  it("throws (updates NOTHING) when the parent is not owned by this tenant", async () => {
+    const sink: { ownWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+    await expect(
+      t.updateThrough(boqDocs, projects, boqDocs.projectId, PROJECT, { status: "approved" }, eq(boqDocs.id, "d0")),
+    ).rejects.toThrow(/TENANT_SCOPE_PARENT_DENIED/);
+    expect(sink.set).toBeUndefined();
+    // ownership check is scoped by company_id AND the parent id.
+    const params = new PgDialect().sqlToQuery(sink.ownWhere!).params;
+    expect(params).toContain(COMPANY);
+    expect(params).toContain(PROJECT);
+  });
+
+  it("updates the row (scoped by the verified parent FK) once the parent is proven owned", async () => {
+    const sink: { ownWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([{ id: PROJECT }], sink), COMPANY);
+    const rows = await t.updateThrough(
+      boqDocs, projects, boqDocs.projectId, PROJECT, { status: "approved" }, eq(boqDocs.id, "d0"),
+    );
+    expect(rows).toHaveLength(1);
+    expect(sink.set).toEqual({ status: "approved" });
+    // the write is additionally scoped BY the verified parent id (project_id),
+    // so a row whose parent FK points elsewhere is never touched.
+    const params = new PgDialect().sqlToQuery(sink.setWhere!).params;
+    expect(params).toContain(PROJECT);
+  });
+});
+
 describe("delete is always company_id-scoped", () => {
   it("scopes the WHERE by company_id", () => {
     const { sql, params } = tdb.delete(users).toSQL();

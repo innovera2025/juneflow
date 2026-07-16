@@ -228,6 +228,58 @@ export class TenantDb {
   }
 
   /**
+   * UPDATE door for a parent-FK-scoped child table (boq_doc, ...) that carries
+   * no companyId column of its own — the update counterpart to insertThrough()
+   * (P2-BE-02). Fail-closed BY CONSTRUCTION: it FIRST verifies this tenant owns
+   * the company_id-scoped parent row (parent.id = parentId AND
+   * parent.company_id = <tenant>) and throws TenantScopeError otherwise, so a
+   * child can never be mutated under another tenant's parent. Only then does it
+   * UPDATE ... RETURNING, scoping the write BY parentFk = parentId as well, so a
+   * row whose parent FK points elsewhere is never touched even if `where` alone
+   * would match it.
+   *
+   * Callers pass the child's FK column (`parentFk`, e.g. boqDocs.projectId), the
+   * verified `parentId` (the parent row this tenant owns — resolve it first via a
+   * scoped selectThrough), and a `where` narrowing to the specific child row
+   * (e.g. eq(boqDocs.id, docId)). The state machine (boq submit/approve/revise)
+   * is the first caller.
+   */
+  async updateThrough<T extends PgTable>(
+    table: T,
+    parent: TenantTable,
+    parentFk: PgColumn,
+    parentId: string,
+    set: Partial<T["$inferInsert"]>,
+    where: SQL,
+  ): Promise<T["$inferSelect"][]> {
+    const parentPk = (parent as PgTable & { id?: PgColumn }).id;
+    if (!parentPk) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_HOP_INVALID: updateThrough() parent must expose an id " +
+          "primary-key column to anchor the tenant scope on",
+      );
+    }
+    const owned = await this.#db
+      .select({ id: parentPk })
+      .from(parent)
+      .where(
+        and(eq(parentPk, parentId), eq(parent.companyId, this.companyId)) as SQL,
+      );
+    if (owned.length === 0) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_PARENT_DENIED: updateThrough() parent row is not owned " +
+          "by this tenant — a child cannot be mutated under a foreign parent",
+      );
+    }
+    const updated = await this.#db
+      .update(table)
+      .set(set as PgUpdateSetSource<T>)
+      .where(and(where, eq(parentFk, parentId)) as SQL)
+      .returning();
+    return updated as T["$inferSelect"][];
+  }
+
+  /**
    * Read a platform-global REFERENCE table (no `companyId` column exists, so no
    * tenant predicate is possible — exactly: package, company). Read-only, and
    * gated TWICE: the ReferenceTable type blocks companyId-column tables at
