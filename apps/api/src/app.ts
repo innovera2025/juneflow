@@ -43,6 +43,7 @@ import { registerRolesRoute } from "./routes/roles.js";
 import { registerOrgUnitsRoute } from "./routes/org-units.js";
 import { registerProjectNodesRoute } from "./routes/project-nodes.js";
 import { registerBoqRoute } from "./routes/boq.js";
+import { registerPrRoute } from "./routes/pr.js";
 import { registerDashboardRoute } from "./routes/dashboard.js";
 import type { SignIn } from "./auth.js";
 
@@ -138,6 +139,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerOrgUnitsRoute(v1);
       registerProjectNodesRoute(v1);
       registerBoqRoute(v1);
+      registerPrRoute(v1);
       registerDashboardRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
