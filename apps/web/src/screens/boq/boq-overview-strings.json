@@ -1,0 +1,19 @@
+{
+  "_source": "Verbatim strings for pototype/boq.jsx BOQOverview (L52-311) that do NOT have a dedicated boq.ov* DICT key. Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx/.ts source — same pattern as boq-strings.json. Each value is a REAL i18n key: navBoqOverview / navBoqList are nav_i18n labels (tn); every other value is a phrases key (tp) verified present in docs/extract/i18n-full.json (phrases bucket, where the Thai phrase IS the key). The boq.ov* DICT keys cover the labels/headers/titles/info templates and are used via t(). Strings with NO key anywhere (KPI subs/deltas, flow-row subs, the 'Material + Subcon' / 'ที่มี Balance' filter values, the 'แสดง 1-10 จาก N' count line, the mock updated-time) are mock decoration with no wire source and are dropped, never invented (§0 rule 2 + rule 3).",
+  "navBoqOverview": "BOQ Overview",
+  "navBoqList": "BOQ List",
+  "newBoq": "สร้าง BOQ ใหม่",
+  "hintProject": "โครงการ",
+  "hintPhase": "เฟส",
+  "hintBlock": "บล็อก",
+  "hintUnitModel": "ยูนิต/Model",
+  "all": "ทั้งหมด",
+  "millionBaht": "ล้านบาท",
+  "approved": "อนุมัติแล้ว",
+  "unitItems": "รายการ",
+  "catFilter": "หมวด",
+  "typeFilter": "ประเภท",
+  "statusFilter": "สถานะ",
+  "thCode": "รหัส",
+  "thUnit": "หน่วย"
+}
