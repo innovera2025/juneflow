@@ -127,6 +127,48 @@
       "when": 1784196246808,
       "tag": "0017_vendor_extend",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784217475414,
+      "tag": "0018_gr_item",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784217520662,
+      "tag": "0019_ap_billing_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784217552157,
+      "tag": "0020_wo_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784217586532,
+      "tag": "0021_boq_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784217610263,
+      "tag": "0022_pr_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784217628943,
+      "tag": "0023_boq_item_detail",
+      "breakpoints": true
     }
   ]
 }
