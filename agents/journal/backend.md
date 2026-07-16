@@ -500,3 +500,8 @@
 - state machine draft/pending/approved(lock)/revise(v+1) · approval flows.html 3-tier no-threshold (approve=MD level 4 lock)
 - NEW TenantDb.updateThrough door (parent-FK child mutation, fail-closed like insertThrough) — security-core, gate-4.5 scrutiny
 - gaps flagged (no invent): boq_doc no approval_step (terminal MD lock only) · GET /boq/{id} added to contract by orch-A · action 403/409 undocumented
+
+## 2026-07-16 · orch-A subagent · P2-BE-05 (B-070 po/wo · migration 0015)
+- CORRECTION: B-070 'no migration' wrong for po/wo — schema lacked status/approval_step/no/retention_pct; orch-A authorized additive 0015 (precedent 0012-0014)
+- tiered approval PO/WO 1M/5M (differs from PR); variation-order; retention=value×pct; PO/WO tenant-anchored via pr_id (POST requires approved PR of tenant)
+- live-PG not run (no stack) — flag for batch-6 audit
