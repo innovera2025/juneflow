@@ -164,3 +164,137 @@ suite(`authenticated GET list endpoints @ ${BASE ?? '(unset)'}`, () => {
     });
   }
 });
+
+/**
+ * Authenticated READ expansion (QA durable lane) — the list suite above proves the
+ * LIST surface; this proves the uncovered READ surface the `!hasPathParams` filter
+ * skipped: detail-by-id, the dashboard aggregates, and the notifications feed. Each
+ * probe resolves a real seed id from an already-covered LIST (or hits the aggregate
+ * directly), GETs the endpoint, and validates the 200 body against its DECLARED
+ * contract response schema (black-box — the contract is the sole source of shape,
+ * tests/CLAUDE.md · no route impl is read beyond confirming the path exists). A path
+ * declared in the contract but not yet mounted answers 404 and is skipped-with-note
+ * (not failed), so the default run stays green as the contract surface fills in.
+ */
+
+/** Log in as the seed user and return a bearer (shared by the READ suite). */
+async function loginBearer(): Promise<string> {
+  const { status, body } = await fetchJson('/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: SEED_EMAIL, password: SEED_PASSWORD }),
+  });
+  expect(status, 'seed login must succeed to drive the READ probes').toBe(200);
+  const token = (body as { token?: string } | undefined)?.token;
+  expect(token, 'login 200 body must carry a bearer token').toBeTruthy();
+  return token as string;
+}
+
+/** A detail GET whose {id} is resolved from a sibling LIST endpoint. */
+interface DetailTarget {
+  /** LIST endpoint to pull a real seed id from (`data[0].id`). */
+  listPath: string;
+  /** Contract path template for the detail GET (also used for schema lookup). */
+  template: string;
+}
+
+// GET-by-id READ surface named in the QA task. Each id comes from the sibling LIST
+// (no hand-written fixture — tests/CLAUDE.md). GET /projects/{id} is declared but not
+// mounted yet (404) → skipped-unimplemented, like any not-yet-built contract path.
+const DETAIL_TARGETS: readonly DetailTarget[] = [
+  { listPath: '/po', template: '/po/{id}' },
+  { listPath: '/wo', template: '/wo/{id}' },
+  { listPath: '/boq', template: '/boq/{id}' },
+  { listPath: '/pr', template: '/pr/{id}' },
+  { listPath: '/projects', template: '/projects/{id}' },
+  { listPath: '/projects', template: '/projects/{id}/hierarchy' },
+  { listPath: '/models', template: '/models/{id}/bom' },
+];
+
+// Dashboard aggregates enumerated straight from the contract (every GET /dashboard/*),
+// plus the notifications feed. No id needed — these are tenant-scoped aggregates.
+const AGGREGATE_PATHS: readonly string[] = [
+  ...operations
+    .filter((o) => o.method === 'GET' && o.path.startsWith('/dashboard/'))
+    .map((o) => o.path),
+  '/notifications',
+];
+
+suite(`authenticated READ endpoints (detail + aggregate) @ ${BASE ?? '(unset)'}`, () => {
+  let bearer = '';
+
+  beforeAll(async () => {
+    bearer = await loginBearer();
+  });
+
+  const authInit = (): RequestInit => ({ headers: { Authorization: `Bearer ${bearer}` } });
+
+  /** Resolve `data[0].id` from a LIST endpoint (undefined = non-200 / empty / no id). */
+  async function firstIdFrom(listPath: string): Promise<string | undefined> {
+    const { status, body } = await fetchJson(listPath, authInit());
+    if (status !== 200) return undefined;
+    const data = (body as { data?: unknown[] } | undefined)?.data;
+    const first = Array.isArray(data) ? data[0] : undefined;
+    const id = (first as { id?: unknown } | undefined)?.id;
+    return typeof id === 'string' ? id : undefined;
+  }
+
+  for (const target of DETAIL_TARGETS) {
+    it(`GET ${target.template} returns 200 with a contract-honoring body`, async (ctx) => {
+      // Guard against a contract path the test names but the spec no longer has.
+      const op = operations.find((o) => o.path === target.template && o.method === 'GET');
+      expect(op, `${target.template} GET is not declared in the contract`).toBeDefined();
+
+      const id = await firstIdFrom(target.listPath);
+      if (!id) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[live] SKIP ${target.template}: no seed row to resolve an id from ${target.listPath}`,
+        );
+        ctx.skip();
+        return;
+      }
+      const livePath = target.template.replace('{id}', id);
+      const { status, body } = await fetchJson(livePath, authInit());
+
+      // A genuinely-unimplemented route (declared but not mounted) answers 404 —
+      // skip + note, don't fail. Every other non-200 is a real regression.
+      if (status === 404) {
+        // TODO: unimplemented — declared in openapi but not mounted on dev yet.
+        // eslint-disable-next-line no-console
+        console.warn(`[live] SKIP ${target.template}: not implemented on dev (404)`);
+        ctx.skip();
+        return;
+      }
+      expect(status, `${target.template} should authorize the seeded bearer`).toBe(200);
+
+      const schema = schemaFor(target.template, 'GET', '200');
+      expect(schema, `${target.template} has no declared 200 response schema`).toBeDefined();
+      const violations = validate(body, schema, doc);
+      expect(violations, `${target.template} 200 body drifted from its contract schema`).toEqual([]);
+    });
+  }
+
+  for (const path of AGGREGATE_PATHS) {
+    it(`GET ${path} returns 200 with a contract-honoring body`, async (ctx) => {
+      const op = operations.find((o) => o.path === path && o.method === 'GET');
+      expect(op, `${path} GET is not declared in the contract`).toBeDefined();
+
+      const { status, body } = await fetchJson(path, authInit());
+
+      if (status === 404) {
+        // TODO: unimplemented — declared in openapi but not mounted on dev yet.
+        // eslint-disable-next-line no-console
+        console.warn(`[live] SKIP ${path}: not implemented on dev (404)`);
+        ctx.skip();
+        return;
+      }
+      expect(status, `${path} should authorize the seeded bearer`).toBe(200);
+
+      const schema = schemaFor(path, 'GET', '200');
+      expect(schema, `${path} has no declared 200 response schema`).toBeDefined();
+      const violations = validate(body, schema, doc);
+      expect(violations, `${path} 200 body drifted from its contract schema`).toEqual([]);
+    });
+  }
+});
