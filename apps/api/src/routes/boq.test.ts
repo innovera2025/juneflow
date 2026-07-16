@@ -19,6 +19,8 @@ import {
   boqItems,
   cbsBudgets,
   projects,
+  prItems,
+  prs,
   roles,
   users,
 } from "@juneflow/db";
@@ -666,5 +668,194 @@ describe("BOQ state machine — submit/approve/revise", () => {
       ).inject({ method: "POST", url: `/api/v1/boq/nope/${verb}` });
       expect(res.statusCode).toBe(404);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /boq/:id/generate-pr — M/S split + cut-remain (boq-extra.jsx BOQtoPRForm)
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
+  // An approved doc with a Material (M) item and a Subcon (S) item.
+  const D0 = doc("d0", "BOQ-2026-B-02", "approved", 3);
+  const IM = item("im", "g0", "M", "10", "100.00"); // remain 10, price 100
+  const IS = item("is", "g0", "S", "8", "200.00"); // remain 8,  price 200
+
+  it("splits Material→material PR + Subcon→subcon PR, prices from real BOQ (C10), and cuts remain", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM, IS]],
+            [projects, [project]],
+            [prs, []],
+          ],
+          inserted,
+          updated,
+          updateBase: IM,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im", "is"], qty: { im: 5, is: 3 } },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.prs).toHaveLength(2);
+
+    const mat = body.prs.find((p: { type: string }) => p.type === "material");
+    const sub = body.prs.find((p: { type: string }) => p.type === "subcon");
+    expect(mat).toBeTruthy();
+    expect(sub).toBeTruthy();
+    // Running nos derive from the (empty) existing set → 0001 each prefix.
+    expect(mat.no).toMatch(/^PR-\d{4}-0001$/);
+    expect(sub.no).toMatch(/^PR-S-\d{4}-0001$/);
+    expect(mat.boq_id).toBe("d0");
+
+    // Material PR: 1 line (im), amount = 5 × 100 (real BOQ price, never hardcoded).
+    expect(mat.items).toHaveLength(1);
+    expect(mat.items[0].boq_item_id).toBe("im");
+    expect(mat.items[0].qty).toBe(5);
+    expect(mat.items[0].price).toBe(100);
+    expect(mat.amount).toBe(500);
+    // Subcon PR: 1 line (is), amount = 3 × 200.
+    expect(sub.items[0].boq_item_id).toBe("is");
+    expect(sub.amount).toBe(600);
+
+    // Two PR docs + their lines were inserted on pr / pr_item.
+    expect(inserted.filter((w) => w.table === prs)).toHaveLength(2);
+    expect(inserted.filter((w) => w.table === prItems)).toHaveLength(2);
+    const prLines = inserted.filter((w) => w.table === prItems);
+    expect((prLines[0]!.rows[0] as { boqItemId: string }).boqItemId).toBe("im");
+
+    // Cut-remain: each PR'd item's remain_qty was decremented (10−5, 8−3 → "5").
+    const remainWrites = updated.filter((u) => u.table === boqItems);
+    expect(remainWrites).toHaveLength(2);
+    expect(remainWrites.map((u) => u.set.remainQty)).toEqual(["5", "5"]);
+  });
+
+  it("single category (only Material) → one PR, no subcon PR", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[boqDocs, [D0]], [boqItems, [IM]], [projects, [project]], [prs, []]],
+          updateBase: IM,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"], qty: { im: 4 } },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.prs).toHaveLength(1);
+    expect(body.prs[0].type).toBe("material");
+  });
+
+  it("defaults qty to the item's full remaining quantity when omitted", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[boqDocs, [D0]], [boqItems, [IM]], [projects, [project]], [prs, []]],
+          updateBase: IM,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"] }, // no qty map → full remain (10)
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().prs[0].amount).toBe(1000); // 10 × 100
+  });
+
+  it("409s when the BOQ is not approved (draft cannot be PR'd)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "draft")]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"], qty: { im: 1 } },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("BOQ_NOT_APPROVED");
+  });
+
+  it("409s when a requested qty exceeds the item's remain_qty", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [boqItems, [IM]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"], qty: { im: 20 } }, // remain is 10
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("QTY_EXCEEDS_REMAIN");
+  });
+
+  it("404s when a selected item is not in this BOQ (tenant/doc scoped)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [boqItems, [IM]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im", "foreign"], qty: { im: 1, foreign: 1 } },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("400s when item_ids is empty", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/generate-pr", payload: { item_ids: [] } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("404s for a BOQ outside the tenant, and binds company_id on the scoped read", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, []]], captured }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/nope/generate-pr",
+      payload: { item_ids: ["im"], qty: { im: 1 } },
+    });
+    expect(res.statusCode).toBe(404);
+    const docRead = captured.find((c) => c.table === boqDocs);
+    expect(paramsOf(docRead!.where)).toContain(COMPANY);
+    expect(paramsOf(docRead!.where)).not.toContain(OTHER_COMPANY);
+  });
+
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"] },
+    });
+    expect(res.statusCode).toBe(401);
   });
 });
