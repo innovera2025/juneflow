@@ -1379,6 +1379,18 @@ paths:
           $ref: "#/components/responses/Unauthorized"
 
   /gr:
+    get:
+      tags: [boq]
+      summary: List goods receipts
+      operationId: listGr
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [boq]
       summary: Goods receipt ({po_id,lines[{qty_ok,qty_rejected,photos[]}]}) — rejects gen defect-report
@@ -1389,11 +1401,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [po_id, lines]
+              required: [lines]
               properties:
                 po_id:
                   type: string
                   format: uuid
+                wo_id:
+                  type: string
+                  format: uuid
+                  description: Alternative to po_id — GR against a work order (B-070 GR-from-WO)
                 lines:
                   type: array
                   items:
@@ -3050,6 +3066,140 @@ paths:
           $ref: "#/components/responses/EntityList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  # ===== FLOW-A procurement actions (B-070) =====
+  /po/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Submit PO (action)
+      operationId: submitPo
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /po/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Approve PO (action)
+      operationId: approvePo
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /po/{id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Reject PO ({reason}) (action)
+      operationId: rejectPo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /wo/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Submit WO (action)
+      operationId: submitWo
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /wo/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Approve WO (action)
+      operationId: approveWo
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /wo/{id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Reject WO ({reason}) (action)
+      operationId: rejectWo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /gr/{id}/return:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Return goods receipt (action)
+      operationId: returnGr
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /gr/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [boq]
+      summary: Cancel goods receipt (action)
+      operationId: cancelGr
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
 components:
   securitySchemes:
