@@ -443,8 +443,13 @@ const WO_VALUES = [2150000, 845000, 2840000, 985000, 425000];
 const WO_NOS = ["WO-2026-0117", "WO-2026-0116", "WO-2026-0115", "WO-2026-0114", "WO-2026-0113"];
 const WO_STATUS = ["pending", "approved", "approved", "approved", "approved"];
 const WO_RETENTION_PCTS = ["10.000", "10.000", "10.000", "10.000", "0.000"];
-// gr.jsx:3 GR_ROWS (5) received %/amount; :11 RETURN_ROWS handled via rejected qty.
+// gr.jsx:3 GR_ROWS (5) received %/amount + verbatim GR `no` (P2-BE-06, B-070:
+// gr gained no/status/wo_id in migration 0016); :11 RETURN_ROWS handled via
+// rejected qty. All 5 seed rows are PO receipts (poId); status defaults to
+// `received`. (A seeded WO receipt is deferred to keep the ap_billing 3-way
+// match gr:i↔po:i 1:1 — GR-from-WO is exercised by the gr.ts handler + tests.)
 const GR_RECEIVED = [320, 240, 120, 92, 920];
+const GR_NOS = ["GR-2026-0148", "GR-2026-0147", "GR-2026-0146", "GR-2026-0145", "GR-2026-0144"];
 
 // subcon-accept.jsx:8 SUBC_CONTRACTS (4 contracts / 16 periods = 4/4/3/5).
 // C3 state map: accepted→passed, requested→delivered, rejected/pending kept.
@@ -1055,7 +1060,7 @@ async function seed(): Promise<void> {
 
       await tx.insert(schema.grs).values(
         GR_RECEIVED.map((received, i) => ({
-          id: det(`gr:${i}`), poId: det(`po:${i}`), received: m(received), rejected: m(i), photos: [],
+          id: det(`gr:${i}`), poId: det(`po:${i}`), no: at(GR_NOS, i), received: m(received), rejected: m(i), photos: [],
         })),
       );
 

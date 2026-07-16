@@ -8,7 +8,8 @@
 // Structure: Project -> N BOQDoc -> N BOQGroup -> N BOQItem (data-dictionary
 // "BOQDoc -> N Group -> N Item"). CBSBudget is a per-group budget-control row
 // (data-dictionary CBSBudget.group_id). PR (from BOQ) -> PO(material) /
-// WO(subcon); PO -> GR; GR rejection -> DefectReport.
+// WO(subcon); PO -> GR (or WO -> GR, B-070 GR-from-WO); GR rejection ->
+// DefectReport.
 //
 // Global-readiness hard rules (PLAN.md section 4): real uuid FKs, UTC
 // timestamps, every money column carries currency_code. Company scope flows
@@ -323,15 +324,32 @@ export const variationOrders = pgTable("variation_order", {
 });
 
 /**
- * GR — goods receipt against a PO: received / rejected quantities + photos.
- * A rejection generates a DefectReport and notifies the vendor
- * (data-dictionary "ตีกลับ -> DefectReport + แจ้งผู้ขาย").
+ * GR — goods receipt against a PO (material) OR a WO (subcon work; B-070
+ * GR-from-WO): received / rejected quantities + photos. A rejection generates a
+ * DefectReport and notifies the vendor (data-dictionary "ตีกลับ -> DefectReport
+ * + แจ้งผู้ขาย"). gr.jsx "รับจาก PO" + "รับงาน WO" tabs.
+ *
+ * `wo_id` / `no` / `status` were added (P2-BE-06, B-070, migration 0016) and
+ * `po_id` was made NULLABLE so a receipt can anchor on EITHER a PO or a WO
+ * (exactly one is set):
+ *   - `wo_id`  — nullable FK to wo; set (with po_id NULL) for a WO receipt.
+ *   - `no`     — document number (gr.jsx "GR เลขที่", e.g. GR-2026-0148);
+ *                client-supplied like po/wo `no`, nullable.
+ *   - `status` — the return/cancel lifecycle: `received` (default, recorded) ->
+ *                `returned` | `cancelled`. There is NO GR approval endpoint in
+ *                the contract, so the prototype's "approved" badge maps to the
+ *                recorded `received` state.
+ *
+ * received / rejected are the AGGREGATE of the createGr body's lines
+ * (Σ qty_ok / Σ qty_rejected): the gr table has no per-line child table, so a
+ * multi-line receipt collapses to one gr row (GAP flagged in gr.ts; mirrors the
+ * po-has-no-line-table shape). photos flattens every line's photos[].
  */
 export const grs = pgTable("gr", {
   id: uuid("id").primaryKey().defaultRandom(),
-  poId: uuid("po_id")
-    .notNull()
-    .references(() => pos.id, { onDelete: "cascade" }),
+  poId: uuid("po_id").references(() => pos.id, { onDelete: "cascade" }),
+  woId: uuid("wo_id").references(() => wos.id, { onDelete: "cascade" }),
+  no: text("no"),
   received: numeric("received", { precision: 18, scale: 4 })
     .notNull()
     .default("0"),
@@ -339,6 +357,7 @@ export const grs = pgTable("gr", {
     .notNull()
     .default("0"),
   photos: jsonb("photos").$type<string[]>().notNull().default([]),
+  status: text("status").notNull().default("received"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
