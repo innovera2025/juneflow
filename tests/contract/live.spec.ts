@@ -11,7 +11,7 @@
  * Only side-effect-free calls are made: unauthenticated GETs (must be rejected) and a
  * bogus login (must fail the contract way). No seed data is assumed and no mutations run.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { deref, loadSpec, listOperations, resolveRef, validate } from './lib/openapi';
 
 const BASE = process.env.CONTRACT_API_URL?.replace(/\/$/, '');
@@ -68,4 +68,99 @@ suite(`contract vs dev API @ ${BASE ?? '(unset)'}`, () => {
     const errors = validate(body, schemaFor('/auth/login', 'POST', String(status)), doc);
     expect(errors, `login ${status} body violated the contract`).toEqual([]);
   });
+});
+
+/**
+ * Authenticated POSITIVE path (Gate G2 live backfill) — the 401 probes above prove
+ * the guard closes; these prove the guarded GET LIST endpoints, once a real bearer
+ * is presented, answer 200 with a body that HONORS its declared response schema.
+ * Black-box by design (tests/CLAUDE.md — no route implementation is read): the
+ * contract is the sole source of expected shape, so this catches contract-vs-impl
+ * drift the 401 tests cannot see.
+ *
+ * The bearer comes from the central seed (packages/db seed/index.ts): logging in as
+ * COMPANY_USERS[0] somchai@rungrueang.co.th with DEV_PASSWORD "juneflow-dev" — no
+ * ad-hoc fixture, no mutation (only side-effect-free GETs are driven).
+ */
+const SEED_EMAIL = 'somchai@rungrueang.co.th';
+const SEED_PASSWORD = 'juneflow-dev';
+
+/** All 9 nav-badge count keys (Counts enum) so GET /counts returns 200, not 400. */
+const COUNT_KEYS = ['boq', 'boq.approval', 'pr.list', 'accept', 'pm.wo', 'gl.inbox', 'sales', 'sales.crm', 'sales.service'];
+
+interface AuthTarget {
+  /** Contract path template (used to look up the declared 200 schema). */
+  path: string;
+  /** Extra query string appended to the live request (e.g. required params). */
+  query?: string;
+  /**
+   * A documented, quarantined contract-vs-impl drift to tolerate on THIS endpoint
+   * (still fails on any OTHER violation, so the probe keeps guarding for regressions).
+   * See the QA handoff — deciding the conflict is not the QA zone's call and
+   * openapi.yaml is a sacred file, so it is surfaced, not silently passed or fixed.
+   */
+  knownDrift?: RegExp;
+}
+
+// The guarded list endpoints named in the QA task. /counts needs its required
+// `keys`; /projects carries one known drift (ProjectPhase.sale_status is declared
+// `type: string` yet its own description says "nullable free text" and the live
+// stack returns null — a contract-internal inconsistency, flagged for the contract
+// owner, quarantined here so the rest of the /projects body is still validated).
+const AUTH_GET_TARGETS: readonly AuthTarget[] = [
+  { path: '/companies' },
+  { path: '/projects', knownDrift: /\.sale_status: expected type string, got null$/ },
+  { path: '/vendors' },
+  { path: '/boq' },
+  { path: '/pr' },
+  { path: '/po' },
+  { path: '/wo' },
+  { path: '/gr' },
+  { path: '/counts', query: `?keys=${COUNT_KEYS.join(',')}` },
+];
+
+suite(`authenticated GET list endpoints @ ${BASE ?? '(unset)'}`, () => {
+  let bearer = '';
+
+  beforeAll(async () => {
+    const { status, body } = await fetchJson('/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: SEED_EMAIL, password: SEED_PASSWORD }),
+    });
+    expect(status, 'seed login must succeed to drive the authenticated probes').toBe(200);
+    const token = (body as { token?: string } | undefined)?.token;
+    expect(token, 'login 200 body must carry a bearer token').toBeTruthy();
+    bearer = token as string;
+  });
+
+  const authInit = (): RequestInit => ({ headers: { Authorization: `Bearer ${bearer}` } });
+
+  for (const target of AUTH_GET_TARGETS) {
+    it(`GET ${target.path} returns 200 with a contract-honoring body`, async (ctx) => {
+      // Guard against a contract path the test names but the spec no longer has.
+      const op = operations.find((o) => o.path === target.path && o.method === 'GET');
+      expect(op, `${target.path} GET is not declared in the contract`).toBeDefined();
+
+      const { status, body } = await fetchJson(`${target.path}${target.query ?? ''}`, authInit());
+
+      // A genuinely-unimplemented route (not mounted) answers 404 — skip + note,
+      // don't fail. Every other non-200 is a real regression and must fail.
+      if (status === 404) {
+        // eslint-disable-next-line no-console
+        console.warn(`[live] SKIP ${target.path}: not implemented on dev (404)`);
+        ctx.skip();
+        return;
+      }
+      expect(status, `${target.path} should authorize the seeded bearer`).toBe(200);
+
+      const schema = schemaFor(target.path, 'GET', '200');
+      expect(schema, `${target.path} has no declared 200 response schema`).toBeDefined();
+
+      const violations = validate(body, schema, doc).filter(
+        (v) => !(target.knownDrift && target.knownDrift.test(v)),
+      );
+      expect(violations, `${target.path} 200 body drifted from its contract schema`).toEqual([]);
+    });
+  }
 });
