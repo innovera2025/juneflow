@@ -1,0 +1,6 @@
+{
+  "_source": "Verbatim strings for pototype/boq.jsx BOQArchive (L1468-1631) that do NOT have a dedicated boq.arc* DICT key. Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx/.ts source — same pattern as boq-overview-strings.json / boq-strings.json. Each value is a REAL phrases key (tp) verified present in docs/extract/i18n-full.json (phrases bucket, where the Thai phrase IS the key). The boq.arc* DICT keys cover the title/subtitle/search/column headers/filter+export copy and are used via t(); status labels reuse boq-strings.json (statusApproved/Pending/Draft/Revise). The prototype's mock columns with no wire source (approver / approve date / attachment count / revise-history timeline / the 'grong · 1' active-filter count) are rendered as an honest em-dash and never invented (Juneflow CLAUDE.md C10 · PLAN.md §0 rule 4).",
+  "thDetails": "รายละเอียด",
+  "thValue": "มูลค่า (฿)",
+  "yearLabel": "ปี"
+}
