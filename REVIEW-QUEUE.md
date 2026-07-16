@@ -19,6 +19,8 @@
 
 ## คิวรอ promote
 
+> 🔍 **AUDIT batch 6 — PROMOTABLE** (orch-A · 2026-07-16 · pin `98589b6` · baseline batch-5 `5668574` · 10-agent): batch-6 = P2-BE-05/06/07/08 (FLOW-A po/wo/gr/inbox/vendor-extend) + migrations 0015/0016/0017 + docnum + boq.list · backend+migrations **ALL PASS** (live PG16 0000-0017 apply + seed idempotent · **po_id DROP-NOT-NULL data-safe verified** · additive corrects B-070 no-migration recon-error) · sacred clean (openapi/i18n unchanged in batch-6 · only 0015-0017 new) · build 28/29 (docker-smoke pre-existing) · 2 web ports = **WARN sev=none** (structural-G5 PASS · code-clean · **automated pixel-G5 owed = live-G5 QA pass** · ไม่ใช่ defect) · adversarial verify → **0 blocker** · combined promote (batch-5+6) pin นี้ครอบทั้งหมด
+
 > 🔍 **AUDIT batch 5 — PROMOTABLE** (orch-A · 2026-07-16 · pin `0fa9822` · 12-agent workflow): 15 review rows = **ALL PASS** · sacred integrity vs main `433dda5` = 0 unauthorized (openapi B-049/B-070 · i18n B-049/B-062/B-070 · migrations 0012/0013/0014 additive USING-cast verified · CLAUDE.md/.github/reference/PLAN untouched) · **live PG16 0000-0014 apply + seed idempotent ✓** · turbo 28/29 (แดง=docker-smoke pre-existing) · 2 new security doors updateThrough/updateThroughChain verified fail-closed · adversarial verify → **0 blocker** · WARN minor: P0-DEV-07/QA-08 = อยู่บน main แล้ว (batch-4) · P2-BE-00 RQ row เพิ่มแล้ว (fix)
 
 
