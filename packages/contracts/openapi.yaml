@@ -1024,6 +1024,20 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /boq/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [boq]
+      summary: Get BOQ doc detail (groups + per-group CBS)
+      operationId: getBoq
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /boq/{id}/submit:
     parameters:
       - $ref: "#/components/parameters/IdPath"
