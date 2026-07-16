@@ -11,7 +11,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { prs, projects, roles, users, vendors, wos } from "@juneflow/db";
+import {
+  prs,
+  projects,
+  roles,
+  users,
+  vendors,
+  wos,
+  workPeriods,
+} from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -139,6 +147,13 @@ const prRow = (status: "draft" | "pending" | "approved" | "rejected") => ({
   needDate: null,
   status,
   approvalStep: 0,
+  // B-075: PR display fields — title doubles as the WO scope (งานเหมา).
+  title: "งานทาสีภายนอก Block A",
+  vendorId: null,
+  requesterId: null,
+  phase: "เฟส 1 · A",
+  submittedAt: null,
+  approvedAt: null,
   createdAt: D,
   updatedAt: D,
 });
@@ -150,16 +165,39 @@ const wo = (
   value: number,
   retentionPct = "0.000",
   prId: string | null = PR,
+  contractId: string | null = null,
 ) => ({
   id,
   prId,
   vendorId: VENDOR,
+  contractId,
   no,
   value: String(value),
   currencyCode: "THB",
   retentionPct,
   status,
   approvalStep: 0,
+  createdAt: D,
+  updatedAt: D,
+});
+
+// A work_period installment (B-080 / F3) linked to a subcon contract.
+const workPeriod = (
+  id: string,
+  contractId: string,
+  seq: number,
+  amount: number,
+  status: "pending" | "delivered" | "inspecting" | "passed" | "rejected" | "paid",
+) => ({
+  id,
+  contractId,
+  seq,
+  basis: "percent",
+  target: "0",
+  pct: "0",
+  amount: String(amount),
+  currencyCode: "THB",
+  status,
   createdAt: D,
   updatedAt: D,
 });
@@ -197,12 +235,25 @@ describe("GET /api/v1/wo — auth + list + retention", () => {
     expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
   });
 
-  it("returns the envelope with a DERIVED retention_amount (value × retention_pct / 100)", async () => {
+  it("returns the envelope with retention_amount + scope/progress/installments (F3)", async () => {
+    // Contract c0 plan: งวด1 645k passed + งวด2 645k pending + งวด3 860k pending →
+    // done 645k / total 2,150k → progress round(30%) = 30.
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[wos, [wo("w0", "WO-2026-0117", "pending", 2_150_000, "10.000")]]],
+          rows: [
+            [wos, [wo("w0", "WO-2026-0117", "pending", 2_150_000, "10.000", PR, "c0")]],
+            [
+              workPeriods,
+              [
+                workPeriod("wp2", "c0", 2, 645000, "pending"),
+                workPeriod("wp0", "c0", 1, 645000, "passed"),
+                workPeriod("wp1", "c0", 3, 860000, "pending"),
+              ],
+            ],
+            [prs, [prRow("approved")]],
+          ],
         }),
       })
     ).inject({ url: "/api/v1/wo" });
@@ -215,21 +266,50 @@ describe("GET /api/v1/wo — auth + list + retention", () => {
     expect(w0.amount).toBe(2_150_000);
     expect(w0.retention_pct).toBe(10);
     expect(w0.retention_amount).toBe(215000); // 2,150,000 × 10% (matches po-wo.jsx mock)
+    // B-080 (F3): scope = source PR title; progress + installments from work_period.
+    expect(w0.contract_id).toBe("c0");
+    expect(w0.scope).toBe("งานทาสีภายนอก Block A");
+    expect(w0.progress).toBe(30); // 645k done / 2,150k plan
+    expect(w0.installments.map((p: { seq: number }) => p.seq)).toEqual([1, 2, 3]); // sorted
+    expect(w0.installments[0].amount).toBe(645000);
+    expect(w0.installments[0].status).toBe("passed");
     expect(Object.keys(w0).sort()).toEqual(
       [
         "amount",
         "approval_step",
+        "contract_id",
         "currency_code",
         "id",
+        "installments",
         "no",
         "pr_id",
+        "progress",
         "retention_amount",
         "retention_pct",
+        "scope",
         "status",
         "value",
         "vendor_id",
       ],
     );
+  });
+
+  it("a WO with contract_id null honestly reports an empty plan / null progress", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [wos, [wo("w0", "WO-2026-0116", "approved", 845000, "5.000", PR, null)]],
+            [prs, [prRow("approved")]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/wo" });
+    const w0 = res.json().data[0];
+    expect(w0.contract_id).toBe(null);
+    expect(w0.installments).toEqual([]);
+    expect(w0.progress).toBe(null);
   });
 
   it("binds company_id on the project root of the scoped read (no cross-tenant leak)", async () => {

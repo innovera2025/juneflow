@@ -293,3 +293,68 @@ describe("POST /api/v1/models — create starts draft, palette color, unique cod
     expect(badArea.statusCode).toBe(400);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /models/:id/bom — the BOM template lines (boq.bom / F5)
+// ---------------------------------------------------------------------------
+
+const bomRow = (unitType: string, items: unknown[]) => ({
+  id: `bom-${unitType}`,
+  companyId: COMPANY,
+  unitType,
+  items,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+});
+
+describe("GET /api/v1/models/:id/bom", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/models/m-b1/bom" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+
+  it("returns the model's BOM template lines (keyed by unit_type = code)", async () => {
+    const lines = [
+      { cat: "M", code: "01-001", name: "เสาเข็มเจาะ", unit: "ต้น", qty: 18, price: 4200 },
+      { cat: "M", code: "02-002", name: "คอนกรีตผสมเสร็จ", unit: "ลบ.ม.", qty: 42, price: 2150 },
+    ];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([
+          [models, [B1]],
+          [boms, [bomRow("B-1", lines)]],
+        ]),
+      })
+    ).inject({ url: "/api/v1/models/m-b1/bom" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(2);
+    expect(body.page).toBe(1);
+    expect(body.data).toEqual(lines);
+  });
+
+  it("returns an empty list honestly when the model has no matching BOM", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[models, [A1]], [boms, []]]),
+      })
+    ).inject({ url: "/api/v1/models/m-a1/bom" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(0);
+    expect(res.json().data).toEqual([]);
+  });
+
+  it("404s for a model not in this tenant (foreign / absent id)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[models, []]]),
+      })
+    ).inject({ url: "/api/v1/models/nope/bom" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("NOT_FOUND");
+  });
+});

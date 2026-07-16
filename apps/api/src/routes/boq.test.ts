@@ -15,6 +15,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
   boqDocs,
+  boqVersionHistory,
   boqGroups,
   boqItems,
   cbsBudgets,
@@ -149,6 +150,7 @@ const doc = (
   no: string,
   status: "draft" | "pending" | "approved" | "revise",
   version = 1,
+  approvedBy: string | null = null,
 ) => ({
   id,
   projectId: PROJECT,
@@ -157,8 +159,44 @@ const doc = (
   scope: "Block B",
   version,
   status,
+  // B-081 (F4): archive approver + timestamp (null unless approved).
+  approvedBy,
+  approvedAt: approvedBy ? new Date(1_700_000_000_000) : null,
   createdAt: new Date(1_700_000_000_000),
   updatedAt: new Date(1_700_000_000_000),
+});
+
+// A tenant dictionary user row (for approver / version-history name resolution).
+const user = (id: string, name: string) => ({
+  id,
+  companyId: COMPANY,
+  email: `${id}@t.co`,
+  name,
+  roleId: "role-dir",
+  status: "active",
+  createdAt: new Date(1_700_000_000_000),
+  updatedAt: new Date(1_700_000_000_000),
+});
+
+// A boq_version_history row (B-081 / F4).
+const vhRow = (
+  id: string,
+  docId: string,
+  version: number,
+  action: string,
+  by: string | null,
+  delta: string | null,
+  note: string | null,
+) => ({
+  id,
+  docId,
+  version,
+  action,
+  by,
+  at: new Date(1_700_000_000_000),
+  delta,
+  note,
+  createdAt: new Date(1_700_000_000_000),
 });
 
 const group = (id: string, boqId: string, name: string, seq: number) => ({
@@ -181,6 +219,7 @@ const item = (
   groupId,
   code: `C-${id}`,
   name: `item ${id}`,
+  detail: `detail ${id}`,
   cat,
   qty,
   unit: "ถุง",
@@ -244,7 +283,7 @@ describe("GET /api/v1/boq — auth + list", () => {
   });
 
   it("returns the B-014 envelope with a DERIVED total per doc (C10, never hardcoded)", async () => {
-    const D0 = doc("d0", "BOQ-2026-B-02", "approved", 3);
+    const D0 = doc("d0", "BOQ-2026-B-02", "approved", 3, "u-dir");
     const D1 = doc("d1", "BOQ-2026-C-01", "draft");
     const G0 = group("g0", "d0", "02 งานโครงสร้าง", 1);
     // 2 items under d0's group: 10×100 + 3×50 = 1150. d1 has no items → total 0.
@@ -258,6 +297,7 @@ describe("GET /api/v1/boq — auth + list", () => {
             [boqDocs, [D0, D1]],
             [boqGroups, [G0]],
             [boqItems, [I0, I1]],
+            [users, [user("u-dir", "วิภา จันทร์เจริญ")]],
           ],
         }),
       })
@@ -274,9 +314,27 @@ describe("GET /api/v1/boq — auth + list", () => {
     expect(d0.status).toBe("approved");
     expect(d0.version).toBe(3);
     expect(d1.total).toBe(0);
-    // wire is real columns only — no company_id / timestamps leak.
+    // B-081 (F4): the approved doc carries a resolved approver; the draft one null.
+    expect(d0.approved_by).toBe("u-dir");
+    expect(d0.approved_by_name).toBe("วิภา จันทร์เจริญ");
+    expect(d1.approved_by).toBe(null);
+    expect(d1.approved_by_name).toBe(null);
+    // wire is real columns only — no company_id / update timestamp leak.
     expect(Object.keys(d0).sort()).toEqual(
-      ["currency_code", "id", "name", "no", "project_id", "scope", "status", "total", "version"],
+      [
+        "approved_at",
+        "approved_by",
+        "approved_by_name",
+        "currency_code",
+        "id",
+        "name",
+        "no",
+        "project_id",
+        "scope",
+        "status",
+        "total",
+        "version",
+      ],
     );
   });
 
@@ -362,8 +420,8 @@ describe("POST /api/v1/boq — create", () => {
 // ---------------------------------------------------------------------------
 
 describe("GET /api/v1/boq/:id — detail + CBS", () => {
-  it("returns the doc with per-group CBS available = budget − used − committed", async () => {
-    const D0 = doc("d0", "BOQ-1", "approved", 2);
+  it("returns the doc with per-group CBS available = budget − used − committed + F4 history", async () => {
+    const D0 = doc("d0", "BOQ-1", "approved", 2, "u-dir");
     const G0 = group("g0", "d0", "02 งานโครงสร้าง", 1);
     const I0 = item("i0", "g0", "M", "4", "25.00"); // total 100
     const C0 = cbs("c0", "g0", "1000000.00", "200000.00", "100000.00"); // avail 700000
@@ -376,6 +434,15 @@ describe("GET /api/v1/boq/:id — detail + CBS", () => {
             [boqGroups, [G0]],
             [boqItems, [I0]],
             [cbsBudgets, [C0]],
+            [users, [user("u-dir", "วิภา จันทร์เจริญ")]],
+            // out-of-order versions — the detail sorts newest-first.
+            [
+              boqVersionHistory,
+              [
+                vhRow("vh1", "d0", 1, "อนุมัติฉบับแรก", "u-dir", "11598000", "BOQ ฉบับแรก"),
+                vhRow("vh2", "d0", 2, "อนุมัติ", "u-dir", "-120000", "ลดสเปกประตู"),
+              ],
+            ],
           ],
         }),
       })
@@ -386,6 +453,12 @@ describe("GET /api/v1/boq/:id — detail + CBS", () => {
     expect(body.groups).toHaveLength(1);
     expect(body.groups[0].cbs.available).toBe(700000);
     expect(body.groups[0].cbs.budget).toBe(1000000);
+    // B-081 (F4): approver name + version-history (newest version first).
+    expect(body.approved_by_name).toBe("วิภา จันทร์เจริญ");
+    expect(body.version_history.map((v: { version: number }) => v.version)).toEqual([2, 1]);
+    expect(body.version_history[0].action).toBe("อนุมัติ");
+    expect(body.version_history[0].by_name).toBe("วิภา จันทร์เจริญ");
+    expect(body.version_history[1].delta).toBe("11598000");
   });
 
   it("404s for an id outside the tenant", async () => {
@@ -416,8 +489,9 @@ describe("GET /api/v1/boq/:id/items — list + group filter", () => {
     expect(body.data[0].qty).toBe(4800);
     expect(body.data[0].price).toBe(168.5);
     expect(body.data[0].cat).toBe("M");
+    expect(body.data[0].detail).toBe("detail i0");
     expect(Object.keys(body.data[0]).sort()).toEqual(
-      ["cat", "cc_id", "code", "currency_code", "element_id", "group_id", "id", "name", "price", "qty", "remain_qty", "unit"],
+      ["cat", "cc_id", "code", "currency_code", "detail", "element_id", "group_id", "id", "name", "price", "qty", "remain_qty", "unit"],
     );
   });
 
@@ -574,9 +648,10 @@ describe("BOQ state machine — submit/approve/revise", () => {
     expect(res.json().code).toBe("INVALID_STATE");
   });
 
-  it("approve: pending → approved (LOCK) with MD-tier authority", async () => {
-    const D0 = doc("d0", "N", "pending");
+  it("approve: pending → approved (LOCK) with MD-tier authority + F4 history", async () => {
+    const D0 = doc("d0", "N", "pending", 2);
     const updated: Updated[] = [];
+    const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -589,13 +664,27 @@ describe("BOQ state machine — submit/approve/revise", () => {
             [boqItems, []],
           ],
           updated,
-          updateBase: D0,
+          inserted,
+          updateBase: { ...D0, status: "approved", approvedBy: "u-0" },
         }),
       })
     ).inject({ method: "POST", url: "/api/v1/boq/d0/approve" });
     expect(res.statusCode).toBe(200);
     expect(res.json().status).toBe("approved");
     expect(updated[0]!.set.status).toBe("approved");
+    // B-081 (F4): the archive approver + timestamp are stamped on the doc.
+    expect(updated[0]!.set.approvedBy).toBe("u-0");
+    expect(updated[0]!.set.approvedAt).toBeInstanceOf(Date);
+    // ...and a version-history row is appended (action=approve, doc version).
+    const vhWrite = inserted.find((w) => w.table === boqVersionHistory);
+    expect(vhWrite).toBeTruthy();
+    const vh = vhWrite!.rows[0] as { action: string; version: number; by: string | null };
+    expect(vh.action).toBe("approve");
+    expect(vh.version).toBe(2);
+    expect(vh.by).toBe("u-0");
+    // echoed approver display name resolves from the user row.
+    expect(res.json().approved_by).toBe("u-0");
+    expect(res.json().approved_by_name).toBe("วิภา");
   });
 
   it("approve: 403 when the caller's role.approvalLevel is below the MD tier", async () => {

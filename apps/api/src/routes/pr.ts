@@ -66,6 +66,8 @@ import {
   projects,
   prItems,
   prs,
+  vendors,
+  users,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
@@ -211,14 +213,19 @@ function requiredTierCount(amount: number): number {
 
 /**
  * The opaque Entity wire shape for a PR doc: real pr columns + the derived
- * `amount` (Σ qty×price over its lines) and the currency those lines are priced
- * in. The mock's presentational vendor/requester/budget% strings are NOT stored,
- * so they are not returned.
+ * `amount` (Σ qty×price over its lines) and its currency. The list-row display
+ * fields — title / phase / vendor_id / requester_id + the submit/approve
+ * timestamps (which the PR KPIs need: approved-this-month, avg-approval-time) —
+ * are now REAL columns (migration 0022, B-075) and always returned. When the
+ * vendor + requester name maps are resolved (list / detail), the display `vendor`
+ * / `requester` names are added too; the state-machine echoes keep the ids and
+ * omit the resolved names (the FE re-reads the list after an action).
  */
 function prWire(
   pr: PrRow,
   amount: number,
   currency: string,
+  names?: { vendor: string | null; requester: string | null },
 ): Record<string, unknown> {
   return {
     id: pr.id,
@@ -230,6 +237,15 @@ function prWire(
     approval_step: pr.approvalStep,
     currency_code: currency,
     amount,
+    title: pr.title,
+    phase: pr.phase,
+    vendor_id: pr.vendorId,
+    requester_id: pr.requesterId,
+    submitted_at: pr.submittedAt,
+    approved_at: pr.approvedAt,
+    ...(names
+      ? { vendor: names.vendor, requester: names.requester }
+      : {}),
   };
 }
 
@@ -298,10 +314,14 @@ export function registerPrRoute(app: FastifyInstance): void {
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
 
-    const [docs, lines, boqItemRows] = await Promise.all([
+    const [docs, lines, boqItemRows, vendorRows, userRows] = await Promise.all([
       db.selectThrough(prs, PR_HOPS),
       db.selectThrough(prItems, PR_ITEM_HOPS),
       db.selectThrough(boqItems, BOQ_ITEM_HOPS),
+      // vendor + user carry their own company_id (scoped select) — resolve the
+      // display names for the PR list's vendor / requester columns.
+      db.select(vendors),
+      db.select(users),
     ]);
 
     const prices = priceMap(boqItemRows);
@@ -311,12 +331,17 @@ export function registerPrRoute(app: FastifyInstance): void {
       list.push(ln);
       linesByPr.set(ln.prId, list);
     }
+    const vendorNameById = new Map(vendorRows.map((v) => [v.id, v.name]));
+    const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
 
     return reply.code(200).send(
       listEnvelope(
         docs.map((d) => {
           const { amount, currency } = sumLines(linesByPr.get(d.id) ?? [], prices);
-          return prWire(d, amount, currency);
+          return prWire(d, amount, currency, {
+            vendor: d.vendorId ? vendorNameById.get(d.vendorId) ?? null : null,
+            requester: d.requesterId ? userNameById.get(d.requesterId) ?? null : null,
+          });
         }),
       ),
     );
@@ -460,8 +485,17 @@ export function registerPrRoute(app: FastifyInstance): void {
     }
 
     const { amount, currency, lines, prices } = await prAmount(db, id);
+    // Resolve the vendor + requester display names (scoped selects) for the detail.
+    const [vendor, requester] = await Promise.all([
+      pr.vendorId
+        ? db.select(vendors, eq(vendors.id, pr.vendorId)).then((r) => r[0]?.name ?? null)
+        : Promise.resolve(null),
+      pr.requesterId
+        ? db.select(users, eq(users.id, pr.requesterId)).then((r) => r[0]?.name ?? null)
+        : Promise.resolve(null),
+    ]);
     return reply.code(200).send({
-      ...prWire(pr, amount, currency),
+      ...prWire(pr, amount, currency, { vendor, requester }),
       items: lines.map((ln) =>
         prItemWire(ln, ln.boqItemId ? (prices.get(ln.boqItemId)?.price ?? 0) : 0),
       ),
@@ -494,7 +528,9 @@ export function registerPrRoute(app: FastifyInstance): void {
       projects,
       prs.projectId,
       pr.projectId,
-      { status: "pending" },
+      // Stamp submitted_at so the PR KPIs (approved-this-month, avg-approval-time)
+      // have a real submit time going forward (migration 0022, B-075).
+      { status: "pending", submittedAt: new Date() },
       eq(prs.id, id),
     );
     return reply.code(200).send(await prWireWithAmount(db, updated!));
@@ -540,7 +576,12 @@ export function registerPrRoute(app: FastifyInstance): void {
       projects,
       prs.projectId,
       pr.projectId,
-      { status: "approved", approvalStep: requiredTierCount(amount) },
+      // Stamp approved_at so the PR KPIs compute a real approval time going forward.
+      {
+        status: "approved",
+        approvalStep: requiredTierCount(amount),
+        approvedAt: new Date(),
+      },
       eq(prs.id, id),
     );
     return reply.code(200).send(prWire(updated!, amount, currency));
