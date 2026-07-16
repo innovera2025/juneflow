@@ -171,7 +171,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P2-PLAT-01 | platform | review | **[R1] i18n vendor** — compile ~30 keys master.vendor (`master-party.jsx` · verbatim) → apply 2 สำเนา (`SACRED_OVERRIDE=wei-approved:B-070`) · driven by orch-A (compile agent) | — | cmp identical + i18n test · gate 4.5 | 1.5 ชม. |
 | P2-PLAT-02 | platform | review | **[R2] i18n BOQ core** — ~140 keys (boq.list/overview/editor) · compile+apply | P2-PLAT-01 | cmp identical + i18n test · gate 4.5 | 3 ชม. |
 | P2-PLAT-03 | platform | review | **[R3] i18n BOQ aux** — ~105 keys (bom/approval/archive/reports/aiqto) | P2-PLAT-02 | cmp + i18n test · gate 4.5 | 2.5 ชม. |
-| P2-PLAT-04 | platform | doing | **[R4] i18n proc docs** — ~55 keys (pr/po/wo/gr) | P2-PLAT-03 | cmp + i18n test · gate 4.5 | 2 ชม. |
+| P2-PLAT-04 | platform | review | **[R4] i18n proc docs** — ~55 keys (pr/po/wo/gr) | P2-PLAT-03 | cmp + i18n test · gate 4.5 | 2 ชม. |
 | P2-WEB-01 | web | ready | **master.vendor** port (`master-party.jsx:56` · ref NAV g2-vendor · CRUD add/edit · type display-map) · G5 | P2-BE-01, P2-PLAT-01 | G5 + CI · gate 4.5 | 3 ชม. |
 | P2-WEB-02 | web | blocked | **boq.list** port (`boq-list.jsx` +NewBOQForm/Excel import · g1/08) | P2-BE-02, P2-PLAT-02 | G5 g1/08 · gate 4.5 | 3 ชม. |
 | P2-WEB-03 | web | blocked | **boq.overview** port (`boq.jsx:52` · g1/07 · waterfall live · tabs 2-5 empty-state) | P2-BE-02, P2-BE-03, P2-PLAT-02 | G5 g1/07 · gate 4.5 | 3 ชม. |
