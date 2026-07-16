@@ -47,6 +47,7 @@ import { registerAiQtoRoute } from "./routes/ai-qto.js";
 import { registerPrRoute } from "./routes/pr.js";
 import { registerPoRoute } from "./routes/po.js";
 import { registerWoRoute } from "./routes/wo.js";
+import { registerGrRoute } from "./routes/gr.js";
 import { registerDashboardRoute } from "./routes/dashboard.js";
 import type { SignIn } from "./auth.js";
 
@@ -146,6 +147,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerPrRoute(v1);
       registerPoRoute(v1);
       registerWoRoute(v1);
+      registerGrRoute(v1);
       registerDashboardRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,

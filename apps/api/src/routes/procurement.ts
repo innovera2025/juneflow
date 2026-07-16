@@ -153,3 +153,20 @@ export async function prLineAmount(
   }
   return { amount, currency };
 }
+
+/**
+ * The total ORDERED quantity of a PR = Σ over its lines of pr_item.qty (C10 —
+ * real rows, never a hardcoded total). This is the denominator the GR
+ * partial-vs-full check compares cumulative received against: a PO/WO has no
+ * line-item table of its own, so the source PR's line quantities are the only
+ * real "ordered" quantity (gr.ts partial receipt logic). Returns 0 when the PR
+ * has no lines — the caller treats an un-quantified order as never auto-closing.
+ */
+export async function prOrderedQty(db: TenantDb, prId: string): Promise<number> {
+  const lines: PrItemRow[] = await db.selectThrough(
+    prItems,
+    PR_ITEM_HOPS,
+    eq(prs.id, prId),
+  );
+  return lines.reduce((sum, ln) => sum + Number(ln.qty), 0);
+}
