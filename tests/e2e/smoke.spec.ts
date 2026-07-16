@@ -35,21 +35,78 @@ test.describe("smoke: compose dev reachability (G4)", () => {
   });
 });
 
-// login -> shell load (Phase 1 — blocked on P0-WEB-05 / B-020).
+// login -> shell load (the REAL G4 flow) — runs when E2E_LIVE=1.
 //
-// TODO(P0-QA-03 / B-034): implement the full smoke once login + app shell are
-// ported. Spec: prototype extra-screens.jsx:7-56 (ScreenLogin — empty
-// email/password -> validation error; valid creds -> authed + navigate to the
-// dashboard shell) plus the state machine in docs/handoff/flows.html.
-// apps/web currently renders only Placeholder scaffolds (no login form, no
-// shell), so asserting this flow now would invent behavior absent from spec and
-// violate PLAN.md §0 rules 1 & 4. Registered as fixme (a running-suite todo)
-// rather than fabricated — it appears in the report without failing G4.
-test.describe("login -> shell load (Phase 1 — awaits P0-WEB-05 / B-020)", () => {
-  test.fixme(
-    "empty email/password shows validation error; valid creds navigate to dashboard shell",
-    async () => {
-      // Intentionally empty: awaiting login screen + app shell port (P0-WEB-05).
-    },
-  );
+// Spec source (expected BEHAVIOR, not implementation): pototype/extra-screens.jsx
+// ScreenLogin (login() = empty email|password -> validation error, no navigate;
+// valid creds -> authed + navigate("dashboard")) + docs/handoff/flows.html. Only
+// spec-backed, language-stable selectors are asserted:
+//   - LOGIN_TITLE / LOGIN_ERR_REQUIRED are login.title / login.errRequired from
+//     docs/extract/i18n-full.json, which are Thai in EVERY language (B-035/B-036),
+//     so they are stable regardless of the active locale.
+//   - the email/password fields are matched structurally (the only text field /
+//     the sole type=password field on the login panel), never by pixel or layout.
+// Credentials + identity come from the central seed (packages/db seed/index.ts:
+//   COMPANY_USERS[0] "สมชาย วัฒนกุล" / somchai@rungrueang.co.th, DEV_PASSWORD
+//   "juneflow-dev") — no ad-hoc fixture (tests/CLAUDE.md "central seed only").
+//
+// Gated on E2E_LIVE because it needs the seeded compose stack behind the
+// single-origin live-proxy (see e2e/live-proxy.mjs + playwright.config.ts): the
+// browser must make same-origin /api/v1 calls that reach apps/api for the real
+// bearer-JWT flow. Without the flag the suite stays at reachability only.
+const LIVE = Boolean(process.env.E2E_LIVE);
+const liveDescribe = LIVE ? test.describe : test.describe.skip;
+
+// Thai-in-all-languages login copy (i18n-full.json login.*) — stable selectors.
+const LOGIN_TITLE = "เข้าสู่ระบบ"; // login.title (header + submit button)
+const LOGIN_ERR_REQUIRED = "กรุณากรอกอีเมลและรหัสผ่าน"; // login.errRequired
+// Central-seed credentials + the authenticated identity the shell must show.
+const SEED_EMAIL = "somchai@rungrueang.co.th";
+const SEED_PASSWORD = "juneflow-dev";
+const SEED_USER_NAME = "สมชาย วัฒนกุล"; // COMPANY_USERS[0].name -> GET /me user.name
+
+liveDescribe("login -> shell load (G4, live seeded stack)", () => {
+  test("empty credentials show the validation error and do NOT navigate", async ({ page }) => {
+    await page.goto("/login");
+
+    // The login panel exposes exactly one plain text field (email) + one
+    // type=password field (chrome/checkbox excluded) — ScreenLogin form panel.
+    const email = page.locator('input:not([type="password"]):not([type="checkbox"])').first();
+    const password = page.locator('input[type="password"]').first();
+    await expect(email).toBeVisible();
+
+    // Empty BOTH fields (email is pre-filled by the screen) then submit.
+    await email.fill("");
+    await password.fill("");
+    await page.getByRole("button", { name: LOGIN_TITLE }).click();
+
+    // ScreenLogin.login(): validation error is shown and navigation is blocked.
+    await expect(page.getByText(LOGIN_ERR_REQUIRED)).toBeVisible();
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("valid seeded credentials authenticate and render the app shell", async ({ page }) => {
+    await page.goto("/login");
+
+    const email = page.locator('input:not([type="password"]):not([type="checkbox"])').first();
+    const password = page.locator('input[type="password"]').first();
+    await expect(email).toBeVisible();
+
+    await email.fill(SEED_EMAIL);
+    await password.fill(SEED_PASSWORD);
+    await page.getByRole("button", { name: LOGIN_TITLE }).click();
+
+    // login() navigates to the dashboard shell on the real bearer-JWT success.
+    await expect(page).toHaveURL(/\/dashboard$/);
+
+    // App shell chrome renders: sidebar (aside) + its menu tree (nav) + the
+    // per-page topbar (header, ported from chrome.jsx TopBar).
+    await expect(page.locator("aside")).toBeVisible();
+    await expect(page.locator("aside nav")).toBeVisible();
+    await expect(page.locator("header").first()).toBeVisible();
+
+    // The sidebar footer identity comes from the authenticated GET /me — its
+    // presence proves the bearer token flowed through and the session is real.
+    await expect(page.getByText(SEED_USER_NAME)).toBeVisible();
+  });
 });
