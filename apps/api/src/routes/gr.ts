@@ -429,7 +429,7 @@ export function registerGrRoute(app: FastifyInstance): void {
       ? await db.selectThrough(grs, GR_PO_HOPS, eq(grs.poId, poId))
       : await db.selectThrough(grs, GR_WO_HOPS, eq(grs.woId, woId));
     const receivedTotal = anchorGrs
-      .filter((g) => g.status !== "cancelled")
+      .filter((g) => g.status === "received")
       .reduce((sum, g) => sum + Number(g.received), 0);
     const full = ordered > 0 && receivedTotal >= ordered;
     if (full) {

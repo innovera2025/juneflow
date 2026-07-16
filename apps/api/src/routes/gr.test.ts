@@ -703,6 +703,45 @@ describe("POST /api/v1/gr — partial vs full receipt", () => {
     expect(body.received_total).toBe(1000); // 600 + 400, cancelled 999 excluded
     expect(body.partial).toBe(false);
   });
+
+  it("RETURNED GRs are excluded from the cumulative total — a return-then-re-receive does NOT force-close the PO", async () => {
+    // Regression (handler-verify FIX): a returned receipt must not count toward
+    // ordered qty, else the outstanding balance is stranded. ordered 1000,
+    // a returned 600 + a fresh 600 → only the active 600 counts → still partial.
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]], // ordered 1000
+            [
+              grs,
+              [
+                gr("g-ret", { poId: PO, received: 600, status: "returned" }), // excluded
+                gr("new-0", { poId: PO, received: 600, status: "received" }),
+              ],
+            ],
+          ],
+          updated,
+          updateBase: poRow("approved"),
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, lines: [{ qty_ok: 600 }] },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.received_total).toBe(600); // returned 600 excluded, only active 600
+    expect(body.partial).toBe(true);
+    // PO NOT closed — the outstanding 400 must remain receivable.
+    expect(updated.find((u) => u.table === pos)).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
