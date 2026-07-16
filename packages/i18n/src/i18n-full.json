@@ -2692,6 +2692,1260 @@
       "en": "KBANK 012-3-...",
       "zh": "KBANK 012-3-...",
       "ar": "KBANK 012-3-..."
+    },
+    "boq.ovSubtitle": {
+      "th": "ภาพรวม Bill of Quantities · ผูกกับ Master Project → Phase → Block → Unit",
+      "en": "ภาพรวม Bill of Quantities · ผูกกับ Master Project → Phase → Block → Unit",
+      "zh": "ภาพรวม Bill of Quantities · ผูกกับ Master Project → Phase → Block → Unit",
+      "ar": "ภาพรวม Bill of Quantities · ผูกกับ Master Project → Phase → Block → Unit"
+    },
+    "boq.ovScopeLabel": {
+      "th": "ขอบเขต BOQ",
+      "en": "ขอบเขต BOQ",
+      "zh": "ขอบเขต BOQ",
+      "ar": "ขอบเขต BOQ"
+    },
+    "boq.ovScopeFloor": {
+      "th": "ชั้น",
+      "en": "ชั้น",
+      "zh": "ชั้น",
+      "ar": "ชั้น"
+    },
+    "boq.ovReload": {
+      "th": "รีโหลด",
+      "en": "รีโหลด",
+      "zh": "รีโหลด",
+      "ar": "รีโหลด"
+    },
+    "boq.ovReloadToast": {
+      "th": "รีโหลดข้อมูล BOQ ตามขอบเขต",
+      "en": "รีโหลดข้อมูล BOQ ตามขอบเขต",
+      "zh": "รีโหลดข้อมูล BOQ ตามขอบเขต",
+      "ar": "รีโหลดข้อมูล BOQ ตามขอบเขต"
+    },
+    "boq.ovKpiTotal": {
+      "th": "มูลค่า BOQ รวม",
+      "en": "มูลค่า BOQ รวม",
+      "zh": "มูลค่า BOQ รวม",
+      "ar": "มูลค่า BOQ รวม"
+    },
+    "boq.ovKpiPendingRevise": {
+      "th": "รออนุมัติ Revise",
+      "en": "รออนุมัติ Revise",
+      "zh": "รออนุมัติ Revise",
+      "ar": "รออนุมัติ Revise"
+    },
+    "boq.ovKpiUsed": {
+      "th": "ใช้งบไป (จาก BOQ)",
+      "en": "ใช้งบไป (จาก BOQ)",
+      "zh": "ใช้งบไป (จาก BOQ)",
+      "ar": "ใช้งบไป (จาก BOQ)"
+    },
+    "boq.ovFlowTitle": {
+      "th": "การไหลของงบ — BOQ → PR → PO/WO → GR",
+      "en": "การไหลของงบ — BOQ → PR → PO/WO → GR",
+      "zh": "การไหลของงบ — BOQ → PR → PO/WO → GR",
+      "ar": "การไหลของงบ — BOQ → PR → PO/WO → GR"
+    },
+    "boq.ovFlowApproved": {
+      "th": "BOQ ที่อนุมัติ",
+      "en": "BOQ ที่อนุมัติ",
+      "zh": "BOQ ที่อนุมัติ",
+      "ar": "BOQ ที่อนุมัติ"
+    },
+    "boq.ovFlowPR": {
+      "th": "เปิดเป็น PR แล้ว",
+      "en": "เปิดเป็น PR แล้ว",
+      "zh": "เปิดเป็น PR แล้ว",
+      "ar": "เปิดเป็น PR แล้ว"
+    },
+    "boq.ovFlowPOWO": {
+      "th": "อนุมัติเป็น PO / WO",
+      "en": "อนุมัติเป็น PO / WO",
+      "zh": "อนุมัติเป็น PO / WO",
+      "ar": "อนุมัติเป็น PO / WO"
+    },
+    "boq.ovFlowGR": {
+      "th": "รับวัสดุ / รับงาน (GR)",
+      "en": "รับวัสดุ / รับงาน (GR)",
+      "zh": "รับวัสดุ / รับงาน (GR)",
+      "ar": "รับวัสดุ / รับงาน (GR)"
+    },
+    "boq.ovTabBoq": {
+      "th": "BOQ + Balance",
+      "en": "BOQ + Balance",
+      "zh": "BOQ + Balance",
+      "ar": "BOQ + Balance"
+    },
+    "boq.ovTabNon": {
+      "th": "Non-BOQ",
+      "en": "Non-BOQ",
+      "zh": "Non-BOQ",
+      "ar": "Non-BOQ"
+    },
+    "boq.ovTabGrpo": {
+      "th": "GR PO",
+      "en": "GR PO",
+      "zh": "GR PO",
+      "ar": "GR PO"
+    },
+    "boq.ovTabGrwo": {
+      "th": "GR WO",
+      "en": "GR WO",
+      "zh": "GR WO",
+      "ar": "GR WO"
+    },
+    "boq.ovTabRev": {
+      "th": "Revise History",
+      "en": "Revise History",
+      "zh": "Revise History",
+      "ar": "Revise History"
+    },
+    "boq.ovSearchPh": {
+      "th": "ค้นหา Material / Cost Name / รหัส...",
+      "en": "ค้นหา Material / Cost Name / รหัส...",
+      "zh": "ค้นหา Material / Cost Name / รหัส...",
+      "ar": "ค้นหา Material / Cost Name / รหัส..."
+    },
+    "boq.ovEmptyTab": {
+      "th": "เลือกแท็บ {tab} เพื่อดูตารางรายการแสดงตัวอย่าง",
+      "en": "เลือกแท็บ {tab} เพื่อดูตารางรายการแสดงตัวอย่าง",
+      "zh": "เลือกแท็บ {tab} เพื่อดูตารางรายการแสดงตัวอย่าง",
+      "ar": "เลือกแท็บ {tab} เพื่อดูตารางรายการแสดงตัวอย่าง"
+    },
+    "boq.ovThBoqQty": {
+      "th": "BOQ (จำนวน)",
+      "en": "BOQ (จำนวน)",
+      "zh": "BOQ (จำนวน)",
+      "ar": "BOQ (จำนวน)"
+    },
+    "boq.ovThUsed": {
+      "th": "ใช้ไป",
+      "en": "ใช้ไป",
+      "zh": "ใช้ไป",
+      "ar": "ใช้ไป"
+    },
+    "boq.ovThBalance": {
+      "th": "Balance",
+      "en": "Balance",
+      "zh": "Balance",
+      "ar": "Balance"
+    },
+    "boq.ovThBoqValue": {
+      "th": "มูลค่า BOQ (฿)",
+      "en": "มูลค่า BOQ (฿)",
+      "zh": "มูลค่า BOQ (฿)",
+      "ar": "มูลค่า BOQ (฿)"
+    },
+    "boq.ovThBalanceValue": {
+      "th": "Balance (฿)",
+      "en": "Balance (฿)",
+      "zh": "Balance (฿)",
+      "ar": "Balance (฿)"
+    },
+    "boq.ovThPctUsed": {
+      "th": "% Used",
+      "en": "% Used",
+      "zh": "% Used",
+      "ar": "% Used"
+    },
+    "boq.listSubtitle": {
+      "th": "รายการ BOQ ทั้งหมด · ผูกกับ Project → Phase → Block → Unit/Model",
+      "en": "รายการ BOQ ทั้งหมด · ผูกกับ Project → Phase → Block → Unit/Model",
+      "zh": "รายการ BOQ ทั้งหมด · ผูกกับ Project → Phase → Block → Unit/Model",
+      "ar": "รายการ BOQ ทั้งหมด · ผูกกับ Project → Phase → Block → Unit/Model"
+    },
+    "boq.listKpiAll": {
+      "th": "BOQ ทั้งหมด",
+      "en": "BOQ ทั้งหมด",
+      "zh": "BOQ ทั้งหมด",
+      "ar": "BOQ ทั้งหมด"
+    },
+    "boq.listKpiValueFilter": {
+      "th": "มูลค่ารวม (กรอง)",
+      "en": "มูลค่ารวม (กรอง)",
+      "zh": "มูลค่ารวม (กรอง)",
+      "ar": "มูลค่ารวม (กรอง)"
+    },
+    "boq.listKpiValueSub": {
+      "th": "ผลรวมรายการที่แสดง",
+      "en": "ผลรวมรายการที่แสดง",
+      "zh": "ผลรวมรายการที่แสดง",
+      "ar": "ผลรวมรายการที่แสดง"
+    },
+    "boq.listKpiDraftPending": {
+      "th": "ร่าง + รออนุมัติ",
+      "en": "ร่าง + รออนุมัติ",
+      "zh": "ร่าง + รออนุมัติ",
+      "ar": "ร่าง + รออนุมัติ"
+    },
+    "boq.listKpiPendingDelta": {
+      "th": "ค้าง",
+      "en": "ค้าง",
+      "zh": "ค้าง",
+      "ar": "ค้าง"
+    },
+    "boq.listSearchPh": {
+      "th": "ค้นหา รหัส / ชื่อ / ผู้รับผิดชอบ...",
+      "en": "ค้นหา รหัส / ชื่อ / ผู้รับผิดชอบ...",
+      "zh": "ค้นหา รหัส / ชื่อ / ผู้รับผิดชอบ...",
+      "ar": "ค้นหา รหัส / ชื่อ / ผู้รับผิดชอบ..."
+    },
+    "boq.listStatusAll": {
+      "th": "ทุกสถานะ",
+      "en": "ทุกสถานะ",
+      "zh": "ทุกสถานะ",
+      "ar": "ทุกสถานะ"
+    },
+    "boq.listThCodeBoq": {
+      "th": "รหัส BOQ",
+      "en": "รหัส BOQ",
+      "zh": "รหัส BOQ",
+      "ar": "รหัส BOQ"
+    },
+    "boq.listThNameBoq": {
+      "th": "ชื่อ BOQ",
+      "en": "ชื่อ BOQ",
+      "zh": "ชื่อ BOQ",
+      "ar": "ชื่อ BOQ"
+    },
+    "boq.listThScope": {
+      "th": "โครงการ / เฟส / บล็อก / Unit-Model",
+      "en": "โครงการ / เฟส / บล็อก / Unit-Model",
+      "zh": "โครงการ / เฟส / บล็อก / Unit-Model",
+      "ar": "โครงการ / เฟส / บล็อก / Unit-Model"
+    },
+    "boq.listEditInEditor": {
+      "th": "แก้ไขใน Editor",
+      "en": "แก้ไขใน Editor",
+      "zh": "แก้ไขใน Editor",
+      "ar": "แก้ไขใน Editor"
+    },
+    "boq.listDelReasonPh": {
+      "th": "เหตุผลการลบ...",
+      "en": "เหตุผลการลบ...",
+      "zh": "เหตุผลการลบ...",
+      "ar": "เหตุผลการลบ..."
+    },
+    "boq.listNewSubtitle": {
+      "th": "กำหนดขอบเขต · เลือกวิธีเริ่มต้น · ระบบจะออกเลขที่ให้อัตโนมัติ",
+      "en": "กำหนดขอบเขต · เลือกวิธีเริ่มต้น · ระบบจะออกเลขที่ให้อัตโนมัติ",
+      "zh": "กำหนดขอบเขต · เลือกวิธีเริ่มต้น · ระบบจะออกเลขที่ให้อัตโนมัติ",
+      "ar": "กำหนดขอบเขต · เลือกวิธีเริ่มต้น · ระบบจะออกเลขที่ให้อัตโนมัติ"
+    },
+    "boq.listScopeSection": {
+      "th": "ขอบเขต",
+      "en": "ขอบเขต",
+      "zh": "ขอบเขต",
+      "ar": "ขอบเขต"
+    },
+    "boq.listFldUnitModel": {
+      "th": "ยูนิต / Model",
+      "en": "ยูนิต / Model",
+      "zh": "ยูนิต / Model",
+      "ar": "ยูนิต / Model"
+    },
+    "boq.listFldLevel": {
+      "th": "ระดับการสร้าง BOQ",
+      "en": "ระดับการสร้าง BOQ",
+      "zh": "ระดับการสร้าง BOQ",
+      "ar": "ระดับการสร้าง BOQ"
+    },
+    "boq.listLevelBomFormula": {
+      "th": "BOM (ระดับสูตร)",
+      "en": "BOM (ระดับสูตร)",
+      "zh": "BOM (ระดับสูตร)",
+      "ar": "BOM (ระดับสูตร)"
+    },
+    "boq.listLevelByUnit": {
+      "th": "by Model / Unit",
+      "en": "by Model / Unit",
+      "zh": "by Model / Unit",
+      "ar": "by Model / Unit"
+    },
+    "boq.listLevelByBlock": {
+      "th": "by Block / Floor",
+      "en": "by Block / Floor",
+      "zh": "by Block / Floor",
+      "ar": "by Block / Floor"
+    },
+    "boq.listStartFrom": {
+      "th": "เริ่มต้นจาก",
+      "en": "เริ่มต้นจาก",
+      "zh": "เริ่มต้นจาก",
+      "ar": "เริ่มต้นจาก"
+    },
+    "boq.listTplBom": {
+      "th": "จาก BOM (สูตรต่อหลัง)",
+      "en": "จาก BOM (สูตรต่อหลัง)",
+      "zh": "จาก BOM (สูตรต่อหลัง)",
+      "ar": "จาก BOM (สูตรต่อหลัง)"
+    },
+    "boq.listTplBomD": {
+      "th": "ดึงรายการจากสูตร BOM ของ Model ที่เลือก × จำนวนยูนิต",
+      "en": "ดึงรายการจากสูตร BOM ของ Model ที่เลือก × จำนวนยูนิต",
+      "zh": "ดึงรายการจากสูตร BOM ของ Model ที่เลือก × จำนวนยูนิต",
+      "ar": "ดึงรายการจากสูตร BOM ของ Model ที่เลือก × จำนวนยูนิต"
+    },
+    "boq.listTplCopy": {
+      "th": "คัดลอกจาก BOQ เดิม",
+      "en": "คัดลอกจาก BOQ เดิม",
+      "zh": "คัดลอกจาก BOQ เดิม",
+      "ar": "คัดลอกจาก BOQ เดิม"
+    },
+    "boq.listTplCopyD": {
+      "th": "เริ่มจาก BOQ ที่มีอยู่แล้ว แล้วปรับแก้",
+      "en": "เริ่มจาก BOQ ที่มีอยู่แล้ว แล้วปรับแก้",
+      "zh": "เริ่มจาก BOQ ที่มีอยู่แล้ว แล้วปรับแก้",
+      "ar": "เริ่มจาก BOQ ที่มีอยู่แล้ว แล้วปรับแก้"
+    },
+    "boq.listTplScratch": {
+      "th": "สร้างใหม่จากศูนย์",
+      "en": "สร้างใหม่จากศูนย์",
+      "zh": "สร้างใหม่จากศูนย์",
+      "ar": "สร้างใหม่จากศูนย์"
+    },
+    "boq.listTplScratchD": {
+      "th": "เริ่มจาก BOQ เปล่า เพิ่มหมวด/รายการเอง",
+      "en": "เริ่มจาก BOQ เปล่า เพิ่มหมวด/รายการเอง",
+      "zh": "เริ่มจาก BOQ เปล่า เพิ่มหมวด/รายการเอง",
+      "ar": "เริ่มจาก BOQ เปล่า เพิ่มหมวด/รายการเอง"
+    },
+    "boq.listTplExcelD": {
+      "th": "อัปโหลดไฟล์ + จับคู่คอลัมน์ แล้วนำเข้า",
+      "en": "อัปโหลดไฟล์ + จับคู่คอลัมน์ แล้วนำเข้า",
+      "zh": "อัปโหลดไฟล์ + จับคู่คอลัมน์ แล้วนำเข้า",
+      "ar": "อัปโหลดไฟล์ + จับคู่คอลัมน์ แล้วนำเข้า"
+    },
+    "boq.listErrCode": {
+      "th": "ระบุรหัส BOQ",
+      "en": "ระบุรหัส BOQ",
+      "zh": "ระบุรหัส BOQ",
+      "ar": "ระบุรหัส BOQ"
+    },
+    "boq.listErrName": {
+      "th": "ระบุชื่อ BOQ",
+      "en": "ระบุชื่อ BOQ",
+      "zh": "ระบุชื่อ BOQ",
+      "ar": "ระบุชื่อ BOQ"
+    },
+    "boq.listErrExcel": {
+      "th": "อัปโหลดและตรวจสอบไฟล์ก่อนสร้าง",
+      "en": "อัปโหลดและตรวจสอบไฟล์ก่อนสร้าง",
+      "zh": "อัปโหลดและตรวจสอบไฟล์ก่อนสร้าง",
+      "ar": "อัปโหลดและตรวจสอบไฟล์ก่อนสร้าง"
+    },
+    "boq.listSelectBomModel": {
+      "th": "เลือกสูตร BOM (Model)",
+      "en": "เลือกสูตร BOM (Model)",
+      "zh": "เลือกสูตร BOM (Model)",
+      "ar": "เลือกสูตร BOM (Model)"
+    },
+    "boq.listCopyFromBoq": {
+      "th": "คัดลอกจาก BOQ",
+      "en": "คัดลอกจาก BOQ",
+      "zh": "คัดลอกจาก BOQ",
+      "ar": "คัดลอกจาก BOQ"
+    },
+    "boq.listFldCurrency": {
+      "th": "หน่วยเงิน",
+      "en": "หน่วยเงิน",
+      "zh": "หน่วยเงิน",
+      "ar": "หน่วยเงิน"
+    },
+    "boq.listFldStartDate": {
+      "th": "วันที่เริ่มต้น",
+      "en": "วันที่เริ่มต้น",
+      "zh": "วันที่เริ่มต้น",
+      "ar": "วันที่เริ่มต้น"
+    },
+    "boq.listFldOwnerUnit": {
+      "th": "หน่วยงานเจ้าของ",
+      "en": "หน่วยงานเจ้าของ",
+      "zh": "หน่วยงานเจ้าของ",
+      "ar": "หน่วยงานเจ้าของ"
+    },
+    "boq.listFldApprover": {
+      "th": "ผู้อนุมัติขั้นต้น",
+      "en": "ผู้อนุมัติขั้นต้น",
+      "zh": "ผู้อนุมัติขั้นต้น",
+      "ar": "ผู้อนุมัติขั้นต้น"
+    },
+    "boq.listOptionalPh": {
+      "th": "ไม่บังคับ",
+      "en": "ไม่บังคับ",
+      "zh": "ไม่บังคับ",
+      "ar": "ไม่บังคับ"
+    },
+    "boq.listSubmitCreate": {
+      "th": "สร้าง BOQ",
+      "en": "สร้าง BOQ",
+      "zh": "สร้าง BOQ",
+      "ar": "สร้าง BOQ"
+    },
+    "boq.listExcDropText": {
+      "th": "ลากไฟล์ Template BOM & BOQ มาวาง หรือเลือกไฟล์",
+      "en": "ลากไฟล์ Template BOM & BOQ มาวาง หรือเลือกไฟล์",
+      "zh": "ลากไฟล์ Template BOM & BOQ มาวาง หรือเลือกไฟล์",
+      "ar": "ลากไฟล์ Template BOM & BOQ มาวาง หรือเลือกไฟล์"
+    },
+    "boq.listExcDownloadTpl": {
+      "th": "ดาวน์โหลด Template",
+      "en": "ดาวน์โหลด Template",
+      "zh": "ดาวน์โหลด Template",
+      "ar": "ดาวน์โหลด Template"
+    },
+    "boq.listExcPickSample": {
+      "th": "เลือกไฟล์ตัวอย่าง",
+      "en": "เลือกไฟล์ตัวอย่าง",
+      "zh": "เลือกไฟล์ตัวอย่าง",
+      "ar": "เลือกไฟล์ตัวอย่าง"
+    },
+    "boq.listExcChangeFile": {
+      "th": "เปลี่ยนไฟล์",
+      "en": "เปลี่ยนไฟล์",
+      "zh": "เปลี่ยนไฟล์",
+      "ar": "เปลี่ยนไฟล์"
+    },
+    "boq.edCreateRevise": {
+      "th": "สร้าง Revise",
+      "en": "สร้าง Revise",
+      "zh": "สร้าง Revise",
+      "ar": "สร้าง Revise"
+    },
+    "boq.edSaveDraftToast": {
+      "th": "บันทึกร่าง BOQ แล้ว",
+      "en": "บันทึกร่าง BOQ แล้ว",
+      "zh": "บันทึกร่าง BOQ แล้ว",
+      "ar": "บันทึกร่าง BOQ แล้ว"
+    },
+    "boq.edSendApproveTitle": {
+      "th": "ส่ง BOQ ไปอนุมัติ",
+      "en": "ส่ง BOQ ไปอนุมัติ",
+      "zh": "ส่ง BOQ ไปอนุมัติ",
+      "ar": "ส่ง BOQ ไปอนุมัติ"
+    },
+    "boq.edSendApproveToast": {
+      "th": "ส่ง BOQ ไปอนุมัติแล้ว",
+      "en": "ส่ง BOQ ไปอนุมัติแล้ว",
+      "zh": "ส่ง BOQ ไปอนุมัติแล้ว",
+      "ar": "ส่ง BOQ ไปอนุมัติแล้ว"
+    },
+    "boq.edLockBadge": {
+      "th": "🔒 ล็อก · แก้ไขผ่าน Revise",
+      "en": "🔒 ล็อก · แก้ไขผ่าน Revise",
+      "zh": "🔒 ล็อก · แก้ไขผ่าน Revise",
+      "ar": "🔒 ล็อก · แก้ไขผ่าน Revise"
+    },
+    "boq.edReviseBadge": {
+      "th": "กำลังแก้ไขเป็นเวอร์ชันใหม่ → ส่งอนุมัติ Revise",
+      "en": "กำลังแก้ไขเป็นเวอร์ชันใหม่ → ส่งอนุมัติ Revise",
+      "zh": "กำลังแก้ไขเป็นเวอร์ชันใหม่ → ส่งอนุมัติ Revise",
+      "ar": "กำลังแก้ไขเป็นเวอร์ชันใหม่ → ส่งอนุมัติ Revise"
+    },
+    "boq.edFreshBadge": {
+      "th": "BOQ ใหม่ · ยังไม่มีรายการ",
+      "en": "BOQ ใหม่ · ยังไม่มีรายการ",
+      "zh": "BOQ ใหม่ · ยังไม่มีรายการ",
+      "ar": "BOQ ใหม่ · ยังไม่มีรายการ"
+    },
+    "boq.edLevelBomHouse": {
+      "th": "BOM (ตามแบบบ้าน)",
+      "en": "BOM (ตามแบบบ้าน)",
+      "zh": "BOM (ตามแบบบ้าน)",
+      "ar": "BOM (ตามแบบบ้าน)"
+    },
+    "boq.edEmptyTitle": {
+      "th": "ยังไม่มีรายการ — เริ่มจากไหนดี?",
+      "en": "ยังไม่มีรายการ — เริ่มจากไหนดี?",
+      "zh": "ยังไม่มีรายการ — เริ่มจากไหนดี?",
+      "ar": "ยังไม่มีรายการ — เริ่มจากไหนดี?"
+    },
+    "boq.edStartManual": {
+      "th": "เพิ่มรายการด้วยตัวเอง",
+      "en": "เพิ่มรายการด้วยตัวเอง",
+      "zh": "เพิ่มรายการด้วยตัวเอง",
+      "ar": "เพิ่มรายการด้วยตัวเอง"
+    },
+    "boq.edStartManualD": {
+      "th": "เริ่มจากหมวดงานมาตรฐาน 6 หมวด",
+      "en": "เริ่มจากหมวดงานมาตรฐาน 6 หมวด",
+      "zh": "เริ่มจากหมวดงานมาตรฐาน 6 หมวด",
+      "ar": "เริ่มจากหมวดงานมาตรฐาน 6 หมวด"
+    },
+    "boq.edStartBom": {
+      "th": "นำเข้าจาก BOM",
+      "en": "นำเข้าจาก BOM",
+      "zh": "นำเข้าจาก BOM",
+      "ar": "นำเข้าจาก BOM"
+    },
+    "boq.edStartBomD": {
+      "th": "ดึงสูตรวัสดุ-แรงงานต่อหลัง",
+      "en": "ดึงสูตรวัสดุ-แรงงานต่อหลัง",
+      "zh": "ดึงสูตรวัสดุ-แรงงานต่อหลัง",
+      "ar": "ดึงสูตรวัสดุ-แรงงานต่อหลัง"
+    },
+    "boq.edStartExcelD": {
+      "th": "อัปโหลด + จับคู่คอลัมน์",
+      "en": "อัปโหลด + จับคู่คอลัมน์",
+      "zh": "อัปโหลด + จับคู่คอลัมน์",
+      "ar": "อัปโหลด + จับคู่คอลัมน์"
+    },
+    "boq.edDownloadTplExcel": {
+      "th": "ดาวน์โหลด Template Excel",
+      "en": "ดาวน์โหลด Template Excel",
+      "zh": "ดาวน์โหลด Template Excel",
+      "ar": "ดาวน์โหลด Template Excel"
+    },
+    "boq.edStartManualToast": {
+      "th": "เริ่มด้วยหมวดงานมาตรฐาน — เพิ่มรายการได้เลย",
+      "en": "เริ่มด้วยหมวดงานมาตรฐาน — เพิ่มรายการได้เลย",
+      "zh": "เริ่มด้วยหมวดงานมาตรฐาน — เพิ่มรายการได้เลย",
+      "ar": "เริ่มด้วยหมวดงานมาตรฐาน — เพิ่มรายการได้เลย"
+    },
+    "boq.edStartBomToast": {
+      "th": "ดึงรายการจากสูตร BOM แล้ว · ตรวจสอบและปรับแก้ได้",
+      "en": "ดึงรายการจากสูตร BOM แล้ว · ตรวจสอบและปรับแก้ได้",
+      "zh": "ดึงรายการจากสูตร BOM แล้ว · ตรวจสอบและปรับแก้ได้",
+      "ar": "ดึงรายการจากสูตร BOM แล้ว · ตรวจสอบและปรับแก้ได้"
+    },
+    "boq.edCardMaterial": {
+      "th": "Material · วัสดุ",
+      "en": "Material · วัสดุ",
+      "zh": "Material · วัสดุ",
+      "ar": "Material · วัสดุ"
+    },
+    "boq.edCardSubcon": {
+      "th": "Subcontractor · ค่าผู้รับเหมา",
+      "en": "Subcontractor · ค่าผู้รับเหมา",
+      "zh": "Subcontractor · ค่าผู้รับเหมา",
+      "ar": "Subcontractor · ค่าผู้รับเหมา"
+    },
+    "boq.edCardLabor": {
+      "th": "Labor · ค่าแรง",
+      "en": "Labor · ค่าแรง",
+      "zh": "Labor · ค่าแรง",
+      "ar": "Labor · ค่าแรง"
+    },
+    "boq.edCardTotalGroup": {
+      "th": "ยอดรวมหมวดนี้",
+      "en": "ยอดรวมหมวดนี้",
+      "zh": "ยอดรวมหมวดนี้",
+      "ar": "ยอดรวมหมวดนี้"
+    },
+    "boq.edCbsTitle": {
+      "th": "Budget Control · CBS",
+      "en": "Budget Control · CBS",
+      "zh": "Budget Control · CBS",
+      "ar": "Budget Control · CBS"
+    },
+    "boq.edCbsSubtitle": {
+      "th": "งบ vs ใช้ไป vs ผูกพัน vs คงเหลือ — ตามหมวดงาน",
+      "en": "งบ vs ใช้ไป vs ผูกพัน vs คงเหลือ — ตามหมวดงาน",
+      "zh": "งบ vs ใช้ไป vs ผูกพัน vs คงเหลือ — ตามหมวดงาน",
+      "ar": "งบ vs ใช้ไป vs ผูกพัน vs คงเหลือ — ตามหมวดงาน"
+    },
+    "boq.edCbsBudget": {
+      "th": "งบรวม",
+      "en": "งบรวม",
+      "zh": "งบรวม",
+      "ar": "งบรวม"
+    },
+    "boq.edCbsCommitted": {
+      "th": "ผูกพัน",
+      "en": "ผูกพัน",
+      "zh": "ผูกพัน",
+      "ar": "ผูกพัน"
+    },
+    "boq.edCbsLegUsed": {
+      "th": "ใช้ไป (Actual)",
+      "en": "ใช้ไป (Actual)",
+      "zh": "ใช้ไป (Actual)",
+      "ar": "ใช้ไป (Actual)"
+    },
+    "boq.edCbsLegCommit": {
+      "th": "ผูกพัน (PR/PO Committed)",
+      "en": "ผูกพัน (PR/PO Committed)",
+      "zh": "ผูกพัน (PR/PO Committed)",
+      "ar": "ผูกพัน (PR/PO Committed)"
+    },
+    "boq.edGroupsPanel": {
+      "th": "BOQ Groups",
+      "en": "BOQ Groups",
+      "zh": "BOQ Groups",
+      "ar": "BOQ Groups"
+    },
+    "boq.edRename": {
+      "th": "เปลี่ยนชื่อ",
+      "en": "เปลี่ยนชื่อ",
+      "zh": "เปลี่ยนชื่อ",
+      "ar": "เปลี่ยนชื่อ"
+    },
+    "boq.edDelGroup": {
+      "th": "ลบหมวด",
+      "en": "ลบหมวด",
+      "zh": "ลบหมวด",
+      "ar": "ลบหมวด"
+    },
+    "boq.edGroupsFooterTotal": {
+      "th": "ยอดรวมทุกหมวด",
+      "en": "ยอดรวมทุกหมวด",
+      "zh": "ยอดรวมทุกหมวด",
+      "ar": "ยอดรวมทุกหมวด"
+    },
+    "boq.edReadOnly": {
+      "th": "อ่านอย่างเดียว",
+      "en": "อ่านอย่างเดียว",
+      "zh": "อ่านอย่างเดียว",
+      "ar": "อ่านอย่างเดียว"
+    },
+    "boq.edTemplateBtn": {
+      "th": "Template",
+      "en": "Template",
+      "zh": "Template",
+      "ar": "Template"
+    },
+    "boq.edImportBtn": {
+      "th": "Import",
+      "en": "Import",
+      "zh": "Import",
+      "ar": "Import"
+    },
+    "boq.edGenPr": {
+      "th": "สร้าง PR จากรายการที่เลือก",
+      "en": "สร้าง PR จากรายการที่เลือก",
+      "zh": "สร้าง PR จากรายการที่เลือก",
+      "ar": "สร้าง PR จากรายการที่เลือก"
+    },
+    "boq.edMoveGroup": {
+      "th": "ย้ายหมวด",
+      "en": "ย้ายหมวด",
+      "zh": "ย้ายหมวด",
+      "ar": "ย้ายหมวด"
+    },
+    "boq.edMoveGroupToast": {
+      "th": "ย้ายไปหมวดอื่น · เลือกหมวดในเมนูถัดไป",
+      "en": "ย้ายไปหมวดอื่น · เลือกหมวดในเมนูถัดไป",
+      "zh": "ย้ายไปหมวดอื่น · เลือกหมวดในเมนูถัดไป",
+      "ar": "ย้ายไปหมวดอื่น · เลือกหมวดในเมนูถัดไป"
+    },
+    "boq.edDelSelected": {
+      "th": "ลบที่เลือก",
+      "en": "ลบที่เลือก",
+      "zh": "ลบที่เลือก",
+      "ar": "ลบที่เลือก"
+    },
+    "boq.edThMaterialItem": {
+      "th": "Material / รายการ",
+      "en": "Material / รายการ",
+      "zh": "Material / รายการ",
+      "ar": "Material / รายการ"
+    },
+    "boq.edThCostName": {
+      "th": "Cost Name",
+      "en": "Cost Name",
+      "zh": "Cost Name",
+      "ar": "Cost Name"
+    },
+    "boq.edThQty": {
+      "th": "QTY",
+      "en": "QTY",
+      "zh": "QTY",
+      "ar": "QTY"
+    },
+    "boq.edThUnitEn": {
+      "th": "Unit",
+      "en": "Unit",
+      "zh": "Unit",
+      "ar": "Unit"
+    },
+    "boq.edThPriceUnit": {
+      "th": "Price/Unit",
+      "en": "Price/Unit",
+      "zh": "Price/Unit",
+      "ar": "Price/Unit"
+    },
+    "boq.edThTotal": {
+      "th": "Total (฿)",
+      "en": "Total (฿)",
+      "zh": "Total (฿)",
+      "ar": "Total (฿)"
+    },
+    "boq.edEmptyRowsGroup": {
+      "th": "ยังไม่มีรายการในหมวดนี้ — กด 'เพิ่มรายการ' เพื่อเริ่ม",
+      "en": "ยังไม่มีรายการในหมวดนี้ — กด 'เพิ่มรายการ' เพื่อเริ่ม",
+      "zh": "ยังไม่มีรายการในหมวดนี้ — กด 'เพิ่มรายการ' เพื่อเริ่ม",
+      "ar": "ยังไม่มีรายการในหมวดนี้ — กด 'เพิ่มรายการ' เพื่อเริ่ม"
+    },
+    "boq.edEmptyRowsFilter": {
+      "th": "ไม่พบรายการที่ตรงกับตัวกรอง",
+      "en": "ไม่พบรายการที่ตรงกับตัวกรอง",
+      "zh": "ไม่พบรายการที่ตรงกับตัวกรอง",
+      "ar": "ไม่พบรายการที่ตรงกับตัวกรอง"
+    },
+    "boq.edDupRowToast": {
+      "th": "ทำซ้ำรายการแล้ว",
+      "en": "ทำซ้ำรายการแล้ว",
+      "zh": "ทำซ้ำรายการแล้ว",
+      "ar": "ทำซ้ำรายการแล้ว"
+    },
+    "boq.edItemEditTitle": {
+      "th": "แก้ไขรายการ BOQ",
+      "en": "แก้ไขรายการ BOQ",
+      "zh": "แก้ไขรายการ BOQ",
+      "ar": "แก้ไขรายการ BOQ"
+    },
+    "boq.edItemAddTitle": {
+      "th": "เพิ่มรายการ BOQ",
+      "en": "เพิ่มรายการ BOQ",
+      "zh": "เพิ่มรายการ BOQ",
+      "ar": "เพิ่มรายการ BOQ"
+    },
+    "boq.edItemUpdateToast": {
+      "th": "อัปเดตรายการแล้ว",
+      "en": "อัปเดตรายการแล้ว",
+      "zh": "อัปเดตรายการแล้ว",
+      "ar": "อัปเดตรายการแล้ว"
+    },
+    "boq.edItemAddToast": {
+      "th": "เพิ่มรายการแล้ว · อัปเดตยอดรวม",
+      "en": "เพิ่มรายการแล้ว · อัปเดตยอดรวม",
+      "zh": "เพิ่มรายการแล้ว · อัปเดตยอดรวม",
+      "ar": "เพิ่มรายการแล้ว · อัปเดตยอดรวม"
+    },
+    "boq.edDelItemTitle": {
+      "th": "ลบรายการ BOQ",
+      "en": "ลบรายการ BOQ",
+      "zh": "ลบรายการ BOQ",
+      "ar": "ลบรายการ BOQ"
+    },
+    "boq.edItemThis": {
+      "th": "รายการนี้",
+      "en": "รายการนี้",
+      "zh": "รายการนี้",
+      "ar": "รายการนี้"
+    },
+    "boq.edAddGroupTitle": {
+      "th": "เพิ่ม BOQ Group ใหม่",
+      "en": "เพิ่ม BOQ Group ใหม่",
+      "zh": "เพิ่ม BOQ Group ใหม่",
+      "ar": "เพิ่ม BOQ Group ใหม่"
+    },
+    "boq.edAddGroupSubtitle": {
+      "th": "กำหนดรหัส + ชื่อหมวดงาน",
+      "en": "กำหนดรหัส + ชื่อหมวดงาน",
+      "zh": "กำหนดรหัส + ชื่อหมวดงาน",
+      "ar": "กำหนดรหัส + ชื่อหมวดงาน"
+    },
+    "boq.edRenameGroupTitle": {
+      "th": "เปลี่ยนชื่อหมวด",
+      "en": "เปลี่ยนชื่อหมวด",
+      "zh": "เปลี่ยนชื่อหมวด",
+      "ar": "เปลี่ยนชื่อหมวด"
+    },
+    "boq.edRenameGroupToast": {
+      "th": "เปลี่ยนชื่อหมวดแล้ว",
+      "en": "เปลี่ยนชื่อหมวดแล้ว",
+      "zh": "เปลี่ยนชื่อหมวดแล้ว",
+      "ar": "เปลี่ยนชื่อหมวดแล้ว"
+    },
+    "boq.edDelGroupTitle": {
+      "th": "ลบ BOQ Group",
+      "en": "ลบ BOQ Group",
+      "zh": "ลบ BOQ Group",
+      "ar": "ลบ BOQ Group"
+    },
+    "boq.edDelGroupReasonPh": {
+      "th": "เหตุผลการลบหมวด...",
+      "en": "เหตุผลการลบหมวด...",
+      "zh": "เหตุผลการลบหมวด...",
+      "ar": "เหตุผลการลบหมวด..."
+    },
+    "boq.edItemTypeLabel": {
+      "th": "ประเภทรายการ",
+      "en": "ประเภทรายการ",
+      "zh": "ประเภทรายการ",
+      "ar": "ประเภทรายการ"
+    },
+    "boq.edCatMaterial": {
+      "th": "Material",
+      "en": "Material",
+      "zh": "Material",
+      "ar": "Material"
+    },
+    "boq.edCatSubcon": {
+      "th": "Subcontractor",
+      "en": "Subcontractor",
+      "zh": "Subcontractor",
+      "ar": "Subcontractor"
+    },
+    "boq.edCatLabor": {
+      "th": "Labor",
+      "en": "Labor",
+      "zh": "Labor",
+      "ar": "Labor"
+    },
+    "boq.edFldItemCode": {
+      "th": "รหัสรายการ",
+      "en": "รหัสรายการ",
+      "zh": "รหัสรายการ",
+      "ar": "รหัสรายการ"
+    },
+    "boq.edFldItemName": {
+      "th": "ชื่อรายการ (Material)",
+      "en": "ชื่อรายการ (Material)",
+      "zh": "ชื่อรายการ (Material)",
+      "ar": "ชื่อรายการ (Material)"
+    },
+    "boq.edFldCostCenter": {
+      "th": "Cost Center (Cost_Code ↔ Cost_Name)",
+      "en": "Cost Center (Cost_Code ↔ Cost_Name)",
+      "zh": "Cost Center (Cost_Code ↔ Cost_Name)",
+      "ar": "Cost Center (Cost_Code ↔ Cost_Name)"
+    },
+    "boq.edCostCenterPh": {
+      "th": "เลือก Cost Center...",
+      "en": "เลือก Cost Center...",
+      "zh": "เลือก Cost Center...",
+      "ar": "เลือก Cost Center..."
+    },
+    "boq.edFldQty": {
+      "th": "จำนวน (QTY)",
+      "en": "จำนวน (QTY)",
+      "zh": "จำนวน (QTY)",
+      "ar": "จำนวน (QTY)"
+    },
+    "boq.edFldPriceUnit": {
+      "th": "ราคา / หน่วย",
+      "en": "ราคา / หน่วย",
+      "zh": "ราคา / หน่วย",
+      "ar": "ราคา / หน่วย"
+    },
+    "boq.edItemTotalValue": {
+      "th": "มูลค่ารวมรายการ",
+      "en": "มูลค่ารวมรายการ",
+      "zh": "มูลค่ารวมรายการ",
+      "ar": "มูลค่ารวมรายการ"
+    },
+    "boq.edAddItemUpdate": {
+      "th": "เพิ่มรายการ + อัปเดตยอด",
+      "en": "เพิ่มรายการ + อัปเดตยอด",
+      "zh": "เพิ่มรายการ + อัปเดตยอด",
+      "ar": "เพิ่มรายการ + อัปเดตยอด"
+    },
+    "boq.edFldGroupCode": {
+      "th": "รหัสหมวด",
+      "en": "รหัสหมวด",
+      "zh": "รหัสหมวด",
+      "ar": "รหัสหมวด"
+    },
+    "boq.edFldGroupName": {
+      "th": "ชื่อหมวดงาน",
+      "en": "ชื่อหมวดงาน",
+      "zh": "ชื่อหมวดงาน",
+      "ar": "ชื่อหมวดงาน"
+    },
+    "boq.edReviseTitle": {
+      "th": "สร้าง Revise (ขอแก้ไข BOQ)",
+      "en": "สร้าง Revise (ขอแก้ไข BOQ)",
+      "zh": "สร้าง Revise (ขอแก้ไข BOQ)",
+      "ar": "สร้าง Revise (ขอแก้ไข BOQ)"
+    },
+    "boq.edReviseCopyNote": {
+      "th": "คัดลอกรายการเดิมมาทั้งหมด แล้วแก้ไขได้",
+      "en": "คัดลอกรายการเดิมมาทั้งหมด แล้วแก้ไขได้",
+      "zh": "คัดลอกรายการเดิมมาทั้งหมด แล้วแก้ไขได้",
+      "ar": "คัดลอกรายการเดิมมาทั้งหมด แล้วแก้ไขได้"
+    },
+    "boq.edReviseScopeLabel": {
+      "th": "ขอบเขตการแก้ไข",
+      "en": "ขอบเขตการแก้ไข",
+      "zh": "ขอบเขตการแก้ไข",
+      "ar": "ขอบเขตการแก้ไข"
+    },
+    "boq.edReviseScope1": {
+      "th": "เพิ่ม/แก้รายการบางส่วน",
+      "en": "เพิ่ม/แก้รายการบางส่วน",
+      "zh": "เพิ่ม/แก้รายการบางส่วน",
+      "ar": "เพิ่ม/แก้รายการบางส่วน"
+    },
+    "boq.edReviseScope2": {
+      "th": "แก้ราคาต่อหน่วย (price update)",
+      "en": "แก้ราคาต่อหน่วย (price update)",
+      "zh": "แก้ราคาต่อหน่วย (price update)",
+      "ar": "แก้ราคาต่อหน่วย (price update)"
+    },
+    "boq.edReviseScope3": {
+      "th": "เพิ่มหมวดงานใหม่",
+      "en": "เพิ่มหมวดงานใหม่",
+      "zh": "เพิ่มหมวดงานใหม่",
+      "ar": "เพิ่มหมวดงานใหม่"
+    },
+    "boq.edReviseScope4": {
+      "th": "ปรับทั้ง BOQ (major revise)",
+      "en": "ปรับทั้ง BOQ (major revise)",
+      "zh": "ปรับทั้ง BOQ (major revise)",
+      "ar": "ปรับทั้ง BOQ (major revise)"
+    },
+    "boq.edReviseReasonLabel": {
+      "th": "เหตุผลการขอแก้ไข",
+      "en": "เหตุผลการขอแก้ไข",
+      "zh": "เหตุผลการขอแก้ไข",
+      "ar": "เหตุผลการขอแก้ไข"
+    },
+    "boq.edReviseReasonPh": {
+      "th": "เช่น ราคาเหล็กปรับขึ้น + เจ้าของเพิ่มงานไฟฟ้า...",
+      "en": "เช่น ราคาเหล็กปรับขึ้น + เจ้าของเพิ่มงานไฟฟ้า...",
+      "zh": "เช่น ราคาเหล็กปรับขึ้น + เจ้าของเพิ่มงานไฟฟ้า...",
+      "ar": "เช่น ราคาเหล็กปรับขึ้น + เจ้าของเพิ่มงานไฟฟ้า..."
+    },
+    "boq.edReviseReasonErr": {
+      "th": "ต้องระบุเหตุผลก่อนสร้าง Revise",
+      "en": "ต้องระบุเหตุผลก่อนสร้าง Revise",
+      "zh": "ต้องระบุเหตุผลก่อนสร้าง Revise",
+      "ar": "ต้องระบุเหตุผลก่อนสร้าง Revise"
+    },
+    "boq.edLockTitle": {
+      "th": "BOQ นี้อนุมัติแล้ว — แก้ไขได้ผ่าน Revise เท่านั้น",
+      "en": "BOQ นี้อนุมัติแล้ว — แก้ไขได้ผ่าน Revise เท่านั้น",
+      "zh": "BOQ นี้อนุมัติแล้ว — แก้ไขได้ผ่าน Revise เท่านั้น",
+      "ar": "BOQ นี้อนุมัติแล้ว — แก้ไขได้ผ่าน Revise เท่านั้น"
+    },
+    "boq.edLockDesc": {
+      "th": "ตารางรายการถูกล็อกเพื่อรักษาความถูกต้องของงบที่อนุมัติ · การแก้ไขจะสร้างเป็นเวอร์ชันใหม่และต้องผ่านการอนุมัติ",
+      "en": "ตารางรายการถูกล็อกเพื่อรักษาความถูกต้องของงบที่อนุมัติ · การแก้ไขจะสร้างเป็นเวอร์ชันใหม่และต้องผ่านการอนุมัติ",
+      "zh": "ตารางรายการถูกล็อกเพื่อรักษาความถูกต้องของงบที่อนุมัติ · การแก้ไขจะสร้างเป็นเวอร์ชันใหม่และต้องผ่านการอนุมัติ",
+      "ar": "ตารางรายการถูกล็อกเพื่อรักษาความถูกต้องของงบที่อนุมัติ · การแก้ไขจะสร้างเป็นเวอร์ชันใหม่และต้องผ่านการอนุมัติ"
+    },
+    "boq.edLockCreateRevise": {
+      "th": "สร้าง Revise (ขอแก้ไข)",
+      "en": "สร้าง Revise (ขอแก้ไข)",
+      "zh": "สร้าง Revise (ขอแก้ไข)",
+      "ar": "สร้าง Revise (ขอแก้ไข)"
+    },
+    "boq.edAuditSubtitle": {
+      "th": "ใคร · เมื่อไหร่ · แก้อะไร",
+      "en": "ใคร · เมื่อไหร่ · แก้อะไร",
+      "zh": "ใคร · เมื่อไหร่ · แก้อะไร",
+      "ar": "ใคร · เมื่อไหร่ · แก้อะไร"
+    },
+    "boq.edAuditExport": {
+      "th": "Export ประวัติ",
+      "en": "Export ประวัติ",
+      "zh": "Export ประวัติ",
+      "ar": "Export ประวัติ"
+    },
+    "boq.edAuditExportToast": {
+      "th": "Export ประวัติการแก้ไข (CSV)",
+      "en": "Export ประวัติการแก้ไข (CSV)",
+      "zh": "Export ประวัติการแก้ไข (CSV)",
+      "ar": "Export ประวัติการแก้ไข (CSV)"
+    },
+    "boq.ovFlowSubtitle": {
+      "th": "เทียบมูลค่าแต่ละขั้นกับ BOQ ({total}) · ตัดงบอัตโนมัติเมื่ออนุมัติ PO/WO",
+      "en": "เทียบมูลค่าแต่ละขั้นกับ BOQ ({total}) · ตัดงบอัตโนมัติเมื่ออนุมัติ PO/WO",
+      "zh": "เทียบมูลค่าแต่ละขั้นกับ BOQ ({total}) · ตัดงบอัตโนมัติเมื่ออนุมัติ PO/WO",
+      "ar": "เทียบมูลค่าแต่ละขั้นกับ BOQ ({total}) · ตัดงบอัตโนมัติเมื่ออนุมัติ PO/WO"
+    },
+    "boq.ovUpdatedAt": {
+      "th": "อัปเดต {time} น.",
+      "en": "อัปเดต {time} น.",
+      "zh": "อัปเดต {time} น.",
+      "ar": "อัปเดต {time} น."
+    },
+    "boq.ovRemainInfo": {
+      "th": "คงเหลือใน BOQ พร้อมใช้ {value} — ยังไม่ได้เปิด PR ({pct})",
+      "en": "คงเหลือใน BOQ พร้อมใช้ {value} — ยังไม่ได้เปิด PR ({pct})",
+      "zh": "คงเหลือใน BOQ พร้อมใช้ {value} — ยังไม่ได้เปิด PR ({pct})",
+      "ar": "คงเหลือใน BOQ พร้อมใช้ {value} — ยังไม่ได้เปิด PR ({pct})"
+    },
+    "boq.ovCommitInfo": {
+      "th": "ภาระผูกพันรอ GR {value}",
+      "en": "ภาระผูกพันรอ GR {value}",
+      "zh": "ภาระผูกพันรอ GR {value}",
+      "ar": "ภาระผูกพันรอ GR {value}"
+    },
+    "boq.listKpiMatchFilter": {
+      "th": "{n} ตรงตัวกรอง",
+      "en": "{n} ตรงตัวกรอง",
+      "zh": "{n} ตรงตัวกรอง",
+      "ar": "{n} ตรงตัวกรอง"
+    },
+    "boq.listShowCount": {
+      "th": "แสดง {shown} จาก {total} ฉบับ",
+      "en": "แสดง {shown} จาก {total} ฉบับ",
+      "zh": "แสดง {shown} จาก {total} ฉบับ",
+      "ar": "แสดง {shown} จาก {total} ฉบับ"
+    },
+    "boq.listEmptyText": {
+      "th": "ไม่พบ BOQ ตามเงื่อนไข · ลองล้างตัวกรอง หรือ {create}",
+      "en": "ไม่พบ BOQ ตามเงื่อนไข · ลองล้างตัวกรอง หรือ {create}",
+      "zh": "ไม่พบ BOQ ตามเงื่อนไข · ลองล้างตัวกรอง หรือ {create}",
+      "ar": "ไม่พบ BOQ ตามเงื่อนไข · ลองล้างตัวกรอง หรือ {create}"
+    },
+    "boq.listFootTotal": {
+      "th": "รวม {n} ฉบับ",
+      "en": "รวม {n} ฉบับ",
+      "zh": "รวม {n} ฉบับ",
+      "ar": "รวม {n} ฉบับ"
+    },
+    "boq.listDupToast": {
+      "th": "ทำซ้ำเป็น {no} แล้ว",
+      "en": "ทำซ้ำเป็น {no} แล้ว",
+      "zh": "ทำซ้ำเป็น {no} แล้ว",
+      "ar": "ทำซ้ำเป็น {no} แล้ว"
+    },
+    "boq.listDelMsg": {
+      "th": "ต้องการลบ {no} — {name} ({value} ฿) ออกจากระบบใช่หรือไม่? ไม่สามารถย้อนกลับได้",
+      "en": "ต้องการลบ {no} — {name} ({value} ฿) ออกจากระบบใช่หรือไม่? ไม่สามารถย้อนกลับได้",
+      "zh": "ต้องการลบ {no} — {name} ({value} ฿) ออกจากระบบใช่หรือไม่? ไม่สามารถย้อนกลับได้",
+      "ar": "ต้องการลบ {no} — {name} ({value} ฿) ออกจากระบบใช่หรือไม่? ไม่สามารถย้อนกลับได้"
+    },
+    "boq.listDelToast": {
+      "th": "ลบ {no} แล้ว",
+      "en": "ลบ {no} แล้ว",
+      "zh": "ลบ {no} แล้ว",
+      "ar": "ลบ {no} แล้ว"
+    },
+    "boq.listNameBoqPh": {
+      "th": "เช่น ทาวน์โฮม Block B (เฟส 2)",
+      "en": "เช่น ทาวน์โฮม Block B (เฟส 2)",
+      "zh": "เช่น ทาวน์โฮม Block B (เฟส 2)",
+      "ar": "เช่น ทาวน์โฮม Block B (เฟส 2)"
+    },
+    "boq.listCreateToast": {
+      "th": "สร้าง {no} สำเร็จ",
+      "en": "สร้าง {no} สำเร็จ",
+      "zh": "สร้าง {no} สำเร็จ",
+      "ar": "สร้าง {no} สำเร็จ"
+    },
+    "boq.listCurBaht": {
+      "th": "บาท (THB)",
+      "en": "บาท (THB)",
+      "zh": "บาท (THB)",
+      "ar": "บาท (THB)"
+    },
+    "boq.listCurUsd": {
+      "th": "ดอลลาร์ (USD)",
+      "en": "ดอลลาร์ (USD)",
+      "zh": "ดอลลาร์ (USD)",
+      "ar": "ดอลลาร์ (USD)"
+    },
+    "boq.listExcGroupBom": {
+      "th": "กลุ่ม BOM",
+      "en": "กลุ่ม BOM",
+      "zh": "กลุ่ม BOM",
+      "ar": "กลุ่ม BOM"
+    },
+    "boq.listExcItemCode": {
+      "th": "รหัส Item",
+      "en": "รหัส Item",
+      "zh": "รหัส Item",
+      "ar": "รหัส Item"
+    },
+    "boq.listExcItemName": {
+      "th": "ชื่อรายการ",
+      "en": "ชื่อรายการ",
+      "zh": "ชื่อรายการ",
+      "ar": "ชื่อรายการ"
+    },
+    "boq.listExcCostCode": {
+      "th": "รหัส Cost",
+      "en": "รหัส Cost",
+      "zh": "รหัส Cost",
+      "ar": "รหัส Cost"
+    },
+    "boq.listExcCostName": {
+      "th": "ชื่อ Cost Center",
+      "en": "ชื่อ Cost Center",
+      "zh": "ชื่อ Cost Center",
+      "ar": "ชื่อ Cost Center"
+    },
+    "boq.listExcMS": {
+      "th": "M/S",
+      "en": "M/S",
+      "zh": "M/S",
+      "ar": "M/S"
+    },
+    "boq.listExcSupport": {
+      "th": "รองรับ .xlsx, .csv · 10 คอลัมน์: Group_boq · Material_Code · Material_Name · Detail · Cost_Code · Cost_Name · QTY · UOM · Price_Unit · Type",
+      "en": "รองรับ .xlsx, .csv · 10 คอลัมน์: Group_boq · Material_Code · Material_Name · Detail · Cost_Code · Cost_Name · QTY · UOM · Price_Unit · Type",
+      "zh": "รองรับ .xlsx, .csv · 10 คอลัมน์: Group_boq · Material_Code · Material_Name · Detail · Cost_Code · Cost_Name · QTY · UOM · Price_Unit · Type",
+      "ar": "รองรับ .xlsx, .csv · 10 คอลัมน์: Group_boq · Material_Code · Material_Name · Detail · Cost_Code · Cost_Name · QTY · UOM · Price_Unit · Type"
+    },
+    "boq.listExcSkipRows": {
+      "th": "(ข้าม 2 แถวบนสุดที่เป็นคำอธิบาย/แหล่งดึงข้อมูล Master อัตโนมัติ)",
+      "en": "(ข้าม 2 แถวบนสุดที่เป็นคำอธิบาย/แหล่งดึงข้อมูล Master อัตโนมัติ)",
+      "zh": "(ข้าม 2 แถวบนสุดที่เป็นคำอธิบาย/แหล่งดึงข้อมูล Master อัตโนมัติ)",
+      "ar": "(ข้าม 2 แถวบนสุดที่เป็นคำอธิบาย/แหล่งดึงข้อมูล Master อัตโนมัติ)"
+    },
+    "boq.listExcMatType": {
+      "th": "วัสดุ (M)",
+      "en": "วัสดุ (M)",
+      "zh": "วัสดุ (M)",
+      "ar": "วัสดุ (M)"
+    },
+    "boq.listExcSubType": {
+      "th": "เหมา/แรง (S)",
+      "en": "เหมา/แรง (S)",
+      "zh": "เหมา/แรง (S)",
+      "ar": "เหมา/แรง (S)"
+    },
+    "boq.listExcMatched": {
+      "th": "· กลุ่ม {group} · จับคู่ 10 คอลัมน์อัตโนมัติ",
+      "en": "· กลุ่ม {group} · จับคู่ 10 คอลัมน์อัตโนมัติ",
+      "zh": "· กลุ่ม {group} · จับคู่ 10 คอลัมน์อัตโนมัติ",
+      "ar": "· กลุ่ม {group} · จับคู่ 10 คอลัมน์อัตโนมัติ"
+    },
+    "boq.listDownloadToast": {
+      "th": "ดาวน์โหลด {file}",
+      "en": "ดาวน์โหลด {file}",
+      "zh": "ดาวน์โหลด {file}",
+      "ar": "ดาวน์โหลด {file}"
+    },
+    "boq.edPrintToast": {
+      "th": "ส่งคำสั่งพิมพ์ {docNo}",
+      "en": "ส่งคำสั่งพิมพ์ {docNo}",
+      "zh": "ส่งคำสั่งพิมพ์ {docNo}",
+      "ar": "ส่งคำสั่งพิมพ์ {docNo}"
+    },
+    "boq.edSendApproveMsg": {
+      "th": "ส่ง BOQ ฉบับนี้ไปยังขั้นตอนอนุมัติ ({value} ฿)",
+      "en": "ส่ง BOQ ฉบับนี้ไปยังขั้นตอนอนุมัติ ({value} ฿)",
+      "zh": "ส่ง BOQ ฉบับนี้ไปยังขั้นตอนอนุมัติ ({value} ฿)",
+      "ar": "ส่ง BOQ ฉบับนี้ไปยังขั้นตอนอนุมัติ ({value} ฿)"
+    },
+    "boq.edEmptyDesc": {
+      "th": "{docNo} เป็น BOQ ใหม่ที่ยังว่างอยู่ · เลือกวิธีเริ่มต้นด้านล่าง เพิ่มรายการได้ทันที",
+      "en": "{docNo} เป็น BOQ ใหม่ที่ยังว่างอยู่ · เลือกวิธีเริ่มต้นด้านล่าง เพิ่มรายการได้ทันที",
+      "zh": "{docNo} เป็น BOQ ใหม่ที่ยังว่างอยู่ · เลือกวิธีเริ่มต้นด้านล่าง เพิ่มรายการได้ทันที",
+      "ar": "{docNo} เป็น BOQ ใหม่ที่ยังว่างอยู่ · เลือกวิธีเริ่มต้นด้านล่าง เพิ่มรายการได้ทันที"
+    },
+    "boq.edCardSub": {
+      "th": "{count} รายการ · {pct}%",
+      "en": "{count} รายการ · {pct}%",
+      "zh": "{count} รายการ · {pct}%",
+      "ar": "{count} รายการ · {pct}%"
+    },
+    "boq.edCardTotalSub": {
+      "th": "{group} · ต่อ 1 BOQ",
+      "en": "{group} · ต่อ 1 BOQ",
+      "zh": "{group} · ต่อ 1 BOQ",
+      "ar": "{group} · ต่อ 1 BOQ"
+    },
+    "boq.edCbsDetail": {
+      "th": "ใช้ {used} + ผูกพัน {committed} / งบ {budget} · เหลือ {available}",
+      "en": "ใช้ {used} + ผูกพัน {committed} / งบ {budget} · เหลือ {available}",
+      "zh": "ใช้ {used} + ผูกพัน {committed} / งบ {budget} · เหลือ {available}",
+      "ar": "ใช้ {used} + ผูกพัน {committed} / งบ {budget} · เหลือ {available}"
+    },
+    "boq.edGroupItems": {
+      "th": "{n} รายการ",
+      "en": "{n} รายการ",
+      "zh": "{n} รายการ",
+      "ar": "{n} รายการ"
+    },
+    "boq.edSelectedCount": {
+      "th": "เลือกแล้ว {n} รายการ",
+      "en": "เลือกแล้ว {n} รายการ",
+      "zh": "เลือกแล้ว {n} รายการ",
+      "ar": "เลือกแล้ว {n} รายการ"
+    },
+    "boq.edFootGroupTotal": {
+      "th": "ยอดรวม {group}",
+      "en": "ยอดรวม {group}",
+      "zh": "ยอดรวม {group}",
+      "ar": "ยอดรวม {group}"
+    },
+    "boq.edPrMarked": {
+      "th": "เปิด PR แล้ว · {prNo}",
+      "en": "เปิด PR แล้ว · {prNo}",
+      "zh": "เปิด PR แล้ว · {prNo}",
+      "ar": "เปิด PR แล้ว · {prNo}"
+    },
+    "boq.edItemSubtitle": {
+      "th": "หมวด {group}",
+      "en": "หมวด {group}",
+      "zh": "หมวด {group}",
+      "ar": "หมวด {group}"
+    },
+    "boq.edDelItemSubtitle": {
+      "th": "{n} รายการที่เลือก",
+      "en": "{n} รายการที่เลือก",
+      "zh": "{n} รายการที่เลือก",
+      "ar": "{n} รายการที่เลือก"
+    },
+    "boq.edDelItemMsg": {
+      "th": "ต้องการลบ {target} ออกจาก BOQ ใช่หรือไม่? การลบจะส่งผลต่อยอดรวมและงบประมาณ",
+      "en": "ต้องการลบ {target} ออกจาก BOQ ใช่หรือไม่? การลบจะส่งผลต่อยอดรวมและงบประมาณ",
+      "zh": "ต้องการลบ {target} ออกจาก BOQ ใช่หรือไม่? การลบจะส่งผลต่อยอดรวมและงบประมาณ",
+      "ar": "ต้องการลบ {target} ออกจาก BOQ ใช่หรือไม่? การลบจะส่งผลต่อยอดรวมและงบประมาณ"
+    },
+    "boq.edDelItemToast": {
+      "th": "ลบ {n} รายการแล้ว",
+      "en": "ลบ {n} รายการแล้ว",
+      "zh": "ลบ {n} รายการแล้ว",
+      "ar": "ลบ {n} รายการแล้ว"
+    },
+    "boq.edAddGroupToast": {
+      "th": "เพิ่มหมวด {label} แล้ว",
+      "en": "เพิ่มหมวด {label} แล้ว",
+      "zh": "เพิ่มหมวด {label} แล้ว",
+      "ar": "เพิ่มหมวด {label} แล้ว"
+    },
+    "boq.edDelGroupMsg": {
+      "th": "การลบจะลบ {n} รายการ ภายในหมวดทั้งหมด · ไม่สามารถย้อนกลับได้",
+      "en": "การลบจะลบ {n} รายการ ภายในหมวดทั้งหมด · ไม่สามารถย้อนกลับได้",
+      "zh": "การลบจะลบ {n} รายการ ภายในหมวดทั้งหมด · ไม่สามารถย้อนกลับได้",
+      "ar": "การลบจะลบ {n} รายการ ภายในหมวดทั้งหมด · ไม่สามารถย้อนกลับได้"
+    },
+    "boq.edDelGroupToast": {
+      "th": "ลบหมวด {label} แล้ว",
+      "en": "ลบหมวด {label} แล้ว",
+      "zh": "ลบหมวด {label} แล้ว",
+      "ar": "ลบหมวด {label} แล้ว"
+    },
+    "boq.edCatShortSubcon": {
+      "th": "ค่าผู้รับเหมา",
+      "en": "ค่าผู้รับเหมา",
+      "zh": "ค่าผู้รับเหมา",
+      "ar": "ค่าผู้รับเหมา"
+    },
+    "boq.edAddToGroup": {
+      "th": "จะเพิ่มเข้า {group}",
+      "en": "จะเพิ่มเข้า {group}",
+      "zh": "จะเพิ่มเข้า {group}",
+      "ar": "จะเพิ่มเข้า {group}"
+    },
+    "boq.edGroupCodeHint": {
+      "th": "เช่น 07, 08 ...",
+      "en": "เช่น 07, 08 ...",
+      "zh": "เช่น 07, 08 ...",
+      "ar": "เช่น 07, 08 ..."
+    },
+    "boq.edGroupNamePh": {
+      "th": "เช่น 07 งานภายนอก + Landscape",
+      "en": "เช่น 07 งานภายนอก + Landscape",
+      "zh": "เช่น 07 งานภายนอก + Landscape",
+      "ar": "เช่น 07 งานภายนอก + Landscape"
+    },
+    "boq.edReviseSubtitle": {
+      "th": "{no} · เวอร์ชันปัจจุบัน {ver}",
+      "en": "{no} · เวอร์ชันปัจจุบัน {ver}",
+      "zh": "{no} · เวอร์ชันปัจจุบัน {ver}",
+      "ar": "{no} · เวอร์ชันปัจจุบัน {ver}"
+    },
+    "boq.edReviseSubmit": {
+      "th": "สร้าง {ver} & แก้ไข",
+      "en": "สร้าง {ver} & แก้ไข",
+      "zh": "สร้าง {ver} & แก้ไข",
+      "ar": "สร้าง {ver} & แก้ไข"
+    },
+    "boq.edReviseToast": {
+      "th": "สร้าง {no} {ver} (ร่าง-รออนุมัติ Revise) แล้ว",
+      "en": "สร้าง {no} {ver} (ร่าง-รออนุมัติ Revise) แล้ว",
+      "zh": "สร้าง {no} {ver} (ร่าง-รออนุมัติ Revise) แล้ว",
+      "ar": "สร้าง {no} {ver} (ร่าง-รออนุมัติ Revise) แล้ว"
     }
   },
   "nav_i18n": {
