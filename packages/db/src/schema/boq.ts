@@ -20,6 +20,7 @@ import {
   pgEnum,
   pgTable,
   index,
+  uniqueIndex,
   text,
   uuid,
   integer,
@@ -159,6 +160,19 @@ export const boqVersionHistory = pgTable("boq_version_history", {
   // 0024 (perf-audit §2.4): the version-history rows of a doc are read/written
   // by doc_id (the Revise-history expander) — index the FK.
   index("boq_version_history_doc_idx").on(t.docId),
+  // 0025 (B-085 fix 2 — TOCTOU): /boq/{id}/approve reads status=pending then
+  // writes an approve-history row; two concurrent approves could pass the
+  // read-then-write pending guard and double-insert. This DB-level UNIQUE on
+  // (doc_id, version, action) makes the second insert fail at the database, not
+  // silently double-write. Legitimate rows never collide: approve stamps
+  // doc.version, revise stamps the freshly bumped version+1, and the state
+  // machine only reaches approve once per version — so every (doc,version,action)
+  // key is distinct across the submit→approve→revise cycle.
+  uniqueIndex("boq_version_history_doc_version_action_uq").on(
+    t.docId,
+    t.version,
+    t.action,
+  ),
 ]);
 
 /**

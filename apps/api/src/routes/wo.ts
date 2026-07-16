@@ -49,6 +49,7 @@ import {
   workPeriods,
 } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
 import {
   callerApprovalLevel,
   has,
@@ -122,7 +123,9 @@ function woWire(
     currency_code: wo.currencyCode,
     value,
     retention_pct: retentionPct,
-    retention_amount: (value * retentionPct) / 100,
+    // value × pct / 100 is a JS-float product → round to the 2-dp minor unit at
+    // the wire so the held-back figure never shows drift (B-085 fix 3).
+    retention_amount: round2((value * retentionPct) / 100),
     amount: value,
   };
   if (!plan) return base;

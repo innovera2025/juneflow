@@ -338,6 +338,25 @@ describe("GET /api/v1/boq — auth + list", () => {
     );
   });
 
+  it("rounds the derived total to 2 dp — no JS-float accumulation drift (B-085 fix 3)", async () => {
+    const D0 = doc("d0", "BOQ-DRIFT", "draft");
+    const G0 = group("g0", "d0", "01", 1);
+    // 3 × 0.10 = 0.30000000000000004 in IEEE-754 → must round to 0.3, not leak the
+    // trailing digits to the FE / visual gate.
+    const I0 = item("i0", "g0", "M", "3", "0.10");
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[boqDocs, [D0]], [boqGroups, [G0]], [boqItems, [I0]], [users, []]],
+        }),
+      })
+    ).inject({ url: "/api/v1/boq" });
+    expect(res.statusCode).toBe(200);
+    const d0 = res.json().data.find((d: { id: string }) => d.id === "d0");
+    expect(d0.total).toBe(0.3);
+  });
+
   it("binds company_id on the project root of every scoped read (no cross-tenant leak)", async () => {
     const captured: Captured[] = [];
     await (
@@ -721,13 +740,19 @@ describe("BOQ state machine — submit/approve/revise", () => {
     expect(res.json().code).toBe("INVALID_STATE");
   });
 
-  it("revise: approved → revise with version += 1", async () => {
+  it("revise: approved → revise with version += 1 (+ B-085 fix 1 revise-history row)", async () => {
     const D0 = doc("d0", "N", "approved", 3);
     const updated: Updated[] = [];
+    const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]], [projects, [project]], [boqItems, []]], updated, updateBase: D0 }),
+        db: stubDb({
+          rows: [[boqDocs, [D0]], [users, [userRow]], [projects, [project]], [boqItems, []]],
+          updated,
+          inserted,
+          updateBase: D0,
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/boq/d0/revise" });
     expect(res.statusCode).toBe(200);
@@ -735,6 +760,14 @@ describe("BOQ state machine — submit/approve/revise", () => {
     expect(body.status).toBe("revise");
     expect(body.version).toBe(4); // v3 → v4
     expect(updated[0]!.set.version).toBe(4);
+    // B-085 fix 1: revise now writes a version-history row (action=revise) for the
+    // NEW version so the archive timeline shows revise events, not just approvals.
+    const vhWrite = inserted.find((w) => w.table === boqVersionHistory);
+    expect(vhWrite).toBeTruthy();
+    const vh = vhWrite!.rows[0] as { action: string; version: number; by: string | null };
+    expect(vh.action).toBe("revise");
+    expect(vh.version).toBe(4); // the freshly bumped version — distinct from approve keys
+    expect(vh.by).toBe("u-0"); // resolved reviser (mirrors /approve)
   });
 
   it("revise: 409 when the doc is not approved", async () => {

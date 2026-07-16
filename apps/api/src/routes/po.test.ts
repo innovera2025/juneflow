@@ -322,6 +322,32 @@ describe("GET /api/v1/po — auth + list", () => {
     );
   });
 
+  it("rounds paid/deposit to 2 dp — no Σ ap_billing float drift (B-085 fix 3)", async () => {
+    // 0.1 + 0.2 = 0.30000000000000004 in IEEE-754 → paid must surface as 0.3, and
+    // the lone 0.2 deposit stays exact.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [po("p0", "PO-DRIFT", "approved", 1)]],
+            [
+              apBillings,
+              [
+                apBilling("ap0", "p0", 0.2, "deposit"),
+                apBilling("ap1", "p0", 0.1, "progress"),
+              ],
+            ],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/po" });
+    expect(res.statusCode).toBe(200);
+    const p0 = res.json().data[0];
+    expect(p0.paid).toBe(0.3);
+    expect(p0.deposit).toBe(0.2);
+  });
+
   it("binds company_id on the project root of the scoped read (no cross-tenant leak)", async () => {
     const captured: Captured[] = [];
     await (
