@@ -1,0 +1,720 @@
+// G3 unit tests (PLAN.md §9) — PO handlers (P2-BE-05, B-070; po-wo.jsx POList +
+// POForm, flows.html FLOW-A + MATRIX "PO ใบสั่งซื้อ"). Covers the B-014 list
+// envelope over real po columns, create-from-approved-PR (201, server-owned
+// draft + approval_step 0, total seeded from the source PR's priced lines — C10,
+// requires an approved pr_id + this tenant's vendor), single-doc detail with its
+// variation orders, and the submit→approve→reject state machine with the PO/WO
+// TIERED approval matrix (≤1M needs หน.จัดซื้อ/level 2; >1M needs ผจก.โครงการ/level 3;
+// >5M needs MD/level 4 — NOTE the thresholds differ from PR's 500K/2M), plus the
+// variation-order amendment (add/cut adjusts the stored total). Tenant scope is
+// bound on the project root reached THROUGH pr_id → pr → project (no cross-tenant
+// leak). All money comes from the stubbed rows — no value is hand-computed
+// against the impl.
+import { afterEach, describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import {
+  boqItems,
+  pos,
+  projects,
+  prItems,
+  prs,
+  roles,
+  users,
+  variationOrders,
+  vendors,
+} from "@juneflow/db";
+import type { Db } from "@juneflow/db/client";
+import { buildApp, type AppDeps } from "../app.js";
+import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
+import { createFakeR2Storage } from "./files.js";
+
+const COMPANY = "22222222-2222-2222-2222-222222222222";
+const OTHER_COMPANY = "33333333-3333-3333-3333-333333333333";
+const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const PR = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+const VENDOR = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+const D = new Date(1_700_000_000_000);
+
+const SESSION = {
+  companyId: COMPANY,
+  user: { id: "au-0", email: "wipha@rungrueang.co.th", name: "วิภา" },
+};
+
+interface Captured {
+  table: unknown;
+  where: SQL | undefined;
+}
+interface Inserted {
+  table: unknown;
+  rows: unknown[];
+}
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL | undefined;
+}
+interface StubOpts {
+  rows: Array<[unknown, unknown[]]>;
+  captured?: Captured[];
+  inserted?: Inserted[];
+  updated?: Updated[];
+  updateBase?: Record<string, unknown>;
+}
+
+/** Base Db stub: canned rows per table for reads; capture of write ops. */
+function stubDb(opts: StubOpts): Db {
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const rowsFor = (table: unknown): unknown[] => {
+    for (const [t, r] of rows) if (t === table) return r;
+    return [];
+  };
+  const builderFor = (table: unknown) => {
+    const builder = {
+      $dynamic: () => builder,
+      innerJoin: () => builder,
+      where: (where: SQL) => {
+        captured.push({ table, where });
+        return Promise.resolve(rowsFor(table));
+      },
+      then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
+        captured.push({ table, where: undefined });
+        return Promise.resolve(rowsFor(table)).then(onOk, onErr);
+      },
+    };
+    return builder;
+  };
+  let seq = 0;
+  return {
+    select: () => ({ from: (table: unknown) => builderFor(table) }),
+    insert: (table: unknown) => ({
+      values: (values: unknown) => ({
+        returning: () => {
+          const list = Array.isArray(values) ? values : [values];
+          inserted.push({ table, rows: list });
+          return Promise.resolve(
+            list.map((r) => ({ id: `new-${seq++}`, ...(r as object) })),
+          );
+        },
+      }),
+    }),
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            updated.push({ table, set, where });
+            return Promise.resolve([{ ...updateBase, ...set }]);
+          },
+        }),
+      }),
+    }),
+  } as unknown as Db;
+}
+
+function paramsOf(where: SQL | undefined): unknown[] {
+  if (!where) return [];
+  return new PgDialect().sqlToQuery(where).params;
+}
+
+let app: FastifyInstance;
+afterEach(async () => {
+  await app?.close();
+});
+
+async function buildTestApp(overrides: Partial<AppDeps> = {}): Promise<FastifyInstance> {
+  app = await buildApp({
+    db: overrides.db ?? stubDb({ rows: [] }),
+    resolveTenant: overrides.resolveTenant ?? (async () => null),
+    signIn: overrides.signIn ?? (async () => null),
+    storage: overrides.storage ?? createFakeR2Storage("https://r2.test"),
+    quota:
+      overrides.quota ??
+      new QuotaGuard({ resolver: unlimitedQuotaResolver, upgradeUrl: "https://upgrade.test" }),
+    auditSink: overrides.auditSink ?? (async () => {}),
+    logger: false,
+  });
+  return app;
+}
+
+// ---------------------------------------------------------------------------
+// Row factories (stub-backed)
+// ---------------------------------------------------------------------------
+
+const project = { id: PROJECT, companyId: COMPANY, name: "juneflow ราชพฤกษ์" };
+const vendor = { id: VENDOR, companyId: COMPANY, name: "บจก. ซัพพลาย", kind: "supplier" };
+
+const prRow = (status: "draft" | "pending" | "approved" | "rejected") => ({
+  id: PR,
+  projectId: PROJECT,
+  no: "PR-2026-0001",
+  type: "material",
+  needDate: null,
+  status,
+  approvalStep: 0,
+  createdAt: D,
+  updatedAt: D,
+});
+
+const po = (
+  id: string,
+  no: string | null,
+  status: "draft" | "pending" | "approved" | "rejected",
+  total: number,
+  prId: string | null = PR,
+) => ({
+  id,
+  prId,
+  vendorId: VENDOR,
+  no,
+  total: String(total),
+  vat: "0",
+  currencyCode: "THB",
+  creditTerm: 30,
+  status,
+  approvalStep: 0,
+  createdAt: D,
+  updatedAt: D,
+});
+
+const voRow = (id: string, poId: string, dir: "add" | "cut", amount: number) => ({
+  id,
+  poId,
+  dir,
+  amount: String(amount),
+  currencyCode: "THB",
+  reason: "เพิ่มงาน",
+  createdAt: D,
+  updatedAt: D,
+});
+
+const prLine = (id: string, prId: string, boqItemId: string | null, qty: string) => ({
+  id,
+  prId,
+  boqItemId,
+  qty,
+  createdAt: D,
+  updatedAt: D,
+});
+
+const boqItemPriced = (id: string, price: string, currencyCode = "THB") => ({
+  id,
+  groupId: "g0",
+  code: `C-${id}`,
+  name: `item ${id}`,
+  cat: "M",
+  qty: "0",
+  unit: "ถุง",
+  price,
+  currencyCode,
+  ccId: null,
+  remainQty: "0",
+  elementId: null,
+  createdAt: D,
+  updatedAt: D,
+});
+
+const roleRow = (approvalLevel: number) => ({
+  id: "role-0",
+  companyId: COMPANY,
+  name: "Role",
+  approvalLimits: {},
+  perms: {},
+  approvalLevel,
+  approvalLimit: null,
+  currencyCode: "THB",
+  createdAt: D,
+  updatedAt: D,
+});
+
+const userRow = {
+  id: "u-0",
+  companyId: COMPANY,
+  email: "wipha@rungrueang.co.th",
+  name: "วิภา",
+  roleId: "role-0",
+  status: "active",
+};
+
+// ---------------------------------------------------------------------------
+// GET /po — list + tenant scope
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/po — auth + list", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/po" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+  });
+
+  it("returns the B-014 envelope of real po columns", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[pos, [po("p0", "PO-2026-0291", "approved", 1268000)]]],
+        }),
+      })
+    ).inject({ url: "/api/v1/po" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1);
+    expect(body.page).toBe(1);
+    const p0 = body.data[0];
+    expect(p0.no).toBe("PO-2026-0291");
+    expect(p0.status).toBe("approved");
+    expect(p0.amount).toBe(1268000);
+    expect(p0.total).toBe(1268000);
+    expect(Object.keys(p0).sort()).toEqual(
+      [
+        "amount",
+        "approval_step",
+        "credit_term",
+        "currency_code",
+        "id",
+        "no",
+        "pr_id",
+        "status",
+        "total",
+        "vat",
+        "vendor_id",
+      ],
+    );
+  });
+
+  it("binds company_id on the project root of the scoped read (no cross-tenant leak)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "draft", 1)]]], captured }),
+      })
+    ).inject({ url: "/api/v1/po" });
+    const read = captured.find((c) => c.table === pos);
+    expect(read).toBeTruthy();
+    expect(paramsOf(read!.where)).toContain(COMPANY);
+    expect(paramsOf(read!.where)).not.toContain(OTHER_COMPANY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /po — create from an approved PR
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/po — create from approved PR", () => {
+  it("creates a draft PO (201) with total seeded from the source PR's priced lines (C10)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [prRow("approved")]],
+            [vendors, [vendor]],
+            [pos, []],
+            [projects, [project]],
+            [prItems, [prLine("l0", PR, "b0", "10")]], // 10 × 168.50 = 1685
+            [boqItems, [boqItemPriced("b0", "168.50")]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po",
+      payload: { pr_id: PR, vendor_id: VENDOR, no: "PO-2026-0999", vat: 118, credit_term: 45 },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.status).toBe("draft");
+    expect(body.approval_step).toBe(0);
+    expect(body.pr_id).toBe(PR);
+    expect(body.vendor_id).toBe(VENDOR);
+    expect(body.total).toBe(1685);
+    expect(body.amount).toBe(1685);
+    expect(body.vat).toBe(118);
+    expect(body.credit_term).toBe(45);
+    const write = inserted.find((w) => w.table === pos);
+    expect((write!.rows[0] as { status: string }).status).toBe("draft");
+    expect((write!.rows[0] as { total: string }).total).toBe("1685");
+  });
+
+  it("400s when pr_id is missing (a PO must be raised from an approved PR)", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [] }) })
+    ).inject({ method: "POST", url: "/api/v1/po", payload: { vendor_id: VENDOR } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("pr_id");
+  });
+
+  it("400s when the PR is not this tenant's", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[prs, []]] }), // PR not visible to this tenant
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po",
+      payload: { pr_id: PR, vendor_id: VENDOR },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toBe("pr not found");
+  });
+
+  it("409s when the source PR is not approved", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[prs, [prRow("pending")]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po",
+      payload: { pr_id: PR, vendor_id: VENDOR },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  it("400s when the vendor is not this tenant's", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[prs, [prRow("approved")]], [vendors, []]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po",
+      payload: { pr_id: PR, vendor_id: VENDOR },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toBe("vendor not found");
+  });
+
+  it("409s on a duplicate no within the tenant", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [prRow("approved")]],
+            [vendors, [vendor]],
+            [pos, [po("p0", "DUP", "approved", 1)]],
+          ],
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po",
+      payload: { pr_id: PR, vendor_id: VENDOR, no: "DUP" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("DUPLICATE_CODE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /po/:id — detail with variation orders
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/po/:id — detail", () => {
+  it("returns the PO with its variation orders", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [po("p0", "PO-1", "approved", 500000)]],
+            [variationOrders, [voRow("v0", "p0", "add", 148000)]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/po/p0" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.amount).toBe(500000);
+    expect(body.variation_orders).toHaveLength(1);
+    expect(body.variation_orders[0].dir).toBe("add");
+    expect(body.variation_orders[0].amount).toBe(148000);
+  });
+
+  it("404s for an id outside the tenant", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[pos, []]] }) })
+    ).inject({ url: "/api/v1/po/nope" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// State machine: submit → approve → reject
+// ---------------------------------------------------------------------------
+
+describe("PO state machine — submit", () => {
+  it("submit: draft → pending", async () => {
+    const P0 = po("p0", "N", "draft", 1000);
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [P0]]], updated, updateBase: P0 }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/submit" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("pending");
+    expect(updated[0]!.set.status).toBe("pending");
+  });
+
+  it("submit: 409 when the PO is not draft", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "pending", 1000)]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/submit" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+});
+
+describe("PO state machine — approve (tiered authority, B-070 PO/WO 1M/5M)", () => {
+  it("approve: ≤1M PO approved by หน.จัดซื้อ tier (level 2), approval_step=1", async () => {
+    const P0 = po("p0", "N", "pending", 1000);
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[pos, [P0]], [users, [userRow]], [roles, [roleRow(2)]]],
+          updated,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/approve" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("approved");
+    expect(updated[0]!.set.approvalStep).toBe(1);
+  });
+
+  it("approve: >1M PO needs ผจก.โครงการ — level 2 gets 403, level 3 passes (step 2)", async () => {
+    const rows = (level: number) => ({
+      rows: [
+        [pos, [po("p0", "N", "pending", 2_000_000)]],
+        [users, [userRow]],
+        [roles, [roleRow(level)]],
+      ] as Array<[unknown, unknown[]]>,
+    });
+    const denied = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb(rows(2)) })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/approve" });
+    expect(denied.statusCode).toBe(403);
+
+    const updated: Updated[] = [];
+    const ok = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ ...rows(3), updated, updateBase: po("p0", "N", "pending", 2_000_000) }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/approve" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().status).toBe("approved");
+    expect(updated[0]!.set.approvalStep).toBe(2);
+  });
+
+  it("approve: >5M PO needs MD — level 3 gets 403, level 4 passes (step 3)", async () => {
+    const rows = (level: number) => ({
+      rows: [
+        [pos, [po("p0", "N", "pending", 6_000_000)]],
+        [users, [userRow]],
+        [roles, [roleRow(level)]],
+      ] as Array<[unknown, unknown[]]>,
+    });
+    const denied = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb(rows(3)) })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/approve" });
+    expect(denied.statusCode).toBe(403);
+
+    const ok = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ ...rows(4), updateBase: po("p0", "N", "pending", 6_000_000) }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/approve" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().approval_step).toBe(3);
+  });
+
+  it("approve: 403 when the caller has no attributable role", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "pending", 1000)]], [users, []], [roles, []]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/approve" });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+  });
+
+  it("approve: 409 when the PO is not pending (authority ok, wrong state)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "draft", 1000)]], [users, [userRow]], [roles, [roleRow(4)]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/approve" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+});
+
+describe("PO state machine — reject", () => {
+  it("reject: pending → rejected with a reason", async () => {
+    const P0 = po("p0", "N", "pending", 1000);
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [P0]]], updated, updateBase: P0 }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: { reason: "ราคาเกินงบ" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("rejected");
+    expect(updated[0]!.set.status).toBe("rejected");
+  });
+
+  it("reject: 400 when reason is missing", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "pending", 1000)]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: {} });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+  });
+
+  it("reject: 409 when the PO is not pending", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "draft", 1000)]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: { reason: "x" } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// variation-order — add/cut amends the stored total
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/po/:id/variation-order", () => {
+  it("add: writes a variation order and increases the stored total", async () => {
+    const P0 = po("p0", "N", "approved", 1000);
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[pos, [P0]], [prs, [prRow("approved")]], [projects, [project]]],
+          inserted,
+          updated,
+          updateBase: P0,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "add", amount: 500, reason: "เพิ่มผนัง" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.variation_order.dir).toBe("add");
+    expect(body.variation_order.amount).toBe(500);
+    expect(body.po.total).toBe(1500);
+    expect(body.po.amount).toBe(1500);
+    const voWrite = inserted.find((w) => w.table === variationOrders);
+    expect((voWrite!.rows[0] as { dir: string }).dir).toBe("add");
+    expect(updated[0]!.set.total).toBe("1500");
+  });
+
+  it("cut: decreases the stored total", async () => {
+    const P0 = po("p0", "N", "approved", 1000);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[pos, [P0]], [prs, [prRow("approved")]], [projects, [project]]],
+          updateBase: P0,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "cut", amount: 300 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().po.total).toBe(700);
+  });
+
+  it("400s on an invalid dir", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "approved", 1000)]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "sideways", amount: 1 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s on a missing/negative amount", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "approved", 1000)]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "add" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("404s for a PO outside the tenant", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[pos, []]] }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/nope/variation-order",
+      payload: { dir: "add", amount: 1 },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("PO action endpoints — tenant scope", () => {
+  it("404 for a PO outside the tenant (submit/approve/reject)", async () => {
+    for (const verb of ["submit", "approve", "reject"]) {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[pos, []], [users, [userRow]], [roles, [roleRow(4)]]] }),
+        })
+      ).inject({
+        method: "POST",
+        url: `/api/v1/po/nope/${verb}`,
+        payload: { reason: "x" },
+      });
+      expect(res.statusCode).toBe(404);
+    }
+  });
+});
