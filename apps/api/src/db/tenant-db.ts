@@ -28,7 +28,7 @@
 // G3: src/db/tenant-db.test.ts proves the predicate/value is present on every
 // operation by inspecting the generated SQL (drizzle `.toSQL()`), and that a
 // missing companyId fails closed.
-import { and, eq, getTableColumns, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { companies, packages } from "@juneflow/db/schema";
 import type { Db } from "@juneflow/db/client";
@@ -321,6 +321,80 @@ export class TenantDb {
       .update(table)
       .set(set as PgUpdateSetSource<T>)
       .where(inArray(idCol, ids as never[]))
+      .returning();
+    return updated as T["$inferSelect"][];
+  }
+
+  /**
+   * BULK, PER-ROW UPDATE door for a table scoped through a MULTI-HOP ancestry —
+   * the set-many counterpart to updateThroughChain() (perf 0024 audit). Where
+   * updateThroughChain() writes ONE value to every matched row, this writes a
+   * DISTINCT value per id in a SINGLE statement. It exists to kill the
+   * generate-PR cut-remain N+1: decrementing N BOQ items' remain_qty previously
+   * cost 2·N queries (N ownership-resolve selectThroughs + N updates); this
+   * collapses it to 2 (one selectThrough ownership resolve + one CASE update).
+   *
+   * Fail-closed BY CONSTRUCTION, exactly like updateThroughChain(): the id set
+   * is resolved ONLY by selectThrough() (which AND-anchors company_id on the
+   * root), so an id belonging to another tenant resolves to nothing and is never
+   * written. The final UPDATE is scoped by `id IN (<resolved scoped ids>)`, and
+   * each row's new value is taken from the caller `values` map keyed by that
+   * resolved id — never trusting the caller's raw id list. Returns the updated
+   * rows (empty when `values` is empty or nothing resolved within this tenant).
+   *
+   * `column` is the single target column (e.g. boqItems.remainQty); each THEN
+   * branch is cast to that column's own SQL type so the CASE result type is
+   * unambiguous for any column kind.
+   */
+  async updateThroughChainMany<T extends PgTable & { id: PgColumn }>(
+    table: T,
+    hops: readonly { fk: PgColumn; parent: PgTable }[],
+    column: PgColumn,
+    values: ReadonlyMap<string, string>,
+  ): Promise<T["$inferSelect"][]> {
+    const idCol = (table as PgTable & { id?: PgColumn }).id;
+    if (!idCol) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_HOP_INVALID: updateThroughChainMany() table must expose an " +
+          "id primary-key column to anchor the scoped update on",
+      );
+    }
+    const ids = [...values.keys()];
+    if (ids.length === 0) return [];
+    // Ownership proof: resolve the tenant-scoped rows THROUGH the hop chain
+    // (selectThrough AND-anchors company_id on the root) — never trust the raw ids.
+    const scoped = (await this.selectThrough(
+      table,
+      hops,
+      inArray(idCol, ids as never[]),
+    )) as { id: unknown }[];
+    const scopedIds = scoped
+      .map((r) => r.id as string)
+      .filter((id) => values.has(id));
+    if (scopedIds.length === 0) return [];
+    // Resolve the drizzle property key for `column` so .set() targets it by key.
+    const cols = getTableColumns(table) as Record<string, PgColumn>;
+    const colKey = Object.keys(cols).find((k) => cols[k]?.name === column.name);
+    if (!colKey) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_COLUMN_INVALID: updateThroughChainMany() column must belong " +
+          "to the target table",
+      );
+    }
+    // One statement:
+    //   SET col = CASE WHEN id = $a THEN $b::<coltype> ... ELSE col END
+    //   WHERE id IN (<scoped ids>)
+    // Each new value comes from the caller map keyed by the RESOLVED scoped id.
+    const sqlType = column.getSQLType();
+    const whenClauses = scopedIds.map(
+      (id) =>
+        sql`when ${idCol} = ${id} then ${values.get(id)!}::${sql.raw(sqlType)}`,
+    );
+    const caseExpr = sql`case ${sql.join(whenClauses, sql` `)} else ${column} end`;
+    const updated = await this.#db
+      .update(table)
+      .set({ [colKey]: caseExpr } as PgUpdateSetSource<T>)
+      .where(inArray(idCol, scopedIds as never[]))
       .returning();
     return updated as T["$inferSelect"][];
   }

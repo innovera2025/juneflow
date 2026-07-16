@@ -21,6 +21,7 @@
 import {
   pgEnum,
   pgTable,
+  index,
   text,
   uuid,
   integer,
@@ -102,7 +103,11 @@ export const subconContracts = pgTable("subcon_contract", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): subcon_contract → project is a selectThrough
+  // hop.
+  index("subcon_contract_project_idx").on(t.projectId),
+]);
 
 /**
  * WorkPeriod — a payment/progress period of a subcontract (งวดงาน).
@@ -129,7 +134,13 @@ export const workPeriods = pgTable("work_period", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): work_period → subcon_contract is a
+  // selectThrough hop; the (contract_id,status) composite serves the
+  // status-filtered installment scans (the leading column also covers the
+  // plain contract_id JOIN via the leftmost-prefix rule).
+  index("work_period_contract_status_idx").on(t.contractId, t.status),
+]);
 
 /**
  * Acceptance — a foreman's on-site inspection of a work period (via mobile)
@@ -151,7 +162,10 @@ export const acceptances = pgTable("acceptance", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): acceptance → work_period JOIN key.
+  index("acceptance_period_idx").on(t.periodId),
+]);
 
 /**
  * Defect — a defect raised during an Acceptance (data-dictionary
@@ -174,4 +188,7 @@ export const defects = pgTable("defect", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): defect → acceptance JOIN key.
+  index("defect_acceptance_idx").on(t.acceptanceId),
+]);

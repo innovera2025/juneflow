@@ -823,10 +823,16 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const prLines = inserted.filter((w) => w.table === prItems);
     expect((prLines[0]!.rows[0] as { boqItemId: string }).boqItemId).toBe("im");
 
-    // Cut-remain: each PR'd item's remain_qty was decremented (10−5, 8−3 → "5").
+    // Cut-remain: a SINGLE bulk CASE update decrements every PR'd item's
+    // remain_qty (10−5, 8−3 → both "5") in one statement — not one update per
+    // row (0024 perf fix, updateThroughChainMany). The CASE binds each item id
+    // with its new remainder; the WHERE scopes to the resolved ids.
     const remainWrites = updated.filter((u) => u.table === boqItems);
-    expect(remainWrites).toHaveLength(2);
-    expect(remainWrites.map((u) => u.set.remainQty)).toEqual(["5", "5"]);
+    expect(remainWrites).toHaveLength(1);
+    const caseParams = paramsOf(remainWrites[0]!.set.remainQty as SQL);
+    expect(caseParams).toEqual(expect.arrayContaining(["im", "is", "5"]));
+    const whereParams = paramsOf(remainWrites[0]!.where);
+    expect(whereParams).toEqual(expect.arrayContaining(["im", "is"]));
   });
 
   it("single category (only Material) → one PR, no subcon PR", async () => {
