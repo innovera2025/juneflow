@@ -289,3 +289,15 @@
   - recommendation: **1 backend task** = migration (add columns + po_item/wo-installment/gr_item tables + boq_item.detail) + seed FLOW-A + extend GET → re-run live-G5 → 6 จอ PASS. **hand เข้า orch-A data-completeness packet** (ไม่ file blocker ซ้ำ · B-074/075 มีแล้ว)
 - **pr.list DESIGN flag (แยกจาก data-wire):** ref g1/15 = 4 filter pills (โครงการ/ช่วงเวลา/ประเภท/วงเงิน) · port = 2 (โครงการ/ประเภท · pr-list.tsx L451-452 ตัด period/amount เป็น decorative). period ไม่มี wire source (data-wire) แต่ **วงเงิน/amount อยู่บน wire จริง** → droppable-but-implementable · §0 กฎ 1 (visual 100%) vs กฎ 3 (ไม่ลอก mock) → Wei adjudicate (เข้า packet)
 - git: qa worktree clean · stack down · ไม่แตะ screen code
+
+## 2026-07-16 22:25 · qa (orch-B) · LIVE-G5 QA ROUND 3 — 5 boq-flow screens · 0 regression
+- ทำอะไร: live compose (5433) + pixel เทียบ gallery จริง บน 5 จอ boq-flow (qa worktree synced dev 1a5b4bf) — boq.bom(g1/10) · boq.approval(g1/12) · boq.archive(g1/13) · boq.reports(g1/14) · boq.aiqto(g1/09)
+- ผล: **1 PASS · 4 FAIL(data-wire) · 0 FAIL(regression)** — boq.aiqto PASS (static demo) · ที่เหลือ faithful โครงสร้างครบ (column/token/label/stepper/tabs ตรง ref) แต่ em-dash จาก backend gap
+- **cumulative round 1-3 = ~20 จอ Phase-2 · 0 regression เลย** → ports orch-A สะอาดเชิงโครงสร้างทุกจอ · verify lane ปิดรอบ wave นี้
+- **gaps ใหม่เข้า FLOW-A packet:**
+  - boq.bom → **MISSING ENDPOINT + line-table**: /models คืน bom_item_count scalar เท่านั้น (B-1=17) · ไม่มี endpoint คืน bom line rows → table + 4 KPI (ต้นทุน/หลัง·Mat/Sub/Lab%) em-dash. ต้อง GET /models/:id/bom-items + aggregates
+  - boq.approval → **MISSING ENDPOINT (version-diff read model)**: POST approve wired แต่ read side ไม่มี (line diff ค่าเดิม/ค่าใหม่ · เพิ่ม/ลด counts · net-diff · prev-version total) · seed มีแค่ 1 pending v1/ใหม่ (ไม่มี prior version) → feature demonstrate ไม่ได้. ต้อง version-diff endpoint + seed v2+ pending
+  - boq.archive → **MISSING COLUMNS + line-table**: GET /boq ขาด last-approver/approved-at/attachment-count/revise-count → em-dash · + ไม่มี revise-history (v1→vN timeline row-expand). มูลค่า=0 (boq_item sparse)
+  - boq.reports → **WHOLE MISSING BACKEND FEATURE**: ไม่ call reports endpoint เลย (structural shell + honest empty per orch-A) · ต้อง reports-aggregation service (RPT-001 BOQ-vs-NonBOQ · RPT-002 revise-history · RPT-003 cost-type breakdown)
+- **methodology gotcha (บันทึกไว้ live-G5 รอบหน้า):** launch vite ด้วย `VITE_API_BASE_URL=` (empty) ไม่ override client `?? "/api/v1"` → base "" → fetch miss proxy = false empty. ต้อง temp proxy `/api`→:3000 + ไม่ set env เปล่า
+- git: qa worktree clean · stack down · ไม่แตะ screen code
