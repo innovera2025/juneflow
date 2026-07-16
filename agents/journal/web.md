@@ -306,3 +306,9 @@
 - **round 4:** 5 PASS · 8 FAIL(data-wire) · 0 regression (12 FLOW-A + dashboard). **KEY: backend data-completeness สำเร็จ (API คืน field จริง verify curl) แต่ web ไม่ re-wire** → 8 จอ (gr/po/pr/wo.list · boq.list/bom/archive/reports) ยัง hardcode DASH → web re-wire task (orch-A · rows opaque Entity ไม่ต้องแก้ contract). PASS: boq.overview/editor/approval/aiqto + **dashboard real body**. B-083 = acceptable (approver=user:1 วิภา Director-role · ชื่อต่างจาก mock = honest). dashboard manifest unmask done.
 - **B-084 mutation-authz matrix** (`agents/orch-b-recon/b084-mutation-authz-matrix.md`): 27 mutation → 7 gated · 12 status-only · **8 UNGATED**. CRITICAL = POST /po/:id/variation-order (po.ts:416 · no authz+no status · tier-downgrade approval-bypass weaponize ladder · survives F1) · HIGH generate-pr · models/cc ไม่ gate master.create. Wei-gated (authz model ruling) · report+exploit only.
 - git: unmask merged dev · reports committed · ไม่แตะ screen code
+
+## 2026-07-17 01:42 · qa (orch-B) · CONTRACT-LIVE expansion (Lane 1) + drift-sweep gate (Lane 2)
+- Lane 1: tests/contract/live.spec.ts +14 READ endpoints schema-validated (getPo/getWo/getBoq/getPr + /projects/id/hierarchy + /models/id/bom + 7 dashboard + notifications) ALL PASS · /projects/id skip(404 declared-not-mounted)
+- Lane 2: tests/contract/drift.spec.ts NEW static gate — mounted-but-undeclared=**0 (B-086 class CLEAN)** · 105 declared-but-unmounted warned(scaffolding backlog · informational) · parser-floor guard กัน vacuous-pass
+- verified: static 452/84 · live 535/1 · 0 schema-drift FAIL (FLOW-A read surface contract-clean) · merged dev
+- durable: contract regression gate โตตามทุก backend wave · B-086 failure-class ปิดถาวร
