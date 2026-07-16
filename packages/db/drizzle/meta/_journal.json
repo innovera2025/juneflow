@@ -120,6 +120,13 @@
       "when": 1784195219003,
       "tag": "0016_gr_from_wo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784196246808,
+      "tag": "0017_vendor_extend",
+      "breakpoints": true
     }
   ]
 }

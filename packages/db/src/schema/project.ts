@@ -293,6 +293,25 @@ export const costCenters = pgTable(
  * Vendor — supplier / subcon master; AP pulls from here (data-dictionary
  * "master แยกชัด: vendor(ผู้ขาย|ผู้รับเหมา flag)"). Company-scoped master.
  * creditTerm = payment credit term in days (erd.html Vendor.credit_term).
+ *
+ * addr / bank / status / code — B-071 (P2-BE-08) approved additive superset,
+ * mirroring the B-059(ก)/cost_center pattern (P1-BE-11): the master.vendor
+ * screen (master-party.jsx MasterVendor + VendorForm L137-183) renders columns
+ * the base table lacked. addr = the registered-address display text; bank = the
+ * bank-account display string ("KBANK 012-3-45678-9"); code = the "V-00xx"
+ * display code the mock generates (now persisted — before B-071 there was no
+ * column so it was omitted from the wire). addr/bank/code are nullable at the
+ * column level so the new-column migration lands on the 13 pre-existing rows
+ * (B-050 precedent); presence is populated by the seed + POST /vendors.
+ *   status = active | inactive (VendorForm status dropdown, master-party.jsx:175).
+ * Plain text (not an enum) — matches the most recent same-wave precedent
+ * (gr.status, migration 0016) and the task's ALTER-only additive shape; the
+ * active|inactive closed set is enforced at the handler layer (POST/PUT). A new
+ * vendor starts `active` (the mock's VendorForm default).
+ *   `type` is NOT a column — the mock's 4-way type badge (วัสดุ/บริการ/ที่ดิน/
+ * รับเหมา) is display-derived from `kind` on the web (B-070), never stored.
+ *   `spend` is NOT a column — the per-vendor purchase total has no AP source
+ * yet (honest gap), so it stays computed/omitted rather than fabricated.
  */
 export const vendors = pgTable("vendor", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -300,9 +319,16 @@ export const vendors = pgTable("vendor", {
     .notNull()
     .references(() => companies.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  // Display code ("V-00xx") from VendorForm; nullable (new column on old rows).
+  code: text("code"),
   taxId: text("tax_id"),
   kind: vendorKind("kind").notNull().default("supplier"),
   creditTerm: integer("credit_term"),
+  // Registered-address + bank-account display strings from VendorForm; nullable.
+  addr: text("addr"),
+  bank: text("bank"),
+  // active | inactive (VendorForm dropdown); closed set enforced by the handler.
+  status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
