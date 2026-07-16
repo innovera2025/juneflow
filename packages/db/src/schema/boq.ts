@@ -239,6 +239,11 @@ export const prItems = pgTable("pr_item", {
  * PO — a material purchase order raised from an approved PR
  * (data-dictionary "PR อนุมัติ -> PO(วัสดุ)"). total/vat are money ->
  * currency_code; credit_term in days.
+ *
+ * `no` (document number), `status`, and `approval_step` were added (P2-BE-05,
+ * B-070, migration 0015) to give PO the same submit->approve->reject state
+ * machine + tiered-approval matrix as PR (flows.html FLOW-A / MATRIX). They
+ * mirror the pr columns exactly: status defaults to `draft`, approval_step to 0.
  */
 export const pos = pgTable("po", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -246,10 +251,13 @@ export const pos = pgTable("po", {
   vendorId: uuid("vendor_id")
     .notNull()
     .references(() => vendors.id, { onDelete: "restrict" }),
+  no: text("no"),
   total: numeric("total", { precision: 16, scale: 2 }).notNull().default("0"),
   vat: numeric("vat", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
   creditTerm: integer("credit_term"),
+  status: text("status").notNull().default("draft"),
+  approvalStep: integer("approval_step").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -261,7 +269,14 @@ export const pos = pgTable("po", {
 /**
  * WO — a subcon work order, the PO counterpart raised for subcon work
  * (data-dictionary "WO(เหมา)"). value is money -> currency_code. Subcon delivery
- * itself is tracked via SubconContract -> WorkPeriod (see subcon.ts).
+ * itself (งวดงาน / installments) is tracked via SubconContract -> WorkPeriod
+ * (see subcon.ts) — the WO row carries no per-installment breakdown.
+ *
+ * `no`, `status`, `approval_step` were added (P2-BE-05, B-070, migration 0015)
+ * for the same state machine + tiered approval as PO/PR. `retention_pct` (mirror
+ * of subcon_contract.retention_pct) was added so the WO can carry its own
+ * retention hold-back rate (po-wo.jsx WOForm "Retention %" input); the retained
+ * amount is derived at read time as value * retention_pct / 100.
  */
 export const wos = pgTable("wo", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -269,8 +284,14 @@ export const wos = pgTable("wo", {
   vendorId: uuid("vendor_id")
     .notNull()
     .references(() => vendors.id, { onDelete: "restrict" }),
+  no: text("no"),
   value: numeric("value", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
+  retentionPct: numeric("retention_pct", { precision: 6, scale: 3 })
+    .notNull()
+    .default("0"),
+  status: text("status").notNull().default("draft"),
+  approvalStep: integer("approval_step").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

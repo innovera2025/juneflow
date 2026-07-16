@@ -431,10 +431,18 @@ const PR_ROWS = [
   { no: "PR-2026-0409", type: "expense", status: "rejected", step: 1 },
 ] as const;
 
-// po-wo.jsx:3 PO_ROWS (6) — real totals (vendorId cycles suppliers; no "no" column).
+// po-wo.jsx:3 PO_ROWS (6) — real totals + verbatim doc `no` + `status`
+// (P2-BE-05, B-070: pos gained no/status/approval_step in migration 0015).
 const PO_TOTALS = [1268000, 902475, 612400, 96800, 268000, 1840000];
-// po-wo.jsx:272 WO_ROWS (5) — real values.
+const PO_NOS = ["PO-2026-0291", "PO-2026-0290", "PO-2026-0289", "PO-2026-0288", "PO-2026-0287", "PO-2026-0286"];
+const PO_STATUS = ["approved", "pending", "approved", "approved", "approved", "approved"];
+// po-wo.jsx:272 WO_ROWS (5) — real values + verbatim `no`/`status` + retention_pct.
+// retention_pct is the mock's retention÷value ratio verbatim (215000/2150000 = 10%,
+// … WO-0113 = 0%); scale-3 to mirror subcon_contract.retention_pct.
 const WO_VALUES = [2150000, 845000, 2840000, 985000, 425000];
+const WO_NOS = ["WO-2026-0117", "WO-2026-0116", "WO-2026-0115", "WO-2026-0114", "WO-2026-0113"];
+const WO_STATUS = ["pending", "approved", "approved", "approved", "approved"];
+const WO_RETENTION_PCTS = ["10.000", "10.000", "10.000", "10.000", "0.000"];
 // gr.jsx:3 GR_ROWS (5) received %/amount; :11 RETURN_ROWS handled via rejected qty.
 const GR_RECEIVED = [320, 240, 120, 92, 920];
 
@@ -1027,7 +1035,8 @@ async function seed(): Promise<void> {
       await tx.insert(schema.pos).values(
         PO_TOTALS.map((total, i) => ({
           id: det(`po:${i}`), prId: det(`pr:${i}`), vendorId: at(SUPPLIER_VENDORS, i),
-          total: m(total), vat: m(total * 0.07), creditTerm: 30,
+          no: at(PO_NOS, i), total: m(total), vat: m(total * 0.07), creditTerm: 30,
+          status: at(PO_STATUS, i),
         })),
       );
 
@@ -1039,7 +1048,8 @@ async function seed(): Promise<void> {
         WO_VALUES.map((value, i) => ({
           id: det(`wo:${i}`), prId: det(`pr:${i + 1}`),
           vendorId: det(`vendor:SC-0${i + 1}`),
-          value: m(value),
+          no: at(WO_NOS, i), value: m(value),
+          retentionPct: at(WO_RETENTION_PCTS, i), status: at(WO_STATUS, i),
         })),
       );
 
