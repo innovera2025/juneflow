@@ -28,6 +28,8 @@ import {
 import { LoginScreen } from "./screens/login/login-screen";
 import { BOQList } from "./screens/boq/boq-list";
 import { GRList } from "./screens/gr/gr-list";
+import { POList } from "./screens/po-wo/po-list";
+import { WOList } from "./screens/po-wo/wo-list";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
 import { MasterCompany } from "./screens/master/master-company";
@@ -48,6 +50,8 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
   "boq.list": BOQList,
   "gr.list": GRList,
+  "po.list": POList,
+  "wo.list": WOList,
   "master.cc": MasterCC,
   "master.docnum": MasterDocNum,
   "master.company": MasterCompany,
