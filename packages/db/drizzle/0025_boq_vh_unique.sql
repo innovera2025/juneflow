@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "boq_version_history_doc_version_action_uq" ON "boq_version_history" USING btree ("doc_id","version","action");

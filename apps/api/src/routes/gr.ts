@@ -61,6 +61,7 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
 import { has, pick, prOrderedQty, str, toNum } from "./procurement.js";
 
 type GrRow = typeof grs.$inferSelect;
@@ -143,9 +144,10 @@ function grWire(
   extra: { vendor?: string | null; items?: GrItemRow[] } = {},
 ): Record<string, unknown> {
   const items = extra.items ?? [];
-  const money = items.reduce(
-    (sum, it) => sum + Number(it.receivedQty) * Number(it.price),
-    0,
+  // Σ(received_qty × price) is a JS-float product-sum → round to the 2-dp minor
+  // unit at the wire so accumulation drift never surfaces (B-085 fix 3).
+  const money = round2(
+    items.reduce((sum, it) => sum + Number(it.receivedQty) * Number(it.price), 0),
   );
   const orderedQty = items.reduce((sum, it) => sum + Number(it.orderedQty), 0);
   return {
@@ -337,6 +339,19 @@ export function registerGrRoute(app: FastifyInstance): void {
             str(pick(line, "currency_code", "currencyCode")).trim() || "THB",
         });
       }
+    }
+
+    // Mixed-currency guard (B-085 fix 4): grWire sums Σ(received_qty × price)
+    // across ALL lines but labels the receipt with items[0].currency_code — so a
+    // receipt whose lines carry more than one currency would silently sum across
+    // currencies under a single (wrong) label. One receipt = one currency: reject
+    // at create rather than emit a meaningless cross-currency total.
+    const currencies = new Set(itemDrafts.map((d) => d.currencyCode));
+    if (currencies.size > 1) {
+      return reply.code(400).send({
+        code: "VALIDATION",
+        message: "all received lines must share one currency_code (one receipt = one currency)",
+      });
     }
 
     // Resolve the anchor doc (scoped) + its source PR — a foreign/absent id

@@ -57,6 +57,7 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
 
 type BoqDocRow = typeof boqDocs.$inferSelect;
@@ -184,7 +185,10 @@ function docWire(
     version: doc.version,
     status: doc.status,
     currency_code: currency,
-    total,
+    // Σ(qty × price) over the doc's items is a JS-float product-sum → round to
+    // the 2-dp minor unit at the wire so accumulation drift never surfaces to the
+    // BOQ list/detail (B-085 fix 3).
+    total: round2(total),
     // B-081 (F4, migration 0021): the archive approver + approval timestamp. id +
     // timestamp are real columns; the display name is resolved for list/detail.
     approved_by: doc.approvedBy,
@@ -249,7 +253,9 @@ function cbsWire(c: CbsRow): Record<string, unknown> {
     budget,
     used,
     committed,
-    available: budget - used - committed,
+    // budget − used − committed is a JS-float difference → round to the 2-dp
+    // minor unit at the wire so subtraction drift never surfaces (B-085 fix 3).
+    available: round2(budget - used - committed),
     currency_code: c.currencyCode,
   };
 }
@@ -884,14 +890,39 @@ export function registerBoqRoute(app: FastifyInstance): void {
       });
     }
 
+    // Resolve the revising user (mirrors /approve) so the version-history row is
+    // attributed to a real actor; a system/unresolvable caller stamps `by` null.
+    const reviser = request.authUser
+      ? await loadUserByEmail(db, request.authUser.email)
+      : null;
+    const revisedAt = new Date();
+    const newVersion = doc.version + 1;
+
     const [updated] = await db.updateThrough(
       boqDocs,
       projects,
       boqDocs.projectId,
       doc.projectId,
-      { status: "revise", version: doc.version + 1 },
+      { status: "revise", version: newVersion },
       eq(boqDocs.id, id),
     );
+
+    // Append a version-history row (action=revise) for the NEW version so the
+    // archive's Revise-history timeline shows revise events, not just approvals
+    // (B-085 fix 1; previously only /approve logged a row). version = the freshly
+    // bumped version so it never collides with this doc's approve-history keys.
+    await db.insertThrough(boqVersionHistory, projects, doc.projectId, [
+      {
+        docId: id,
+        version: newVersion,
+        action: "revise",
+        by: reviser?.id ?? null,
+        at: revisedAt,
+        delta: null,
+        note: null,
+      },
+    ]);
+
     return reply.code(200).send(await docWireWithTotal(db, updated!));
   });
 }

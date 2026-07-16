@@ -312,6 +312,25 @@ describe("GET /api/v1/wo — auth + list + retention", () => {
     expect(w0.progress).toBe(null);
   });
 
+  it("rounds retention_amount to 2 dp — no value × pct / 100 sub-cent drift (B-085 fix 3)", async () => {
+    // 12345 × 7.125 / 100 = 879.58125 → must surface as 879.58, not the raw
+    // sub-cent value (the FE / visual gate shows money at 2 dp).
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [wos, [wo("w0", "WO-RETAIN", "approved", 12345, "7.125", PR, null)]],
+            [prs, [prRow("approved")]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/wo" });
+    expect(res.statusCode).toBe(200);
+    const w0 = res.json().data[0];
+    expect(w0.retention_amount).toBe(879.58);
+  });
+
   it("binds company_id on the project root of the scoped read (no cross-tenant leak)", async () => {
     const captured: Captured[] = [];
     await (

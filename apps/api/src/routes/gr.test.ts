@@ -321,6 +321,28 @@ describe("GET /api/v1/gr — auth + list", () => {
     );
   });
 
+  it("rounds money to 2 dp — no Σ(received × price) float drift (B-085 fix 3)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [[grs, pos], [gr("g0", { no: "GR-DRIFT", poId: PO, received: 3 })]],
+            [[grs, wos], []],
+            // 3 × 0.10 = 0.30000000000000004 in IEEE-754 → must surface as 0.3.
+            [[grItems, pos], [grItem("gi0", "g0", 3, 3, "0.10")]],
+            [[grItems, wos], []],
+            [pos, [poRow("approved")]],
+            [vendors, [vendorRow]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gr" });
+    expect(res.statusCode).toBe(200);
+    const g0 = res.json().data.find((g: { id: string }) => g.id === "g0");
+    expect(g0.money).toBe(0.3);
+  });
+
   it("binds company_id on the project root of both scoped reads (no cross-tenant leak)", async () => {
     const captured: Captured[] = [];
     await (
@@ -430,6 +452,42 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(row.orderedQty).toBe("100");
     expect(row.receivedQty).toBe("90"); // = qty_ok
     expect(row.price).toBe("300.00");
+  });
+
+  it("400s when the receipt lines carry more than one currency (B-085 fix 4 — one receipt = one currency)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]],
+            [grs, [gr("new-0", { poId: PO, received: 5 })]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [
+          { qty_ok: 3, name: "ปูนซีเมนต์", ordered_qty: 3, unit: "ถุง", price: 300, currency_code: "THB" },
+          { qty_ok: 2, name: "steel", ordered_qty: 2, unit: "ton", price: 400, currency_code: "USD" },
+        ],
+      },
+    });
+    // Fail closed at create — never sum across currencies under one label, and
+    // never persist the receipt (no gr / gr_item writes).
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("currency");
+    expect(inserted.find((w) => w.table === grItems)).toBeFalsy();
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
   });
 
   it("creates a receipt against a WO (201) — wo_id set, po_id null (B-070 GR-from-WO)", async () => {

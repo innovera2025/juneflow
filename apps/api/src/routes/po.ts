@@ -63,6 +63,7 @@ import {
   apBillings,
 } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
 import {
   callerApprovalLevel,
   has,
@@ -92,7 +93,9 @@ function sumBillings(bills: ApBillingRow[]): { paid: number; deposit: number } {
     paid += amount;
     if (b.kind === "deposit") deposit += amount;
   }
-  return { paid, deposit };
+  // Σ ap_billing is a JS-float sum → round both to the 2-dp minor unit at the
+  // wire so accumulation drift never surfaces (B-085 fix 3).
+  return { paid: round2(paid), deposit: round2(deposit) };
 }
 
 // The tenant anchor for a po: pr_id → pr → project (company_id-scoped root).
