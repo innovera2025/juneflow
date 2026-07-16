@@ -16,7 +16,7 @@
 
 > **หมายเหตุ Phase 0:** PLAN.md §7 กำหนด Phase 0 = Backend/Platform **เดี่ยว** — task เขตอื่นในตารางนี้คืองาน Phase 0 ในเขตตัวเอง + งานเตรียม Phase 0/1 ที่เริ่มได้เร็วสุด โดยลำดับถูกบังคับผ่านคอลัมน์ dependencies แล้ว
 >
-> **TODO [TBD-MVP]** — การแตก task Phase 1 ขึ้นไปแบบเต็มรูปต้องรอนิยาม MVP (PLAN.md §2) — ห้าม agent สร้าง task ที่ผูกกับขอบเขต MVP เอง งานที่ขึ้นกับนิยาม MVP ให้ escalate ผ่าน `BLOCKERS.md`
+> **MVP DEFINED = B (B-069 · Wei 16 ก.ค.)** — FLOW-A ครบวง + finance touch + dashboard · approval=fixed/seed · track=GR/procurement · cost-side only · **[TBD-MVP] freeze ปลดสำหรับ scope นี้** · Phase-2 Wave-1 task creation authorized (อ้าง B-069) · PLAN §2 (sacred) รอ Wei apply ข้อความใน MVP-PROPOSAL.md · scope **นอก** B ยังต้อง escalate ผ่าน `BLOCKERS.md`
 
 Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test · **G3** unit business logic · **G4** E2E Playwright · **G5** visual gate — task โครงสร้างพื้นฐานที่ยังไม่แตะ 5 gates ให้ระบุเกณฑ์ CI ขั้นต่ำ (lint+typecheck+build) แทน
 

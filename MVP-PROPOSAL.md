@@ -86,3 +86,32 @@
 6. **Mobile ยืนยันอยู่นอก MVP?** — 0/26 จอ + offline-first level (ก/ข) ยังไม่ตัดสิน → ยืนยัน mobile คง Phase 4
 
 **ช่องที่ยังไม่ตรวจลึก (อย่าเดา):** ตัวเลข ชม.รวมแม่นยำ (มีแค่ S/M/L) · สเปคระดับจอ BOQ/proc อาจมี discrepancy ใน `GAPS.md` — ตรวจตอนแตก Wave 1
+
+
+---
+
+## ✅ APPROVED (Wei 16 ก.ค. · B-069) — ข้อความสำหรับ PLAN.md §2
+
+> Wei เลือก **B** + 4 rulings · ข้อความด้านล่างให้ Wei วางแทน `**TODO [TBD-MVP]**` ใน **PLAN.md §2** (sacred · Wei แก้เอง) · หลัง apply แล้ว §11 Q1 + `> [TBD-MVP]` header (PLAN.md:4) ปรับตามได้
+
+```markdown
+## 2. MVP Definition
+
+**MVP = Option B "Balanced core" (Wei 16 ก.ค. · B-069)** — เจาะแนวดิ่ง FLOW-A ครบวงจร + finance touch ให้ demo เป็น ERP loop จริง: define → procure → track → cost
+
+**ขอบเขต IN:**
+- FLOW-A procurement ครบวง: BOQ → PR → PO/WO → GR → AP → จ่ายเงิน/bank export
+- Finance touch: GL posting (jv/inbox ขั้นต่ำ) + P&L รายโครงการ (gl.projectpl)
+- Dashboard (default landing · B-049)
+- Master prerequisite: master.vendor
+- Approval matrix: fixed/seed จาก flows.html (ไม่ configurable ใน MVP)
+- Track = GR/procurement status + phase-progress dashboard
+
+**ขอบเขต OUT (defer เป็น Phase ถัดไป):**
+- AR/รายได้/sales-CRM/land (Phase 5) · subcon/งวดงาน/ศูนย์ตรวจรับ/PM (Phase 4)
+- Inventory · Mobile (Phase 4 · offline level ยังไม่ตัดสิน)
+- AI-QTO engine จริง (fake-result UI M+ gated เท่านั้น · §12)
+- Configurable approval · multi-currency เต็ม · Stripe/SSO/RLS (§12)
+
+**Wave:** Wave-0 (master.vendor + ปิด Phase-1) → Wave-1 (procurement backend) → Wave-2 (procurement web) → Wave-3 (finance touch)
+```
