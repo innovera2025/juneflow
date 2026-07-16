@@ -37,6 +37,7 @@ import { registerProjectTypesRoute } from "./routes/project-types.js";
 import { registerCostCentersRoute } from "./routes/cost-centers.js";
 import { registerDocNumberingRoute } from "./routes/doc-numbering.js";
 import { registerModelsRoute } from "./routes/models.js";
+import { registerVendorsRoute } from "./routes/vendors.js";
 import { registerUsersRoute } from "./routes/users.js";
 import { registerRolesRoute } from "./routes/roles.js";
 import { registerOrgUnitsRoute } from "./routes/org-units.js";
@@ -130,6 +131,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerCostCentersRoute(v1);
       registerDocNumberingRoute(v1);
       registerModelsRoute(v1);
+      registerVendorsRoute(v1);
       registerUsersRoute(v1);
       registerRolesRoute(v1);
       registerOrgUnitsRoute(v1);
