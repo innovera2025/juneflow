@@ -101,7 +101,10 @@ export const pmContracts = pgTable("pm_contract", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): pm_contract → project JOIN key.
+  index("pm_contract_project_idx").on(t.projectId),
+]);
 
 /**
  * PMAsset — a maintained asset under a PM contract, type-aware
@@ -123,7 +126,11 @@ export const pmAssets = pgTable("pm_asset", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2, corrected column): pm_asset → pm_contract
+  // JOIN key is contract_id (the audit sketch's "asset_id" was a flagged typo).
+  index("pm_asset_contract_idx").on(t.contractId),
+]);
 
 /**
  * ChecklistTemplate — central config, picked when a PMWorkOrder is created
@@ -171,7 +178,10 @@ export const pmWorkOrders = pgTable("pm_workorder", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): pm_workorder → pm_asset JOIN key.
+  index("pm_workorder_asset_idx").on(t.assetId),
+]);
 
 /**
  * PMQuote — a spare-parts quote raised off a PM work order and sent to the

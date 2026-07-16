@@ -122,7 +122,16 @@ export const boqDocs = pgTable("boq_doc", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 FK-index migration (perf-audit §2.3): boq_doc is scoped THROUGH
+  // project_id (every selectThrough door hop) — with no index that JOIN is a
+  // seq-scan. The (project_id,status) composite serves the pending counts /
+  // dashboard-inbox filtered scans; the archive approver FK (approved_by) is a
+  // plain lookup key.
+  index("boq_doc_project_idx").on(t.projectId),
+  index("boq_doc_project_status_idx").on(t.projectId, t.status),
+  index("boq_doc_approved_by_idx").on(t.approvedBy),
+]);
 
 /**
  * BOQVersionHistory — the Revise history of a BOQDoc (B-081 / F4, migration
@@ -146,7 +155,11 @@ export const boqVersionHistory = pgTable("boq_version_history", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.4): the version-history rows of a doc are read/written
+  // by doc_id (the Revise-history expander) — index the FK.
+  index("boq_version_history_doc_idx").on(t.docId),
+]);
 
 /**
  * BOQGroup — a heading / cost category inside a BOQDoc (data-dictionary
@@ -165,7 +178,10 @@ export const boqGroups = pgTable("boq_group", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): boq_group → boq_doc is a selectThrough hop.
+  index("boq_group_boq_idx").on(t.boqId),
+]);
 
 /**
  * BOQItem — a priced line inside a BOQGroup. remain_qty is cut when a PR opens
@@ -202,7 +218,11 @@ export const boqItems = pgTable("boq_item", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): boq_item → boq_group is a selectThrough hop
+  // and the hottest one (BOQ_ITEM_HOPS price-map + cut-remain).
+  index("boq_item_group_idx").on(t.groupId),
+]);
 
 /**
  * CBSBudget — budget control per BOQGroup + over-budget warning
@@ -226,7 +246,11 @@ export const cbsBudgets = pgTable("cbs_budget", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): cbs_budget → boq_group is a selectThrough
+  // hop (per-group CBS available = budget−used−committed).
+  index("cbs_budget_group_idx").on(t.groupId),
+]);
 
 /**
  * PR — purchase requisition against a project, with N lines pulled from BOQ
@@ -266,7 +290,15 @@ export const prs = pgTable("pr", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): pr → project is a selectThrough hop; the
+  // (project_id,status) composite serves the pending-PR counts/inbox scans.
+  // vendor_id / requester_id (Gap-2, migration 0022) are display-JOIN FKs.
+  index("pr_project_idx").on(t.projectId),
+  index("pr_project_status_idx").on(t.projectId, t.status),
+  index("pr_vendor_idx").on(t.vendorId),
+  index("pr_requester_idx").on(t.requesterId),
+]);
 
 /**
  * PRItem — a PR line referencing the source BOQItem (erd.html "PR + Items ->
@@ -287,7 +319,12 @@ export const prItems = pgTable("pr_item", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): pr_item is read by pr_id (PR detail lines)
+  // and joined back to its source boq_item (the pricing map).
+  index("pr_item_pr_idx").on(t.prId),
+  index("pr_item_boq_item_idx").on(t.boqItemId),
+]);
 
 /**
  * PO — a material purchase order raised from an approved PR
@@ -318,7 +355,12 @@ export const pos = pgTable("po", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): po → pr is a selectThrough hop; the
+  // (pr_id,status) composite serves the pending-PO counts scans.
+  index("po_pr_idx").on(t.prId),
+  index("po_pr_status_idx").on(t.prId, t.status),
+]);
 
 /**
  * WO — a subcon work order, the PO counterpart raised for subcon work
@@ -359,7 +401,14 @@ export const wos = pgTable("wo", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): wo → pr is a selectThrough hop; the
+  // (pr_id,status) composite serves pending-WO scans. contract_id (B-080,
+  // migration 0020) joins the WO to its subcon contract's installment model.
+  index("wo_pr_idx").on(t.prId),
+  index("wo_pr_status_idx").on(t.prId, t.status),
+  index("wo_contract_idx").on(t.contractId),
+]);
 
 /**
  * VariationOrder — an add/cut amendment attached to a PO
@@ -381,7 +430,10 @@ export const variationOrders = pgTable("variation_order", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): variation_order → po JOIN key.
+  index("variation_order_po_idx").on(t.poId),
+]);
 
 /**
  * GR — goods receipt against a PO (material) OR a WO (subcon work; B-070
@@ -424,7 +476,12 @@ export const grs = pgTable("gr", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): a GR anchors on EITHER a PO or a WO — both
+  // FKs are selectThrough hops (findGr walks the po chain then the wo chain).
+  index("gr_po_idx").on(t.poId),
+  index("gr_wo_idx").on(t.woId),
+]);
 
 /**
  * GRItem — a per-line detail row of a GR (B-078 / F1, migration 0018). The `gr`
@@ -463,7 +520,12 @@ export const grItems = pgTable("gr_item", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2 + task): gr_item is read by gr_id (GR detail
+  // lines) and joined back to its source boq_item.
+  index("gr_item_gr_idx").on(t.grId),
+  index("gr_item_boq_item_idx").on(t.boqItemId),
+]);
 
 /**
  * DefectReport — generated from a GR rejection (data-dictionary). Distinct from
@@ -481,4 +543,7 @@ export const defectReports = pgTable("defect_report", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): defect_report → gr JOIN key.
+  index("defect_report_gr_idx").on(t.grId),
+]);

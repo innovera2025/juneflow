@@ -742,16 +742,20 @@ export function registerBoqRoute(app: FastifyInstance): void {
 
     // Cut-remain: decrement each PR'd item's remain_qty by the generated qty.
     // boq_item has no direct tenant FK, so the scoped-write door resolves the
-    // item THROUGH its ancestry to the company_id root before updating it.
-    for (const l of lines) {
-      const newRemain = Number(l.item.remainQty) - l.qty;
-      await db.updateThroughChain(
-        boqItems,
-        ITEM_HOPS,
-        { remainQty: String(newRemain) },
-        eq(boqItems.id, l.item.id),
-      );
-    }
+    // items THROUGH their ancestry to the company_id root before updating them.
+    // Perf (0024 audit): a SINGLE bulk CASE update keyed by item id — not one
+    // ownership-resolve + update per row — so N cut lines cost 2 queries, not
+    // 2·N. `lines` holds distinct item ids (item_ids[] was de-duped above), so
+    // the id→new-remain map has no key collisions.
+    const remainByItem = new Map(
+      lines.map((l) => [l.item.id, String(Number(l.item.remainQty) - l.qty)]),
+    );
+    await db.updateThroughChainMany(
+      boqItems,
+      ITEM_HOPS,
+      boqItems.remainQty,
+      remainByItem,
+    );
 
     return reply.code(201).send({ prs: createdPrs });
   });

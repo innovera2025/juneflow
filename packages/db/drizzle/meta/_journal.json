@@ -169,6 +169,13 @@
       "when": 1784217628943,
       "tag": "0023_boq_item_detail",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784225722363,
+      "tag": "0024_fk_indexes",
+      "breakpoints": true
     }
   ]
 }

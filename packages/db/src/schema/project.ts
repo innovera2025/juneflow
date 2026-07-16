@@ -248,7 +248,13 @@ export const projectNodes = pgTable("project_node", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): project_node is the self-referential
+  // Phase/Block/Unit tree — read by project_id (all nodes of a project) and
+  // walked by parent_id (children of a node). Both are FK JOIN keys.
+  index("project_node_project_idx").on(t.projectId),
+  index("project_node_parent_idx").on(t.parentId),
+]);
 
 /**
  * CostCenter — attached to every cost document (incl. land survey work).

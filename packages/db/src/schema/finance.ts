@@ -171,7 +171,13 @@ export const apBillings = pgTable("ap_billing", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("ap_billing_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("ap_billing_company_idx").on(t.companyId),
+  // 0024 (task + perf-audit §1.4): the 3-way match joins ap_billing back to its
+  // PO and GR — index both FK columns (nullable for non-PO expenses).
+  index("ap_billing_po_idx").on(t.poId),
+  index("ap_billing_gr_idx").on(t.grId),
+]);
 
 /**
  * PV — payment voucher settling one or more AP billings (data-dictionary
