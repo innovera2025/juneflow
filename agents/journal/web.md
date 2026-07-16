@@ -301,3 +301,8 @@
   - boq.reports → **WHOLE MISSING BACKEND FEATURE**: ไม่ call reports endpoint เลย (structural shell + honest empty per orch-A) · ต้อง reports-aggregation service (RPT-001 BOQ-vs-NonBOQ · RPT-002 revise-history · RPT-003 cost-type breakdown)
 - **methodology gotcha (บันทึกไว้ live-G5 รอบหน้า):** launch vite ด้วย `VITE_API_BASE_URL=` (empty) ไม่ override client `?? "/api/v1"` → base "" → fetch miss proxy = false empty. ต้อง temp proxy `/api`→:3000 + ไม่ set env เปล่า
 - git: qa worktree clean · stack down · ไม่แตะ screen code
+
+## 2026-07-17 01:25 · qa (orch-B) · LIVE-G5 ROUND 4 (real-data) + B-084 mutation-authz matrix
+- **round 4:** 5 PASS · 8 FAIL(data-wire) · 0 regression (12 FLOW-A + dashboard). **KEY: backend data-completeness สำเร็จ (API คืน field จริง verify curl) แต่ web ไม่ re-wire** → 8 จอ (gr/po/pr/wo.list · boq.list/bom/archive/reports) ยัง hardcode DASH → web re-wire task (orch-A · rows opaque Entity ไม่ต้องแก้ contract). PASS: boq.overview/editor/approval/aiqto + **dashboard real body**. B-083 = acceptable (approver=user:1 วิภา Director-role · ชื่อต่างจาก mock = honest). dashboard manifest unmask done.
+- **B-084 mutation-authz matrix** (`agents/orch-b-recon/b084-mutation-authz-matrix.md`): 27 mutation → 7 gated · 12 status-only · **8 UNGATED**. CRITICAL = POST /po/:id/variation-order (po.ts:416 · no authz+no status · tier-downgrade approval-bypass weaponize ladder · survives F1) · HIGH generate-pr · models/cc ไม่ gate master.create. Wei-gated (authz model ruling) · report+exploit only.
+- git: unmask merged dev · reports committed · ไม่แตะ screen code
