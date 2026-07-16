@@ -495,3 +495,8 @@
 - openapi §10 (7 ops + project_id) applied by orch-A; subagent impl handlers only (no sacred touch)
 - C10 honest aggregation: real where seed has data (budget/contractors/approvals/phase), honest-empty where schema lacks source (time-series/alerts/cashflow)
 - project_id active-project scope: 404 foreign (EntityOk) / empty (EntityList), no cross-tenant leak
+
+## 2026-07-16 · orch-A subagent · P2-BE-02 (B-070 BOQ handlers)
+- state machine draft/pending/approved(lock)/revise(v+1) · approval flows.html 3-tier no-threshold (approve=MD level 4 lock)
+- NEW TenantDb.updateThrough door (parent-FK child mutation, fail-closed like insertThrough) — security-core, gate-4.5 scrutiny
+- gaps flagged (no invent): boq_doc no approval_step (terminal MD lock only) · GET /boq/{id} added to contract by orch-A · action 403/409 undocumented
