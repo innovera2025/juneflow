@@ -30,6 +30,7 @@ import { BOQOverview } from "./screens/boq/boq-overview";
 import { BOQList } from "./screens/boq/boq-list";
 import { BOQEditor } from "./screens/boq/boq-editor";
 import { BOMTemplates } from "./screens/boq/boq-bom";
+import { BOQApproval } from "./screens/boq/boq-approval";
 import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
 import { POList } from "./screens/po-wo/po-list";
@@ -56,6 +57,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
   "boq.bom": BOMTemplates,
+  "boq.approval": BOQApproval,
   "gr.list": GRList,
   "pr.list": PRList,
   "po.list": POList,

@@ -1,0 +1,12 @@
+{
+  "_source": "Verbatim i18n KEYS for pototype/boq.jsx BOQApproval (L1108-1371) + FileListBody (L1373-1419) strings that have NO dedicated boq.apr* / common.* DICT key. Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx/.ts source — same pattern as boq-editor-strings.json / boq-strings.json. navApproval is the 'อนุมัติ BOM/BOQ' nav_i18n label (tn, the breadcrumb crumb the prototype's TopBar renders); every other value is a phrases-bucket key (tp) where the Thai phrase IS the key, verified present in docs/extract/i18n-full.json (phrases). The 50 boq.apr* + common.print/all/notif/reject/approve DICT keys cover the rest and are used via t(). No string here is invented (§0 rule 2).",
+  "navApproval": "อนุมัติ BOM/BOQ",
+  "pendingHeader": "รออนุมัติ",
+  "thType": "ประเภท",
+  "thCode": "รหัส",
+  "chainProjectMgr": "ผจก.โครงการ",
+  "notifyEmail": "อีเมล",
+  "closeBtn": "ปิด",
+  "addFileBtn": "เพิ่มไฟล์",
+  "reviseBtn": "ขอแก้ไข"
+}
