@@ -134,5 +134,39 @@ Columns — **Door:** tenant-scope door used · **:id anchored:** is `:id` bound
 4. **F2** (High) — real quota resolver.
 5. **F5** (High, devops/Wei) — fix the `BETTER_AUTH_SECRET` env-name mismatch so prod boots.
 6. **F6/F7/F8** (Med) then **F9/F10** (Low).
-</content>
-</invoke>
+
+---
+
+## Follow-up: updateThroughChainMany door (0024 N+1 fix)
+
+**Date:** 2026-07-17 · **Auditor:** orch-B recon · **Trigger:** dev `8beea5f` flagged the new batch door for a security pass (migration-0024 N+1 fix replaced the boq generate-PR cut-remain 2·N loop with one bulk CASE update).
+**Scope:** `apps/api/src/db/tenant-db.ts:349-400` (new `updateThroughChainMany`) vs `updateThroughChain` (`:300-326`) it batches · call site `boq.ts:759-764` · tests `tenant-db.test.ts:473-582`.
+
+### Verdict: **FAIL-CLOSED (safe)** — isolation tests present, no cross-tenant write, no SQL-injection surface.
+
+The batch door preserves the SAME fail-closed guarantee as the single `updateThroughChain`: it does **not** trust the caller's raw id list. It resolves ownership as a **set** through the hop chain and then drives the write **only** by the resolved-and-owned ids — never by the caller's ids directly. A partial-ownership batch (some owned, some foreign) updates **only the owned rows**; foreign ids are silently dropped to a no-op (fail-closed "update only owned", not fail-open "update all").
+
+### Evidence — how batch ownership is enforced
+
+1. **Per-id ownership is a SET filter, not count/first.** The door resolves ownership via `this.selectThrough(table, hops, inArray(idCol, ids))` (`tenant-db.ts:366-370`). `selectThrough` INNER-JOINs the full hop chain to the company_id-scoped root and anchors `WHERE root.company_id = <this tenant> [AND id IN (ids)]` (`tenant-db.ts:162,182-184`). The result `scoped` is the set of rows this tenant actually owns — every id is checked, not just the first or a count.
+2. **The write is scoped by RESOLVED ids, not raw caller ids.** `scopedIds = scoped.map(r.id).filter(values.has(id))` (`tenant-db.ts:371-373`) — the intersection of DB-resolved-owned rows AND the caller's map keys. The final `UPDATE … WHERE id IN (scopedIds)` (`:397`) and the `CASE WHEN id = <id> THEN <val> … ELSE <column> END` (`:389-393`) both iterate `scopedIds` **only**. The caller's raw `ids`/`values` never drive the write. A foreign id absent from `scoped` is therefore absent from both the WHERE selector and the CASE.
+3. **Double-layered no-op for a foreign id.** Even if the `WHERE id IN (…)` ever over-matched, the CASE's `ELSE ${column} END` writes the column back to its own current value for any row not explicitly listed — so a non-resolved row is untouched by construction.
+4. **No SQL-injection surface.** All caller-influenced data are bound parameters: `${id}` and `${values.get(id)!}` in the CASE (`:391`) are drizzle `sql`-template interpolations → bind params; `inArray(idCol, scopedIds)` / `inArray(idCol, ids)` (`:397,:369`) → bind params. The **only** raw interpolation is `sql.raw(sqlType)` where `sqlType = column.getSQLType()` (`:388,391`) — a schema-derived type string (e.g. `numeric`), not user input. `column` is a typed `PgColumn` argument, validated to belong to the table via the `colKey` lookup (`:376-383`), and the sole caller passes a literal schema column (`boqItems.remainQty`). Safe **as long as `column` stays code-supplied** — see invariant below.
+
+### Call-site check (defense-in-depth, `boq.ts`)
+
+The id list is derived from a **tenant-scoped query**, not raw user input: `remainByItem` (`boq.ts:756-758`) is built from `lines`, whose `l.item` each come from `itemById.get(itemId)` (`:652`), and `itemById` is populated from `db.selectThrough(boqItems, ITEM_HOPS, eq(boqDocs.id, id))` (`:645`) — a tenant-scoped read. The doc itself was resolved via `selectThrough` (`:618`) and a foreign/unselected `itemId` yields 404 before the loop (`:653-657`). So the call site already hands the door only owned ids, **and** the door re-enforces regardless — belt-and-suspenders.
+
+### Test coverage — isolation tests ARE present (not a NEEDS-TEST gap)
+
+- `tenant-db.test.ts:533-554` — **"drops an id the hop chain did NOT resolve (a foreign id is never written)"**: the partial-ownership case (caller sends `it-1` owned + `evil` foreign; `selectThrough` resolves `it-1` only → CASE and WHERE bind `it-1` alone, `evil` **and** its value `999` dropped). This is the crafted-batch tenant-isolation test.
+- `tenant-db.test.ts:570-581` — **"updates NOTHING when the hop chain resolves no tenant-owned rows"**: a fully-foreign batch → returns `[]`, no UPDATE issued (the "foreign id in batch → 0 rows affected" regression).
+- `tenant-db.test.ts:510-531` — ownership resolve is company_id-anchored (asserts `COMPANY` in the selectThrough WHERE params) and the UPDATE WHERE + CASE are keyed by the resolved ids.
+
+### Residuals / recommendations (non-blocking)
+
+- **Test methodology (Info).** The four tests use a hand-rolled `fakeDb` and assert generated-SQL shape (`.toSQL()`/`PgDialect`), consistent with this file's G3 approach — they prove the write is driven **only** by `selectThrough`-resolved ids and that the resolve is company_id-anchored. They do **not** exercise the real JOIN/company_id filter against Postgres; that correctness is **transitive through `selectThrough`**, the already-audited/tested door (§5 item 1). Acceptable, but note the guarantee inherits from `selectThrough`.
+- **Invariant to preserve (Info).** `sql.raw(column.getSQLType())` is the one raw-SQL interpolation. It is safe because `column` is always a code-supplied schema `PgColumn`. If a future caller ever routes a user-controlled column/type into this door, that raw cast becomes an injection vector. Keep `column` code-supplied and table-validated (as the `colKey` guard already enforces).
+
+**Bottom line:** the batch door inherits `updateThroughChain`'s fail-closed guarantee — ownership is re-proved per-id through the company_id-anchored chain, the write touches only resolved-owned ids, foreign ids in a mixed batch are dropped to no-ops, and there is no injection surface. Cross-tenant isolation is preserved; the isolation tests exist.
+
