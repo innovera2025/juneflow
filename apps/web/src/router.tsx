@@ -31,6 +31,8 @@ import { BOQList } from "./screens/boq/boq-list";
 import { BOQEditor } from "./screens/boq/boq-editor";
 import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
+import { POList } from "./screens/po-wo/po-list";
+import { WOList } from "./screens/po-wo/wo-list";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
 import { MasterCompany } from "./screens/master/master-company";
@@ -54,6 +56,8 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "boq.editor": BOQEditor,
   "gr.list": GRList,
   "pr.list": PRList,
+  "po.list": POList,
+  "wo.list": WOList,
   "master.cc": MasterCC,
   "master.docnum": MasterDocNum,
   "master.company": MasterCompany,
