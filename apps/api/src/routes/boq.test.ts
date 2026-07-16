@@ -1,0 +1,670 @@
+// G3 unit tests (PLAN.md §9) — BOQ handlers (P2-BE-02, B-070; boq.jsx BOQEditor +
+// boq-list.jsx BOQList, flows.html FLOW-A + MATRIX "BOQ / Revise"). Covers the
+// B-014 list envelope with a DERIVED total (C10, Σ qty×price — never hardcoded),
+// tenant scope on every read/write (company_id bound on the project root — no
+// cross-tenant leak), create (201, server-owned draft + version 1), single-doc
+// detail with per-group CBS available = budget−used−committed, item list + ?group
+// filter, bulk item add (201) + rejection once approved (immutable/locked), and
+// the submit→approve→revise state machine: approve locks + requires MD-tier
+// (approvalLevel 4) authority, edit-after-approve rejected, revise → v+1, and the
+// out-of-order transition guards (approval-step progression). All money/counts
+// come from the stubbed rows — no value is hand-computed against the impl.
+import { afterEach, describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import {
+  boqDocs,
+  boqGroups,
+  boqItems,
+  cbsBudgets,
+  projects,
+  roles,
+  users,
+} from "@juneflow/db";
+import type { Db } from "@juneflow/db/client";
+import { buildApp, type AppDeps } from "../app.js";
+import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
+import { createFakeR2Storage } from "./files.js";
+
+const COMPANY = "22222222-2222-2222-2222-222222222222";
+const OTHER_COMPANY = "33333333-3333-3333-3333-333333333333";
+const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+// A Director session (role approvalLevel 4 → may approve/lock BOQ). Email is
+// irrelevant to the stub (role rows are provided directly), but present so the
+// tenant-scope hook attaches request.authUser exactly as production does.
+const SESSION = {
+  companyId: COMPANY,
+  user: { id: "au-0", email: "wipha@rungrueang.co.th", name: "วิภา" },
+};
+
+interface Captured {
+  table: unknown;
+  where: SQL | undefined;
+}
+interface Inserted {
+  table: unknown;
+  rows: unknown[];
+}
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL | undefined;
+}
+
+interface StubOpts {
+  rows: Array<[unknown, unknown[]]>;
+  captured?: Captured[];
+  inserted?: Inserted[];
+  updated?: Updated[];
+  /** Base row merged with the update SET to synthesize the RETURNING row. */
+  updateBase?: Record<string, unknown>;
+}
+
+/** Base Db stub: canned rows per table for reads; capture of write ops. */
+function stubDb(opts: StubOpts): Db {
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const rowsFor = (table: unknown): unknown[] => {
+    for (const [t, r] of rows) if (t === table) return r;
+    return [];
+  };
+  const builderFor = (table: unknown) => {
+    const builder = {
+      $dynamic: () => builder,
+      innerJoin: () => builder,
+      where: (where: SQL) => {
+        captured.push({ table, where });
+        return Promise.resolve(rowsFor(table));
+      },
+      then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
+        captured.push({ table, where: undefined });
+        return Promise.resolve(rowsFor(table)).then(onOk, onErr);
+      },
+    };
+    return builder;
+  };
+  let seq = 0;
+  return {
+    select: () => ({ from: (table: unknown) => builderFor(table) }),
+    insert: (table: unknown) => ({
+      values: (values: unknown) => ({
+        returning: () => {
+          const list = Array.isArray(values) ? values : [values];
+          inserted.push({ table, rows: list });
+          return Promise.resolve(
+            list.map((r) => ({ id: `new-${seq++}`, ...(r as object) })),
+          );
+        },
+      }),
+    }),
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            updated.push({ table, set, where });
+            return Promise.resolve([{ ...updateBase, ...set }]);
+          },
+        }),
+      }),
+    }),
+  } as unknown as Db;
+}
+
+function paramsOf(where: SQL | undefined): unknown[] {
+  if (!where) return [];
+  return new PgDialect().sqlToQuery(where).params;
+}
+
+let app: FastifyInstance;
+afterEach(async () => {
+  await app?.close();
+});
+
+async function buildTestApp(overrides: Partial<AppDeps> = {}): Promise<FastifyInstance> {
+  app = await buildApp({
+    db: overrides.db ?? stubDb({ rows: [] }),
+    resolveTenant: overrides.resolveTenant ?? (async () => null),
+    signIn: overrides.signIn ?? (async () => null),
+    storage: overrides.storage ?? createFakeR2Storage("https://r2.test"),
+    quota:
+      overrides.quota ??
+      new QuotaGuard({ resolver: unlimitedQuotaResolver, upgradeUrl: "https://upgrade.test" }),
+    auditSink: overrides.auditSink ?? (async () => {}),
+    logger: false,
+  });
+  return app;
+}
+
+// ---------------------------------------------------------------------------
+// Row factories (stub-backed — never the mock's presentational values)
+// ---------------------------------------------------------------------------
+
+const project = { id: PROJECT, companyId: COMPANY, name: "juneflow ราชพฤกษ์" };
+
+const doc = (
+  id: string,
+  no: string,
+  status: "draft" | "pending" | "approved" | "revise",
+  version = 1,
+) => ({
+  id,
+  projectId: PROJECT,
+  no,
+  name: `BOQ ${no}`,
+  scope: "Block B",
+  version,
+  status,
+  createdAt: new Date(1_700_000_000_000),
+  updatedAt: new Date(1_700_000_000_000),
+});
+
+const group = (id: string, boqId: string, name: string, seq: number) => ({
+  id,
+  boqId,
+  name,
+  seq,
+  createdAt: new Date(1_700_000_000_000),
+  updatedAt: new Date(1_700_000_000_000),
+});
+
+const item = (
+  id: string,
+  groupId: string,
+  cat: "M" | "L" | "S",
+  qty: string,
+  price: string,
+) => ({
+  id,
+  groupId,
+  code: `C-${id}`,
+  name: `item ${id}`,
+  cat,
+  qty,
+  unit: "ถุง",
+  price,
+  currencyCode: "THB",
+  ccId: null,
+  remainQty: qty,
+  elementId: null,
+  createdAt: new Date(1_700_000_000_000),
+  updatedAt: new Date(1_700_000_000_000),
+});
+
+const cbs = (
+  id: string,
+  groupId: string,
+  budget: string,
+  used: string,
+  committed: string,
+) => ({
+  id,
+  groupId,
+  budget,
+  used,
+  committed,
+  currencyCode: "THB",
+  createdAt: new Date(1_700_000_000_000),
+  updatedAt: new Date(1_700_000_000_000),
+});
+
+const roleRow = (approvalLevel: number) => ({
+  id: "role-0",
+  companyId: COMPANY,
+  name: "Role",
+  approvalLimits: {},
+  perms: {},
+  approvalLevel,
+  approvalLimit: null,
+  currencyCode: "THB",
+  createdAt: new Date(1_700_000_000_000),
+  updatedAt: new Date(1_700_000_000_000),
+});
+
+const userRow = {
+  id: "u-0",
+  companyId: COMPANY,
+  email: "wipha@rungrueang.co.th",
+  name: "วิภา",
+  roleId: "role-0",
+  status: "active",
+};
+
+// ---------------------------------------------------------------------------
+// GET /boq — list envelope + derived total + tenant scope
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/boq — auth + list", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/boq" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+  });
+
+  it("returns the B-014 envelope with a DERIVED total per doc (C10, never hardcoded)", async () => {
+    const D0 = doc("d0", "BOQ-2026-B-02", "approved", 3);
+    const D1 = doc("d1", "BOQ-2026-C-01", "draft");
+    const G0 = group("g0", "d0", "02 งานโครงสร้าง", 1);
+    // 2 items under d0's group: 10×100 + 3×50 = 1150. d1 has no items → total 0.
+    const I0 = item("i0", "g0", "M", "10", "100.00");
+    const I1 = item("i1", "g0", "M", "3", "50.00");
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0, D1]],
+            [boqGroups, [G0]],
+            [boqItems, [I0, I1]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/boq" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(2);
+    expect(body.page).toBe(1);
+    const d0 = body.data.find((d: { id: string }) => d.id === "d0");
+    const d1 = body.data.find((d: { id: string }) => d.id === "d1");
+    expect(d0.total).toBe(1150);
+    expect(d0.currency_code).toBe("THB");
+    expect(d0.status).toBe("approved");
+    expect(d0.version).toBe(3);
+    expect(d1.total).toBe(0);
+    // wire is real columns only — no company_id / timestamps leak.
+    expect(Object.keys(d0).sort()).toEqual(
+      ["currency_code", "id", "name", "no", "project_id", "scope", "status", "total", "version"],
+    );
+  });
+
+  it("binds company_id on the project root of every scoped read (no cross-tenant leak)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "draft")]]], captured }),
+      })
+    ).inject({ url: "/api/v1/boq" });
+    const docRead = captured.find((c) => c.table === boqDocs);
+    expect(docRead).toBeTruthy();
+    // the tenant predicate anchors on project.company_id = THIS tenant.
+    expect(paramsOf(docRead!.where)).toContain(COMPANY);
+    expect(paramsOf(docRead!.where)).not.toContain(OTHER_COMPANY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /boq — create
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/boq — create", () => {
+  it("creates a draft doc (201, server-owned status=draft + version=1)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[projects, [project]], [boqDocs, []]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq",
+      payload: { no: "BOQ-2026-Z-99", name: "New BOQ", scope: "Block Z", project_id: PROJECT },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.no).toBe("BOQ-2026-Z-99");
+    expect(body.status).toBe("draft");
+    expect(body.version).toBe(1);
+    expect(body.total).toBe(0);
+    expect(body.project_id).toBe(PROJECT);
+  });
+
+  it("400s when project_id is missing / not the tenant's", async () => {
+    const missing = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [] }) })
+    ).inject({ method: "POST", url: "/api/v1/boq", payload: { no: "X", name: "Y" } });
+    expect(missing.statusCode).toBe(400);
+
+    const foreign = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[projects, []]] }), // project not visible to this tenant
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq",
+      payload: { no: "X", name: "Y", project_id: PROJECT },
+    });
+    expect(foreign.statusCode).toBe(400);
+    expect(foreign.json().message).toBe("project not found");
+  });
+
+  it("409s on a duplicate no within the tenant", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[projects, [project]], [boqDocs, [doc("d0", "DUP", "approved")]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq",
+      payload: { no: "DUP", name: "Y", project_id: PROJECT },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("DUPLICATE_CODE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /boq/:id — detail with per-group CBS
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/boq/:id — detail + CBS", () => {
+  it("returns the doc with per-group CBS available = budget − used − committed", async () => {
+    const D0 = doc("d0", "BOQ-1", "approved", 2);
+    const G0 = group("g0", "d0", "02 งานโครงสร้าง", 1);
+    const I0 = item("i0", "g0", "M", "4", "25.00"); // total 100
+    const C0 = cbs("c0", "g0", "1000000.00", "200000.00", "100000.00"); // avail 700000
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqGroups, [G0]],
+            [boqItems, [I0]],
+            [cbsBudgets, [C0]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/boq/d0" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(100);
+    expect(body.groups).toHaveLength(1);
+    expect(body.groups[0].cbs.available).toBe(700000);
+    expect(body.groups[0].cbs.budget).toBe(1000000);
+  });
+
+  it("404s for an id outside the tenant", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[boqDocs, []]] }) })
+    ).inject({ url: "/api/v1/boq/nope" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /boq/:id/items — list + ?group filter
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/boq/:id/items — list + group filter", () => {
+  it("lists the doc's items (real item columns only)", async () => {
+    const D0 = doc("d0", "N", "approved");
+    const I0 = item("i0", "g0", "M", "4800", "168.50");
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [boqItems, [I0]]] }),
+      })
+    ).inject({ url: "/api/v1/boq/d0/items" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1);
+    expect(body.data[0].qty).toBe(4800);
+    expect(body.data[0].price).toBe(168.5);
+    expect(body.data[0].cat).toBe("M");
+    expect(Object.keys(body.data[0]).sort()).toEqual(
+      ["cat", "cc_id", "code", "currency_code", "element_id", "group_id", "id", "name", "price", "qty", "remain_qty", "unit"],
+    );
+  });
+
+  it("?group binds the group id into the scoped item read", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "approved")]], [boqItems, []]], captured }),
+      })
+    ).inject({ url: "/api/v1/boq/d0/items?group=g-xyz" });
+    const itemRead = captured.find((c) => c.table === boqItems);
+    expect(itemRead).toBeTruthy();
+    expect(paramsOf(itemRead!.where)).toContain("g-xyz");
+  });
+
+  it("404s for a doc outside the tenant", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[boqDocs, []]] }) })
+    ).inject({ url: "/api/v1/boq/nope/items" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /boq/:id/items — bulk add + immutability
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/boq/:id/items — bulk add", () => {
+  it("adds items (201) targeting a group of the doc and returns the refreshed total", async () => {
+    const inserted: Inserted[] = [];
+    const D0 = doc("d0", "N", "draft");
+    const G0 = group("g0", "d0", "02", 1);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[boqDocs, [D0]], [boqGroups, [G0]], [projects, [project]], [boqItems, []]],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/items",
+      payload: { items: [{ group_id: "g0", code: "MAT-1", name: "ปูน", cat: "M", qty: 10, unit: "ถุง", price: 100 }] },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].code).toBe("MAT-1");
+    expect(body.items[0].remain_qty).toBe(10); // fresh line → remain = qty
+    // the write landed on the boq_item table.
+    const write = inserted.find((w) => w.table === boqItems);
+    expect(write).toBeTruthy();
+  });
+
+  it("accepts a bare items[] array body too", async () => {
+    const D0 = doc("d0", "N", "revise");
+    const G0 = group("g0", "d0", "02", 1);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [boqGroups, [G0]], [projects, [project]], [boqItems, []]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/items",
+      payload: [{ group_id: "g0", code: "L-1", name: "แรง", cat: "L", qty: 5, price: 200 }],
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("REJECTS edits once approved (409 locked — immutable until a Revise)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "approved")]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/items",
+      payload: { items: [{ group_id: "g0", code: "X", name: "Y", cat: "M", qty: 1, price: 1 }] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("BOQ_LOCKED");
+  });
+
+  it("400s when an item targets a group not in this BOQ, or with a bad cat", async () => {
+    const D0 = doc("d0", "N", "draft");
+    const G0 = group("g0", "d0", "02", 1);
+    const badGroup = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [boqGroups, [G0]], [projects, [project]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/items",
+      payload: { items: [{ group_id: "g-foreign", code: "X", name: "Y", cat: "M", qty: 1, price: 1 }] },
+    });
+    expect(badGroup.statusCode).toBe(400);
+
+    const badCat = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [boqGroups, [G0]], [projects, [project]]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/items",
+      payload: { items: [{ group_id: "g0", code: "X", name: "Y", cat: "Z", qty: 1, price: 1 }] },
+    });
+    expect(badCat.statusCode).toBe(400);
+  });
+
+  it("400s on an empty items list", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "draft")]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/items", payload: { items: [] } });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// State machine: submit → approve → revise (+ authority + guards)
+// ---------------------------------------------------------------------------
+
+describe("BOQ state machine — submit/approve/revise", () => {
+  it("submit: draft → pending", async () => {
+    const D0 = doc("d0", "N", "draft");
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [projects, [project]], [boqItems, []]], updated, updateBase: D0 }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/submit" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("pending");
+    expect(updated[0]!.set.status).toBe("pending");
+  });
+
+  it("submit: 409 when the doc is not draft/revise (e.g. already pending)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "pending")]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/submit" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  it("approve: pending → approved (LOCK) with MD-tier authority", async () => {
+    const D0 = doc("d0", "N", "pending");
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]], // Director — may approve
+            [projects, [project]],
+            [boqItems, []],
+          ],
+          updated,
+          updateBase: D0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/approve" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("approved");
+    expect(updated[0]!.set.status).toBe("approved");
+  });
+
+  it("approve: 403 when the caller's role.approvalLevel is below the MD tier", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [doc("d0", "N", "pending")]],
+            [users, [userRow]],
+            [roles, [roleRow(3)]], // Project Manager — NOT enough for BOQ lock
+          ],
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/approve" });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+  });
+
+  it("approve: 409 when the doc is not pending (must submit first)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [doc("d0", "N", "draft")]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]],
+          ],
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/approve" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  it("revise: approved → revise with version += 1", async () => {
+    const D0 = doc("d0", "N", "approved", 3);
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [D0]], [projects, [project]], [boqItems, []]], updated, updateBase: D0 }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/revise" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("revise");
+    expect(body.version).toBe(4); // v3 → v4
+    expect(updated[0]!.set.version).toBe(4);
+  });
+
+  it("revise: 409 when the doc is not approved", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "pending")]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/revise" });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("action endpoints 404 for a doc outside the tenant", async () => {
+    for (const verb of ["submit", "approve", "revise"]) {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[boqDocs, []], [users, [userRow]], [roles, [roleRow(4)]]] }),
+        })
+      ).inject({ method: "POST", url: `/api/v1/boq/nope/${verb}` });
+      expect(res.statusCode).toBe(404);
+    }
+  });
+});
