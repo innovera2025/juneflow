@@ -34,7 +34,7 @@
 // seed, the handler returns an HONEST null/empty/zero with a code comment naming
 // the gap (see the DATA GAPS notes on each handler) rather than fabricating a
 // number to match the mock.
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, type SQL } from "drizzle-orm";
 import {
   apBillings,
@@ -43,6 +43,7 @@ import {
   boqGroups,
   boqItems,
   cbsBudgets,
+  pos,
   ppaInvoices,
   prItems,
   projectNodes,
@@ -54,9 +55,19 @@ import {
   subconContracts,
   vendors,
   workPeriods,
+  wos,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+// Approver-tier authority reuse (P2-BE-07, B-070): the inbox filters each doc by
+// the SAME tier gate its approve handler enforces, so the inbox and the write
+// path can never drift. PR thresholds (500K/2M) live in pr.ts; PO/WO thresholds
+// (1M/5M) live in procurement.ts — each is imported, never re-declared here.
+import { requiredApprovalLevel as prRequiredLevel } from "./pr.js";
+import {
+  callerApprovalLevel,
+  requiredApprovalLevel as poWoRequiredLevel,
+} from "./procurement.js";
 
 type ProjectRow = typeof projects.$inferSelect;
 type NodeRow = typeof projectNodes.$inferSelect;
@@ -362,24 +373,66 @@ async function budgetActual(db: TenantDb, ctx: DashCtx): Promise<Result> {
 }
 
 // ---------------------------------------------------------------------------
-// 3. GET /dashboard/approvals-inbox — pending PR approvals (EntityList)
+// 3. GET /dashboard/approvals-inbox — the caller's pending approvals (EntityList)
 // ---------------------------------------------------------------------------
-// Real source: pr rows with status = 'pending' (the only procurement doc with an
-// approval state machine — counts.ts uses the same pending semantics), amount
-// derived from the PR's lines (pr_item.qty × boq_item.price). project_id → only
-// that project's pending PRs; omitted → tenant-wide.
-// DATA GAPS: (a) po/wo carry NO status column and NO doc-number column, so they
-// have no "pending approval" state to filter on and are honestly EXCLUDED — the
-// mock's PO/WO inbox rows have no schema backing. (b) pr has no title / requester
-// (created_by) / urgency column, so those are null (NOT fabricated). amount is a
-// real derived line total (null when a PR has no priced BOQ lines).
-async function approvalsInbox(db: TenantDb, ctx: DashCtx): Promise<Result> {
-  const pendingFilter = both(
-    eq(prs.status, "pending"),
-    ctx.projectId ? eq(prs.projectId, ctx.projectId) : undefined,
-  );
-  const [pending, prLines, boqAll] = await Promise.all([
-    db.selectThrough(prs, [{ fk: prs.projectId, parent: projects }], pendingFilter),
+// Real source: the UNION of PENDING pr + po + wo docs (all three now carry the
+// B-070 status / approval_step state machine — pr.ts / po.ts / wo.ts) that THIS
+// caller is a valid next-tier approver for. A row is INCLUDED when its doc is in
+// `status = 'pending'` AND the caller's role.approvalLevel reaches the tier that
+// doc's amount demands — EXACTLY the gate each doc's approve handler enforces
+// (level >= requiredApprovalLevel(amount)), so the inbox shows precisely the docs
+// the caller could actually approve. Amounts are real, per doc kind:
+//   PR — Σ pr_item.qty × boq_item.price (derived; tier by pr.ts's 500K/2M matrix)
+//   PO — the stored pos.total          (tier by procurement.ts's 1M/5M matrix)
+//   WO — the stored wos.value          (tier by procurement.ts's 1M/5M matrix)
+// project_id → only that project's pending docs (filtered on the project root the
+// pr/po/wo scope-chain already joins); omitted → tenant-wide. Tenant scope: pr is
+// anchored pr → project; po/wo are anchored pr_id → pr → project (their only
+// tenant root), so no cross-tenant doc can appear. An unattributable caller (no
+// session user / no role) or one below every tier (level < 2) gets an empty inbox.
+// C10: `total` / `data` are the live pending-and-actionable docs from these
+// queries — NEVER the mock's hardcoded 17; this count feeds the dashboard badge.
+// DATA GAPS (honest null, NOT fabricated — PLAN.md §0 rule 4): pr/po/wo have no
+// title, no requester/created_by, and no priority/urgency column → title,
+// requester and urgent are null. PR amount/currency are null when a PR has no
+// priced BOQ lines (its tier is then computed from a real 0). po.no / wo.no are
+// nullable real columns, so doc_no may legitimately be null for a PO/WO.
+async function approvalsInbox(
+  db: TenantDb,
+  ctx: DashCtx,
+  request: FastifyRequest,
+): Promise<Result> {
+  // The caller's approval tier (null when unattributable). null / level 0 / 1
+  // clears no tier (the lowest required level is 2), so the inbox stays empty.
+  const level = await callerApprovalLevel(request);
+
+  // Project filter, applied on the project ROOT each doc's scope-chain joins
+  // (pr directly; po/wo via pr.project_id) so a PO/WO with no project_id column
+  // is still scopable to one project.
+  const projFilter = ctx.projectId ? eq(prs.projectId, ctx.projectId) : undefined;
+
+  const [pendingPrs, pendingPos, pendingWos, prLines, boqAll] = await Promise.all([
+    db.selectThrough(
+      prs,
+      [{ fk: prs.projectId, parent: projects }],
+      both(eq(prs.status, "pending"), projFilter),
+    ),
+    db.selectThrough(
+      pos,
+      [
+        { fk: pos.prId, parent: prs },
+        { fk: prs.projectId, parent: projects },
+      ],
+      both(eq(pos.status, "pending"), projFilter),
+    ),
+    db.selectThrough(
+      wos,
+      [
+        { fk: wos.prId, parent: prs },
+        { fk: prs.projectId, parent: projects },
+      ],
+      both(eq(wos.status, "pending"), projFilter),
+    ),
     // pr_item scoped pr → project; boq_item scoped group → doc → project. Kept
     // tenant-wide (they only feed the price/amount maps — a superset is harmless).
     db.selectThrough(prItems, [
@@ -396,7 +449,8 @@ async function approvalsInbox(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const priceByItem = new Map(
     boqAll.map((b) => [b.id, { price: num(b.price), ccy: b.currencyCode }]),
   );
-  // Sum each PR's derived amount from its priced lines.
+  // Sum each PR's derived amount from its priced lines (the same Σ pr.ts approve
+  // uses to pick the PR's tier).
   const amountByPr = new Map<string, { amount: number; ccy: string | null }>();
   for (const line of prLines) {
     const px = line.boqItemId ? priceByItem.get(line.boqItemId) : undefined;
@@ -406,9 +460,28 @@ async function approvalsInbox(db: TenantDb, ctx: DashCtx): Promise<Result> {
     amountByPr.set(line.prId, prev);
   }
 
-  const rows = pending.map((pr) => {
+  /** The caller may act iff their level reaches the tier `amount` demands. */
+  const canApprove = (amount: number, requiredLevel: (a: number) => number) =>
+    level != null && level >= requiredLevel(amount);
+
+  type InboxRow = {
+    kind: string;
+    doc_no: string | null;
+    title: null;
+    requester: null;
+    amount: number | null;
+    currency_code: string | null;
+    created_at: unknown;
+    urgent: null;
+  };
+  const rows: InboxRow[] = [];
+
+  for (const pr of pendingPrs) {
     const derived = amountByPr.get(pr.id);
-    return {
+    // Tier is computed from the real derived amount (0 when the PR has no priced
+    // lines) even though the displayed amount stays null in that case.
+    if (!canApprove(derived?.amount ?? 0, prRequiredLevel)) continue;
+    rows.push({
       kind: "PR",
       doc_no: pr.no,
       title: null, // GAP: pr has no title/name column.
@@ -416,8 +489,45 @@ async function approvalsInbox(db: TenantDb, ctx: DashCtx): Promise<Result> {
       amount: derived ? round2(derived.amount) : null,
       currency_code: derived ? derived.ccy : null,
       created_at: pr.createdAt,
-      urgent: false, // GAP: no priority/age column to derive urgency honestly.
-    };
+      urgent: null, // GAP: no priority/age column to derive urgency honestly.
+    });
+  }
+
+  for (const po of pendingPos) {
+    const amount = num(po.total); // real stored total (po has no line table).
+    if (!canApprove(amount, poWoRequiredLevel)) continue;
+    rows.push({
+      kind: "PO",
+      doc_no: po.no, // real column, nullable → may be null (GAP-free honest null).
+      title: null, // GAP: po has no title column.
+      requester: null, // GAP: po has no requester/created_by column.
+      amount: round2(amount),
+      currency_code: po.currencyCode,
+      created_at: po.createdAt,
+      urgent: null, // GAP: no priority/urgency column.
+    });
+  }
+
+  for (const wo of pendingWos) {
+    const amount = num(wo.value); // real stored contract value.
+    if (!canApprove(amount, poWoRequiredLevel)) continue;
+    rows.push({
+      kind: "WO",
+      doc_no: wo.no, // real column, nullable → may be null.
+      title: null, // GAP: wo has no title column.
+      requester: null, // GAP: wo has no requester/created_by column.
+      amount: round2(amount),
+      currency_code: wo.currencyCode,
+      created_at: wo.createdAt,
+      urgent: null, // GAP: no priority/urgency column.
+    });
+  }
+
+  // Newest first; JS's stable sort keeps the PR→PO→WO grouping for equal times.
+  rows.sort((a, b) => {
+    const at = a.created_at ? new Date(a.created_at as string).getTime() : 0;
+    const bt = b.created_at ? new Date(b.created_at as string).getTime() : 0;
+    return bt - at;
   });
   return { status: 200, body: listEnvelope(rows) };
 }
@@ -707,8 +817,8 @@ function parseProjectId(raw: unknown): string | null {
 /** Register the 7 GET /dashboard/* routes on the /api/v1-prefixed scope. */
 export function registerDashboardRoute(app: FastifyInstance): void {
   const withTenant =
-    (run: (db: TenantDb, ctx: DashCtx) => Promise<Result>) =>
-    async (request: { db?: TenantDb; query?: unknown }, reply: FastifyReply) => {
+    (run: (db: TenantDb, ctx: DashCtx, request: FastifyRequest) => Promise<Result>) =>
+    async (request: FastifyRequest, reply: FastifyReply) => {
       const db = request.db;
       if (!db) return unauthenticated(reply);
       const q = (request.query ?? {}) as {
@@ -720,7 +830,9 @@ export function registerDashboardRoute(app: FastifyInstance): void {
         range: parseRange(q.range ?? q.period),
         projectId: parseProjectId(q.project_id),
       };
-      const result = await run(db, ctx);
+      // The request is forwarded so the approvals-inbox can resolve the caller's
+      // approval tier (request.authUser → role); the other handlers ignore it.
+      const result = await run(db, ctx, request);
       return reply.code(result.status).send(result.body);
     };
 

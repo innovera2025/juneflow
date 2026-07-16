@@ -14,17 +14,21 @@ import {
   boqGroups,
   boqItems,
   cbsBudgets,
+  pos,
   ppaInvoices,
   prItems,
   projectNodes,
   projects,
   projectTypes,
   prs,
+  roles,
   salesUnits,
   solarInverters,
   subconContracts,
+  users,
   vendors,
   workPeriods,
+  wos,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
@@ -273,16 +277,24 @@ describe("GET /api/v1/dashboard/budget-actual", () => {
 });
 
 // ===========================================================================
-// 3. approvals-inbox — pending PRs, amount derived from pr_item × boq_item
+// 3. approvals-inbox — UNION of pending PR+PO+WO the CALLER may approve (B-070).
+// The caller's role.approvalLevel (resolved authUser.email → user → role) must
+// reach the tier each doc's amount demands (the same gate the approve handlers
+// enforce). PR tiers 500K/2M; PO/WO tiers 1M/5M (procurement.ts / pr.ts).
 // ===========================================================================
+/** Seed a session user + role at the given approvalLevel (loadUser/Role → row[0]). */
+const approver = (level: number): Array<[unknown, unknown[]]> => [
+  [users, [{ id: "au-0", email: SESSION.user.email, roleId: "role-x", companyId: COMPANY, name: "สมชาย", status: "active" }]],
+  [roles, [{ id: "role-x", companyId: COMPANY, approvalLevel: level }]],
+];
+
 describe("GET /api/v1/dashboard/approvals-inbox", () => {
-  const db = (captured: Captured[] = []) =>
+  // A director (level 4) clears every tier → sees every pending PR/PO/WO.
+  const unionDb = (captured: Captured[] = []) =>
     stubJoinDb(
       [
-        [prs, [
-          { id: "pr-0", no: "PR-0418", status: "pending", createdAt: D },
-          { id: "pr-6", no: "PR-0412", status: "pending", createdAt: D },
-        ]],
+        ...approver(4),
+        [prs, [{ id: "pr-0", no: "PR-0418", status: "pending", createdAt: D }]],
         [prItems, [
           { prId: "pr-0", boqItemId: "bi-0", qty: "5" },
           { prId: "pr-0", boqItemId: "bi-1", qty: "6" },
@@ -291,38 +303,135 @@ describe("GET /api/v1/dashboard/approvals-inbox", () => {
           { id: "bi-0", price: "280000.00", currencyCode: "THB" },
           { id: "bi-1", price: "850.00", currencyCode: "THB" },
         ]],
+        [pos, [{ id: "po-0", no: "PO-2201", status: "pending", total: "2000000.00", currencyCode: "THB", createdAt: D }]],
+        // wo.no is a nullable real column → doc_no is legitimately null here.
+        [wos, [{ id: "wo-0", no: null, status: "pending", value: "1000000.00", currencyCode: "THB", createdAt: D }]],
       ],
       captured,
     );
 
-  it("returns pending PRs with derived amount + honest null gap fields", async () => {
-    const res = await get("/api/v1/dashboard/approvals-inbox", db());
+  it("returns the pending PR+PO+WO union for an approver, with honest null gaps", async () => {
+    const res = await get("/api/v1/dashboard/approvals-inbox", unionDb());
     expect(res.statusCode).toBe(200);
     const b = res.json();
-    expect(b.total).toBe(2);
-    // pr-0: 5×280000 + 6×850 = 1,405,100 (real derived line total)
-    expect(b.data[0]).toMatchObject({
-      kind: "PR",
-      doc_no: "PR-0418",
-      title: null,
-      requester: null,
-      amount: 1405100,
-      currency_code: "THB",
-      urgent: false,
+    expect(b.total).toBe(3);
+    const byKind = Object.fromEntries(
+      b.data.map((r: { kind: string }) => [r.kind, r]),
+    );
+    // PR: 5×280000 + 6×850 = 1,405,100 (real derived line total); title/requester/urgent honest null.
+    expect(byKind.PR).toMatchObject({
+      kind: "PR", doc_no: "PR-0418", title: null, requester: null,
+      amount: 1405100, currency_code: "THB", urgent: null,
     });
-    // pr-6 has no priced lines → honest null amount/currency
-    expect(b.data[1]).toMatchObject({ doc_no: "PR-0412", amount: null, currency_code: null });
+    // PO: stored total (po has no line table). WO: stored value; its null `no` → null doc_no.
+    expect(byKind.PO).toMatchObject({ kind: "PO", doc_no: "PO-2201", amount: 2000000, currency_code: "THB" });
+    expect(byKind.WO).toMatchObject({ kind: "WO", doc_no: null, amount: 1000000, currency_code: "THB", urgent: null });
   });
 
-  it("scopes pr(1)/pr_item(2)/boq_item(3) through join hops + tenant scope", async () => {
+  it("scopes pr(1)/po(2)/wo(2)/pr_item(2)/boq_item(3) + pending filter + tenant scope on every read", async () => {
     const captured: Captured[] = [];
-    await get("/api/v1/dashboard/approvals-inbox", db(captured));
-    expectTenantScoped(captured);
+    await get("/api/v1/dashboard/approvals-inbox", unionDb(captured));
+    expectTenantScoped(captured); // company_id bound on user/role/pr/po/wo/pr_item/boq_item
     expect(captured.find((c) => c.table === prs)?.joins.length).toBe(1);
+    expect(captured.find((c) => c.table === pos)?.joins.length).toBe(2);
+    expect(captured.find((c) => c.table === wos)?.joins.length).toBe(2);
     expect(captured.find((c) => c.table === prItems)?.joins.length).toBe(2);
     expect(captured.find((c) => c.table === boqItems)?.joins.length).toBe(3);
-    // the pending filter is bound alongside company_id
+    // the pending filter is bound alongside company_id on every doc query
     expect(paramsOf(captured.find((c) => c.table === prs)?.where)).toContain("pending");
+    expect(paramsOf(captured.find((c) => c.table === pos)?.where)).toContain("pending");
+    expect(paramsOf(captured.find((c) => c.table === wos)?.where)).toContain("pending");
+  });
+
+  it("pr with no priced lines → honest null amount/currency, tier from a real 0 (proc sees it)", async () => {
+    const res = await get(
+      "/api/v1/dashboard/approvals-inbox",
+      stubJoinDb([
+        ...approver(2), // หน.จัดซื้อ — clears the level-2 tier an unpriced (amount 0) PR needs
+        [prs, [{ id: "pr-x", no: "PR-0412", status: "pending", createdAt: D }]],
+        [prItems, []],
+        [boqItems, []],
+      ]),
+    );
+    const b = res.json();
+    expect(b.total).toBe(1);
+    expect(b.data[0]).toMatchObject({ doc_no: "PR-0412", amount: null, currency_code: null });
+  });
+
+  // --- tier authority: a doc appears iff callerLevel >= requiredLevel(amount) ---
+  // small docs need level 2; big docs need level 4 (PR>2M, PO/WO>5M).
+  const tierDb = (level: number) =>
+    stubJoinDb([
+      ...approver(level),
+      [prs, [
+        { id: "pr-s", no: "PR-S", status: "pending", createdAt: D },
+        { id: "pr-b", no: "PR-B", status: "pending", createdAt: D },
+      ]],
+      [prItems, [
+        { prId: "pr-s", boqItemId: "bi-s", qty: "1" }, // 1×100000 = 100,000 → tier 2
+        { prId: "pr-b", boqItemId: "bi-b", qty: "10" }, // 10×300000 = 3,000,000 → tier 4 (>2M)
+      ]],
+      [boqItems, [
+        { id: "bi-s", price: "100000.00", currencyCode: "THB" },
+        { id: "bi-b", price: "300000.00", currencyCode: "THB" },
+      ]],
+      [pos, [
+        { id: "po-s", no: "PO-S", status: "pending", total: "500000.00", currencyCode: "THB", createdAt: D }, // tier 2
+        { id: "po-b", no: "PO-B", status: "pending", total: "6000000.00", currencyCode: "THB", createdAt: D }, // tier 4 (>5M)
+      ]],
+      [wos, [
+        { id: "wo-s", no: "WO-S", status: "pending", value: "800000.00", currencyCode: "THB", createdAt: D }, // tier 2
+        { id: "wo-b", no: "WO-B", status: "pending", value: "6000000.00", currencyCode: "THB", createdAt: D }, // tier 4 (>5M)
+      ]],
+    ]);
+
+  it("level-2 (หน.จัดซื้อ) sees only the docs at its tier — big docs excluded", async () => {
+    const res = await get("/api/v1/dashboard/approvals-inbox", tierDb(2));
+    const b = res.json();
+    expect(b.total).toBe(3);
+    expect(b.data.map((r: { doc_no: string }) => r.doc_no).sort()).toEqual(["PO-S", "PR-S", "WO-S"]);
+  });
+
+  it("level-4 (MD) clears every tier → sees all 6 pending docs", async () => {
+    const res = await get("/api/v1/dashboard/approvals-inbox", tierDb(4));
+    const b = res.json();
+    expect(b.total).toBe(6);
+    expect(b.data.map((r: { doc_no: string }) => r.doc_no).sort())
+      .toEqual(["PO-B", "PO-S", "PR-B", "PR-S", "WO-B", "WO-S"]);
+  });
+
+  it("empty inbox when nothing is pending (honest zero — the badge is live, never 17)", async () => {
+    const res = await get(
+      "/api/v1/dashboard/approvals-inbox",
+      stubJoinDb([...approver(4), [prs, []], [pos, []], [wos, []], [prItems, []], [boqItems, []]]),
+    );
+    expect(res.json()).toMatchObject({ total: 0, data: [] });
+  });
+
+  it("unattributable caller (no user/role row) → empty even with pending docs", async () => {
+    const res = await get(
+      "/api/v1/dashboard/approvals-inbox",
+      // no users/roles seeded → callerApprovalLevel null → clears no tier
+      stubJoinDb([
+        [prs, [{ id: "pr-0", no: "PR-0418", status: "pending", createdAt: D }]],
+        [prItems, []], [boqItems, []],
+        [pos, [{ id: "po-0", no: "PO-1", status: "pending", total: "100.00", currencyCode: "THB", createdAt: D }]],
+        [wos, [{ id: "wo-0", no: "WO-1", status: "pending", value: "100.00", currencyCode: "THB", createdAt: D }]],
+      ]),
+    );
+    expect(res.json()).toMatchObject({ total: 0, data: [] });
+  });
+
+  it("level-0 caller (no approval rights) → empty even with pending docs", async () => {
+    const res = await get(
+      "/api/v1/dashboard/approvals-inbox",
+      stubJoinDb([
+        ...approver(0),
+        [prs, [{ id: "pr-0", no: "PR-0418", status: "pending", createdAt: D }]],
+        [prItems, []], [boqItems, []], [pos, []], [wos, []],
+      ]),
+    );
+    expect(res.json()).toMatchObject({ total: 0, data: [] });
   });
 });
 
@@ -626,16 +735,20 @@ describe("GET /api/v1/dashboard/* — ?project_id scope + ownership", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("approvals-inbox?project_id binds company + project + pending on the pr query", async () => {
+  it("approvals-inbox?project_id binds company + project + pending on the pr/po/wo queries", async () => {
     const captured: Captured[] = [];
     await get(
       `/api/v1/dashboard/approvals-inbox?project_id=${RJP}`,
-      stubJoinDb([[prs, []], [prItems, []], [boqItems, []]], captured),
+      stubJoinDb([[prs, []], [pos, []], [wos, []], [prItems, []], [boqItems, []]], captured),
     );
-    const w = paramsOf(captured.find((c) => c.table === prs)?.where);
-    expect(w).toContain(COMPANY);
-    expect(w).toContain(RJP);
-    expect(w).toContain("pending");
+    // Each doc kind is scoped to company_id AND the requested project (po/wo via
+    // the joined pr.project_id root) AND the pending state — no cross-tenant/-project leak.
+    for (const table of [prs, pos, wos]) {
+      const w = paramsOf(captured.find((c) => c.table === table)?.where);
+      expect(w).toContain(COMPANY);
+      expect(w).toContain(RJP);
+      expect(w).toContain("pending");
+    }
   });
 
   it("phase-progress?project_id binds company + project on the project_node query", async () => {
