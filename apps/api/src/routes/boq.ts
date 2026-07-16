@@ -50,6 +50,8 @@ import {
   boqItems,
   cbsBudgets,
   projects,
+  prItems,
+  prs,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
@@ -87,6 +89,20 @@ const CBS_HOPS = [
   { fk: boqGroups.boqId, parent: boqDocs },
   { fk: boqDocs.projectId, parent: projects },
 ];
+// PR is scoped through its own project (the whole PR tree, like the BOQ tree,
+// carries no company_id column — pr.ts PR_HOPS).
+const PR_HOPS = [{ fk: prs.projectId, parent: projects }];
+
+/**
+ * generate-PR category split (boq-extra.jsx BOQtoPRForm): Material items (cat M)
+ * → a supplier "PR ปกติ" (pr_type material); Subcon/Labor items (cat S or L) →
+ * a "PR-Subcon" (pr_type subcon). Mirrors matRows = cat M · subRows = cat S|L,
+ * and the prototype's auto-split into two PRs when both kinds are selected.
+ */
+const PR_BUCKETS = [
+  { cats: new Set(["M"]), type: "material" as const, prefix: "PR" },
+  { cats: new Set(["S", "L"]), type: "subcon" as const, prefix: "PR-S" },
+];
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -118,6 +134,25 @@ function toNum(value: unknown): number | null {
 /** Line amount for a BOQ item = qty × unit price (BOQ total is the Σ of these). */
 function itemAmount(it: BoqItemRow): number {
   return Number(it.qty) * Number(it.price);
+}
+
+/**
+ * Next running PR no for a prefix within the tenant: the max numeric tail among
+ * the tenant's existing PR nos of that prefix/year, + 1, zero-padded (e.g.
+ * PR-2026-0007 · PR-S-2026-0003). Derived from REAL existing nos (never the
+ * mock's hardcoded PR-2026-0419), so repeated partial generations from the same
+ * BOQ never collide. NOTE (gap): a full running-number service (reset rules,
+ * dept/warehouse locking) is deferred to the Phase-2 numbering service —
+ * doc-numbering.ts is read-only today; this is the stopgap issuer.
+ */
+function nextPrNo(existingNos: string[], prefix: string, year: number): string {
+  const re = new RegExp(`^${prefix}-${year}-(\\d+)$`);
+  let max = 0;
+  for (const no of existingNos) {
+    const m = re.exec(no);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `${prefix}-${year}-${String(max + 1).padStart(4, "0")}`;
 }
 
 /**
@@ -485,6 +520,174 @@ export function registerBoqRoute(app: FastifyInstance): void {
       ...docWire(doc, total, created[0]?.currencyCode ?? "THB"),
       items: wireItems,
     });
+  });
+
+  // POST /boq/:id/generate-pr — create PR(s) from selected APPROVED-BOQ items
+  // (boq-extra.jsx BOQtoPRForm; contract generateBoqPr). Body {item_ids[],
+  // qty{item_id:qty}}. Auto-splits Material (cat M) → a supplier PR and
+  // Subcon/Labor (cat S|L) → a PR-Subcon (mirrors the prototype's M/S split).
+  // Each PR line carries boq_item_id + qty; its price DERIVES from the BOQ item
+  // at read time (pr_item has no price column — same as pr.ts, C10). Cut-remain:
+  // each item's remain_qty is decremented by the generated qty, so a BOQ item
+  // can be partially PR'd across several generations.
+  //
+  // No quota is wired: the quota keys are projects/users/storage_gb/ai_per_month
+  // (plugins/quota.ts) — there is NO `pr` dimension, and generateBoqPr declares
+  // no 402 in the contract. So per the task ruling ("if none, skip"), skip.
+  app.post("/boq/:id/generate-pr", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+
+    const { id } = request.params as { id: string };
+    const [doc] = await db.selectThrough(boqDocs, DOC_HOPS, eq(boqDocs.id, id));
+    if (!doc) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: `BOQ ${id} not found` });
+    }
+    // Only an APPROVED (locked) BOQ can be PR'd — you buy against the approved
+    // budget, never a draft/pending/revise doc (flows.html FLOW-A).
+    if (doc.status !== "approved") {
+      return reply.code(409).send({
+        code: "BOQ_NOT_APPROVED",
+        message: "PR can only be generated from an approved BOQ",
+      });
+    }
+
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const itemIds = Array.isArray(body.item_ids)
+      ? // de-dup: a repeated id must not create a double line / double cut-remain.
+        [...new Set((body.item_ids as unknown[]).map((v) => str(v).trim()).filter(Boolean))]
+      : [];
+    if (itemIds.length === 0) {
+      return reply
+        .code(400)
+        .send({ code: "VALIDATION", message: "item_ids[] is required" });
+    }
+    const qtyMap = (body.qty ?? {}) as Record<string, unknown>;
+
+    // The doc's own items — every selected id must be one of them (tenant-scoped
+    // read; a foreign item id simply is not in this set → 404).
+    const items = await db.selectThrough(boqItems, ITEM_HOPS, eq(boqDocs.id, id));
+    const itemById = new Map(items.map((it) => [it.id, it]));
+
+    // Resolve + validate each selection: belongs to the doc, and qty is within
+    // the item's remaining un-PR'd quantity (defaults to the full remainder).
+    const lines: { item: BoqItemRow; qty: number }[] = [];
+    for (const itemId of itemIds) {
+      const it = itemById.get(itemId);
+      if (!it) {
+        return reply.code(404).send({
+          code: "NOT_FOUND",
+          message: `BOQ item ${itemId} is not in this BOQ`,
+        });
+      }
+      const remain = Number(it.remainQty);
+      const requested = toNum(qtyMap[itemId]);
+      const qty = requested == null ? remain : requested;
+      if (qty <= 0) {
+        return reply.code(400).send({
+          code: "VALIDATION",
+          message: `qty for BOQ item ${itemId} must be > 0`,
+        });
+      }
+      if (qty > remain) {
+        return reply.code(409).send({
+          code: "QTY_EXCEEDS_REMAIN",
+          message: `qty ${qty} exceeds remain_qty ${remain} for BOQ item ${itemId}`,
+        });
+      }
+      lines.push({ item: it, qty });
+    }
+
+    // Split the selection by category into (at most) a material PR + a subcon PR.
+    const buckets = PR_BUCKETS.map((def) => ({
+      def,
+      lines: lines.filter((l) => def.cats.has(l.item.cat)),
+    })).filter((b) => b.lines.length > 0);
+
+    // Running PR nos derive from the tenant's existing PR nos (never hardcoded).
+    const existingNos = (await db.selectThrough(prs, PR_HOPS)).map((p) => p.no);
+    const year = new Date().getUTCFullYear();
+
+    const createdPrs: Record<string, unknown>[] = [];
+    for (const bucket of buckets) {
+      const no = nextPrNo(existingNos, bucket.def.prefix, year);
+      existingNos.push(no); // reserve so a 2nd bucket this call cannot reuse it
+
+      const [pr] = await db.insertThrough(prs, projects, doc.projectId, [
+        {
+          projectId: doc.projectId,
+          no,
+          type: bucket.def.type,
+          needDate: null,
+          status: "draft",
+          approvalStep: 0,
+        },
+      ]);
+      const createdLines = await db.insertThrough(
+        prItems,
+        projects,
+        doc.projectId,
+        bucket.lines.map((l) => ({
+          prId: pr!.id,
+          boqItemId: l.item.id,
+          qty: String(l.qty),
+        })),
+      );
+      const lineById = new Map(createdLines.map((ln) => [ln.boqItemId, ln]));
+
+      // amount = Σ qty × the referenced BOQ item's real unit price (C10).
+      let amount = 0;
+      let currency = "THB";
+      let currencySet = false;
+      const wireLines = bucket.lines.map((l) => {
+        const price = Number(l.item.price);
+        amount += l.qty * price;
+        if (!currencySet) {
+          currency = l.item.currencyCode;
+          currencySet = true;
+        }
+        return {
+          id: lineById.get(l.item.id)?.id ?? null,
+          pr_id: pr!.id,
+          boq_item_id: l.item.id,
+          qty: l.qty,
+          price,
+          amount: l.qty * price,
+        };
+      });
+
+      createdPrs.push({
+        id: pr!.id,
+        no: pr!.no,
+        type: pr!.type,
+        project_id: pr!.projectId,
+        boq_id: id,
+        status: pr!.status,
+        approval_step: pr!.approvalStep,
+        currency_code: currency,
+        amount,
+        items: wireLines,
+      });
+    }
+
+    // Cut-remain: decrement each PR'd item's remain_qty by the generated qty.
+    // boq_item has no direct tenant FK, so the scoped-write door resolves the
+    // item THROUGH its ancestry to the company_id root before updating it.
+    for (const l of lines) {
+      const newRemain = Number(l.item.remainQty) - l.qty;
+      await db.updateThroughChain(
+        boqItems,
+        ITEM_HOPS,
+        { remainQty: String(newRemain) },
+        eq(boqItems.id, l.item.id),
+      );
+    }
+
+    return reply.code(201).send({ prs: createdPrs });
   });
 
   // POST /boq/:id/submit — draft|revise → pending (estimator sends to approval).

@@ -28,7 +28,7 @@
 // G3: src/db/tenant-db.test.ts proves the predicate/value is present on every
 // operation by inspecting the generated SQL (drizzle `.toSQL()`), and that a
 // missing companyId fails closed.
-import { and, eq, getTableColumns, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, isNull, or, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { companies, packages } from "@juneflow/db/schema";
 import type { Db } from "@juneflow/db/client";
@@ -275,6 +275,52 @@ export class TenantDb {
       .update(table)
       .set(set as PgUpdateSetSource<T>)
       .where(and(where, eq(parentFk, parentId)) as SQL)
+      .returning();
+    return updated as T["$inferSelect"][];
+  }
+
+  /**
+   * UPDATE door for a table scoped through a MULTI-HOP ancestry (boq_item →
+   * boq_group → boq_doc → project) — the deep-chain counterpart to
+   * updateThrough(), which only reaches a child that carries a DIRECT tenant-FK
+   * column (boq_doc.project_id). boq_item carries neither a companyId column nor
+   * a project_id FK, so updateThrough() cannot anchor on it; this door proves
+   * tenant ownership EXACTLY the way selectThrough() reads it — by resolving the
+   * target rows THROUGH the hop chain to a company_id-scoped root — and then
+   * updates strictly the resolved ids.
+   *
+   * Fail-closed BY CONSTRUCTION: the id set is produced ONLY by selectThrough()
+   * (which AND-anchors company_id on the root table), so an id in `where` that
+   * belongs to another tenant resolves to nothing and is never written. The
+   * final UPDATE is scoped by `id IN (<resolved scoped ids>)`, never by the raw
+   * caller `where` alone. Returns the updated rows (empty when `where` matched
+   * nothing within this tenant). The first caller is BOQ generate-PR cut-remain
+   * (boq_item.remain_qty -= generated qty).
+   */
+  async updateThroughChain<T extends PgTable & { id: PgColumn }>(
+    table: T,
+    hops: readonly { fk: PgColumn; parent: PgTable }[],
+    set: Partial<T["$inferInsert"]>,
+    where: SQL,
+  ): Promise<T["$inferSelect"][]> {
+    const idCol = (table as PgTable & { id?: PgColumn }).id;
+    if (!idCol) {
+      throw new TenantScopeError(
+        "TENANT_SCOPE_HOP_INVALID: updateThroughChain() table must expose an id " +
+          "primary-key column to anchor the scoped update on",
+      );
+    }
+    // Resolve the tenant-scoped rows matching `where` THROUGH the hop chain —
+    // this is the ownership proof (selectThrough anchors company_id on the root).
+    const scoped = (await this.selectThrough(table, hops, where)) as {
+      id: unknown;
+    }[];
+    const ids = scoped.map((r) => r.id);
+    if (ids.length === 0) return [];
+    const updated = await this.#db
+      .update(table)
+      .set(set as PgUpdateSetSource<T>)
+      .where(inArray(idCol, ids as never[]))
       .returning();
     return updated as T["$inferSelect"][];
   }

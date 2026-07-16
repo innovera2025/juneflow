@@ -11,6 +11,8 @@ import { eq } from "drizzle-orm";
 import { createDb } from "@juneflow/db/client";
 import {
   boqDocs,
+  boqGroups,
+  boqItems,
   companies,
   packages,
   pmAssets,
@@ -391,6 +393,80 @@ describe("updateThrough is the fail-closed UPDATE door for parent-FK child table
     // so a row whose parent FK points elsewhere is never touched.
     const params = new PgDialect().sqlToQuery(sink.setWhere!).params;
     expect(params).toContain(PROJECT);
+  });
+});
+
+describe("updateThroughChain is the fail-closed UPDATE door for MULTI-HOP child tables (P2-BE-03)", () => {
+  // boq_item → boq_group → boq_doc → project (the deepest scoped write chain).
+  const ITEM_HOPS = [
+    { fk: boqItems.groupId, parent: boqGroups },
+    { fk: boqGroups.boqId, parent: boqDocs },
+    { fk: boqDocs.projectId, parent: projects },
+  ];
+
+  // The selectThrough ownership resolution returns `scopedRows`; the UPDATE
+  // captures its set + WHERE and echoes the resolved rows merged with the set.
+  function fakeDb(
+    scopedRows: unknown[],
+    sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> },
+  ): Db {
+    const builder = {
+      $dynamic: () => builder,
+      innerJoin: () => builder,
+      where: (where: SQL) => {
+        sink.selWhere = where;
+        return Promise.resolve(scopedRows);
+      },
+    };
+    return {
+      select: () => ({ from: () => builder }),
+      update: () => ({
+        set: (set: Record<string, unknown>) => ({
+          where: (where: SQL) => ({
+            returning: () => {
+              sink.set = set;
+              sink.setWhere = where;
+              return Promise.resolve(
+                scopedRows.map((r) => ({ ...(r as object), ...set })),
+              );
+            },
+          }),
+        }),
+      }),
+    } as unknown as Db;
+  }
+
+  it("resolves scoped ids via the hop chain (company_id anchored) then updates ONLY those ids", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([{ id: "it-1" }, { id: "it-2" }], sink), COMPANY);
+    const rows = await t.updateThroughChain(
+      boqItems,
+      ITEM_HOPS,
+      { remainQty: "5" },
+      eq(boqItems.id, "it-1"),
+    );
+    expect(rows).toHaveLength(2);
+    expect(sink.set).toEqual({ remainQty: "5" });
+    // ownership resolution is anchored on company_id (via the project root).
+    expect(new PgDialect().sqlToQuery(sink.selWhere!).params).toContain(COMPANY);
+    // the UPDATE is scoped by id IN (<the RESOLVED scoped ids>), never by the
+    // raw caller `where` alone — a foreign id could never slip through.
+    const setParams = new PgDialect().sqlToQuery(sink.setWhere!).params;
+    expect(setParams).toContain("it-1");
+    expect(setParams).toContain("it-2");
+  });
+
+  it("updates NOTHING (returns []) when `where` resolves to no tenant-owned rows", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+    const rows = await t.updateThroughChain(
+      boqItems,
+      ITEM_HOPS,
+      { remainQty: "0" },
+      eq(boqItems.id, "foreign"),
+    );
+    expect(rows).toEqual([]);
+    expect(sink.set).toBeUndefined(); // no UPDATE issued at all
   });
 });
 
