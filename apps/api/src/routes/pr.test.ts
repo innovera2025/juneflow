@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { boqItems, projects, prItems, prs, roles, users } from "@juneflow/db";
+import { boqItems, projects, prItems, prs, roles, users, vendors } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -140,6 +140,7 @@ const pr = (
   status: "draft" | "pending" | "approved" | "rejected",
   type: "material" | "subcon" | "expense" | "advance" = "material",
   approvalStep = 0,
+  opts: { vendorId?: string | null; requesterId?: string | null } = {},
 ) => ({
   id,
   projectId: PROJECT,
@@ -148,6 +149,14 @@ const pr = (
   needDate: "2026-06-02",
   status,
   approvalStep,
+  // B-075 display columns (migration 0022): title/phase/vendor/requester +
+  // submit/approve timestamps (null until the PR reaches that state).
+  title: `คำขอ ${no}`,
+  phase: "เฟส 2 · B",
+  vendorId: opts.vendorId ?? null,
+  requesterId: opts.requesterId ?? null,
+  submittedAt: status === "draft" ? null : new Date(1_700_000_000_000),
+  approvedAt: status === "approved" ? new Date(1_700_000_000_000) : null,
   createdAt: new Date(1_700_000_000_000),
   updatedAt: new Date(1_700_000_000_000),
 });
@@ -213,7 +222,10 @@ describe("GET /api/v1/pr — auth + list", () => {
   });
 
   it("returns the B-014 envelope with a DERIVED amount per PR (C10, priced from BOQ)", async () => {
-    const P0 = pr("p0", "PR-2026-0418", "pending");
+    const P0 = pr("p0", "PR-2026-0418", "pending", "material", 0, {
+      vendorId: "v0",
+      requesterId: "u0",
+    });
     const P1 = pr("p1", "PR-2026-0417", "draft", "expense");
     // p0 has 2 lines priced from BOQ b0 (price 100) + b1 (price 50):
     //   10×100 + 4×50 = 1200. p1 has no lines → amount 0.
@@ -227,6 +239,8 @@ describe("GET /api/v1/pr — auth + list", () => {
             [prs, [P0, P1]],
             [prItems, [L0, L1]],
             [boqItems, [boqItemPriced("b0", "100.00"), boqItemPriced("b1", "50.00")]],
+            [vendors, [{ id: "v0", companyId: COMPANY, name: "บจก. ผู้ขายวัสดุ" }]],
+            [users, [{ id: "u0", companyId: COMPANY, name: "สมชาย วัฒนกุล" }]],
           ],
         }),
       })
@@ -242,9 +256,34 @@ describe("GET /api/v1/pr — auth + list", () => {
     expect(p0.currency_code).toBe("THB");
     expect(p0.status).toBe("pending");
     expect(p1.amount).toBe(0);
-    // wire is real columns only — no company_id / timestamps leak.
+    // B-075: real display columns + resolved vendor/requester names.
+    expect(p0.title).toBe("คำขอ PR-2026-0418");
+    expect(p0.phase).toBe("เฟส 2 · B");
+    expect(p0.vendor).toBe("บจก. ผู้ขายวัสดุ");
+    expect(p0.requester).toBe("สมชาย วัฒนกุล");
+    expect(p0.submitted_at).toBeTruthy();
+    expect(p1.vendor).toBe(null); // no vendor_id on the expense PR
+    // wire is real columns only — no company_id / update timestamp leak.
     expect(Object.keys(p0).sort()).toEqual(
-      ["amount", "approval_step", "currency_code", "id", "need_date", "no", "project_id", "status", "type"],
+      [
+        "amount",
+        "approval_step",
+        "approved_at",
+        "currency_code",
+        "id",
+        "need_date",
+        "no",
+        "phase",
+        "project_id",
+        "requester",
+        "requester_id",
+        "status",
+        "submitted_at",
+        "title",
+        "type",
+        "vendor",
+        "vendor_id",
+      ],
     );
   });
 

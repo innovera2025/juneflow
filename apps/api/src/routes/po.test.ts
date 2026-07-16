@@ -15,6 +15,7 @@ import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  apBillings,
   boqItems,
   pos,
   projects,
@@ -177,6 +178,29 @@ const po = (
   updatedAt: D,
 });
 
+// An ap_billing row for the paid/deposit split (B-079 / F2).
+const apBilling = (
+  id: string,
+  poId: string,
+  amount: number,
+  kind: "deposit" | "progress" | "final",
+) => ({
+  id,
+  companyId: COMPANY,
+  poId,
+  grId: null,
+  vendorId: VENDOR,
+  invoiceNo: `INV-${id}`,
+  dueDate: null,
+  amount: String(amount),
+  vat: "0",
+  currencyCode: "THB",
+  status: "approved",
+  kind,
+  createdAt: D,
+  updatedAt: D,
+});
+
 const voRow = (id: string, poId: string, dir: "add" | "cut", amount: number) => ({
   id,
   poId,
@@ -247,12 +271,22 @@ describe("GET /api/v1/po — auth + list", () => {
     expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
   });
 
-  it("returns the B-014 envelope of real po columns", async () => {
+  it("returns the B-014 envelope of real po columns + AP paid/deposit split", async () => {
+    // Two billings on p0: a 300k deposit + a 200k progress → paid 500k, deposit 300k.
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[pos, [po("p0", "PO-2026-0291", "approved", 1268000)]]],
+          rows: [
+            [pos, [po("p0", "PO-2026-0291", "approved", 1268000)]],
+            [
+              apBillings,
+              [
+                apBilling("ap0", "p0", 300000, "deposit"),
+                apBilling("ap1", "p0", 200000, "progress"),
+              ],
+            ],
+          ],
         }),
       })
     ).inject({ url: "/api/v1/po" });
@@ -265,14 +299,20 @@ describe("GET /api/v1/po — auth + list", () => {
     expect(p0.status).toBe("approved");
     expect(p0.amount).toBe(1268000);
     expect(p0.total).toBe(1268000);
+    // B-079 (F2): paid = Σ all billings; deposit = Σ kind=deposit (both real).
+    expect(p0.paid).toBe(500000);
+    expect(p0.deposit).toBe(300000);
     expect(Object.keys(p0).sort()).toEqual(
       [
         "amount",
         "approval_step",
         "credit_term",
         "currency_code",
+        "deposit",
+        "doc_date",
         "id",
         "no",
+        "paid",
         "pr_id",
         "status",
         "total",

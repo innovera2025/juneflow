@@ -34,6 +34,7 @@
 // (their semantics are undefined — inventing filter behavior would violate
 // PLAN.md §0 rule 4); the full tenant-scoped list is returned as one page.
 import type { FastifyInstance } from "fastify";
+import { eq } from "drizzle-orm";
 import { models, projectNodes, projects, boms } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
 
@@ -190,6 +191,39 @@ export function registerModelsRoute(app: FastifyInstance): void {
     // A brand-new model provably has no units and no BOM yet (master.jsx: "สร้าง
     // BOM ได้หลังบันทึก") — the derived counts are 0.
     return reply.code(201).send(toWire(created!, 0, 0));
+  });
+
+  // GET /models/:id/bom — the BOM template lines for a house model (boq.bom /
+  // BOMTemplates, P2-WEB-05). The BOM lines already live in bom.items (jsonb),
+  // keyed by unit_type = model.code (data-completeness gap-6 / F5 — no seed
+  // change, only this read). Both model + bom carry their own company_id (scoped
+  // select), so a foreign model resolves to nothing. Contract getModelBom →
+  // EntityList; a model with no matching BOM returns an empty list honestly (the
+  // screen's "no-BOM" empty state), never fabricated lines. (404 for a missing
+  // model is undocumented — the contract declares only 200/401 — but honest.)
+  app.get("/models/:id/bom", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply.code(401).send({
+        code: "UNAUTHENTICATED",
+        message: "Missing tenant context",
+      });
+    }
+
+    const { id } = request.params as { id: string };
+    const [model] = await db.select(models, eq(models.id, id));
+    if (!model) {
+      return reply
+        .code(404)
+        .send({ code: "NOT_FOUND", message: `model ${id} not found` });
+    }
+
+    // BOM template lines keyed by unit_type = model.code (bom.items jsonb).
+    const bomRows = model.code
+      ? await db.select(boms, eq(boms.unitType, model.code))
+      : [];
+    const items = bomRows[0]?.items ?? [];
+    return reply.code(200).send(listEnvelope(items));
   });
 }
 
