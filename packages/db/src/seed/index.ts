@@ -58,7 +58,7 @@
 // by the 3 DMS `defect`-category documents — the real "defect reports").
 
 import { drizzle } from "drizzle-orm/node-postgres";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { Pool } from "pg";
 // better-auth's own scrypt hasher — seed-time only (devDependency), so seeded
 // credential rows always match what better-auth verifies at sign-in.
@@ -361,6 +361,28 @@ const BOQ_DOCS = [
   { no: "BOQ-2026-B-04", name: "Block B — สเปกพิเศษ B-12 (upgrade)", scope: "B-12 รายยูนิต", ver: 1, status: "draft" as const },
 ];
 
+// boq.jsx:1454 ARCHIVE — the approver + approval timestamp per approved BOQ doc
+// (B-081 / F4, migration 0021). Keyed by doc `no`; only docs whose `no` matches a
+// seeded BOQ_DOCS row AND are approved get archive fields. The mock approver
+// "ผอ.สมพร เพชรชัย" is NOT a seeded user, so approved_by maps to the seeded
+// Director role-holder user:1 (วิภา จันทร์เจริญ, ROLE_DEFS[1]=dir) — the tenant's
+// BOQ approval authority (task: "approver = a seeded user"). Dates are the CE-UTC
+// of the mock Thai-BE date+time (69 = 2026; · time is ICT → −7h to UTC).
+const APPROVER_IDX = 1; // user:1 = Director (วิภา จันทร์เจริญ), BOQ approval authority
+const ARCHIVE_BY_NO: Record<string, string> = {
+  "BOQ-2026-B-02": "2026-03-15T07:32:00Z", // 15 มี.ค. 69 · 14:32
+  "BOQ-2026-C-01": "2026-03-08T02:48:00Z", // 08 มี.ค. 69 · 09:48
+};
+// boq.jsx:1456 ARCHIVE[0].history — the Revise log of BOQ-2026-B-02 (the only
+// archive row carrying a history[]). `by` = APPROVER_IDX (mock "ผอ.สมพร เพชรชัย"
+// → seeded Director). `delta` stored as text (signed value string). Ordered
+// newest→oldest exactly as the mock renders it.
+const BOQ_HISTORY = [
+  { docNo: "BOQ-2026-B-02", version: 3, action: "อนุมัติ", at: "2026-03-15T07:32:00Z", delta: "280000", note: "อนุมัติเพิ่มงานหลังคา" },
+  { docNo: "BOQ-2026-B-02", version: 2, action: "อนุมัติ", at: "2026-02-02T04:08:00Z", delta: "-120000", note: "ลดสเปกประตูภายใน" },
+  { docNo: "BOQ-2026-B-02", version: 1, action: "อนุมัติฉบับแรก", at: "2026-01-18T09:20:00Z", delta: "11598000", note: "BOQ ฉบับแรกของ Block B" },
+] as const;
+
 // boq.jsx:317 INITIAL_GROUPS (6 BOQ work groups)
 const BOQ_GROUPS = [
   "01 งานเตรียม + Site Work",
@@ -372,29 +394,30 @@ const BOQ_GROUPS = [
 ];
 
 // boq.jsx:326 INITIAL_ROWS_BY_GROUP (21 BOQItem rows across the 6 groups)
-// g = group index; cat M/L/S; qty/unit/price verbatim.
-const BOQ_ITEMS: { g: number; code: string; cat: "M" | "L" | "S"; name: string; qty: number; unit: string; price: number }[] = [
-  { g: 0, code: "SITE-001", cat: "S", name: "ปรับเกรด + เคลียร์พื้นที่", qty: 1, unit: "เหมา", price: 280000 },
-  { g: 0, code: "SITE-002", cat: "L", name: "ค่าแรงรังวัด + ปักหมุด", qty: 15, unit: "วัน-คน", price: 850 },
-  { g: 0, code: "SITE-003", cat: "M", name: "เสาเข็มชั่วคราว + รั้ว Site", qty: 1, unit: "ชุด", price: 184375 },
-  { g: 1, code: "MAT-CEM-001", cat: "M", name: "ปูนซีเมนต์ปอร์ตแลนด์ ตราเสือ", qty: 4800, unit: "ถุง", price: 168.5 },
-  { g: 1, code: "MAT-CEM-002", cat: "M", name: "ปูนทรายฉาบ MORTAR", qty: 1240, unit: "ถุง", price: 142 },
-  { g: 1, code: "MAT-STL-024", cat: "M", name: "เหล็กเส้นกลม SR24 ขนาด 12mm × 10m", qty: 2160, unit: "เส้น", price: 425 },
-  { g: 1, code: "MAT-STL-036", cat: "M", name: "เหล็กเส้นข้ออ้อย SD40 ขนาด 16mm", qty: 1280, unit: "เส้น", price: 685 },
-  { g: 1, code: "SUB-STR-001", cat: "S", name: "งานเหมาเทคอนกรีตเสา-คาน-พื้น", qty: 1, unit: "เหมา", price: 1840000 },
-  { g: 1, code: "SUB-STR-002", cat: "S", name: "งานเหมาผูกเหล็กเสริมเสา-คาน", qty: 1, unit: "เหมา", price: 320000 },
-  { g: 1, code: "LAB-STR-001", cat: "L", name: "ค่าแรงช่างเทคอนกรีต", qty: 48, unit: "วัน-คน", price: 850 },
-  { g: 1, code: "LAB-STR-002", cat: "L", name: "ค่าแรงผูกเหล็ก", qty: 24, unit: "วัน-คน", price: 720 },
-  { g: 2, code: "MAT-TILE-60A", cat: "M", name: "กระเบื้องปูพื้น 60×60 (Type-A)", qty: 4200, unit: "ตร.ม.", price: 302 },
-  { g: 2, code: "MAT-PAINT-PR", cat: "M", name: "สีทาภายใน Premium", qty: 640, unit: "แกลลอน", price: 302.5 },
-  { g: 2, code: "SUB-ARC-001", cat: "S", name: "งานเหมาทาสีภายใน + ภายนอก", qty: 1, unit: "เหมา", price: 480000 },
-  { g: 3, code: "SUB-ELE-001", cat: "S", name: "งานติดตั้งระบบไฟฟ้า + สื่อสาร", qty: 1, unit: "เหมา", price: 1840000 },
-  { g: 3, code: "LAB-ELE-001", cat: "L", name: "ค่าแรงเดินสายไฟ + ติดตั้งดวงไฟ", qty: 240, unit: "วัน-คน", price: 700 },
-  { g: 3, code: "MAT-WIRE-22", cat: "M", name: "สาย VCT 2.5mm × 100m", qty: 24, unit: "ม้วน", price: 7000 },
-  { g: 4, code: "SUB-PLB-001", cat: "S", name: "ระบบประปา + สุขภัณฑ์", qty: 1, unit: "เหมา", price: 985000 },
-  { g: 4, code: "MAT-PLB-018", cat: "M", name: "สุขภัณฑ์ครบชุด · มาตรฐาน", qty: 84, unit: "ชุด", price: 18500 },
-  { g: 5, code: "MAT-FIN-001", cat: "M", name: "วัสดุเก็บงาน + ขอบประตู", qty: 1, unit: "ชุดต่อหลัง", price: 4800 },
-  { g: 5, code: "LAB-FIN-001", cat: "L", name: "ค่าแรงเก็บงาน + ทำความสะอาด", qty: 192, unit: "วัน-คน", price: 600 },
+// g = group index; cat M/L/S; qty/unit/price verbatim. `detail` (gap-5, migration
+// 0023) is the boq.editor line-detail note transcribed verbatim from boq.jsx:328-358.
+const BOQ_ITEMS: { g: number; code: string; cat: "M" | "L" | "S"; name: string; qty: number; unit: string; price: number; detail: string }[] = [
+  { g: 0, code: "SITE-001", cat: "S", name: "ปรับเกรด + เคลียร์พื้นที่", qty: 1, unit: "เหมา", price: 280000, detail: "Site B-1..B-24" },
+  { g: 0, code: "SITE-002", cat: "L", name: "ค่าแรงรังวัด + ปักหมุด", qty: 15, unit: "วัน-คน", price: 850, detail: "ทีม 3 คน × 5 วัน" },
+  { g: 0, code: "SITE-003", cat: "M", name: "เสาเข็มชั่วคราว + รั้ว Site", qty: 1, unit: "ชุด", price: 184375, detail: "ป้องกันเขตก่อสร้าง" },
+  { g: 1, code: "MAT-CEM-001", cat: "M", name: "ปูนซีเมนต์ปอร์ตแลนด์ ตราเสือ", qty: 4800, unit: "ถุง", price: 168.5, detail: "ขนาด 50 kg/ถุง · ตามมอก. 15-2562" },
+  { g: 1, code: "MAT-CEM-002", cat: "M", name: "ปูนทรายฉาบ MORTAR", qty: 1240, unit: "ถุง", price: 142, detail: "ฉาบเรียบภายในและภายนอก" },
+  { g: 1, code: "MAT-STL-024", cat: "M", name: "เหล็กเส้นกลม SR24 ขนาด 12mm × 10m", qty: 2160, unit: "เส้น", price: 425, detail: "ใช้กับงานเสา-คาน" },
+  { g: 1, code: "MAT-STL-036", cat: "M", name: "เหล็กเส้นข้ออ้อย SD40 ขนาด 16mm", qty: 1280, unit: "เส้น", price: 685, detail: "เสริมเสาหลัก" },
+  { g: 1, code: "SUB-STR-001", cat: "S", name: "งานเหมาเทคอนกรีตเสา-คาน-พื้น", qty: 1, unit: "เหมา", price: 1840000, detail: "รวมแบบหล่อ + เทคอนกรีต Block B" },
+  { g: 1, code: "SUB-STR-002", cat: "S", name: "งานเหมาผูกเหล็กเสริมเสา-คาน", qty: 1, unit: "เหมา", price: 320000, detail: "ตามแบบ Spec วิศวกร" },
+  { g: 1, code: "LAB-STR-001", cat: "L", name: "ค่าแรงช่างเทคอนกรีต", qty: 48, unit: "วัน-คน", price: 850, detail: "ทีม 4 คน × 12 วัน" },
+  { g: 1, code: "LAB-STR-002", cat: "L", name: "ค่าแรงผูกเหล็ก", qty: 24, unit: "วัน-คน", price: 720, detail: "ทีม 3 คน × 8 วัน" },
+  { g: 2, code: "MAT-TILE-60A", cat: "M", name: "กระเบื้องปูพื้น 60×60 (Type-A)", qty: 4200, unit: "ตร.ม.", price: 302, detail: "พื้นทั่วทุกห้อง" },
+  { g: 2, code: "MAT-PAINT-PR", cat: "M", name: "สีทาภายใน Premium", qty: 640, unit: "แกลลอน", price: 302.5, detail: "5L · ทาทุกห้อง · 2 ชั้น" },
+  { g: 2, code: "SUB-ARC-001", cat: "S", name: "งานเหมาทาสีภายใน + ภายนอก", qty: 1, unit: "เหมา", price: 480000, detail: "Block B 1-24" },
+  { g: 3, code: "SUB-ELE-001", cat: "S", name: "งานติดตั้งระบบไฟฟ้า + สื่อสาร", qty: 1, unit: "เหมา", price: 1840000, detail: "Block B (B-1..B-24)" },
+  { g: 3, code: "LAB-ELE-001", cat: "L", name: "ค่าแรงเดินสายไฟ + ติดตั้งดวงไฟ", qty: 240, unit: "วัน-คน", price: 700, detail: "ทีม 6 คน × 40 วัน" },
+  { g: 3, code: "MAT-WIRE-22", cat: "M", name: "สาย VCT 2.5mm × 100m", qty: 24, unit: "ม้วน", price: 7000, detail: "สายเมน + กระจาย" },
+  { g: 4, code: "SUB-PLB-001", cat: "S", name: "ระบบประปา + สุขภัณฑ์", qty: 1, unit: "เหมา", price: 985000, detail: "B-1..B-12" },
+  { g: 4, code: "MAT-PLB-018", cat: "M", name: "สุขภัณฑ์ครบชุด · มาตรฐาน", qty: 84, unit: "ชุด", price: 18500, detail: "Cotto / TOTO Premium" },
+  { g: 5, code: "MAT-FIN-001", cat: "M", name: "วัสดุเก็บงาน + ขอบประตู", qty: 1, unit: "ชุดต่อหลัง", price: 4800, detail: "PVC + คิ้วไม้" },
+  { g: 5, code: "LAB-FIN-001", cat: "L", name: "ค่าแรงเก็บงาน + ทำความสะอาด", qty: 192, unit: "วัน-คน", price: 600, detail: "ทีม 2 คน × 8 วัน × 24 หลัง" },
 ];
 
 // bom.jsx:22 BOM_MODELS (4) + :30 BOM_LINES["B-1"] (17 lines, only B-1 has lines)
@@ -420,17 +443,26 @@ const BOM_LINES_B1 = [
 ];
 
 // pr-list.jsx:11 PR_ROWS (10). type `clear` → `advance` (B-029(ข) — no enum change). status is free text.
+// Gap-2 (migration 0022): title/phase/vendor/requester/date transcribed verbatim
+// from pr-list.jsx:12-21. `vendorCode` normalizes the mock vendor-name text to a
+// seeded vendor code where one matches (else null — the mock vendor is not in the
+// seeded register, or the PR is an expense/advance with no vendor). `requesterIdx`
+// maps the mock requester name to its COMPANY_USERS index (null when the mock name
+// is not a seeded user, e.g. "นภัส ใจดี"). `phase` "—" (PR-0409) is a display
+// placeholder → null (seed convention: presentational em-dashes are dropped).
+// `date` is the CE ISO of the mock's Thai-BE day (พ.ค. 69 = May 2026) → submitted_at
+// for every non-draft PR; approved_at only for status=approved.
 const PR_ROWS = [
-  { no: "PR-2026-0418", type: "material", status: "pending", step: 2 },
-  { no: "PR-2026-0417", type: "expense", status: "pending", step: 1 },
-  { no: "PR-2026-0416", type: "material", status: "revise", step: 2 },
-  { no: "PR-2026-0415", type: "subcon", status: "approved", step: 3 },
-  { no: "PR-2026-0414", type: "material", status: "approved", step: 3 },
-  { no: "PR-2026-0413", type: "advance", status: "approved", step: 2 },
-  { no: "PR-2026-0412", type: "material", status: "pending", step: 2 },
-  { no: "PR-2026-0411", type: "advance", status: "approved", step: 2 }, // mock `clear` → advance (B-029(ข))
-  { no: "PR-2026-0410", type: "subcon", status: "draft", step: 0 },
-  { no: "PR-2026-0409", type: "expense", status: "rejected", step: 1 },
+  { no: "PR-2026-0418", type: "material", status: "pending",  step: 2, title: "ปูนซีเมนต์ + เหล็กเส้น เฟส 2/บล็อก B", phase: "เฟส 2 · B", vendorCode: null,   requesterIdx: 1,    date: "2026-05-25" },
+  { no: "PR-2026-0417", type: "expense",  status: "pending",  step: 1, title: "ค่าใช้จ่ายเดินทาง ตรวจไซต์งาน เฟส 3", phase: "เฟส 3",   vendorCode: null,   requesterIdx: 0,    date: "2026-05-25" },
+  { no: "PR-2026-0416", type: "material", status: "revise",   step: 2, title: "ลวดเสริม + ตะแกรงไวร์เมช (ขอแก้ราคา)", phase: "เฟส 2 · B", vendorCode: null,   requesterIdx: 2,    date: "2026-05-25" },
+  { no: "PR-2026-0415", type: "subcon",   status: "approved", step: 3, title: "งานทาสีภายนอก Block A (อาคารตัวอย่าง)", phase: "เฟส 1 · A", vendorCode: "SC-02", requesterIdx: 4,    date: "2026-05-24" },
+  { no: "PR-2026-0414", type: "material", status: "approved", step: 3, title: "กระเบื้องปูพื้น 60×60 (Type-A) — 4,200 ตร.ม.", phase: "เฟส 2 · C", vendorCode: null,   requesterIdx: 2,    date: "2026-05-24" },
+  { no: "PR-2026-0413", type: "advance",  status: "approved", step: 2, title: "เงินทดรองจ่าย ค่าจัดส่งวัสดุไซต์งาน 1 สัปดาห์", phase: "เฟส 2",   vendorCode: null,   requesterIdx: null, date: "2026-05-23" },
+  { no: "PR-2026-0412", type: "material", status: "pending",  step: 2, title: "อุปกรณ์ไฟฟ้า สายเมน + เบรกเกอร์ (B-12 ถึง B-18)", phase: "เฟส 2 · B", vendorCode: "SC-03", requesterIdx: 1,    date: "2026-05-23" },
+  { no: "PR-2026-0411", type: "advance",  status: "approved", step: 2, title: "เคลียร์เงินทดรอง PR-0398 (ค่าตรวจสภาพดิน)", phase: "เฟส 3",   vendorCode: null,   requesterIdx: 0,    date: "2026-05-22" }, // mock `clear` → advance (B-029(ข))
+  { no: "PR-2026-0410", type: "subcon",   status: "draft",    step: 0, title: "งานติดตั้งระบบประปา B-1 ถึง B-12", phase: "เฟส 2 · B", vendorCode: "SC-04", requesterIdx: 4,    date: "2026-05-22" },
+  { no: "PR-2026-0409", type: "expense",  status: "rejected", step: 1, title: "ค่าอาหาร+เครื่องดื่ม วันเปิดบ้านตัวอย่าง", phase: null,      vendorCode: null,   requesterIdx: null, date: "2026-05-21" },
 ] as const;
 
 // po-wo.jsx:3 PO_ROWS (6) — real totals + verbatim doc `no` + `status`
@@ -452,6 +484,18 @@ const WO_RETENTION_PCTS = ["10.000", "10.000", "10.000", "10.000", "0.000"];
 // match gr:i↔po:i 1:1 — GR-from-WO is exercised by the gr.ts handler + tests.)
 const GR_RECEIVED = [320, 240, 120, 92, 920];
 const GR_NOS = ["GR-2026-0148", "GR-2026-0147", "GR-2026-0146", "GR-2026-0145", "GR-2026-0144"];
+// gr.jsx:137-141 per-GR received-line detail (B-078 / F1, migration 0018 gr_item).
+// The prototype detail panel ("รายการที่รับ") renders this 3-line array for ANY
+// selected GR (it is a static array, not keyed by GR) — so every seeded GR gets
+// the same 3 lines, mirroring the prototype's observable behavior. `boqItemIdx`
+// ties each line to its source BOQ_ITEMS row by verbatim name match
+// (ปูนซีเมนต์=3 · ปูนทรายฉาบ=4 · เหล็กเส้นกลม SR24=5); `price` is that item's unit
+// price (the detail array carries no per-line price — derived, never invented).
+const GR_ITEM_LINES = [
+  { name: "ปูนซีเมนต์ปอร์ตแลนด์ ตราเสือ", boqItemIdx: 3, ordered: 480, received: 480, unit: "ถุง" },
+  { name: "ปูนทรายฉาบ MORTAR", boqItemIdx: 4, ordered: 240, received: 240, unit: "ถุง" },
+  { name: "เหล็กเส้นกลม SR24 12mm", boqItemIdx: 5, ordered: 240, received: 120, unit: "เส้น" },
+] as const;
 
 // subcon-accept.jsx:8 SUBC_CONTRACTS (4 contracts / 16 periods = 4/4/3/5).
 // C3 state map: accepted→passed, requested→delivered, rejected/pending kept.
@@ -728,6 +772,13 @@ const AP_BILL = [
   { no: "AP-2026-0181", inv: "INV-TST-028", amount: 268000, vat: 17542, status: "approved" },
   { no: "AP-2026-0180", inv: "—", amount: 645000, vat: 42196, status: "pending" },
 ];
+// ap_billing.kind per row (B-079 / F2, migration 0019), index-aligned to AP_BILL
+// (each row is the sole billing of po:i). Derived from the PO payment state in
+// po-wo.jsx:4-9 (index-aligned via PO_NOS → po:i): only the down-payment paid →
+// `deposit` (PO-0291 po:0, PO-0289 po:2); fully paid → `final` (PO-0288 po:3,
+// PO-0287 po:4 closed); otherwise `progress` (PO-0290 po:1, nothing paid yet).
+// So deposit = Σ(kind=deposit) and paid = Σ(all) are both real, non-equal sums.
+const AP_KIND = ["deposit", "progress", "deposit", "final", "final"] as const;
 const PV_LIST = [
   { net: 561154, wht: 19350 }, { net: 892400, wht: 27600 }, { net: 93896, wht: 2904 }, { net: 402938, wht: 12462 },
 ];
@@ -1003,10 +1054,30 @@ async function seed(): Promise<void> {
       );
 
       await tx.insert(schema.boqDocs).values(
-        BOQ_DOCS.map((d, i) => ({
-          id: det(`boqdoc:${i}`), projectId: det("project:rjp"),
-          no: d.no, name: d.name, scope: d.scope, version: d.ver, status: d.status,
-        })),
+        BOQ_DOCS.map((d, i) => {
+          // B-081: archive approver + timestamp for approved docs with an ARCHIVE
+          // match (approver → seeded Director user:APPROVER_IDX).
+          const approvedAtIso = d.status === "approved" ? ARCHIVE_BY_NO[d.no] : undefined;
+          return {
+            id: det(`boqdoc:${i}`), projectId: det("project:rjp"),
+            no: d.no, name: d.name, scope: d.scope, version: d.ver, status: d.status,
+            approvedBy: approvedAtIso ? det(`user:${APPROVER_IDX}`) : null,
+            approvedAt: approvedAtIso ? new Date(approvedAtIso) : null,
+          };
+        }),
+      );
+
+      // B-081 (F4): the Revise history of the archived docs (only BOQ-2026-B-02
+      // carries a history[] in the mock). Inserted after boqDocs + users exist.
+      await tx.insert(schema.boqVersionHistory).values(
+        BOQ_HISTORY.map((h, k) => {
+          const di = BOQ_DOCS.findIndex((d) => d.no === h.docNo);
+          return {
+            id: det(`boqvh:${k}`), docId: det(`boqdoc:${di}`), version: h.version,
+            action: h.action, by: det(`user:${APPROVER_IDX}`), at: new Date(h.at),
+            delta: h.delta, note: h.note,
+          };
+        }),
       );
 
       await tx.insert(schema.boqGroups).values(
@@ -1016,7 +1087,8 @@ async function seed(): Promise<void> {
       await tx.insert(schema.boqItems).values(
         BOQ_ITEMS.map((it, i) => ({
           id: det(`boqitem:${i}`), groupId: det(`boqgrp:${it.g}`),
-          code: it.code, name: it.name, cat: it.cat, qty: m(it.qty), unit: it.unit, price: m(it.price),
+          code: it.code, name: it.name, detail: it.detail, cat: it.cat, qty: m(it.qty),
+          unit: it.unit, price: m(it.price),
           ccId: det(`cc:${at(CC_SEED, i).code}`), remainQty: m(it.qty),
         })),
       );
@@ -1029,11 +1101,23 @@ async function seed(): Promise<void> {
       );
 
       await tx.insert(schema.prs).values(
-        PR_ROWS.map((p, i) => ({
-          id: det(`pr:${i}`), projectId: det("project:rjp"),
-          no: p.no, type: p.type as "material" | "subcon" | "expense" | "advance",
-          needDate: null, status: p.status, approvalStep: p.step,
-        })),
+        PR_ROWS.map((p, i) => {
+          // Gap-2: submitted_at for every non-draft PR; approved_at only when
+          // approved. The mock carries one date per PR (no separate submit/approve
+          // stamps) → both use it. Stored as midnight-UTC of the CE date.
+          const dateAt = new Date(`${p.date}T00:00:00Z`);
+          return {
+            id: det(`pr:${i}`), projectId: det("project:rjp"),
+            no: p.no, type: p.type as "material" | "subcon" | "expense" | "advance",
+            needDate: null, status: p.status, approvalStep: p.step,
+            title: p.title,
+            vendorId: p.vendorCode ? det(`vendor:${p.vendorCode}`) : null,
+            requesterId: p.requesterIdx != null ? det(`user:${p.requesterIdx}`) : null,
+            phase: p.phase,
+            submittedAt: p.status === "draft" ? null : dateAt,
+            approvedAt: p.status === "approved" ? dateAt : null,
+          };
+        }),
       );
 
       await tx.insert(schema.prItems).values(
@@ -1069,6 +1153,20 @@ async function seed(): Promise<void> {
         })),
       );
 
+      // B-078 (F1): per-GR received-line detail. Every seeded GR gets the same 3
+      // detail lines (gr.jsx's static "รายการที่รับ" array); price = the linked
+      // BOQ item's unit price.
+      await tx.insert(schema.grItems).values(
+        GR_RECEIVED.flatMap((_r, gi) =>
+          GR_ITEM_LINES.map((ln, li) => ({
+            id: det(`gritem:${gi}:${li}`), grId: det(`gr:${gi}`),
+            boqItemId: det(`boqitem:${ln.boqItemIdx}`), name: ln.name,
+            orderedQty: m(ln.ordered), receivedQty: m(ln.received), unit: ln.unit,
+            price: m(at(BOQ_ITEMS, ln.boqItemIdx).price),
+          })),
+        ),
+      );
+
       await tx.insert(schema.variationOrders).values([
         { id: det("vo:0"), poId: det("po:0"), dir: "add" as const, amount: m(148000), reason: "เพิ่มผนังเสริมเหล็ก B-15 ตามคำขอลูกค้า" },
         { id: det("vo:1"), poId: det("po:1"), dir: "cut" as const, amount: m(68000), reason: "ลดงานเทพื้น Roof Deck (ใช้ Pre-cast)" },
@@ -1098,6 +1196,23 @@ async function seed(): Promise<void> {
       // NOTE: acceptance/defect stay 0 records (§สรุป line 318/341 + P0-QA-06). The
       // WO-2026-0055 งวด 3 rejection is captured by status='rejected' above and by the
       // 3 DMS `defect`-category documents (the real "defect reports").
+
+      // B-080 (F3): reconcile WO ↔ subcon_contract by shared vendor. Each seeded WO
+      // points to firm SC-0{i+1}; link it to the contract signed with that same
+      // firm (WO-0117/SC-01 → subc:0 · WO-0115/SC-03 → subc:2 · WO-0114/SC-04 →
+      // subc:1). WOs whose vendor (SC-02/SC-05) has no contract stay contract_id
+      // NULL. Done as a post-insert UPDATE: the WO rows were inserted before the
+      // subcon_contract rows, so the FK target only exists now.
+      for (let wi = 0; wi < WO_VALUES.length; wi++) {
+        const firm = `SC-0${wi + 1}`;
+        const ci = SUBC_CONTRACTS.findIndex((c) => c.firm === firm);
+        if (ci >= 0) {
+          await tx
+            .update(schema.wos)
+            .set({ contractId: det(`subc:${ci}`) })
+            .where(eq(schema.wos.id, det(`wo:${wi}`)));
+        }
+      }
 
       // === PM =============================================================
       await tx.insert(schema.pmContracts).values(
@@ -1136,6 +1251,7 @@ async function seed(): Promise<void> {
           id: det(`ap:${i}`), companyId: CO1, vendorId: at(SUPPLIER_VENDORS, i),
           poId: det(`po:${i}`), grId: det(`gr:${i}`), invoiceNo: a.inv,
           dueDate: null, amount: m(a.amount), vat: m(a.vat), status: a.status,
+          kind: at(AP_KIND, i), // B-079 (F2): installment type per PO payment state
         })),
       );
 

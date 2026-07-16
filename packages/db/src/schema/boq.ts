@@ -28,8 +28,9 @@ import {
   date,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { companies } from "./platform.js";
+import { companies, users } from "./platform.js";
 import { projects, costCenters, vendors } from "./project.js";
+import { subconContracts } from "./subcon.js";
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -107,10 +108,42 @@ export const boqDocs = pgTable("boq_doc", {
   scope: text("scope"),
   version: integer("version").notNull().default(1),
   status: boqDocStatus("status").notNull().default("draft"),
+  // B-081 (F4, migration 0021): the archive approver + approval timestamp. The
+  // audit_log cannot source these (its `entity` is a route template with no
+  // resolved id — recon), so the approve handler writes them directly here.
+  // Nullable — only set once a doc is approved. approvedBy -> users.
+  approvedBy: uuid("approved_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "date" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * BOQVersionHistory — the Revise history of a BOQDoc (B-081 / F4, migration
+ * 0021). boq.jsx ARCHIVE[].history[] shows each version's approve/revise event
+ * with who did it, when, the value delta, and a note. This table persists that
+ * log so the archive screen's Revise-history expander + version-diff read from
+ * real rows. `delta` is stored as text (the mock's signed value string). `by` ->
+ * users (nullable — a system-generated entry has no user).
+ */
+export const boqVersionHistory = pgTable("boq_version_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  docId: uuid("doc_id")
+    .notNull()
+    .references(() => boqDocs.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(0),
+  action: text("action"),
+  by: uuid("by").references(() => users.id, { onDelete: "set null" }),
+  at: timestamp("at", { withTimezone: true, mode: "date" }),
+  delta: text("delta"),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
 });
@@ -149,6 +182,10 @@ export const boqItems = pgTable("boq_item", {
     .references(() => boqGroups.id, { onDelete: "cascade" }),
   code: text("code").notNull(),
   name: text("name").notNull(),
+  // Gap-5 (migration 0023): the boq.editor line-detail note (boq.jsx
+  // INITIAL_ROWS_BY_GROUP[].detail — e.g. "ขนาด 50 kg/ถุง · ตามมอก. 15-2562").
+  // Nullable free text; the editor shows it under the item name.
+  detail: text("detail"),
   cat: boqItemCat("cat").notNull(),
   qty: numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
   unit: text("unit"),
@@ -207,6 +244,22 @@ export const prs = pgTable("pr", {
   needDate: date("need_date"),
   status: text("status").notNull().default("draft"),
   approvalStep: integer("approval_step").notNull().default(0),
+  // Gap-2 (migration 0022): pr-list.jsx display fields that were genuinely absent
+  // from the schema (the list row shows title/vendor/requester/phase + submit/
+  // approve timestamps). vendor_id -> vendor, requester_id -> users (both
+  // nullable — expense/advance PRs carry no vendor, and a mock requester with no
+  // seeded user stays null). submitted_at/approved_at are null until the PR
+  // reaches that state.
+  title: text("title"),
+  vendorId: uuid("vendor_id").references(() => vendors.id, {
+    onDelete: "set null",
+  }),
+  requesterId: uuid("requester_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  phase: text("phase"),
+  submittedAt: timestamp("submitted_at", { withTimezone: true, mode: "date" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "date" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -285,6 +338,13 @@ export const wos = pgTable("wo", {
   vendorId: uuid("vendor_id")
     .notNull()
     .references(() => vendors.id, { onDelete: "restrict" }),
+  // B-080 (F3, migration 0020): link a WO to its subcon contract so the WO reuses
+  // the existing SubconContract -> WorkPeriod installment model (subcon.ts)
+  // instead of duplicating a per-installment table. Nullable — a WO without a
+  // matching contract (no shared subcon vendor) leaves it null.
+  contractId: uuid("contract_id").references(() => subconContracts.id, {
+    onDelete: "set null",
+  }),
   no: text("no"),
   value: numeric("value", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
@@ -358,6 +418,45 @@ export const grs = pgTable("gr", {
     .default("0"),
   photos: jsonb("photos").$type<string[]>().notNull().default([]),
   status: text("status").notNull().default("received"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * GRItem — a per-line detail row of a GR (B-078 / F1, migration 0018). The `gr`
+ * table keeps only the aggregate received/rejected total; the prototype detail
+ * panel (gr.jsx "รายการที่รับ") shows each received line with its
+ * ordered/received quantity + unit. This child table captures that per-line
+ * fidelity so a GR detail view renders real line rows instead of an aggregate.
+ *
+ * `boq_item_id` links a received line back to the source BOQ item where the line
+ * name resolves to a seeded item (nullable — free-text / non-BOQ receipts leave
+ * it null). `price` is money -> currency_code (the line's unit price; derived
+ * from the linked boq_item at seed time — the prototype detail array carries no
+ * per-line price of its own).
+ */
+export const grItems = pgTable("gr_item", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  grId: uuid("gr_id")
+    .notNull()
+    .references(() => grs.id, { onDelete: "cascade" }),
+  boqItemId: uuid("boq_item_id").references(() => boqItems.id, {
+    onDelete: "set null",
+  }),
+  name: text("name").notNull(),
+  orderedQty: numeric("ordered_qty", { precision: 18, scale: 4 })
+    .notNull()
+    .default("0"),
+  receivedQty: numeric("received_qty", { precision: 18, scale: 4 })
+    .notNull()
+    .default("0"),
+  unit: text("unit"),
+  price: numeric("price", { precision: 16, scale: 2 }).notNull().default("0"),
+  currencyCode: text("currency_code").notNull().default("THB"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

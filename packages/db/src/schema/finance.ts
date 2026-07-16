@@ -64,6 +64,21 @@ export const etaxStatus = pgEnum("etax_status", [
   "void",
 ]);
 
+/**
+ * APBilling.kind — B-079 (F2, migration 0019): the billing installment type that
+ * lets the PO paid-vs-deposit split be computed from real AP data. po-wo.jsx
+ * models a PO payment as มัดจำ (down payment) -> งวด 1 (progress) -> งวดสุดท้าย
+ * (final): `deposit` is the down-payment billing, `progress` an interim
+ * receipt-linked billing, `final` the closing billing. A screen then aggregates
+ * deposit = Σ(kind=deposit) and paid = Σ(all), both real. Defaults to the most
+ * common `progress`.
+ */
+export const apBillingKind = pgEnum("ap_billing_kind", [
+  "deposit",
+  "progress",
+  "final",
+]);
+
 // ---------------------------------------------------------------------------
 // GL / period
 // ---------------------------------------------------------------------------
@@ -147,6 +162,9 @@ export const apBillings = pgTable("ap_billing", {
   vat: numeric("vat", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("draft"),
+  // B-079 (F2): billing installment type (deposit | progress | final). Defaults
+  // to the most common `progress`; re-seeded per row from the PO payment state.
+  kind: apBillingKind("kind").notNull().default("progress"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
