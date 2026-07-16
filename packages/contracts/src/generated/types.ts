@@ -997,6 +997,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/po/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get PO detail */
+        get: operations["getPo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/po/{id}/variation-order": {
         parameters: {
             query?: never;
@@ -1028,6 +1047,25 @@ export interface paths {
         put?: never;
         /** Create WO */
         post: operations["createWo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wo/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get WO detail */
+        get: operations["getWo"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4130,6 +4168,22 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    getPo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     createPoVariationOrder: {
         parameters: {
             query?: never;
@@ -4187,6 +4241,22 @@ export interface operations {
         responses: {
             201: components["responses"]["EntityCreated"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getWo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listGr: {

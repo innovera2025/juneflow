@@ -1364,6 +1364,20 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /po/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [boq]
+      summary: Get PO detail
+      operationId: getPo
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /po/{id}/variation-order:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -1420,6 +1434,20 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /wo/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [boq]
+      summary: Get WO detail
+      operationId: getWo
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /gr:
     get:

@@ -18,8 +18,8 @@
  * (filter / KPI aggregates / status tone / money format) lives in boq-rows.ts (unit-tested,
  * gate G3).
  *
- * WIRE GAP (reported honestly, not fabricated): the prototype's `owner` (ผู้รับผิดชอบ) and
- * `updated` (อัปเดตล่าสุด) columns have NO source on the /boq wire (boq_doc has no owner
+ * WIRE GAP (reported honestly, not fabricated): the prototype's `owner` (responsible person) and
+ * `updated` (last-updated) columns have NO source on the /boq wire (boq_doc has no owner
  * column; updatedAt exists but is not exposed), and there is no phase column, so those two
  * cells render an em-dash and the phase filter carries only its "all" option — no invented
  * data. The row duplicate/print/delete actions have no backend endpoint yet (no
