@@ -1254,6 +1254,20 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /pr/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [boq]
+      summary: Get PR detail (priced lines)
+      operationId: getPr
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /pr/{id}/submit:
     parameters:
       - $ref: "#/components/parameters/IdPath"

@@ -884,6 +884,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pr/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get PR detail (priced lines) */
+        get: operations["getPr"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pr/{id}/submit": {
         parameters: {
             query?: never;
@@ -3968,6 +3987,22 @@ export interface operations {
         responses: {
             201: components["responses"]["EntityCreated"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getPr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     submitPr: {
