@@ -169,8 +169,8 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P2-BE-06 | backend | blocked | **gr handler** — createGr(`{po_id|wo_id, lines[{qty_ok,qty_rejected,photos}]}`) + GET /gr + return/cancel (จาก P2-BE-00) · **GR-from-WO** (accept wo_id · อาจเพิ่ม nullable gr.wo_id migration ถ้าจำเป็น — flag) · selectThrough | P2-BE-00, P2-BE-05 | G1 (ถ้ามี migration) · G3 · gate 4.5 | 3 ชม. |
 | P2-BE-07 | backend | blocked | **approvals-inbox wire** — listDashboardApprovals (dashboard.ts op ยังไม่ wired) = union pending PR+PO+WO ที่ caller เป็น approver · เลี้ยง badge live count | P2-BE-04, P2-BE-05 | G3 api tests · gate 4.5 | 1.5 ชม. |
 | P2-PLAT-01 | platform | review | **[R1] i18n vendor** — compile ~30 keys master.vendor (`master-party.jsx` · verbatim) → apply 2 สำเนา (`SACRED_OVERRIDE=wei-approved:B-070`) · driven by orch-A (compile agent) | — | cmp identical + i18n test · gate 4.5 | 1.5 ชม. |
-| P2-PLAT-02 | platform | doing | **[R2] i18n BOQ core** — ~140 keys (boq.list/overview/editor) · compile+apply | P2-PLAT-01 | cmp identical + i18n test · gate 4.5 | 3 ชม. |
-| P2-PLAT-03 | platform | blocked | **[R3] i18n BOQ aux** — ~105 keys (bom/approval/archive/reports/aiqto) | P2-PLAT-02 | cmp + i18n test · gate 4.5 | 2.5 ชม. |
+| P2-PLAT-02 | platform | review | **[R2] i18n BOQ core** — ~140 keys (boq.list/overview/editor) · compile+apply | P2-PLAT-01 | cmp identical + i18n test · gate 4.5 | 3 ชม. |
+| P2-PLAT-03 | platform | doing | **[R3] i18n BOQ aux** — ~105 keys (bom/approval/archive/reports/aiqto) | P2-PLAT-02 | cmp + i18n test · gate 4.5 | 2.5 ชม. |
 | P2-PLAT-04 | platform | blocked | **[R4] i18n proc docs** — ~55 keys (pr/po/wo/gr) | P2-PLAT-03 | cmp + i18n test · gate 4.5 | 2 ชม. |
 | P2-WEB-01 | web | ready | **master.vendor** port (`master-party.jsx:56` · ref NAV g2-vendor · CRUD add/edit · type display-map) · G5 | P2-BE-01, P2-PLAT-01 | G5 + CI · gate 4.5 | 3 ชม. |
 | P2-WEB-02 | web | blocked | **boq.list** port (`boq-list.jsx` +NewBOQForm/Excel import · g1/08) | P2-BE-02, P2-PLAT-02 | G5 g1/08 · gate 4.5 | 3 ชม. |
