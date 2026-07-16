@@ -264,13 +264,15 @@ const CC_SEED = [
 // master-party.jsx:6 VENDOR_SEED (6) — C6. B-026(ก): all seeded as kind=supplier (the 2
 // "รับเหมา" V-0031/V-0045 are master-party contractors, NOT the subcon.jsx register). `type`
 // kept verbatim from the mock for reference.
+// B-071 (P2-BE-08): addr / bank / status carried verbatim from master-party.jsx:6-13
+// (new superset columns). V-0061 is inactive in the mock; the rest are active.
 const VENDOR_SEED = [
-  { code: "V-0012", name: "บจก. รุ่งเรืองวัสดุก่อสร้าง", type: "วัสดุ", taxId: "0105545012345", term: 30 },
-  { code: "V-0024", name: "หจก. ช่างเหล็กไทย", type: "วัสดุ", taxId: "0103539008765", term: 45 },
-  { code: "V-0031", name: "บจก. ไฟฟ้าอุตสาหกรรม", type: "รับเหมา", taxId: "0105549112233", term: 60 },
-  { code: "V-0045", name: "นายสมศักดิ์ รับเหมาก่อสร้าง", type: "รับเหมา", taxId: "1102003456789", term: 30 },
-  { code: "V-0052", name: "บมจ. แม็กซ์เทค เซอร์วิส", type: "บริการ", taxId: "0107536000999", term: 30 },
-  { code: "V-0061", name: "บจก. หัวเว่ย เทคโนโลยี", type: "วัสดุ", taxId: "0105556778899", term: 0 },
+  { code: "V-0012", name: "บจก. รุ่งเรืองวัสดุก่อสร้าง", type: "วัสดุ", taxId: "0105545012345", term: 30, addr: "ถ.พหลโยธิน กทม.", bank: "KBANK 012-3-45678-9", status: "active" },
+  { code: "V-0024", name: "หจก. ช่างเหล็กไทย", type: "วัสดุ", taxId: "0103539008765", term: 45, addr: "ถ.รังสิต ปทุมธานี", bank: "SCB 111-2-33445-6", status: "active" },
+  { code: "V-0031", name: "บจก. ไฟฟ้าอุตสาหกรรม", type: "รับเหมา", taxId: "0105549112233", term: 60, addr: "ถ.บางนา กทม.", bank: "BBL 222-1-55667-8", status: "active" },
+  { code: "V-0045", name: "นายสมศักดิ์ รับเหมาก่อสร้าง", type: "รับเหมา", taxId: "1102003456789", term: 30, addr: "ต.บางพระ นนทบุรี", bank: "KTB 333-4-77889-0", status: "active" },
+  { code: "V-0052", name: "บมจ. แม็กซ์เทค เซอร์วิส", type: "บริการ", taxId: "0107536000999", term: 30, addr: "ถ.รัชดาภิเษก กทม.", bank: "KBANK 444-5-99001-2", status: "active" },
+  { code: "V-0061", name: "บจก. หัวเว่ย เทคโนโลยี", type: "วัสดุ", taxId: "0105556778899", term: 0, addr: "ถ.วิภาวดี กทม.", bank: "SCB 555-6-11223-4", status: "inactive" },
 ];
 
 // subcon.jsx:3 SUBCONS (6 register, SC-01..SC-06) + subcon-accept.jsx unique counterparty
@@ -944,15 +946,18 @@ async function seed(): Promise<void> {
       // B-023(ก)+B-026(ก): master-party VENDOR_SEED (6, all supplier) + 7 subcon firms.
       // Only the 6 register firms (SC-01..SC-06) are kind=subcon → จอทะเบียนผู้รับเหมา = 6;
       // SC-07 is a contract counterparty outside the register → supplier. Total vendors = 13.
+      // B-071 (P2-BE-08): master-party rows carry code/addr/bank/status verbatim from the
+      // mock; subcon firms carry their SC-xx code (from SUBCON_FIRMS) and default status
+      // 'active' — the mock has no addr/bank for them → null (honest, never invented).
       await tx.insert(schema.vendors).values([
         ...VENDOR_SEED.map((v) => ({
-          id: det(`vendor:${v.code}`), companyId: CO1, name: v.name, taxId: v.taxId,
-          kind: "supplier" as const, creditTerm: v.term,
+          id: det(`vendor:${v.code}`), companyId: CO1, name: v.name, code: v.code, taxId: v.taxId,
+          kind: "supplier" as const, creditTerm: v.term, addr: v.addr, bank: v.bank, status: v.status,
         })),
         ...SUBCON_FIRMS.map((f) => ({
-          id: det(`vendor:${f.code}`), companyId: CO1, name: f.name, taxId: null,
+          id: det(`vendor:${f.code}`), companyId: CO1, name: f.name, code: f.code, taxId: null,
           kind: (f.code === "SC-07" ? "supplier" : "subcon") as "subcon" | "supplier",
-          creditTerm: null,
+          creditTerm: null, addr: null, bank: null, status: "active" as const,
         })),
       ]);
       // All master-party vendors are suppliers now (B-026) → PO/AP pull from here.

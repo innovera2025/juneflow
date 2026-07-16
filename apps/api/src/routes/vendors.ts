@@ -7,9 +7,12 @@
 // POST → 201 EntityCreated; GET /{id} → 200 EntityOk / 404; PUT /{id} → 200
 // EntityOk / 404. Every body is the opaque Entity — the web maps its screen
 // fields to these columns. No DELETE (the contract exposes none). Field
-// semantics follow the DB schema `vendor` (project.ts). The wire row is
-//   {id, name, tax_id, kind, credit_term}
+// semantics follow the DB schema `vendor` (project.ts). /vendors is Entity-opaque
+// so the B-071 (P2-BE-08) superset columns need NO contract change. The wire row is
+//   {id, name, code, tax_id, kind, credit_term, addr, bank, status}
 // where
+//   code        = the "V-00xx" display code (B-071 column). Nullable free text —
+//                 the mock generates it (VendorForm:138) with no format rule.
 //   kind        = supplier | subcon (vendor_kind enum). The DB is 2-way; the
 //                 mock's 4-way type badge (วัสดุ / บริการ / ที่ดิน → supplier,
 //                 รับเหมา → subcon, B-070) is a WEB display concern only — this
@@ -23,16 +26,20 @@
 //                 stored as null (never invented — PLAN.md §0 rule 4).
 //   tax_id      = tax id, nullable free text (no format rule: the mock party
 //                 form does not validate it, unlike org_unit / B-052).
+//   addr / bank = registered-address + bank-account display strings (B-071
+//                 columns), nullable free text (VendorForm:172/174, no format rule).
+//   status      = active | inactive (B-071 column, VendorForm:175). Plain-text
+//                 column; the closed set is enforced by this handler (POST/PUT
+//                 400 an out-of-set value). A new vendor defaults to active.
 //
 // Deliberately NOT on the wire (the DB is a real subset of the mock, not a bug):
-//   - code  : the mock's "V-00xx" is display-only; the vendor table has NO code
-//             column, so there is nothing to return or persist ("+ code if
-//             present" — it is not present). Not invented.
 //   - spend : the mock's per-vendor purchase total has NO source yet — AP/PO
 //             aggregation is out of this task's scope — so it is OMITTED rather
 //             than fabricated (a made-up 0 would still be a value the API did not
 //             compute). Flagged to WEB/QA: the party KPI "ยอดซื้อรวม" has no
 //             backing until AP lands.
+//   - type  : the mock's 4-way type badge is display-derived from `kind` on the
+//             web (B-070) — never a stored column, so never on the wire.
 //
 // `vendor` carries its OWN company_id column (project.ts, index vendor_company_idx),
 // so it is read/written through the scoped TenantDb.select()/insert()/update()
@@ -60,14 +67,29 @@ type VendorRow = typeof vendors.$inferSelect;
 /** vendor_kind enum values (project.ts) — also the contract's `kind` filter enum. */
 const VENDOR_KINDS = new Set(["supplier", "subcon"]);
 
+/** vendor.status closed set (VendorForm dropdown, master-party.jsx:175). The DB
+ *  column is plain text (B-071); this app-layer set enforces active|inactive. */
+const VENDOR_STATUSES = new Set(["active", "inactive"]);
+
 /** The opaque Entity wire shape for one vendor (real DB columns only). */
 function toWire(v: VendorRow): Record<string, unknown> {
   return {
     id: v.id,
     name: v.name,
+    // code/addr/bank/status are the B-071 (P2-BE-08) superset columns the
+    // master.vendor screen renders (was omitted before the columns existed).
+    code: v.code,
     tax_id: v.taxId,
     kind: v.kind,
     credit_term: v.creditTerm,
+    addr: v.addr,
+    bank: v.bank,
+    status: v.status,
+    // `spend` is deliberately NOT on the wire — the per-vendor purchase total has
+    // no AP source yet (honest gap), so it is omitted rather than fabricated as a
+    // fake 0. Flagged to WEB/QA: the party KPI "ยอดซื้อรวม" has no backing until
+    // AP lands. `type` is likewise absent — the web derives its 4-way type badge
+    // from `kind` (B-070), never stored/returned here.
   };
 }
 
@@ -105,6 +127,16 @@ function toCreditTerm(value: unknown): number | null {
 /** Normalize a client `kind`, or "" when absent/blank. */
 function pickKind(value: unknown): string {
   return str(value).trim().toLowerCase();
+}
+
+/** Normalize a client `status`, or "" when absent/blank. */
+function pickStatus(value: unknown): string {
+  return str(value).trim().toLowerCase();
+}
+
+/** Trim a client free-text field to a value, or null when absent/blank. */
+function pickText(body: Record<string, unknown>, ...keys: string[]): string | null {
+  return has(body, ...keys) ? str(pick(body, ...keys)).trim() || null : null;
 }
 
 /** Register GET/POST /vendors + GET/PUT /vendors/:id on the /api/v1 scope. */
@@ -149,6 +181,12 @@ export function registerVendorsRoute(app: FastifyInstance): void {
     const creditTerm = has(body, "credit_term", "creditTerm")
       ? toCreditTerm(pick(body, "credit_term", "creditTerm"))
       : null;
+    // B-071 superset fields: free-text display columns (null when blank/absent);
+    // status defaults to the mock's "active" (VendorForm opens on ใช้งาน).
+    const code = pickText(body, "code");
+    const addr = pickText(body, "addr");
+    const bank = pickText(body, "bank");
+    const status = pickStatus(pick(body, "status")) || "active";
 
     // Validation mirrors VendorAddForm.save (master-party.jsx:145-149): name is
     // the only required field. No code / tax_id format rule (the mock has none).
@@ -161,15 +199,27 @@ export function registerVendorsRoute(app: FastifyInstance): void {
         message: "kind must be one of supplier, subcon",
       });
     }
+    // status is a plain-text column (B-071) — enforce the active|inactive closed
+    // set here (the DB cannot). An out-of-set explicit value is rejected.
+    if (!VENDOR_STATUSES.has(status)) {
+      return reply.code(400).send({
+        code: "VALIDATION",
+        message: "status must be one of active, inactive",
+      });
+    }
 
     // company_id is force-set by the scoped insert() door — a vendor can never
     // land under another tenant, and any client company_id is ignored.
     const [created] = await db
       .insert(vendors, {
         name,
+        code,
         taxId,
         kind: kind as "supplier" | "subcon",
         creditTerm,
+        addr,
+        bank,
+        status,
       })
       .returning();
 
@@ -213,12 +263,15 @@ export function registerVendorsRoute(app: FastifyInstance): void {
     // PARTIAL merge — only keys present in the body are updated.
     const set: Record<string, unknown> = {};
     if (has(body, "name")) set.name = str(pick(body, "name")).trim();
+    if (has(body, "code")) set.code = str(pick(body, "code")).trim() || null;
     if (has(body, "tax_id", "taxId")) {
       set.taxId = str(pick(body, "tax_id", "taxId")).trim() || null;
     }
     if (has(body, "credit_term", "creditTerm")) {
       set.creditTerm = toCreditTerm(pick(body, "credit_term", "creditTerm"));
     }
+    if (has(body, "addr")) set.addr = str(pick(body, "addr")).trim() || null;
+    if (has(body, "bank")) set.bank = str(pick(body, "bank")).trim() || null;
     if (has(body, "kind")) {
       const kind = pickKind(pick(body, "kind"));
       if (!VENDOR_KINDS.has(kind)) {
@@ -228,6 +281,16 @@ export function registerVendorsRoute(app: FastifyInstance): void {
         });
       }
       set.kind = kind;
+    }
+    if (has(body, "status")) {
+      const status = pickStatus(pick(body, "status"));
+      if (!VENDOR_STATUSES.has(status)) {
+        return reply.code(400).send({
+          code: "VALIDATION",
+          message: "status must be one of active, inactive",
+        });
+      }
+      set.status = status;
     }
 
     if (Object.keys(set).length === 0) {
