@@ -29,6 +29,7 @@ import { LoginScreen } from "./screens/login/login-screen";
 import { BOQOverview } from "./screens/boq/boq-overview";
 import { BOQList } from "./screens/boq/boq-list";
 import { BOQEditor } from "./screens/boq/boq-editor";
+import { BOQApproval } from "./screens/boq/boq-approval";
 import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
 import { MasterCC } from "./screens/master/master-cc";
@@ -52,6 +53,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "boq.overview": BOQOverview,
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
+  "boq.approval": BOQApproval,
   "gr.list": GRList,
   "pr.list": PRList,
   "master.cc": MasterCC,
