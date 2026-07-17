@@ -81,10 +81,13 @@ function stubDb(opts: StubOpts): Db {
   return {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: Record<string, unknown>) => ({
+      values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
         returning: () => {
-          inserted.push({ table, values });
-          return Promise.resolve([{ id: `new-${seq++}`, createdAt: D, ...values }]);
+          inserted.push({ table, values: values as Record<string, unknown> });
+          // insertThrough passes an ARRAY of child rows; the scoped insert door
+          // passes one object. Return one synthetic row per inserted row.
+          const rows = Array.isArray(values) ? values : [values];
+          return Promise.resolve(rows.map((v) => ({ id: `new-${seq++}`, createdAt: D, ...v })));
         },
       }),
     }),
@@ -493,6 +496,27 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
     expect(write!.set.pvId).toBe(PVA);
     expect(write!.set.chequeId).toBeNull();
   });
+
+  it("409s a match on a line whose statement period is locked (reconcile close is enforced)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [bankStatementLines, [lineRow(L_HIT)]], // unmatched line
+            [bankStatements, [statementRow(STMT0, { locked: true })]], // but the period is closed
+            [pvs, [pvRow(PVA)]],
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/bank/lines/${L_HIT}/match`, payload: { pv_id: PVA } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/locked/);
+    expect(updated).toHaveLength(0); // no write — the lock held
+  });
 });
 
 // ===========================================================================
@@ -603,5 +627,239 @@ describe("POST /api/v1/bank/export-batch", () => {
     expect(body.pv_count).toBe(0);
     expect(body.pv_ids).toEqual([]);
     expect(body.content).toContain("T;0");
+  });
+});
+
+// ===========================================================================
+// POST /bank/statements/import — parse file → create + F-BANK1 auto-match (B-093)
+// ===========================================================================
+describe("POST /api/v1/bank/statements/import", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/bank/statements/import",
+      payload: { file: "2026-05-22,X,-1.00" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("parses the CSV file, creates the statement + lines, and auto-matches the single unambiguous candidate", async () => {
+    const inserted: Inserted[] = [];
+    const csv = [
+      "date,description,amount", // header row → skipped
+      "2026-05-22,FT PAYMENT,-15240.00", // → exact-amount + in-window match on CHQ_HIT
+      "2026-05-01,MISC FEE,-999.00", // → no candidate → unmatched
+    ].join("\n");
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            // insertThrough re-reads the (just-created) parent statement to prove
+            // ownership — the stub ignores the WHERE, so a canned row stands in.
+            [bankStatements, [statementRow(STMT0)]],
+            [cheques, [chequeRow(CHQ_HIT, { no: "CH-040130", amount: "15240.00", dueDate: "2026-05-20" })]],
+            [pvs, []],
+            [rvs, []],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/bank/statements/import",
+      payload: { period: "2569-05", file: csv },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.line_count).toBe(2);
+    expect(body.matched_count).toBe(1); // only the unambiguous FT PAYMENT row
+    expect(body.period).toBe("2569-05");
+    expect(body.statement_id).toBeTruthy();
+
+    // Statement created through the scoped insert door → company_id force-set.
+    const stmtWrite = inserted.find((i) => i.table === bankStatements);
+    expect(stmtWrite).toBeTruthy();
+    expect((stmtWrite!.values as Record<string, unknown>).companyId).toBe(COMPANY);
+    expect((stmtWrite!.values as Record<string, unknown>).locked).toBe(false);
+
+    // Lines created via insertThrough — the matched one carries the cheque FK,
+    // the other stays unmatched (the import never fabricates a match).
+    const lineWrite = inserted.find((i) => i.table === bankStatementLines);
+    expect(lineWrite).toBeTruthy();
+    const lineRows = lineWrite!.values as unknown as Array<Record<string, unknown>>;
+    expect(lineRows).toHaveLength(2);
+    const matched = lineRows.find((r) => r.matched === true)!;
+    expect(matched.chequeId).toBe(CHQ_HIT);
+    expect(matched.pvId).toBeNull();
+    expect(matched.amount).toBe("-15240.00"); // SIGNED preserved
+    const unmatched = lineRows.find((r) => r.matched === false)!;
+    expect(unmatched.chequeId).toBeNull();
+    expect(unmatched.pvId).toBeNull();
+  });
+
+  it("accepts a structured lines[] array (already-parsed alternative form)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [bankStatements, [statementRow(STMT0)]],
+            [cheques, []],
+            [pvs, []],
+            [rvs, []],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/bank/statements/import",
+      payload: {
+        lines: [
+          { date: "2026-05-22", description: "DEPOSIT", amount: 50000 },
+          { date: "2026-05-23", description: "FEE", amount: -120.5 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.line_count).toBe(2);
+    expect(body.matched_count).toBe(0); // no candidate docs → nothing pre-matched
+    const lineWrite = inserted.find((i) => i.table === bankStatementLines);
+    const lineRows = lineWrite!.values as unknown as Array<Record<string, unknown>>;
+    expect(lineRows.map((r) => r.amount).sort()).toEqual(["-120.50", "50000.00"]);
+  });
+
+  it("400s a malformed file (amount column is not a number)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/bank/statements/import",
+      payload: { file: "2026-05-22,bad row,notanumber" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toMatch(/not a number/);
+  });
+
+  it("400s an empty statement (header only → no lines)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/bank/statements/import",
+      payload: { file: "date,description,amount" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/empty/);
+  });
+
+  it("400s when no file and no lines[] are provided", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/bank/statements/import", payload: {} });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/no statement file/);
+  });
+});
+
+// ===========================================================================
+// POST /bank/reconcile — lock/close a period (B-093)
+// ===========================================================================
+describe("POST /api/v1/bank/reconcile", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/bank/reconcile",
+      payload: { period: "2569-05" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("400s when no period is given", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: {} });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/period is required/);
+  });
+
+  it("404s when the period has no statement", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[bankStatements, []]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: { period: "2569-99" } });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("locks the period, returns honest matched_pct, and binds company_id (tenant scope)", async () => {
+    const captured: Captured[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [bankStatements, [statementRow(STMT0, { period: "2569-05", locked: false })]],
+            [
+              bankStatementLines,
+              [
+                lineRow(L_MATCHED, { matched: true, chequeId: CHQ0 }),
+                lineRow(L_HIT, { matched: false }),
+              ],
+            ],
+          ],
+          captured,
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: { period: "2569-05" } });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.locked).toBe(true);
+    expect(body.statement_count).toBe(1);
+    expect(body.line_count).toBe(2);
+    expect(body.matched_count).toBe(1);
+    expect(body.matched_pct).toBe(50);
+
+    // The lock write sets locked=true, scoped to this tenant.
+    const write = updated.find((u) => u.table === bankStatements);
+    expect(write).toBeTruthy();
+    expect(write!.set.locked).toBe(true);
+    // The period read is company-scoped.
+    const read = captured.find((c) => c.table === bankStatements);
+    expect(paramsOf(read!.where)).toContain(COMPANY);
+  });
+
+  it("409s a period that is already reconciled (all statements locked)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[bankStatements, [statementRow(STMT0, { period: "2569-05", locked: true })]]],
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: { period: "2569-05" } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
   });
 });
