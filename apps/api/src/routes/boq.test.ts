@@ -271,6 +271,14 @@ const userRow = {
   status: "active",
 };
 
+// B-084 (matrix GAP-2): generate-PR mints PRs + consumes budget, so it now
+// requires the caller's role to carry pr.create. This role (id role-0, matched
+// by userRow.roleId) grants it; roleRow(level).perms is {} (no pr.create).
+const prCreatorRole = {
+  ...roleRow(0),
+  perms: { pr: { view: true, create: true, edit: false, approve: false, cancel: false } },
+};
+
 // ---------------------------------------------------------------------------
 // GET /boq — list envelope + derived total + tenant scope
 // ---------------------------------------------------------------------------
@@ -815,6 +823,8 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
             [boqItems, [IM, IS]],
             [projects, [project]],
             [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
           ],
           inserted,
           updated,
@@ -873,7 +883,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[boqDocs, [D0]], [boqItems, [IM]], [projects, [project]], [prs, []]],
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [projects, [project]],
+            [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
           updateBase: IM,
         }),
       })
@@ -893,7 +910,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[boqDocs, [D0]], [boqItems, [IM]], [projects, [project]], [prs, []]],
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [projects, [project]],
+            [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
           updateBase: IM,
         }),
       })
@@ -910,7 +934,13 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "draft")]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [doc("d0", "N", "draft")]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({
       method: "POST",
@@ -925,7 +955,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]], [boqItems, [IM]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({
       method: "POST",
@@ -940,7 +977,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]], [boqItems, [IM]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({
       method: "POST",
@@ -954,7 +998,13 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/boq/d0/generate-pr", payload: { item_ids: [] } });
     expect(res.statusCode).toBe(400);
@@ -985,5 +1035,29 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
       payload: { item_ids: ["im"] },
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  it("403s a caller whose role lacks pr.create (B-084: no unauthorized spend initiation)", async () => {
+    // A zero-perms role (roleRow(4).perms is {}) — even an MD-tier approver — may
+    // not mint PRs unless it carries the pr.create right.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]], // approvalLevel 4 but perms {} → no pr.create
+          ],
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"], qty: { im: 1 } },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
   });
 });
