@@ -62,3 +62,5 @@
 > **batch-8 PROMOTED → main 041013a (2026-07-17 · Wave-2 finance + B-095 · 0-drift)** — rows above ที่เป็น Wave-2/B-095 = promoted · P2-BE-20 (B-093 bank import/reconcile) = batch-9 (next).
 
 > **batch-9 authz skeptic = 6/6 SOUND (2026-07-17 · adversarial · 0 bypass · fail-closed/tenant-scope/session-trusted · runs-before-write)** — B-094 3/3 + B-084 reject/reconcile/import gated · promote-ready (pending orch-B live-verify migrate 0028/0029 + live-G5/E2E). residuals→B-096 (non-block).
+
+> **batch-11 merged → dev e2130fe (2026-07-17)** — P2-BE-25 (B-097 TenantDb transaction door · atomic multi-write bank-import/boq-generate-PR/gl-jv · **scope-safe**: tx rebuilds TenantDb with same company_id) + P2-BE-26 (B-098 atomic generate-PR) + orch-B audits (authz/perf re-audit) + finance-E2E (E2E_LIVE-gated) · **gate-4.5 PASS** (0 sacred · scope-invariant tested · api 561/561 · Wei GO) · pending Wei main-promote (+ optional orch-B live BEGIN/COMMIT rollback proof via finance-e2e-live.sh)

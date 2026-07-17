@@ -595,3 +595,45 @@ describe("delete is always company_id-scoped", () => {
     expect(sql).toContain(" and ");
   });
 });
+
+describe("transaction door (B-097) — same-tenant scope, all-or-nothing", () => {
+  // A non-connecting executor whose transaction() hands the real (never-queried)
+  // drizzle handle straight to the callback — no BEGIN/COMMIT — so we can
+  // .toSQL()-inspect the tenant scope of the wrapper the door builds for the
+  // callback. Real rollback (BEGIN/COMMIT on a throw) is drizzle's contract and
+  // is exercised by the live-PG finance E2E, not by serialization-only units.
+  const passthrough = {
+    transaction: (cb: (tx: unknown) => unknown) => cb(db),
+  } as unknown as Db;
+  const tdbTx = new TenantDb(passthrough, COMPANY);
+
+  it("hands the callback a TenantDb bound to the SAME tenant (scope cannot widen)", async () => {
+    let seen: string | undefined;
+    await tdbTx.transaction(async (tx) => {
+      seen = tx.companyId;
+    });
+    expect(seen).toBe(COMPANY);
+    expect(seen).not.toBe(OTHER);
+  });
+
+  it("every door inside the transaction still injects company_id", async () => {
+    await tdbTx.transaction(async (tx) => {
+      const { sql, params } = tx.select(users).toSQL();
+      expect(sql).toContain('"company_id" = $1');
+      expect(params).toContain(COMPANY);
+    });
+  });
+
+  it("propagates the callback's return value", async () => {
+    const out = await tdbTx.transaction(async () => ({ ok: 7 }));
+    expect(out).toEqual({ ok: 7 });
+  });
+
+  it("rejects (→ rollback) when the callback throws", async () => {
+    await expect(
+      tdbTx.transaction(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+  });
+});

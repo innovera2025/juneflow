@@ -326,3 +326,16 @@ Verified during the batch-9 candidate pass (P2-BE-20 bank import/reconcile). Two
 
 - **Not a security-critical bypass:** tenant-scope stays fail-closed (`insertThrough`/`selectThrough`, foreign statement absent), no cross-tenant leak, no payment-approval bypass (unlike the original B-084 F1 self-escalation).
 - **Recommendation:** add `reconcile` (and optionally `import`) to the B-084 per-mutation authz fix — `reconcile` (period close) is the higher-priority one; a low-privilege user locking an accounting period is an integrity concern. Fold into whichever option Wei picks for the B-084 remaining-mutation gate.
+
+
+---
+
+## Update 2026-07-17 (2) — full authz re-audit of main 2051e40 (53 mutations · workflow)
+
+Adversarial re-audit (3 domain finders + refute pass) of EVERY mutation on main 2051e40. 51/53 clean (tenant-scope fail-closed by construction · audit-logged global · known gates confirmed). **2 confirmed gaps · 1 refuted** — see `authz-reaudit-2051e40.md`.
+
+| # | mutation | class | sev | fix |
+|---|---|---|---|---|
+| G1 | `POST /boq/:id/revise` (boq.ts:892) | approve/revise asymmetry — approve LOCK gated MD(≥4), revise UN-locks with 0 authz → tamper approved budget | med | mirror approve ladder (callerApprovalLevel ≥ BOQ_APPROVAL_MIN_LEVEL → 403) · flows.html "MD approves EVERY revise" |
+| G2 | `POST /bank/lines/:id/match` (bank.ts:1034) | reconciliation confirm ungated — siblings import/reconcile gated, match not | med | mirror import gate (loadCaller + permAllowed finance create → 403) |
+| — | `POST /bank/export-batch` | REFUTED — no incremental disclosure (GET-readable) · no money-move (file for approved+transfer PV) | — | none (low-pri defense-in-depth only) |

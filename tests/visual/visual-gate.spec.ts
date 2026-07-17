@@ -308,6 +308,11 @@ interface ManifestEntry {
   // Shell-bearing screens list "sidebar-logo-b044"; screens without the
   // sidebar lockup (e.g. login, P1-WEB-01) must omit this field.
   masks?: string[];
+  // Capture viewport = the reference's own pixel size (P0-QA-04 fold): g1/g2 refs
+  // are 1600x1000, g5 refs are 924x540. Omit → defaults to 1600x1000. A mismatch
+  // between capture and reference dimensions auto-FAILs (PLAN.md §0), so the run
+  // must shoot at the reference size.
+  viewport?: { width: number; height: number };
 }
 
 function loadManifest(): ManifestEntry[] {
@@ -351,8 +356,13 @@ test.describe("visual gate · capture mode (real screens vs reference)", () => {
         !(await appReachable(baseURL)),
         `app not reachable at ${baseURL} — start it (docker compose / pnpm dev) to run capture mode.`
       );
+      // Shoot at the reference's dimensions (fold P0-QA-04) so the capture never
+      // auto-FAILs on a dimension mismatch. fullPage:false clips to the viewport,
+      // which equals the fixed-size reference (the Fiori shell is 100vh — the
+      // content pane scrolls internally, not the page).
+      await page.setViewportSize(entry.viewport ?? { width: 1600, height: 1000 });
       await page.goto(`${baseURL}/#/${entry.route}`);
-      const shot = await page.screenshot({ fullPage: true });
+      const shot = await page.screenshot({ fullPage: false });
       const candidate =
         "data:image/png;base64," + shot.toString("base64");
       const refPath = join(REF_DIR, entry.ref);

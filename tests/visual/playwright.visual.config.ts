@@ -30,5 +30,10 @@ export default defineConfig({
   globalTeardown: "./lib/teardown.ts",
   use: {
     baseURL: process.env.VISUAL_BASE_URL ?? "http://localhost:5173",
+    // Auth for capture mode (P0-QA-04 fold): a run points VISUAL_STORAGE_STATE at a
+    // Playwright storageState file (localStorage bearer token — apps/web/src/auth-token.ts
+    // key `juneflow-token`) so /#/<route> renders the authed shell, not the login screen.
+    // Unset (self-check / no-app) → undefined = no state, unchanged behaviour.
+    storageState: process.env.VISUAL_STORAGE_STATE || undefined,
   },
 });

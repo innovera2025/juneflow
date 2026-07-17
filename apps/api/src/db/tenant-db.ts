@@ -67,6 +67,23 @@ type TenantInsert<T extends TenantTable> = Omit<T["$inferInsert"], "companyId">;
 /** Update payload for a tenant table; company_id can never be reassigned. */
 type TenantUpdate<T extends TenantTable> = Partial<Omit<T["$inferInsert"], "companyId">>;
 
+/**
+ * The executor backing a TenantDb: either the root pool handle (`Db`) or an OPEN
+ * transaction handle. Both expose the identical query-builder + nested
+ * `.transaction()` surface — they share drizzle's `PgDatabase` base — so every
+ * door compiles and runs against either. The tx handle is DERIVED from `Db`
+ * itself via `infer`, so we depend on drizzle's own inference rather than its
+ * un-exported `ExtractTablesWithRelations` generic. `transaction()` rebuilds a
+ * scoped wrapper over the tx handle, keeping the company_id scope inside a
+ * transaction (B-097, security-core: a transaction can never widen tenant scope).
+ */
+type TxHandle<D> = D extends {
+  transaction(fn: (tx: infer TX) => Promise<unknown>): Promise<unknown>;
+}
+  ? TX
+  : never;
+type Executor = Db | TxHandle<Db>;
+
 export class TenantScopeError extends Error {
   constructor(
     message = "TENANT_SCOPE_MISSING: a valid company_id is required for every query",
@@ -78,13 +95,33 @@ export class TenantScopeError extends Error {
 
 export class TenantDb {
   readonly companyId: string;
-  readonly #db: Db;
+  readonly #db: Executor;
 
-  constructor(db: Db, companyId: string) {
+  constructor(db: Executor, companyId: string) {
     // Fail closed: without a tenant we must never hand out a DB handle.
     if (!companyId) throw new TenantScopeError();
     this.#db = db;
     this.companyId = companyId;
+  }
+
+  /**
+   * Run `fn` inside a SINGLE DB transaction, scoped to THIS tenant. The wrapper
+   * handed to `fn` re-applies the same company_id predicate on every door, so
+   * multi-write handlers commit all-or-nothing: bank import (statement + lines),
+   * gl.jv (header + lines), boq approve (doc + version-history). Throwing from
+   * `fn` — an FK violation, a unique-index conflict (migration-0028 reverse
+   * uniqueness), or an explicit guard — ROLLS BACK every write in the block, so
+   * a failed multi-write never leaves an orphaned parent or a partial post.
+   *
+   * Security-core (B-097): the tx-scoped wrapper is constructed with the
+   * IDENTICAL companyId (`this.companyId`), so a transaction inherits — and can
+   * never widen — the caller's tenant scope. Every door on the inner wrapper
+   * still AND-s the tenant predicate. Reads used only to DECIDE writes should
+   * stay OUTSIDE the block; put the writes (and any read whose result must be
+   * consistent with them) inside.
+   */
+  async transaction<R>(fn: (tx: TenantDb) => Promise<R>): Promise<R> {
+    return this.#db.transaction((tx) => fn(new TenantDb(tx, this.companyId)));
   }
 
   /** company_id predicate AND-ed with an optional caller-supplied predicate. */
