@@ -447,6 +447,54 @@ export function registerPoRoute(app: FastifyInstance): void {
         .send({ code: "VALIDATION", message: "amount must be a number >= 0" });
     }
 
+    // B-084 hardening — this endpoint was the CRITICAL FLOW-A authz gap: it
+    // rewrites the PO's stored `total`, and that stored total is exactly what the
+    // /approve gate reads to decide which tier must sign off (po.ts:350). Left
+    // ungated, a low-tier caller could cut a PO below its tier, get it approved
+    // cheaply, then add the amount back after approval — turning the working
+    // approve-ladder into a full in-tenant financial-authorization bypass
+    // (matrix GAP-1 exploit-B). Three defenses (matrix Option C):
+    //
+    //  (1) status guard — only a draft or an approved PO may be amended; a
+    //      pending doc is mid-approval and a rejected/closed one is terminal
+    //      (mirrors how submit/approve/reject 409 on the wrong state).
+    //  (2) non-negative floor — a `cut` may not drive the stored total below 0
+    //      (a negative total would otherwise resolve to the lowest tier).
+    //  (3) approval-authority gate — the caller must hold approval authority for
+    //      the HIGHER of the current total and the resulting total, computed with
+    //      the SAME B-070 thresholds /approve uses (requiredApprovalLevel). This
+    //      makes amending a PO cost at least as much authority as approving it at
+    //      either amount, so the cut-then-add tier-downgrade is denied at the
+    //      FIRST step. Fail-closed: an unattributable caller (no session / no
+    //      dictionary user / no role) resolves to null and is denied.
+    if (po.status !== "draft" && po.status !== "approved") {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a draft or approved PO can be amended",
+      });
+    }
+
+    const currentTotal = Number(po.total);
+    const newTotal = dir === "add" ? currentTotal + amount : currentTotal - amount;
+    if (newTotal < 0) {
+      return reply.code(400).send({
+        code: "VALIDATION",
+        message: "a cut cannot drive the PO total below 0",
+      });
+    }
+
+    const needed = Math.max(
+      requiredApprovalLevel(currentTotal),
+      requiredApprovalLevel(newTotal),
+    );
+    const level = await callerApprovalLevel(request);
+    if (level == null || level < needed) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `amending this PO requires approval level ${needed}`,
+      });
+    }
+
     // Resolve the source PR's project to anchor the scoped VO insert. po.prId is
     // guaranteed non-null (the PO_HOPS INNER JOIN filters null-anchored rows).
     const [pr] = await db.selectThrough(prs, PR_HOPS, eq(prs.id, po.prId!));
@@ -466,8 +514,6 @@ export function registerPoRoute(app: FastifyInstance): void {
       },
     ]);
 
-    const newTotal =
-      dir === "add" ? Number(po.total) + amount : Number(po.total) - amount;
     const [updated] = await db.updateThroughChain(
       pos,
       PO_HOPS,

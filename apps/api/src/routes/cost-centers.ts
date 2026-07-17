@@ -48,6 +48,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { costCenters, projects } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
 
 type CostCenterRow = typeof costCenters.$inferSelect;
 
@@ -124,6 +125,21 @@ export function registerCostCentersRoute(app: FastifyInstance): void {
       return reply.code(401).send({
         code: "UNAUTHENTICATED",
         message: "Missing tenant context",
+      });
+    }
+
+    // B-084 (matrix GAP-8): a cost center sets a `budget` figure and is
+    // `master`-module master-data, yet the B-082 F1 fix gated only /users and
+    // /roles with master.create — leaving /cost-centers open to any tenant
+    // member. For F1 consistency, creating a cost center is master-data
+    // administration too, so gate it on the same master.create right (reusing
+    // loadCaller/permAllowed — no new policy). Fail-closed: an unattributable
+    // caller has no perms and is denied.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, MANAGEMENT_MODULE, "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `requires ${MANAGEMENT_MODULE}.create permission`,
       });
     }
 

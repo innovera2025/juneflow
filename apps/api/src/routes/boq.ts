@@ -59,6 +59,7 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
 import { round2 } from "./money.js";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
+import { loadCaller, permAllowed } from "./authz.js";
 
 type BoqDocRow = typeof boqDocs.$inferSelect;
 type BoqItemRow = typeof boqItems.$inferSelect;
@@ -619,6 +620,24 @@ export function registerBoqRoute(app: FastifyInstance): void {
     if (!doc) {
       return reply.code(404).send({ code: "NOT_FOUND", message: `BOQ ${id} not found` });
     }
+
+    // B-084 (matrix GAP-2): generate-PR mints real draft PR / PR-Subcon docs and
+    // IRREVERSIBLY decrements each item's remain_qty — a financial-commitment
+    // initiation + a budget-consumption vector. It was gated by doc status only,
+    // so any tenant member (even a zero-perms role) could initiate spend and burn
+    // down the remaining budget. Since it creates PRs, gate it on the `pr.create`
+    // right of the tenant's 11×5 perms matrix — reusing the exact F1 mechanism
+    // (loadCaller/permAllowed), inventing no new policy. Fail-closed: an
+    // unattributable caller (no session / no dictionary user / no role) has no
+    // perms and is denied.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, "pr", "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "generating PRs requires pr.create permission",
+      });
+    }
+
     // Only an APPROVED (locked) BOQ can be PR'd — you buy against the approved
     // budget, never a draft/pending/revise doc (flows.html FLOW-A).
     if (doc.status !== "approved") {

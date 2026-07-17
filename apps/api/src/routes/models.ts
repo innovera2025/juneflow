@@ -37,6 +37,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { models, projectNodes, projects, boms } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
 
 /** Model card accent palette — server rotates it at create time (master.jsx:449). */
 const MODEL_COLORS = [
@@ -136,6 +137,20 @@ export function registerModelsRoute(app: FastifyInstance): void {
       return reply.code(401).send({
         code: "UNAUTHENTICATED",
         message: "Missing tenant context",
+      });
+    }
+
+    // B-084 (matrix GAP-8): a house model is `master`-module master-data (it
+    // carries a starting `price`), yet the B-082 F1 fix gated only /users and
+    // /roles with master.create — leaving /models open to any tenant member. For
+    // F1 consistency, creating a model is master-data administration too, so gate
+    // it on the same master.create right (reusing loadCaller/permAllowed — no new
+    // policy). Fail-closed: an unattributable caller has no perms and is denied.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, MANAGEMENT_MODULE, "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `requires ${MANAGEMENT_MODULE}.create permission`,
       });
     }
 

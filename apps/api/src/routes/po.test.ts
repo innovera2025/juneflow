@@ -685,7 +685,15 @@ describe("POST /api/v1/po/:id/variation-order", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[pos, [P0]], [prs, [prRow("approved")]], [projects, [project]]],
+          // B-084: amending needs approval authority for the current (1000) and
+          // resulting (1500) totals — both tier 2 (หน.จัดซื้อ), so level 2 clears.
+          rows: [
+            [pos, [P0]],
+            [prs, [prRow("approved")]],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(2)]],
+          ],
           inserted,
           updated,
           updateBase: P0,
@@ -714,7 +722,13 @@ describe("POST /api/v1/po/:id/variation-order", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[pos, [P0]], [prs, [prRow("approved")]], [projects, [project]]],
+          rows: [
+            [pos, [P0]],
+            [prs, [prRow("approved")]],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(2)]],
+          ],
           updateBase: P0,
         }),
       })
@@ -764,6 +778,149 @@ describe("POST /api/v1/po/:id/variation-order", () => {
       payload: { dir: "add", amount: 1 },
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-084 (matrix GAP-1) — variation-order approval-authority gate. The stored
+// total is what /approve reads to pick the tier, so amending a PO must cost at
+// least as much authority as approving it at both the old and new amount. This
+// closes exploit-B: cut a PO below its tier → get it approved cheaply → add the
+// amount back after approval (a full in-tenant financial-authz bypass).
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/po/:id/variation-order — B-084 authority gate", () => {
+  // The scoped rows for an amend attempt: the PO under amendment + the source PR
+  // + project anchor + the caller's user/role at the given tier.
+  const amendRows = (P0: ReturnType<typeof po>, level: number) =>
+    ({
+      rows: [
+        [pos, [P0]],
+        [prs, [prRow("approved")]],
+        [projects, [project]],
+        [users, [userRow]],
+        [roles, [roleRow(level)]],
+      ] as Array<[unknown, unknown[]]>,
+    });
+
+  it("EXPLOIT closed (cut step): a level-2 caller CANNOT cut a >5M PO to downgrade its tier", async () => {
+    // A 6,000,000 PO demands MD (level 4). The exploit begins by cutting it below
+    // the 1M tier so a level-2 head can approve it — but the cut itself now needs
+    // authority for the CURRENT 6M total (MD), so the tier-2 caller is denied.
+    const P0 = po("p0", "PO-EXPLOIT", "approved", 6_000_000);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(amendRows(P0, 2)),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "cut", amount: 5_600_000 }, // → 400,000 (below tier)
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+  });
+
+  it("EXPLOIT closed (add-back step): a level-2 caller CANNOT add a PO back up past their tier after approval", async () => {
+    // The second half of the exploit: a 400,000 PO (approved cheaply) is inflated
+    // back to 6,000,000. The RESULTING total demands MD, so the tier-2 caller is
+    // denied — the add-back never lands.
+    const P0 = po("p0", "PO-EXPLOIT", "approved", 400_000);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(amendRows(P0, 2)),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "add", amount: 5_600_000 }, // → 6,000,000 (MD tier)
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+  });
+
+  it("an authorized MD (level 4) CAN still variation-order a high-value PO", async () => {
+    const P0 = po("p0", "PO-MD", "approved", 6_000_000);
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ ...amendRows(P0, 4), updated, updateBase: P0 }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "add", amount: 1_000_000 }, // → 7,000,000
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().po.total).toBe(7_000_000);
+    expect(updated[0]!.set.total).toBe("7000000");
+  });
+
+  it("403s an unattributable caller (fail-closed: no role resolved)", async () => {
+    const P0 = po("p0", "N", "approved", 1000);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [P0]], [users, []], [roles, []]] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "add", amount: 1 },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+  });
+
+  it("409s when the PO is pending (mid-approval) — only draft/approved may be amended", async () => {
+    const P0 = po("p0", "N", "pending", 1000);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(amendRows(P0, 4)),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "add", amount: 1 },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  it("409s when the PO is rejected (terminal) — cannot amend a dead doc", async () => {
+    const P0 = po("p0", "N", "rejected", 1000);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(amendRows(P0, 4)),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "add", amount: 1 },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  it("400s a cut that would drive the stored total below 0 (non-negative floor)", async () => {
+    const P0 = po("p0", "N", "approved", 1000);
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(amendRows(P0, 4)),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/po/p0/variation-order",
+      payload: { dir: "cut", amount: 1500 }, // 1000 − 1500 = −500
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
   });
 });
 
