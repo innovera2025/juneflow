@@ -703,84 +703,94 @@ export function registerBoqRoute(app: FastifyInstance): void {
     const existingNos = (await db.selectThrough(prs, PR_HOPS)).map((p) => p.no);
     const year = new Date().getUTCFullYear();
 
-    const createdPrs: Record<string, unknown>[] = [];
-    for (const bucket of buckets) {
-      const no = nextPrNo(existingNos, bucket.def.prefix, year);
-      existingNos.push(no); // reserve so a 2nd bucket this call cannot reuse it
-
-      const [pr] = await db.insertThrough(prs, projects, doc.projectId, [
-        {
-          projectId: doc.projectId,
-          no,
-          type: bucket.def.type,
-          needDate: null,
-          status: "draft",
-          approvalStep: 0,
-        },
-      ]);
-      const createdLines = await db.insertThrough(
-        prItems,
-        projects,
-        doc.projectId,
-        bucket.lines.map((l) => ({
-          prId: pr!.id,
-          boqItemId: l.item.id,
-          qty: String(l.qty),
-        })),
-      );
-      const lineById = new Map(createdLines.map((ln) => [ln.boqItemId, ln]));
-
-      // amount = Σ qty × the referenced BOQ item's real unit price (C10).
-      let amount = 0;
-      let currency = "THB";
-      let currencySet = false;
-      const wireLines = bucket.lines.map((l) => {
-        const price = Number(l.item.price);
-        amount += l.qty * price;
-        if (!currencySet) {
-          currency = l.item.currencyCode;
-          currencySet = true;
-        }
-        return {
-          id: lineById.get(l.item.id)?.id ?? null,
-          pr_id: pr!.id,
-          boq_item_id: l.item.id,
-          qty: l.qty,
-          price,
-          amount: l.qty * price,
-        };
-      });
-
-      createdPrs.push({
-        id: pr!.id,
-        no: pr!.no,
-        type: pr!.type,
-        project_id: pr!.projectId,
-        boq_id: id,
-        status: pr!.status,
-        approval_step: pr!.approvalStep,
-        currency_code: currency,
-        amount,
-        items: wireLines,
-      });
-    }
-
-    // Cut-remain: decrement each PR'd item's remain_qty by the generated qty.
-    // boq_item has no direct tenant FK, so the scoped-write door resolves the
-    // items THROUGH their ancestry to the company_id root before updating them.
-    // Perf (0024 audit): a SINGLE bulk CASE update keyed by item id — not one
-    // ownership-resolve + update per row — so N cut lines cost 2 queries, not
-    // 2·N. `lines` holds distinct item ids (item_ids[] was de-duped above), so
-    // the id→new-remain map has no key collisions.
+    // Cut-remain map (pure — decided from the read `lines`): the new remain_qty
+    // per PR'd item. `lines` holds distinct item ids (item_ids[] was de-duped
+    // above), so the id→new-remain map has no key collisions.
     const remainByItem = new Map(
       lines.map((l) => [l.item.id, String(Number(l.item.remainQty) - l.qty)]),
     );
-    await db.updateThroughChainMany(
-      boqItems,
-      ITEM_HOPS,
-      boqItems.remainQty,
-      remainByItem,
-    );
+
+    // B-098: the PRs (headers + lines) AND the remain_qty cut are ONE issuance —
+    // wrap them in a single transaction (the B-097 door) so a failed remain-cut
+    // can never leave issued PRs against un-decremented remain_qty (double-issue:
+    // the same BOQ qty could be requisitioned twice). The reads that DECIDE the
+    // writes (existingNos, buckets, remainByItem) stay outside; the tx wrapper
+    // carries the same company_id, so every write inside is still tenant-scoped.
+    const createdPrs = await db.transaction(async (tx) => {
+      const createdPrs: Record<string, unknown>[] = [];
+      for (const bucket of buckets) {
+        const no = nextPrNo(existingNos, bucket.def.prefix, year);
+        existingNos.push(no); // reserve so a 2nd bucket this call cannot reuse it
+
+        const [pr] = await tx.insertThrough(prs, projects, doc.projectId, [
+          {
+            projectId: doc.projectId,
+            no,
+            type: bucket.def.type,
+            needDate: null,
+            status: "draft",
+            approvalStep: 0,
+          },
+        ]);
+        const createdLines = await tx.insertThrough(
+          prItems,
+          projects,
+          doc.projectId,
+          bucket.lines.map((l) => ({
+            prId: pr!.id,
+            boqItemId: l.item.id,
+            qty: String(l.qty),
+          })),
+        );
+        const lineById = new Map(createdLines.map((ln) => [ln.boqItemId, ln]));
+
+        // amount = Σ qty × the referenced BOQ item's real unit price (C10).
+        let amount = 0;
+        let currency = "THB";
+        let currencySet = false;
+        const wireLines = bucket.lines.map((l) => {
+          const price = Number(l.item.price);
+          amount += l.qty * price;
+          if (!currencySet) {
+            currency = l.item.currencyCode;
+            currencySet = true;
+          }
+          return {
+            id: lineById.get(l.item.id)?.id ?? null,
+            pr_id: pr!.id,
+            boq_item_id: l.item.id,
+            qty: l.qty,
+            price,
+            amount: l.qty * price,
+          };
+        });
+
+        createdPrs.push({
+          id: pr!.id,
+          no: pr!.no,
+          type: pr!.type,
+          project_id: pr!.projectId,
+          boq_id: id,
+          status: pr!.status,
+          approval_step: pr!.approvalStep,
+          currency_code: currency,
+          amount,
+          items: wireLines,
+        });
+      }
+
+      // Cut-remain atomically with the PR writes. boq_item has no direct tenant
+      // FK, so the scoped-write door resolves the items THROUGH their ancestry to
+      // the company_id root before updating. Perf (0024 audit): a SINGLE bulk
+      // CASE update keyed by item id — N cut lines cost 2 queries, not 2·N.
+      await tx.updateThroughChainMany(
+        boqItems,
+        ITEM_HOPS,
+        boqItems.remainQty,
+        remainByItem,
+      );
+      return createdPrs;
+    });
 
     return reply.code(201).send({ prs: createdPrs });
   });
@@ -857,30 +867,35 @@ export function registerBoqRoute(app: FastifyInstance): void {
       : null;
     const approvedAt = new Date();
 
-    const [updated] = await db.updateThrough(
-      boqDocs,
-      projects,
-      boqDocs.projectId,
-      doc.projectId,
-      // Stamp the archive approver + timestamp so the archive screen reads real
-      // rows (audit_log cannot source these — its entity is a route template).
-      { status: "approved", approvedBy: approver?.id ?? null, approvedAt },
-      eq(boqDocs.id, id),
-    );
-
-    // Append a version-history row (action=approve) so the archive's Revise
-    // history + the approval version-diff render from a real log entry.
-    await db.insertThrough(boqVersionHistory, projects, doc.projectId, [
-      {
-        docId: id,
-        version: doc.version,
-        action: "approve",
-        by: approver?.id ?? null,
-        at: approvedAt,
-        delta: null,
-        note: null,
-      },
-    ]);
+    // B-097: the status flip + its version-history row are ONE approval — write
+    // them in a single transaction so an approved (locked) BOQ can never exist
+    // without its archive log entry (the archive's Revise-history + version-diff
+    // render from that row; a partial write would show an approval with no
+    // history). The tx wrapper carries the same company_id.
+    const updated = await db.transaction(async (tx) => {
+      const [updated] = await tx.updateThrough(
+        boqDocs,
+        projects,
+        boqDocs.projectId,
+        doc.projectId,
+        // Stamp the archive approver + timestamp so the archive screen reads real
+        // rows (audit_log cannot source these — its entity is a route template).
+        { status: "approved", approvedBy: approver?.id ?? null, approvedAt },
+        eq(boqDocs.id, id),
+      );
+      await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
+        {
+          docId: id,
+          version: doc.version,
+          action: "approve",
+          by: approver?.id ?? null,
+          at: approvedAt,
+          delta: null,
+          note: null,
+        },
+      ]);
+      return updated;
+    });
 
     return reply
       .code(200)
@@ -917,30 +932,33 @@ export function registerBoqRoute(app: FastifyInstance): void {
     const revisedAt = new Date();
     const newVersion = doc.version + 1;
 
-    const [updated] = await db.updateThrough(
-      boqDocs,
-      projects,
-      boqDocs.projectId,
-      doc.projectId,
-      { status: "revise", version: newVersion },
-      eq(boqDocs.id, id),
-    );
-
-    // Append a version-history row (action=revise) for the NEW version so the
-    // archive's Revise-history timeline shows revise events, not just approvals
-    // (B-085 fix 1; previously only /approve logged a row). version = the freshly
-    // bumped version so it never collides with this doc's approve-history keys.
-    await db.insertThrough(boqVersionHistory, projects, doc.projectId, [
-      {
-        docId: id,
-        version: newVersion,
-        action: "revise",
-        by: reviser?.id ?? null,
-        at: revisedAt,
-        delta: null,
-        note: null,
-      },
-    ]);
+    // B-097: version bump + its version-history row are ONE revise — write them
+    // atomically so the archive timeline can never show a revised doc whose new
+    // version has no matching history entry (mirrors /approve).
+    const updated = await db.transaction(async (tx) => {
+      const [updated] = await tx.updateThrough(
+        boqDocs,
+        projects,
+        boqDocs.projectId,
+        doc.projectId,
+        { status: "revise", version: newVersion },
+        eq(boqDocs.id, id),
+      );
+      // version = the freshly bumped version so it never collides with this
+      // doc's approve-history keys (B-085 fix 1; previously only /approve logged).
+      await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
+        {
+          docId: id,
+          version: newVersion,
+          action: "revise",
+          by: reviser?.id ?? null,
+          at: revisedAt,
+          delta: null,
+          note: null,
+        },
+      ]);
+      return updated;
+    });
 
     return reply.code(200).send(await docWireWithTotal(db, updated!));
   });

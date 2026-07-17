@@ -317,19 +317,7 @@ async function createJv(
     }
   }
 
-  // Write: jv first (scoped insert → company_id force-set), then its lines
-  // through insertThrough (re-verifies this tenant owns the parent jv).
   const jvId = randomUUID();
-  const [createdJv] = (await db
-    .insert(jvs, {
-      id: jvId,
-      no: parsed.no,
-      sourceDoc: parsed.sourceDoc,
-      periodId: parsed.periodId,
-      memo: parsed.memo,
-    })
-    .returning()) as JvRow[];
-
   const lineRows: (typeof jvLines.$inferInsert)[] = parsed.lines.map((l) => ({
     jvId,
     accountId: l.accountId,
@@ -339,7 +327,25 @@ async function createJv(
     ccId: l.ccId,
     projectId: l.projectId,
   }));
-  const createdLines = await db.insertThrough(jvLines, jvs, jvId, lineRows);
+
+  // B-097: a jv header + its lines are ONE post — write them in a single
+  // transaction so a line failure (e.g. a bad account_id FK) rolls back the
+  // header too, never leaving an orphaned jv (previously mitigated only by
+  // header-first ordering). insertThrough re-proves this tenant owns the parent
+  // jv INSIDE the same transaction; the tx wrapper carries the same company_id.
+  const { createdJv, createdLines } = await db.transaction(async (tx) => {
+    const [createdJv] = (await tx
+      .insert(jvs, {
+        id: jvId,
+        no: parsed.no,
+        sourceDoc: parsed.sourceDoc,
+        periodId: parsed.periodId,
+        memo: parsed.memo,
+      })
+      .returning()) as JvRow[];
+    const createdLines = await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+    return { createdJv, createdLines };
+  });
 
   return reply.code(201).send({
     id: createdJv?.id ?? jvId,
