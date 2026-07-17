@@ -364,7 +364,9 @@ describe("GET /api/v1/bank/statements/:id/lines", () => {
             ],
             [
               pvs,
-              [pvRow(PV_HIT, { amount: "15240.00", chequeDate: "2026-05-25", method: "cheque" })],
+              // The PV suggestion matches on NET (real cash-out), not gross amount
+              // (B-094 net-vs-gross) — net 15240 lines up with the −15240 line.
+              [pvRow(PV_HIT, { amount: "18000.00", net: "15240.00", chequeDate: "2026-05-25", method: "transfer" })],
             ],
             [rvs, []],
           ],
@@ -391,6 +393,49 @@ describe("GET /api/v1/bank/statements/:id/lines", () => {
     const out = body.data.find((r: { id: string }) => r.id === L_OUT);
     // amount matches CHQ_OUT (350) but its date is out of window → no suggestion
     expect(out.suggestions).toEqual([]);
+  });
+
+  // B-094 net-vs-gross: a transfer PV's real bank cash-out is its NET (gross −
+  // WHT − retention), so the suggestion must match a line on pv.net, not gross.
+  it("suggests a PV on its NET cash-out, not its GROSS amount (net-vs-gross)", async () => {
+    const LINE_NET = "line0000-0000-0000-0000-0000000000n1";
+    const LINE_GROSS = "line0000-0000-0000-0000-0000000000n2";
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [bankStatements, [statementRow(STMT0)]],
+            [
+              bankStatementLines,
+              [
+                // withdrawal for the PV's NET (the real cash-out) → should suggest
+                lineRow(LINE_NET, { amount: "-892400.00", lineDate: "2026-05-22", matched: false }),
+                // withdrawal for the PV's GROSS → NOT the cash-out → no suggestion
+                lineRow(LINE_GROSS, { amount: "-920000.00", lineDate: "2026-05-22", matched: false }),
+              ],
+            ],
+            [cheques, []],
+            [
+              pvs,
+              // gross 920000, net 892400 (transfer), dated within the ±7d window
+              [pvRow(PVA, { amount: "920000.00", net: "892400.00", method: "transfer", chequeDate: "2026-05-25" })],
+            ],
+            [rvs, []],
+          ],
+        }),
+      })
+    ).inject({ url: `/api/v1/bank/statements/${STMT0}/lines` });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const net = body.data.find((r: { id: string }) => r.id === LINE_NET);
+    const gross = body.data.find((r: { id: string }) => r.id === LINE_GROSS);
+    // the NET line matches the PV's real cash-out → suggested, amount = net
+    expect(net.suggestions).toHaveLength(1);
+    expect(net.suggestions[0]).toMatchObject({ type: "pv", id: PVA, amount: 892400 });
+    // the GROSS line no longer matches (the old gross-comparison bug) → none
+    expect(gross.suggestions).toEqual([]);
   });
 });
 
@@ -516,6 +561,37 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
     expect(res.json().code).toBe("INVALID_STATE");
     expect(res.json().message).toMatch(/locked/);
     expect(updated).toHaveLength(0); // no write — the lock held
+  });
+
+  // B-094-2: a single PV settles at most ONE statement line — reject a reverse
+  // double-reconcile (the same PV already matched to a DIFFERENT line).
+  it("409s a match whose PV is already matched to another statement line (reverse-uniqueness)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            // rows[0] = the UNMATCHED target line; rows[1] = a DIFFERENT line
+            // already matched to PVA → matching PVA here would double-reconcile.
+            [
+              bankStatementLines,
+              [
+                lineRow(L_HIT), // target (unmatched)
+                lineRow(L_MATCHED, { matched: true, pvId: PVA }), // PVA already used
+              ],
+            ],
+            [bankStatements, [statementRow(STMT0)]],
+            [pvs, [pvRow(PVA)]],
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/bank/lines/${L_HIT}/match`, payload: { pv_id: PVA } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/already matched to another/);
+    expect(updated).toHaveLength(0); // no write — the double-reconcile was blocked
   });
 });
 

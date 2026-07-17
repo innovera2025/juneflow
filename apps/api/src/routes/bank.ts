@@ -54,7 +54,7 @@
 //     (no RV rows are seeded — AR is Phase-5-deferred) → its matched_doc is null.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   apBillings,
   bankStatementLines,
@@ -285,8 +285,12 @@ function buildSuggestions(
   const out: DocRef[] = [];
 
   for (const pv of pools.pv) {
-    if (amountEq(num(pv.amount), target) && withinDateWindow(lineMs, toDateMs(pvDate(pv)))) {
-      out.push({ type: "pv", id: pv.id, ref: pv.chequeNo ?? null, amount: num(pv.amount), date: pvDate(pv) });
+    // A PV's real bank cash-out is its NET (gross − WHT − retention), not the
+    // GROSS `amount` — a transfer PV debits the bank for net. Match + display the
+    // suggestion on pv.net so the candidate lines up with the actual withdrawal
+    // (audit-flagged net-vs-gross). Cheque/RV stay on their own `amount`.
+    if (amountEq(num(pv.net), target) && withinDateWindow(lineMs, toDateMs(pvDate(pv)))) {
+      out.push({ type: "pv", id: pv.id, ref: pv.chequeNo ?? null, amount: num(pv.net), date: pvDate(pv) });
     }
   }
   for (const c of pools.cheque) {
@@ -481,6 +485,28 @@ async function matchLine(
     return badRequest(reply, `${matchFieldName(target.field)} not found in this tenant`);
   }
 
+  // B-094-2: a single pv/cheque/rv settles at most ONE statement line — reject a
+  // reverse double-reconcile (linking the same payment to a second line). Scoped
+  // THROUGH the statement (a foreign line is invisible → fail closed). The DB
+  // filter narrows to matched rows carrying this FK; the JS guard re-checks (the
+  // WHERE is authoritative in prod, the in-memory re-check keeps it correct even
+  // where a candidate row is returned unfiltered) and excludes this same line.
+  const fkColumn = matchFkColumn(target.field);
+  const existingLinks = (await db.selectThrough(
+    bankStatementLines,
+    LINE_HOPS,
+    and(eq(fkColumn, target.id), eq(bankStatementLines.matched, true)),
+  )) as BankStatementLineRow[];
+  const alreadyLinked = existingLinks.some(
+    (l) => l.id !== lineId && l.matched && lineFk(l, target.field) === target.id,
+  );
+  if (alreadyLinked) {
+    return conflict(
+      reply,
+      `${matchFieldName(target.field)} is already matched to another statement line`,
+    );
+  }
+
   // Set matched=true + the chosen FK (the other two stay null). updateThrough
   // re-proves this tenant owns the line's statement before writing the row.
   const [updated] = (await db.updateThrough(
@@ -503,6 +529,23 @@ async function matchLine(
 /** The wire field name for a match target (for the fail-closed 400 message). */
 function matchFieldName(field: "pvId" | "chequeId" | "rvId"): string {
   return field === "pvId" ? "pv_id" : field === "chequeId" ? "cheque_id" : "rv_id";
+}
+
+/** The bank_statement_line FK column for a match target (reverse-uniqueness query). */
+function matchFkColumn(field: "pvId" | "chequeId" | "rvId") {
+  return field === "pvId"
+    ? bankStatementLines.pvId
+    : field === "chequeId"
+      ? bankStatementLines.chequeId
+      : bankStatementLines.rvId;
+}
+
+/** The stored FK value on a line for a match target (reverse-uniqueness re-check). */
+function lineFk(
+  line: BankStatementLineRow,
+  field: "pvId" | "chequeId" | "rvId",
+): string | null {
+  return field === "pvId" ? line.pvId : field === "chequeId" ? line.chequeId : line.rvId;
 }
 
 // ---------------------------------------------------------------------------
