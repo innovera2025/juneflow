@@ -312,3 +312,9 @@
 - Lane 2: tests/contract/drift.spec.ts NEW static gate — mounted-but-undeclared=**0 (B-086 class CLEAN)** · 105 declared-but-unmounted warned(scaffolding backlog · informational) · parser-floor guard กัน vacuous-pass
 - verified: static 452/84 · live 535/1 · 0 schema-drift FAIL (FLOW-A read surface contract-clean) · merged dev
 - durable: contract regression gate โตตามทุก backend wave · B-086 failure-class ปิดถาวร
+
+## 2026-07-17 11:47 · qa (orch-B) · PROCUREMENT E2E (Lane 5) + B-084 exploit-closure verify
+- tests/e2e/procurement-flow.spec.ts + b084-exploit.spec.ts + _api-client.ts (gated E2E_LIVE · default 2/6-skip green)
+- Test 1 money-path 4/4 PASS: PR(1.2M · ผจก.tier)→submit→pending · lower-tier(proc L2)=403 · PM(L3)=approved step2 · PO(1.2M)→approve · partial GR(received/partial/PO-open)
+- **Test 2 B-084 exploit = BLOCKED (fix confirmed independent):** low-tier cut 7.36M PO = **403 ที่ mutation แรก** (require max(tier(cur),tier(new)) authority) · low-tier approve >5M = 403 · negative-floor=400 · amend-pending=409 · 0 variation recorded = exploit ปิดจริง end-to-end
+- merged dev · durable: money-path regression guard + B-084 exploit-closure permanent test
