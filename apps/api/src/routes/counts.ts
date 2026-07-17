@@ -28,7 +28,9 @@
 //                  pv, rv, gr, payroll. Posted-ness = a jv.source_doc
 //                  "table:uuid" ref (finance.ts convention). ค่าเสื่อม/ปันส่วน
 //                  sources have no backing table (seed REPORT_DERIVED) and are
-//                  not countable.
+//                  not countable. The badge count and the GET /gl/posting-inbox
+//                  ROW LIST now share ONE source of truth (gl-posting.ts) so the
+//                  two can never drift (P2-BE-17).
 //   sales.crm      all lead rows — the 5-stage funnel (lead → visit → quote →
 //                  booking → contract) has no closed state; the whole pipeline
 //                  is open CRM work.
@@ -40,24 +42,21 @@ import type { FastifyInstance } from "fastify";
 import { eq, inArray, isNull } from "drizzle-orm";
 import {
   boqDocs,
-  grs,
-  jvs,
   leads,
-  payrolls,
   pmAssets,
   pmContracts,
   pmWorkOrders,
-  pos,
   projects,
   prs,
-  pvs,
-  rvs,
   serviceTickets,
   subconContracts,
-  vendors,
   workPeriods,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+// gl.inbox = the count of the SAME source docs GET /gl/posting-inbox lists.
+// Imported (never re-declared) so the badge and the inbox never drift — the
+// same pattern dashboard.ts uses to import approval-tier gates from pr.ts.
+import { countGlInbox } from "./gl-posting.js";
 
 /** The 9 nav badge ids (chrome.jsx NAV badge sources — contract enum). */
 export const COUNT_KEYS = [
@@ -75,9 +74,6 @@ export const COUNT_KEYS = [
 export type CountKey = (typeof COUNT_KEYS)[number];
 
 const COUNT_KEY_SET: ReadonlySet<string> = new Set(COUNT_KEYS);
-
-/** jv.source_doc "table:uuid" polymorphic ref (finance.ts GLPosting model). */
-const SOURCE_DOC_REF = /^(pv|rv|gr|payroll):([0-9a-fA-F-]{36})$/;
 
 /** boq_doc rows awaiting approval (status = pending), project-scoped. */
 async function countBoqApproval(db: TenantDb): Promise<number> {
@@ -124,35 +120,6 @@ async function countPmOpen(db: TenantDb): Promise<number> {
     isNull(pmWorkOrders.customerSign),
   );
   return rows.length;
-}
-
-/** Source money docs not yet posted to a JV (FLOW-F posting inbox). */
-async function countGlInbox(db: TenantDb): Promise<number> {
-  const [pvRows, rvRows, payrollRows, grRows, jvRows] = await Promise.all([
-    db.select(pvs),
-    db.select(rvs),
-    db.select(payrolls),
-    db.selectThrough(grs, [
-      { fk: grs.poId, parent: pos },
-      { fk: pos.vendorId, parent: vendors },
-    ]),
-    db.select(jvs),
-  ]);
-
-  const posted = new Set<string>();
-  for (const jv of jvRows) {
-    const ref = jv.sourceDoc ? SOURCE_DOC_REF.exec(jv.sourceDoc) : null;
-    if (ref) posted.add(`${ref[1]}:${ref[2]?.toLowerCase()}`);
-  }
-  const pending = (table: string, ids: { id: string }[]): number =>
-    ids.filter((row) => !posted.has(`${table}:${row.id.toLowerCase()}`)).length;
-
-  return (
-    pending("pv", pvRows) +
-    pending("rv", rvRows) +
-    pending("payroll", payrollRows) +
-    pending("gr", grRows)
-  );
 }
 
 /** Open CRM pipeline — every lead in the 5-stage funnel. */
