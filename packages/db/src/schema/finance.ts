@@ -431,6 +431,60 @@ export const bankStatements = pgTable("bank_statement", {
 }, (t) => [index("bank_statement_company_idx").on(t.companyId)]);
 
 /**
+ * BankStatementLine — one normalized line of an imported bank statement, split
+ * out of the raw `BankStatement.lines` jsonb so a reconcile match becomes a
+ * per-row FK write instead of a whole-array jsonb rewrite (B-092 / F-BANK2,
+ * migration 0027; mirrors the `gr_item` child-table precedent). Wei ruling:
+ * normalize the jsonb blob into real rows — the line-level `matched`/FK columns
+ * are the new source of truth for a match; the parent `BankStatement.lines`
+ * jsonb is kept (additive) as the raw imported record.
+ *
+ * `amount` is SIGNED — deposits positive, withdrawals negative (bank.jsx STMT
+ * `v`) — so the statement balance is Σ(amount) (money -> currency_code). A
+ * matched line back-links to the settling payment voucher (pv_id), a cleared
+ * cheque (cheque_id), or a receipt voucher (rv_id); all three are nullable and
+ * only the relevant one is set. An unmatched line carries matched=false + null
+ * FKs. line_date is a calendar date (no time), like due_date.
+ */
+export const bankStatementLines = pgTable(
+  "bank_statement_line",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    statementId: uuid("statement_id")
+      .notNull()
+      .references(() => bankStatements.id, { onDelete: "cascade" }),
+    lineDate: date("line_date"),
+    description: text("description"),
+    // SIGNED money — deposits +, withdrawals − (bank.jsx STMT `v`). Money column
+    // -> carries currency_code; the running balance is Σ(amount).
+    amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
+    currencyCode: text("currency_code").notNull().default("THB"),
+    matched: boolean("matched").notNull().default(false),
+    // F-BANK2: the matched counterpart. A statement line is settled by at most
+    // one of a PV (outgoing payment), a cheque (cleared/cashed), or an RV
+    // (incoming receipt). All nullable — set only on matched lines; rv_id is a
+    // real FK because the `rv` table exists (AR receipt vouchers), though the
+    // seed leaves it null (no RV rows are seeded — AR is Phase-5-deferred).
+    pvId: uuid("pv_id").references(() => pvs.id, { onDelete: "set null" }),
+    chequeId: uuid("cheque_id").references(() => cheques.id, {
+      onDelete: "set null",
+    }),
+    rvId: uuid("rv_id").references(() => rvs.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // 0027 (B-092/F-BANK2): a statement's lines are read/matched together — index
+    // the parent FK, mirroring the child-table FK-index precedent (gr_item).
+    index("bank_statement_line_statement_idx").on(t.statementId),
+  ],
+);
+
+/**
  * Reconcile — the match result between a bank statement and PV/RV entries, which
  * locks the period when closed (data-dictionary "จับคู่ → ปิดงวดล็อก"). matched
  * holds the statement-line -> pv/rv mapping as JSON. period_id points at the

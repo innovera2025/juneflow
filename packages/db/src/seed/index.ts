@@ -813,15 +813,20 @@ const AP_KIND = ["deposit", "progress", "deposit", "final", "final"] as const;
 // are populated only for cheque-method PVs (the mock lists "—" for transfer rows,
 // whose "chequeBank" is really the transfer account, not a cheque bank -> null).
 // cheque_date is not carried by PV_LIST rows -> null (per C10 no-fabrication).
+// `no` = the PV document number (ap.jsx:161-164), carried so the bank statement
+// reconcile (F-BANK2) can resolve a matched line's "PV-2026-xxxx" ref to the
+// seeded pv row by number. The pv table has no `no` column, so the pv insert
+// ignores this field — it is a seed-side lookup key only.
 const PV_LIST: {
+  no: string;
   net: number; wht: number; amount: number; retention: number;
   method: "cash" | "transfer" | "cheque" | "deposit";
   chequeNo: string | null; chequeBank: string | null;
 }[] = [
-  { net: 561154, wht: 19350, amount: 645000, retention: 64500, method: "cheque",   chequeNo: "CH-040128", chequeBank: "SCB · บัญชี OD" },
-  { net: 892400, wht: 27600, amount: 920000, retention: 0,     method: "transfer", chequeNo: null,        chequeBank: null },
-  { net: 93896,  wht: 2904,  amount: 96800,  retention: 0,     method: "transfer", chequeNo: null,        chequeBank: null },
-  { net: 402938, wht: 12462, amount: 415400, retention: 0,     method: "cheque",   chequeNo: "CH-040127", chequeBank: "SCB" },
+  { no: "PV-2026-0184", net: 561154, wht: 19350, amount: 645000, retention: 64500, method: "cheque",   chequeNo: "CH-040128", chequeBank: "SCB · บัญชี OD" },
+  { no: "PV-2026-0183", net: 892400, wht: 27600, amount: 920000, retention: 0,     method: "transfer", chequeNo: null,        chequeBank: null },
+  { no: "PV-2026-0182", net: 93896,  wht: 2904,  amount: 96800,  retention: 0,     method: "transfer", chequeNo: null,        chequeBank: null },
+  { no: "PV-2026-0181", net: 402938, wht: 12462, amount: 415400, retention: 0,     method: "cheque",   chequeNo: "CH-040127", chequeBank: "SCB" },
 ];
 // bank.jsx:46-52 Cheque Register (6 issued cheques). no/amount/status verbatim;
 // the "วันที่ในเช็ค" Thai-BE date (dd พ.ค. 69, พ.ค.=May, 69=2569 BE=2026 CE) -> the
@@ -1402,6 +1407,40 @@ async function seed(): Promise<void> {
           amount: m(c.amount), dueDate: c.date, status: c.status,
           pvId: c.pvIdx == null ? null : det(`pv:${c.pvIdx}`),
         })),
+      );
+
+      // B-092 (F-BANK2, migration 0027): normalize the 8 bank.jsx STMT lines into
+      // real bank_statement_line rows (one per statement, mirroring the existing
+      // 1-statement-per-line BANK_STMT layout). `amount` is SIGNED — kept via
+      // .toFixed(2) (NOT the m() helper, which strips the sign with Math.abs).
+      // line_date derives the calendar date from the statement period 2569-05
+      // (พ.ค. = May, 2569 BE = 2026 CE) + the Thai day number. matched=true when
+      // the mock line carries a doc no; the FK is resolved by that no against the
+      // seeded PV / cheque rows. RV-matched lines stay matched=true (faithful to
+      // the mock's matched flag) but rv_id is null — no RV rows are seeded (AR is
+      // Phase-5-deferred) and the rv table has no doc-no column to resolve by.
+      const pvIdByNo = new Map(PV_LIST.map((pv, i) => [pv.no, det(`pv:${i}`)]));
+      const chequeIdByNo = new Map(
+        CHEQUE_REG.map((c, i) => [c.no, det(`cheque:${i}`)]),
+      );
+      await tx.insert(schema.bankStatementLines).values(
+        BANK_STMT.map((s, i) => {
+          const ref = s.matched;
+          const day = Number.parseInt(s.date, 10); // leading day; all rows = พ.ค. (2569-05)
+          return {
+            id: det(`bankline:${i}`),
+            statementId: det(`bank:${i}`),
+            lineDate: `2026-05-${String(day).padStart(2, "0")}`,
+            description: s.desc,
+            amount: s.v.toFixed(2), // SIGNED — deposits +, withdrawals −
+            matched: ref != null,
+            pvId: ref?.startsWith("PV-") ? (pvIdByNo.get(ref) ?? null) : null,
+            chequeId: ref?.startsWith("CH-")
+              ? (chequeIdByNo.get(ref) ?? null)
+              : null,
+            rvId: null, // RV-* refs: no seeded rv (AR Phase-5-deferred)
+          };
+        }),
       );
 
       await tx.insert(schema.fixedAssets).values(
