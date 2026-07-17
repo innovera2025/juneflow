@@ -45,7 +45,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { companies } from "./platform.js";
 import { projects, costCenters, vendors, customers } from "./project.js";
-import { pos, grs } from "./boq.js";
+import { pos, grs, wos } from "./boq.js";
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -77,6 +77,21 @@ export const apBillingKind = pgEnum("ap_billing_kind", [
   "deposit",
   "progress",
   "final",
+]);
+
+/**
+ * PV.method — the payment-voucher settlement method (B-089 / F-AP1 · migration
+ * 0026). ap.jsx PVCreateForm:252-257 offers a fixed 4-way method whose stable
+ * codes are already English in the mock: cash (เงินสด) | transfer (โอนเงิน) |
+ * cheque (เช็ค) | deposit (หักมัดจำ, deposit off-set). Only the stable code is
+ * stored; the Thai label is an i18n display concern (mirrors `department`). The
+ * column is nullable — a draft PV may not have chosen a method yet.
+ */
+export const pvMethod = pgEnum("pv_method", [
+  "cash",
+  "transfer",
+  "cheque",
+  "deposit",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -160,11 +175,23 @@ export const apBillings = pgTable("ap_billing", {
   dueDate: date("due_date"),
   amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
   vat: numeric("vat", { precision: 16, scale: 2 }).notNull().default("0"),
+  // B-089 (F-AP1, migration 0026): the withholding-tax amount deducted at billing
+  // (ap.jsx AP_BILL `wht`, computed via @juneflow/tax-engine.calcWht). Money —
+  // shares the row's currency_code. Nullable: a billing with no WHT leaves it null.
+  wht: numeric("wht", { precision: 16, scale: 2 }),
+  // B-089 (F-AP1, migration 0026): the retention hold-back on a subcon (WO)
+  // billing (ap.jsx AP_BILL `retention`, only present on the WO-billed row).
+  // Money — shares the row's currency_code. Nullable: no retention -> null.
+  retention: numeric("retention", { precision: 16, scale: 2 }),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("draft"),
   // B-079 (F2): billing installment type (deposit | progress | final). Defaults
   // to the most common `progress`; re-seeded per row from the PO payment state.
   kind: apBillingKind("kind").notNull().default("progress"),
+  // B-089 (F-AP1, migration 0026): a subcon billing raised against a Work Order
+  // (ap.jsx AP-2026-0180 ref "WO-2026-0117 งวด 3") rather than a PO/GR. Nullable —
+  // set only on WO-based billings; PO/GR billings leave it null (and vice-versa).
+  woId: uuid("wo_id").references(() => wos.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -177,6 +204,9 @@ export const apBillings = pgTable("ap_billing", {
   // PO and GR — index both FK columns (nullable for non-PO expenses).
   index("ap_billing_po_idx").on(t.poId),
   index("ap_billing_gr_idx").on(t.grId),
+  // 0026 (B-089/F-AP1): WO-based subcon billings join back to their Work Order —
+  // index the nullable wo_id FK, mirroring the po/gr FK-index precedent.
+  index("ap_billing_wo_idx").on(t.woId),
 ]);
 
 /**
@@ -195,7 +225,24 @@ export const pvs = pgTable("pv", {
     .references(() => companies.id, { onDelete: "cascade" }),
   billingIds: jsonb("billing_ids").$type<string[]>().notNull().default([]),
   whtPct: numeric("wht_pct", { precision: 5, scale: 2 }).notNull().default("0"),
+  // B-089 (F-AP1, migration 0026): the GROSS AP value being settled (ap.jsx
+  // PV_LIST `amount`). The table previously stored only `net` + `wht_pct`, so the
+  // gross could not be reconstructed; persist it so net = gross − WHT − retention
+  // is auditable. Money — shares the row's currency_code. Defaults 0 for the
+  // additive ADD COLUMN on any pre-existing rows; the seed/handler set the real gross.
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
   net: numeric("net", { precision: 16, scale: 2 }).notNull().default("0"),
+  // B-089 (F-AP1, migration 0026): the retention held back on this PV (ap.jsx
+  // PV_LIST `retention`). Money — shares the row's currency_code. Nullable.
+  retention: numeric("retention", { precision: 16, scale: 2 }),
+  // B-089 (F-AP1, migration 0026): settlement method + cheque details (ap.jsx
+  // PV_LIST `method`/`chequeNo`/`chequeBank` + PVCreateForm cheque block). method
+  // is the stable enum code; cheque_* are only populated for cheque-method PVs.
+  // cheque_date is a calendar date (no time) like due_date. All nullable.
+  method: pvMethod("method"),
+  chequeNo: text("cheque_no"),
+  chequeBank: text("cheque_bank"),
+  chequeDate: date("cheque_date"),
   currencyCode: text("currency_code").notNull().default("THB"),
   batchId: uuid("batch_id"),
   status: text("status").notNull().default("draft"),
@@ -344,13 +391,22 @@ export const cheques = pgTable("cheque", {
   currencyCode: text("currency_code").notNull().default("THB"),
   dueDate: date("due_date"),
   status: text("status").notNull().default("draft"),
+  // B-089 (F-AP1, migration 0026): the PV that issued this cheque (bank.jsx
+  // cheque register cross-references a PV by number — CH-040128 -> PV-2026-0184).
+  // Nullable — a received cheque (เช็ครับ) or a cheque whose PV is not modeled
+  // leaves it null.
+  pvId: uuid("pv_id").references(() => pvs.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("cheque_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("cheque_company_idx").on(t.companyId),
+  // 0026 (B-089/F-AP1): the cheque -> PV back-link is a join column — index it.
+  index("cheque_pv_idx").on(t.pvId),
+]);
 
 /**
  * BankStatement — an imported bank statement whose lines are matched against
