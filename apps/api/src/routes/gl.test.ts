@@ -361,6 +361,31 @@ describe("POST /api/v1/gl/jv", () => {
     expect(res.json().message).toMatch(/greater than zero/);
   });
 
+  it("rejects the sub-cent rounding exploit — validate-vs-persist divergence (400, nothing written)", async () => {
+    // gl.jv skeptic: three dr:0.004 legs each round2→0.00 on storage, but a raw-sum
+    // gate saw 0.012→0.01 and matched the cr:0.01 leg → would persist Σdr=0.00 vs
+    // Σcr=0.01 (unbalanced ledger). The per-line-rounded gate must reject it.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: writeDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/jv",
+      payload: {
+        no: "JV-POISON",
+        lines: [
+          { account_id: ACC_COST, dr: 0.004, cr: 0 },
+          { account_id: ACC_COST, dr: 0.004, cr: 0 },
+          { account_id: ACC_COST, dr: 0.004, cr: 0 },
+          { account_id: ACC_AR, dr: 0, cr: 0.01 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    // no unbalanced JV persisted
+    expect(inserted).toHaveLength(0);
+  });
+
   it("rejects empty/missing lines and missing no (400)", async () => {
     const appx = await buildTestApp({ resolveTenant: async () => SESSION, db: writeDb() });
     const noLines = await appx.inject({

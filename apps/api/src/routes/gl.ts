@@ -238,9 +238,12 @@ async function createJv(
   const parsed = parseJvBody(body);
   if (typeof parsed === "string") return badRequest(reply, parsed);
 
-  // Double-entry balance (C9): Σ dr === Σ cr, non-empty.
-  const sumDr = round2(parsed.lines.reduce((s, l) => s + l.dr, 0));
-  const sumCr = round2(parsed.lines.reduce((s, l) => s + l.cr, 0));
+  // Double-entry balance (C9): Σ dr === Σ cr, non-empty. Sum the PER-LINE rounded
+  // values — the same round2() applied at storage (moneyStr below) — so a sub-cent
+  // leg that rounds to 0.00 on write cannot survive a raw-sum gate and persist an
+  // unbalanced ledger (validate-vs-persist divergence · gl.jv skeptic).
+  const sumDr = round2(parsed.lines.reduce((s, l) => s + round2(l.dr), 0));
+  const sumCr = round2(parsed.lines.reduce((s, l) => s + round2(l.cr), 0));
   if (sumDr <= 0) {
     return badRequest(reply, "JV total (Σ dr) must be greater than zero");
   }
