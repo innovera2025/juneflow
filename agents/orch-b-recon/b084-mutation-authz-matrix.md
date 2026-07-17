@@ -311,3 +311,18 @@ on users/roles). **Single worst gap: `POST /po/:id/variation-order` (po.ts:416)*
 zero authz and zero status check, rewrites the PO money total; exploit-B
 (cut-below-tier → approve at a lower tier → add-back after approval) turns the
 working approve-ladder into a full financial-authorization bypass.
+
+
+---
+
+## Update 2026-07-17 — P2-BE-20 bank handlers add 2 ungated mutations
+
+Verified during the batch-9 candidate pass (P2-BE-20 bank import/reconcile). Two NEW within-tenant mutations, both **ungated** (no perms/role check), consistent with the existing B-084 carry-forward class:
+
+| Mutation | Handler | Class | Note |
+|---|---|---|---|
+| `POST /bank/statements/import` | `importBankStatements` (bank.ts) | status/data create | imports a bank statement + lines + F-BANK1 auto-match. Any tenant member can import. Low risk (fail-closed scope; no money moved; conservative no-guess match). |
+| `POST /bank/reconcile` | `reconcileBank` (bank.ts) | **accounting control** | **period LOCK** — once locked, back-dated match → 409 (books close for real). Any tenant member can lock/close a period. **Arguably should be Finance-Manager gated.** |
+
+- **Not a security-critical bypass:** tenant-scope stays fail-closed (`insertThrough`/`selectThrough`, foreign statement absent), no cross-tenant leak, no payment-approval bypass (unlike the original B-084 F1 self-escalation).
+- **Recommendation:** add `reconcile` (and optionally `import`) to the B-084 per-mutation authz fix — `reconcile` (period close) is the higher-priority one; a low-privilege user locking an accounting period is an integrity concern. Fold into whichever option Wei picks for the B-084 remaining-mutation gate.
