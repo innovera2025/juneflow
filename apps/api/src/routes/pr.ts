@@ -604,6 +604,20 @@ export function registerPrRoute(app: FastifyInstance): void {
       return reply.code(404).send({ code: "NOT_FOUND", message: `PR ${id} not found` });
     }
 
+    // B-084-reject: reject is the approver's counterpart to approve — gate it on
+    // the SAME B-070 approval authority the PR's amount demands, so a low-tier
+    // member cannot sabotage a high-value pending doc by rejecting it. Fail-closed:
+    // an unattributable caller (or one below the tier) is denied 403.
+    const { amount: rejectAmount } = await prAmount(db, id);
+    const rejectNeeded = requiredApprovalLevel(rejectAmount);
+    const rejectLevel = await callerApprovalLevel(request);
+    if (rejectLevel == null || rejectLevel < rejectNeeded) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `PR rejection of ${rejectAmount} requires approval level ${rejectNeeded}`,
+      });
+    }
+
     const body = (request.body ?? {}) as Record<string, unknown>;
     const reason = str(pick(body, "reason")).trim();
     if (!reason) {

@@ -609,13 +609,24 @@ describe("PR state machine — approve (tiered authority, B-070)", () => {
 });
 
 describe("PR state machine — reject", () => {
-  it("reject: pending → rejected with a reason", async () => {
+  it("reject: pending → rejected with a reason (by an authorized approver)", async () => {
     const P0 = pr("p0", "N", "pending");
     const updated: Updated[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[prs, [P0]], [projects, [project]], [prItems, []]], updated, updateBase: P0 }),
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [projects, [project]],
+            [prItems, []],
+            [boqItems, []],
+            [users, [userRow]],
+            [roles, [roleRow(2)]],
+          ],
+          updated,
+          updateBase: P0,
+        }),
       })
     ).inject({
       method: "POST",
@@ -631,7 +642,9 @@ describe("PR state machine — reject", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[prs, [pr("p0", "N", "pending")]]] }),
+        db: stubDb({
+          rows: [[prs, [pr("p0", "N", "pending")]], [prItems, []], [boqItems, []], [users, [userRow]], [roles, [roleRow(2)]]],
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/pr/p0/reject", payload: {} });
     expect(res.statusCode).toBe(400);
@@ -642,11 +655,38 @@ describe("PR state machine — reject", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[prs, [pr("p0", "N", "draft")]]] }),
+        db: stubDb({
+          rows: [[prs, [pr("p0", "N", "draft")]], [prItems, []], [boqItems, []], [users, [userRow]], [roles, [roleRow(2)]]],
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/pr/p0/reject", payload: { reason: "x" } });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  // B-084-reject: a low-tier member must not be able to reject a high-value
+  // pending PR (workflow sabotage) — reject is gated on the same authority as
+  // approve (>500K needs ผจก.โครงการ level 3; a level-2 หน.จัดซื้อ is denied 403).
+  it("reject: 403 when a below-tier caller rejects a high-value pending PR (no write)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [pr("p0", "N", "pending")]],
+            [prItems, [prLine("l0", "p0", "b0", "6000")]], // 6000 × 100 = 600,000 (> 500K)
+            [boqItems, [boqItemPriced("b0", "100.00")]],
+            [users, [userRow]],
+            [roles, [roleRow(2)]], // หน.จัดซื้อ — below the ผจก.โครงการ tier
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/reject", payload: { reason: "x" } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(updated).toHaveLength(0); // gate precedes the write — nothing rejected
   });
 });
 

@@ -28,10 +28,12 @@
 // Any NEW conflict outside PLAN.md Appendix C -> BLOCKERS.md, never decide
 // locally.
 
+import { sql } from "drizzle-orm";
 import {
   pgEnum,
   pgTable,
   index,
+  uniqueIndex,
   text,
   uuid,
   integer,
@@ -481,6 +483,20 @@ export const bankStatementLines = pgTable(
     // 0027 (B-092/F-BANK2): a statement's lines are read/matched together — index
     // the parent FK, mirroring the child-table FK-index precedent (gr_item).
     index("bank_statement_line_statement_idx").on(t.statementId),
+    // 0028 (B-094-2): a single PV / cheque / RV settles at most ONE statement line
+    // — a partial UNIQUE index makes the reverse double-reconcile (the handler
+    // 409s first) impossible at the DB layer too. WHERE ... IS NOT NULL keeps the
+    // many unmatched lines (all three FKs null) from colliding on NULL. Mirrors
+    // the org_unit partial-unique precedent (extensions.ts).
+    uniqueIndex("bank_statement_line_pv_uq")
+      .on(t.pvId)
+      .where(sql`${t.pvId} is not null`),
+    uniqueIndex("bank_statement_line_cheque_uq")
+      .on(t.chequeId)
+      .where(sql`${t.chequeId} is not null`),
+    uniqueIndex("bank_statement_line_rv_uq")
+      .on(t.rvId)
+      .where(sql`${t.rvId} is not null`),
   ],
 );
 
