@@ -52,6 +52,7 @@ import { registerGrRoute } from "./routes/gr.js";
 import { registerNotificationsRoute } from "./routes/notifications.js";
 import { registerDashboardRoute } from "./routes/dashboard.js";
 import { registerGlRoute } from "./routes/gl.js";
+import { registerApRoute } from "./routes/ap.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -172,6 +173,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerNotificationsRoute(v1);
       registerDashboardRoute(v1);
       registerGlRoute(v1);
+      registerApRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,
