@@ -17,6 +17,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@juneflow/bank-file':
+        specifier: workspace:*
+        version: link:../../packages/bank-file
       '@juneflow/db':
         specifier: workspace:*
         version: link:../../packages/db
