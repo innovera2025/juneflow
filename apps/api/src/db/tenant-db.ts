@@ -93,9 +93,23 @@ export class TenantDb {
     return extra ? (and(tenant, extra) as SQL) : tenant;
   }
 
+  // drizzle 0.45 hardened `.select().from(x)` with a `TableLikeHasEmptySelection<x>`
+  // guard (rejects referencing a data-modifying subquery that has no `returning`
+  // clause). That guard is a conditional type which only ever excludes empty
+  // Subqueries — never a real PgTable — but it cannot REDUCE for an unbounded
+  // generic table param `T`, so a generic `.from(table)` stopped type-checking on
+  // the 0.38→0.45 bump even though every call site here passes a concrete table.
+  // Fix: pin the type arg (`.from<T>`) so the exact row type is preserved, and
+  // assert the argument through the guard's (unreducible-but-satisfied) parameter
+  // slot with `as never` (the bottom type is assignable to any parameter shape).
+  // Pure type adaptation — zero runtime/query change.
+
   /** SELECT * FROM table WHERE company_id = ? [AND extra]. */
   select<T extends TenantTable>(table: T, where?: SQL) {
-    return this.#db.select().from(table).where(this.#scope(table, where));
+    return this.#db
+      .select()
+      .from<T>(table as never)
+      .where(this.#scope(table, where));
   }
 
   /** INSERT with company_id force-set to this tenant (any caller value ignored). */
@@ -169,7 +183,7 @@ export class TenantDb {
     }
     let query = this.#db
       .select(getTableColumns(table))
-      .from(table)
+      .from<T>(table as never) // drizzle 0.45 .from() guard — see select() note
       .$dynamic() as unknown as ThroughBuilder;
     for (const hop of hops) {
       const parentId = (hop.parent as PgTable & { id?: PgColumn }).id;
@@ -418,7 +432,7 @@ export class TenantDb {
           "the scoped select()/selectGlobalOrOwned()",
       );
     }
-    const query = this.#db.select().from(table);
+    const query = this.#db.select().from<T>(table as never); // guard — see select()
     return where ? query.where(where) : query;
   }
 
@@ -442,7 +456,7 @@ export class TenantDb {
     ) as SQL;
     return this.#db
       .select()
-      .from(table)
+      .from<T>(table as never) // drizzle 0.45 .from() guard — see select() note
       .where(where ? (and(scope, where) as SQL) : scope);
   }
 }
