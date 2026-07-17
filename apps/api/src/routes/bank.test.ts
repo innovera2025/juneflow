@@ -19,7 +19,9 @@ import {
   bankStatements,
   cheques,
   pvs,
+  roles,
   rvs,
+  users,
   vendors,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
@@ -254,6 +256,42 @@ const billingRow = {
   createdAt: D,
   updatedAt: D,
 };
+
+// --- authz seed: the finance caller loadCaller resolves via the session email --
+// The two bank mutations are gated on the finance perms matrix (B-084):
+// POST /bank/statements/import → finance `create`, POST /bank/reconcile →
+// finance `approve`. loadCaller resolves the caller through the session email
+// (authUser.email → dictionary user → role), so a test that must pass the gate
+// seeds a `users` row (email = SESSION) + a `roles` row carrying the perm.
+const userRow = {
+  id: "u-0",
+  companyId: COMPANY,
+  email: "suda@rungrueang.co.th",
+  name: "สุดา",
+  roleId: "role-0",
+  status: "active",
+};
+/** A finance role with configurable create/approve perms (loadCaller: email →
+ *  user → role). Toggle a flag off to prove either mutation gate fail-closed. */
+const financeRole = (create = true, approve = true) => ({
+  id: "role-0",
+  companyId: COMPANY,
+  name: "Finance Manager",
+  approvalLimits: {},
+  perms: {
+    finance: { view: true, create, edit: true, approve, cancel: false },
+  },
+  approvalLevel: 3,
+  approvalLimit: null,
+  currencyCode: "THB",
+  createdAt: D,
+  updatedAt: D,
+});
+/** The two stub rows that authorize a full finance caller (both create+approve). */
+const financeCaller: Array<[unknown, unknown[]]> = [
+  [users, [userRow]],
+  [roles, [financeRole()]],
+];
 
 // ===========================================================================
 // GET /bank/statements
@@ -731,6 +769,7 @@ describe("POST /api/v1/bank/statements/import", () => {
         resolveTenant: async () => SESSION,
         db: stubDb({
           rows: [
+            ...financeCaller, // finance.create — passes the import gate
             // insertThrough re-reads the (just-created) parent statement to prove
             // ownership — the stub ignores the WHERE, so a canned row stands in.
             [bankStatements, [statementRow(STMT0)]],
@@ -782,6 +821,7 @@ describe("POST /api/v1/bank/statements/import", () => {
         resolveTenant: async () => SESSION,
         db: stubDb({
           rows: [
+            ...financeCaller, // finance.create — passes the import gate
             [bankStatements, [statementRow(STMT0)]],
             [cheques, []],
             [pvs, []],
@@ -813,7 +853,7 @@ describe("POST /api/v1/bank/statements/import", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [] }),
+        db: stubDb({ rows: [...financeCaller] }), // finance.create — passes the gate; the parse then 400s
       })
     ).inject({
       method: "POST",
@@ -829,7 +869,7 @@ describe("POST /api/v1/bank/statements/import", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [] }),
+        db: stubDb({ rows: [...financeCaller] }), // finance.create — passes the gate; the empty file then 400s
       })
     ).inject({
       method: "POST",
@@ -844,11 +884,36 @@ describe("POST /api/v1/bank/statements/import", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [] }),
+        db: stubDb({ rows: [...financeCaller] }), // finance.create — passes the gate; missing file then 400s
       })
     ).inject({ method: "POST", url: "/api/v1/bank/statements/import", payload: {} });
     expect(res.statusCode).toBe(400);
     expect(res.json().message).toMatch(/no statement file/);
+  });
+
+  // B-084 gate: import is finance-staff work → requires the finance `create` perm.
+  it("403s (fail closed) a caller lacking the finance create perm — no import runs", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [userRow]],
+            [roles, [financeRole(/* create */ false, /* approve */ true)]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/bank/statements/import",
+      payload: { period: "2569-05", file: "2026-05-22,FT PAYMENT,-15240.00" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/finance create permission/);
+    expect(inserted).toHaveLength(0); // no statement/line was imported
   });
 });
 
@@ -869,7 +934,7 @@ describe("POST /api/v1/bank/reconcile", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [] }),
+        db: stubDb({ rows: [...financeCaller] }), // finance.approve — passes the gate; missing period then 400s
       })
     ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: {} });
     expect(res.statusCode).toBe(400);
@@ -880,7 +945,7 @@ describe("POST /api/v1/bank/reconcile", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[bankStatements, []]] }),
+        db: stubDb({ rows: [...financeCaller, [bankStatements, []]] }), // finance.approve — passes the gate; the period 404s
       })
     ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: { period: "2569-99" } });
     expect(res.statusCode).toBe(404);
@@ -894,6 +959,7 @@ describe("POST /api/v1/bank/reconcile", () => {
         resolveTenant: async () => SESSION,
         db: stubDb({
           rows: [
+            ...financeCaller, // finance.approve — passes the reconcile gate
             [bankStatements, [statementRow(STMT0, { period: "2569-05", locked: false })]],
             [
               bankStatementLines,
@@ -931,11 +997,60 @@ describe("POST /api/v1/bank/reconcile", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[bankStatements, [statementRow(STMT0, { period: "2569-05", locked: true })]]],
+          rows: [
+            ...financeCaller, // finance.approve — passes the gate; the locked period then 409s
+            [bankStatements, [statementRow(STMT0, { period: "2569-05", locked: true })]],
+          ],
         }),
       })
     ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: { period: "2569-05" } });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  // B-084 gate (priority): reconcile LOCKS the period (closes the books) → it
+  // requires the finance `approve` perm. A caller with the perm off is denied and
+  // the lock write never runs (the period stays open).
+  it("403s (fail closed) a caller lacking the finance approve perm — the period is NOT locked", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [userRow]],
+            [roles, [financeRole(/* create */ true, /* approve */ false)]],
+            [bankStatements, [statementRow(STMT0, { period: "2569-05", locked: false })]],
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: { period: "2569-05" } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/finance approve permission/);
+    expect(updated).toHaveLength(0); // the lock never ran — the period stays open
+  });
+
+  // Fail-closed: a resolved session whose email maps to NO dictionary user cannot
+  // be attributed → 403 before the period can be locked.
+  it("403s (fail closed) an unattributable caller — session resolved but no dictionary user", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, []], // the session email resolves to NO dictionary user → no caller
+            [bankStatements, [statementRow(STMT0, { period: "2569-05", locked: false })]],
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/bank/reconcile", payload: { period: "2569-05" } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/cannot be attributed/);
+    expect(updated).toHaveLength(0);
   });
 });
