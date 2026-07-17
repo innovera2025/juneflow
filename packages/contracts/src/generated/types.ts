@@ -1411,9 +1411,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List AP billings */
+        get: operations["listApBilling"];
         put?: never;
-        /** AP billing ({po_id,gr_id,invoice_no}) — 3-way match */
+        /** AP billing ({po_id|wo_id,gr_id,vendor_id,invoice_no,amount,vat,wht,retention,due_date}) — 3-way match */
         post: operations["createApBilling"];
         delete?: never;
         options?: never;
@@ -1428,9 +1429,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List payment vouchers */
+        get: operations["listApPv"];
         put?: never;
-        /** AP payment voucher ({billing_ids[],wht_pct}) */
+        /** AP payment voucher ({billing_ids[],method,amount,wht_pct,retention,cheque_no,cheque_bank,cheque_date}) */
         post: operations["createApPv"];
         delete?: never;
         options?: never;
@@ -4759,6 +4761,24 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listApBilling: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     createApBilling: {
         parameters: {
             query?: never;
@@ -4772,13 +4792,41 @@ export interface operations {
                     /** Format: uuid */
                     po_id?: string;
                     /** Format: uuid */
+                    wo_id?: string;
+                    /** Format: uuid */
                     gr_id?: string;
+                    /** Format: uuid */
+                    vendor_id?: string;
                     invoice_no?: string;
+                    amount?: number;
+                    vat?: number;
+                    wht?: number;
+                    retention?: number;
+                    /** Format: date */
+                    due_date?: string;
                 };
             };
         };
         responses: {
             201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listApPv: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -4793,7 +4841,14 @@ export interface operations {
             content: {
                 "application/json": {
                     billing_ids?: string[];
+                    method?: string;
+                    amount?: number;
                     wht_pct?: number;
+                    retention?: number;
+                    cheque_no?: string;
+                    cheque_bank?: string;
+                    /** Format: date */
+                    cheque_date?: string;
                 };
             };
         };
