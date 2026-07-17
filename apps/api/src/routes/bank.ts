@@ -910,36 +910,43 @@ async function importStatement(
   });
   const matchedCount = decisions.filter((d) => d.autoDoc !== null).length;
 
-  // (a) Create the statement LAST among the reads (scoped insert — company_id
-  // force-set). The raw imported rows are kept in the additive `lines` jsonb.
-  const [statement] = (await db
-    .insert(bankStatements, {
-      period,
-      lines: parsed as unknown[],
-      locked: false,
-    })
-    .returning()) as BankStatementRow[];
-  const statementId = statement!.id;
+  // (a) B-097: statement header + its lines are ONE import — write them in a
+  // single transaction (scoped insert → company_id force-set; raw rows kept in
+  // the additive `lines` jsonb). If a line insert fails (e.g. the migration-0028
+  // reverse-unique index rejecting a doc consumed by a concurrent import), the
+  // whole block rolls back, leaving no orphaned bank_statement row. This
+  // supersedes the earlier create-last mitigation. insertThrough re-proves this
+  // tenant owns the parent inside the same transaction (tx carries company_id).
+  const statementId = await db.transaction(async (tx) => {
+    const [statement] = (await tx
+      .insert(bankStatements, {
+        period,
+        lines: parsed as unknown[],
+        locked: false,
+      })
+      .returning()) as BankStatementRow[];
+    const sid = statement!.id;
 
-  // (b) Materialize the decided lines under the created statement; insertThrough
-  // re-proves this tenant owns the parent before writing.
-  const lineRows = decisions.map((d) => ({
-    statementId,
-    lineDate: d.row.lineDate,
-    description: d.row.description,
-    amount: d.amountStr,
-    currencyCode: currency,
-    matched: d.autoDoc !== null,
-    pvId: d.autoDoc?.type === "pv" ? d.autoDoc.id : null,
-    chequeId: d.autoDoc?.type === "cheque" ? d.autoDoc.id : null,
-    rvId: d.autoDoc?.type === "rv" ? d.autoDoc.id : null,
-  }));
-  await db.insertThrough(bankStatementLines, bankStatements, statementId, lineRows);
+    // (b) Materialize the decided lines under the created statement.
+    const lineRows = decisions.map((d) => ({
+      statementId: sid,
+      lineDate: d.row.lineDate,
+      description: d.row.description,
+      amount: d.amountStr,
+      currencyCode: currency,
+      matched: d.autoDoc !== null,
+      pvId: d.autoDoc?.type === "pv" ? d.autoDoc.id : null,
+      chequeId: d.autoDoc?.type === "cheque" ? d.autoDoc.id : null,
+      rvId: d.autoDoc?.type === "rv" ? d.autoDoc.id : null,
+    }));
+    await tx.insertThrough(bankStatementLines, bankStatements, sid, lineRows);
+    return sid;
+  });
 
   return reply.code(200).send({
     statement_id: statementId,
     period,
-    line_count: lineRows.length,
+    line_count: decisions.length,
     matched_count: matchedCount,
     currency_code: currency,
   });

@@ -857,30 +857,35 @@ export function registerBoqRoute(app: FastifyInstance): void {
       : null;
     const approvedAt = new Date();
 
-    const [updated] = await db.updateThrough(
-      boqDocs,
-      projects,
-      boqDocs.projectId,
-      doc.projectId,
-      // Stamp the archive approver + timestamp so the archive screen reads real
-      // rows (audit_log cannot source these — its entity is a route template).
-      { status: "approved", approvedBy: approver?.id ?? null, approvedAt },
-      eq(boqDocs.id, id),
-    );
-
-    // Append a version-history row (action=approve) so the archive's Revise
-    // history + the approval version-diff render from a real log entry.
-    await db.insertThrough(boqVersionHistory, projects, doc.projectId, [
-      {
-        docId: id,
-        version: doc.version,
-        action: "approve",
-        by: approver?.id ?? null,
-        at: approvedAt,
-        delta: null,
-        note: null,
-      },
-    ]);
+    // B-097: the status flip + its version-history row are ONE approval — write
+    // them in a single transaction so an approved (locked) BOQ can never exist
+    // without its archive log entry (the archive's Revise-history + version-diff
+    // render from that row; a partial write would show an approval with no
+    // history). The tx wrapper carries the same company_id.
+    const updated = await db.transaction(async (tx) => {
+      const [updated] = await tx.updateThrough(
+        boqDocs,
+        projects,
+        boqDocs.projectId,
+        doc.projectId,
+        // Stamp the archive approver + timestamp so the archive screen reads real
+        // rows (audit_log cannot source these — its entity is a route template).
+        { status: "approved", approvedBy: approver?.id ?? null, approvedAt },
+        eq(boqDocs.id, id),
+      );
+      await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
+        {
+          docId: id,
+          version: doc.version,
+          action: "approve",
+          by: approver?.id ?? null,
+          at: approvedAt,
+          delta: null,
+          note: null,
+        },
+      ]);
+      return updated;
+    });
 
     return reply
       .code(200)
@@ -917,30 +922,33 @@ export function registerBoqRoute(app: FastifyInstance): void {
     const revisedAt = new Date();
     const newVersion = doc.version + 1;
 
-    const [updated] = await db.updateThrough(
-      boqDocs,
-      projects,
-      boqDocs.projectId,
-      doc.projectId,
-      { status: "revise", version: newVersion },
-      eq(boqDocs.id, id),
-    );
-
-    // Append a version-history row (action=revise) for the NEW version so the
-    // archive's Revise-history timeline shows revise events, not just approvals
-    // (B-085 fix 1; previously only /approve logged a row). version = the freshly
-    // bumped version so it never collides with this doc's approve-history keys.
-    await db.insertThrough(boqVersionHistory, projects, doc.projectId, [
-      {
-        docId: id,
-        version: newVersion,
-        action: "revise",
-        by: reviser?.id ?? null,
-        at: revisedAt,
-        delta: null,
-        note: null,
-      },
-    ]);
+    // B-097: version bump + its version-history row are ONE revise — write them
+    // atomically so the archive timeline can never show a revised doc whose new
+    // version has no matching history entry (mirrors /approve).
+    const updated = await db.transaction(async (tx) => {
+      const [updated] = await tx.updateThrough(
+        boqDocs,
+        projects,
+        boqDocs.projectId,
+        doc.projectId,
+        { status: "revise", version: newVersion },
+        eq(boqDocs.id, id),
+      );
+      // version = the freshly bumped version so it never collides with this
+      // doc's approve-history keys (B-085 fix 1; previously only /approve logged).
+      await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
+        {
+          docId: id,
+          version: newVersion,
+          action: "revise",
+          by: reviser?.id ?? null,
+          at: revisedAt,
+          delta: null,
+          note: null,
+        },
+      ]);
+      return updated;
+    });
 
     return reply.code(200).send(await docWireWithTotal(db, updated!));
   });

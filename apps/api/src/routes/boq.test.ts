@@ -88,7 +88,7 @@ function stubDb(opts: StubOpts): Db {
     return builder;
   };
   let seq = 0;
-  return {
+  const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
       values: (values: unknown) => ({
@@ -111,7 +111,12 @@ function stubDb(opts: StubOpts): Db {
         }),
       }),
     }),
-  } as unknown as Db;
+  };
+  // B-097: the transaction door runs its callback against this SAME stub, so
+  // writes inside a tx still capture into inserted/updated/captured (the fake
+  // has no real BEGIN/COMMIT — it proves the door threads one scoped handle).
+  raw.transaction = (cb: (tx: unknown) => unknown) => cb(raw);
+  return raw as unknown as Db;
 }
 
 function paramsOf(where: SQL | undefined): unknown[] {
