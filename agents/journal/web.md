@@ -318,3 +318,8 @@
 - Test 1 money-path 4/4 PASS: PR(1.2M · ผจก.tier)→submit→pending · lower-tier(proc L2)=403 · PM(L3)=approved step2 · PO(1.2M)→approve · partial GR(received/partial/PO-open)
 - **Test 2 B-084 exploit = BLOCKED (fix confirmed independent):** low-tier cut 7.36M PO = **403 ที่ mutation แรก** (require max(tier(cur),tier(new)) authority) · low-tier approve >5M = 403 · negative-floor=400 · amend-pending=409 · 0 variation recorded = exploit ปิดจริง end-to-end
 - merged dev · durable: money-path regression guard + B-084 exploit-closure permanent test
+
+## 2026-07-17 13:36 · qa (orch-B) · PROJECT-STATUS.md durable snapshot
+- agents/orch-b-recon/PROJECT-STATUS.md — full project-wide status (5 audit-lane synth): board 130 tasks · 26/100 screens · 84/186 endpoints · 28 migrations · ~173 function register (BE/FE per item) · tech report (security/perf/dep/i18n/a11y) · deferred/roadmap
+- interactive artifact: claude.ai/code/artifact/9cdd1315 (Wei-requested)
+- read-only reference · orch-B zone · no board touch
