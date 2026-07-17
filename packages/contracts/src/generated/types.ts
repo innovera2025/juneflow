@@ -1681,6 +1681,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/bank/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List bank statements */
+        get: operations["listBankStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bank/statements/{id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** List a bank statement's lines (with auto-match suggestions per unmatched line) */
+        get: operations["listBankStatementLines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bank/lines/{id}/match": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Match a bank statement line to a pv/cheque/rv (manual confirm · action endpoint) */
+        post: operations["matchBankLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bank/cheque": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List cheque register */
+        get: operations["listBankCheque"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/gl/close-period": {
         parameters: {
             query?: never;
@@ -5115,6 +5187,85 @@ export interface operations {
         };
         responses: {
             200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listBankStatements: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listBankStatementLines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    matchBankLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    pv_id?: string;
+                    /** Format: uuid */
+                    cheque_id?: string;
+                    /** Format: uuid */
+                    rv_id?: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listBankCheque: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
             401: components["responses"]["Unauthorized"];
         };
     };
