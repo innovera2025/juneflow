@@ -13,8 +13,8 @@
  * GET /projects (§0 rule 3, FK-as-string -> real id join); phase/block are mock
  * decorations with no real column and collapse into the free-text `scope`.
  *
- * WIRE GAP (reported, not fabricated): the prototype's `owner` (ผู้รับผิดชอบ) and `updated`
- * (อัปเดตล่าสุด) columns have NO source in docWire — boq_doc has no owner column, and
+ * WIRE GAP (reported, not fabricated): the prototype's `owner` (responsible person) and `updated`
+ * (last-updated) columns have NO source in docWire — boq_doc has no owner column, and
  * updatedAt exists on the table but is not exposed on the wire (a contract/api change
  * outside the web zone). The view renders an em-dash placeholder for those two cells; this
  * module never invents values for them.

@@ -15,11 +15,13 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import {
   defectReports,
   grs,
+  grItems,
   pos,
   prItems,
   prs,
   projects,
   wos,
+  vendors,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
@@ -32,6 +34,7 @@ const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const PR = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const PO = "dddddddd-dddd-dddd-dddd-dddddddddddd";
 const WO = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+const VENDOR = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const D = new Date(1_700_000_000_000);
 
 const SESSION = {
@@ -226,6 +229,29 @@ const gr = (
   updatedAt: D,
 });
 
+// A gr_item received line (B-078 / F1).
+const grItem = (
+  id: string,
+  grId: string,
+  ordered: number,
+  received: number,
+  price: string,
+) => ({
+  id,
+  grId,
+  boqItemId: null,
+  name: `line ${id}`,
+  orderedQty: String(ordered),
+  receivedQty: String(received),
+  unit: "ถุง",
+  price,
+  currencyCode: "THB",
+  createdAt: D,
+  updatedAt: D,
+});
+
+const vendorRow = { id: VENDOR, companyId: COMPANY, name: "บจก. รุ่งเรืองก่อสร้าง" };
+
 // ---------------------------------------------------------------------------
 // GET /gr — list (PO + WO chains UNIONed) + tenant scope
 // ---------------------------------------------------------------------------
@@ -237,7 +263,7 @@ describe("GET /api/v1/gr — auth + list", () => {
     expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
   });
 
-  it("returns the B-014 envelope UNIONing PO-anchored + WO-anchored receipts", async () => {
+  it("returns the B-014 envelope UNIONing PO-anchored + WO-anchored receipts with F1 data", async () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -245,6 +271,12 @@ describe("GET /api/v1/gr — auth + list", () => {
           rows: [
             [[grs, pos], [gr("g0", { no: "GR-2026-0148", poId: PO, received: 320 })]],
             [[grs, wos], [gr("g1", { no: "GR-2026-0145", woId: WO, received: 92 })]],
+            // per-line gr_items per anchor chain (money = Σ received × price).
+            [[grItems, pos], [grItem("gi0", "g0", 100, 90, "300.00")]],
+            [[grItems, wos], [grItem("gi1", "g1", 50, 50, "100.00")]],
+            [pos, [poRow("approved")]],
+            [wos, [woRow("approved")]],
+            [vendors, [vendorRow]],
           ],
         }),
       })
@@ -253,17 +285,62 @@ describe("GET /api/v1/gr — auth + list", () => {
     const body = res.json();
     expect(body.total).toBe(2);
     expect(body.page).toBe(1);
-    const [g0, g1] = body.data;
+    const g0 = body.data.find((g: { id: string }) => g.id === "g0");
+    const g1 = body.data.find((g: { id: string }) => g.id === "g1");
     expect(g0.no).toBe("GR-2026-0148");
     expect(g0.po_id).toBe(PO);
     expect(g0.wo_id).toBe(null);
     expect(g0.received).toBe(320);
+    // B-078 (F1): resolved vendor, per-line items, money = 90×300, ordered = 100.
+    expect(g0.vendor).toBe("บจก. รุ่งเรืองก่อสร้าง");
+    expect(g0.ordered_qty).toBe(100);
+    expect(g0.money).toBe(27000);
+    expect(g0.items).toHaveLength(1);
+    expect(g0.items[0].name).toBe("line gi0");
     expect(g1.no).toBe("GR-2026-0145");
     expect(g1.wo_id).toBe(WO);
     expect(g1.po_id).toBe(null);
+    expect(g1.money).toBe(5000); // 50 × 100
     expect(Object.keys(g0).sort()).toEqual(
-      ["id", "no", "photos", "po_id", "received", "rejected", "status", "wo_id"],
+      [
+        "currency_code",
+        "date",
+        "id",
+        "items",
+        "money",
+        "no",
+        "ordered_qty",
+        "photos",
+        "po_id",
+        "received",
+        "rejected",
+        "status",
+        "vendor",
+        "wo_id",
+      ],
     );
+  });
+
+  it("rounds money to 2 dp — no Σ(received × price) float drift (B-085 fix 3)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [[grs, pos], [gr("g0", { no: "GR-DRIFT", poId: PO, received: 3 })]],
+            [[grs, wos], []],
+            // 3 × 0.10 = 0.30000000000000004 in IEEE-754 → must surface as 0.3.
+            [[grItems, pos], [grItem("gi0", "g0", 3, 3, "0.10")]],
+            [[grItems, wos], []],
+            [pos, [poRow("approved")]],
+            [vendors, [vendorRow]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gr" });
+    expect(res.statusCode).toBe(200);
+    const g0 = res.json().data.find((g: { id: string }) => g.id === "g0");
+    expect(g0.money).toBe(0.3);
   });
 
   it("binds company_id on the project root of both scoped reads (no cross-tenant leak)", async () => {
@@ -329,6 +406,88 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect((write!.rows[0] as { status: string }).status).toBe("received");
     expect((write!.rows[0] as { poId: string | null }).poId).toBe(PO);
     expect((write!.rows[0] as { woId: string | null }).woId).toBe(null);
+  });
+
+  it("writes gr_item rows from widened lines carrying a name (B-078 / F1)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]],
+            [grs, [gr("new-0", { poId: PO, received: 90 })]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        no: "GR-2026-0151",
+        lines: [
+          // widened detail line → one gr_item; ordered 100, received (qty_ok) 90.
+          { qty_ok: 90, qty_rejected: 0, name: "ปูนซีเมนต์", ordered_qty: 100, unit: "ถุง", price: 300 },
+          // bare qty-only line → no gr_item (per-line detail honestly absent).
+          { qty_ok: 10, qty_rejected: 0 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const itemWrite = inserted.find((w) => w.table === grItems);
+    expect(itemWrite).toBeTruthy();
+    expect(itemWrite!.rows).toHaveLength(1); // only the named line
+    const row = itemWrite!.rows[0] as {
+      name: string;
+      orderedQty: string;
+      receivedQty: string;
+      price: string;
+    };
+    expect(row.name).toBe("ปูนซีเมนต์");
+    expect(row.orderedQty).toBe("100");
+    expect(row.receivedQty).toBe("90"); // = qty_ok
+    expect(row.price).toBe("300.00");
+  });
+
+  it("400s when the receipt lines carry more than one currency (B-085 fix 4 — one receipt = one currency)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]],
+            [grs, [gr("new-0", { poId: PO, received: 5 })]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [
+          { qty_ok: 3, name: "ปูนซีเมนต์", ordered_qty: 3, unit: "ถุง", price: 300, currency_code: "THB" },
+          { qty_ok: 2, name: "steel", ordered_qty: 2, unit: "ton", price: 400, currency_code: "USD" },
+        ],
+      },
+    });
+    // Fail closed at create — never sum across currencies under one label, and
+    // never persist the receipt (no gr / gr_item writes).
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("currency");
+    expect(inserted.find((w) => w.table === grItems)).toBeFalsy();
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
   });
 
   it("creates a receipt against a WO (201) — wo_id set, po_id null (B-070 GR-from-WO)", async () => {
@@ -601,6 +760,45 @@ describe("POST /api/v1/gr — partial vs full receipt", () => {
     const body = res.json();
     expect(body.received_total).toBe(1000); // 600 + 400, cancelled 999 excluded
     expect(body.partial).toBe(false);
+  });
+
+  it("RETURNED GRs are excluded from the cumulative total — a return-then-re-receive does NOT force-close the PO", async () => {
+    // Regression (handler-verify FIX): a returned receipt must not count toward
+    // ordered qty, else the outstanding balance is stranded. ordered 1000,
+    // a returned 600 + a fresh 600 → only the active 600 counts → still partial.
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]], // ordered 1000
+            [
+              grs,
+              [
+                gr("g-ret", { poId: PO, received: 600, status: "returned" }), // excluded
+                gr("new-0", { poId: PO, received: 600, status: "received" }),
+              ],
+            ],
+          ],
+          updated,
+          updateBase: poRow("approved"),
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, lines: [{ qty_ok: 600 }] },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.received_total).toBe(600); // returned 600 excluded, only active 600
+    expect(body.partial).toBe(true);
+    // PO NOT closed — the outstanding 400 must remain receivable.
+    expect(updated.find((u) => u.table === pos)).toBeUndefined();
   });
 });
 

@@ -1,0 +1,12 @@
+{
+  "_source": "Verbatim strings for pototype/bom.jsx BOMTemplates that have NO dedicated boq.bom* DICT key. Kept in .json (the i18n-guard hook skips .json) so no Thai literal ever sits in the .tsx/.ts source — same pattern as boq-overview-strings.json. Every value is a REAL phrases key (tp), verified present in docs/extract/i18n-full.json phrases bucket (where the Thai phrase IS the key): the 7 table column headers, the 'draft' model badge, and the KPI 'million baht' unit. The boq.bom* DICT keys (t) cover every title/label/template; nav.sec.boq (t) is the first breadcrumb; block.fieldModel / boq.edCardMaterial / boq.bomCatSubcon / boq.edCardLabor / vendor.btnExport / common.edit are reused DICT keys. Nothing is translated anew (PLAN.md 0 rule 2).",
+  "thCat": "หมวด",
+  "thCode": "รหัส",
+  "thItem": "รายการ",
+  "thQty": "จำนวน",
+  "thUnit": "หน่วย",
+  "thPrice": "ราคา/หน่วย",
+  "thTotal": "รวม (฿)",
+  "draft": "ร่าง",
+  "millionBaht": "ล้านบาท"
+}

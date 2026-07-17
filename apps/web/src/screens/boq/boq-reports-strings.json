@@ -1,0 +1,15 @@
+{
+  "_source": "Verbatim strings for pototype/boq.jsx BOQReports (L1637-1852) + boq-extra.jsx BOQReportsExtra (RPT-003/004/005) that do NOT have a dedicated boq.rep* DICT key. Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx/.ts source — same pattern as boq-overview-strings.json. Each value is a REAL phrases key (tp) verified present in docs/extract/i18n-full.json (phrases bucket, where the Thai phrase IS the key). The boq.rep* DICT keys cover the report titles/descriptions/column headers/legends/badges and are used via t(). The report DATA VALUES (per-category money, Non-BOQ over-plan spend, revise before/after snapshots, per-installment actuals, EVM PV/EV/AC time-series) have NO backend aggregate source — there is no /reports endpoint and no source for Non-BOQ / actuals / revise-history — so each report body renders an honest empty-state em-dash and NO number is invented (Juneflow CLAUDE.md C10 · PLAN.md §0 rule 4). The prototype's mock row labels (revise reasons · installment descriptions) also have no i18n key, which is why the rows are not reproduced.",
+  "scopeProject": "โครงการ",
+  "scopePhase": "เฟส",
+  "scopePeriod": "ช่วงเวลา",
+  "scopeCategory": "หมวด",
+  "allLabel": "ทั้งหมด",
+  "allCategory": "ทุกหมวด",
+  "thWorkGroup": "หมวดงาน",
+  "thReason": "เหตุผล",
+  "thApprover": "ผู้อนุมัติ",
+  "thDate": "วันที่",
+  "thWorkPeriod": "งวดงาน",
+  "thTotal": "รวม"
+}

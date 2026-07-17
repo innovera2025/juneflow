@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { models, projectNodes, boms } from "@juneflow/db";
+import { models, projectNodes, boms, users, roles } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -134,6 +134,21 @@ const modelRow = (
 const A1 = modelRow("m-a1", "A-1", "บ้านเดี่ยว 2 ชั้น", "168.00", "8240000.00", "active", "#0B2A4A", 4, 4, 2);
 const B1 = modelRow("m-b1", "B-1", "ทาวน์โฮม 2 ชั้น", "92.00", "4850000.00", "active", "#0F766E", 3, 2, 1);
 
+// B-084 (matrix GAP-8): creating a model is master-data administration, now
+// gated on master.create (F1 consistency with /users + /roles). The caller's
+// role carries it; the session email resolves to this scoped user.
+const masterRole = {
+  id: "role-admin", companyId: COMPANY, name: "Admin", approvalLimits: {},
+  perms: { master: { view: true, create: true, edit: true, approve: true, cancel: true } },
+  approvalLevel: 4, approvalLimit: null, currencyCode: "THB",
+  createdAt: new Date(), updatedAt: new Date(),
+};
+const callerUser = {
+  id: "u-caller", companyId: COMPANY, email: SESSION.user.email, name: "สมชาย",
+  roleId: "role-admin", status: "active", department: null,
+  createdAt: new Date(), updatedAt: new Date(),
+};
+
 // project_node: 3 unit-kind nodes on B-1, 1 block-kind on B-1 (must NOT count),
 // 1 unit with no model (skipped) → unit_count(B-1)=3, unit_count(A-1)=0.
 const unitNode = (id: string, modelId: string | null) => ({
@@ -239,7 +254,7 @@ describe("POST /api/v1/models — create starts draft, palette color, unique cod
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb([[models, [A1, B1]]], [], inserted),
+        db: stubDb([[models, [A1, B1]], [users, [callerUser]], [roles, [masterRole]]], [], inserted),
       })
     ).inject({
       method: "POST",
@@ -266,7 +281,7 @@ describe("POST /api/v1/models — create starts draft, palette color, unique cod
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb([[models, [A1, B1]]]),
+        db: stubDb([[models, [A1, B1]], [users, [callerUser]], [roles, [masterRole]]]),
       })
     ).inject({
       method: "POST",
@@ -279,7 +294,10 @@ describe("POST /api/v1/models — create starts draft, palette color, unique cod
 
   it("400s on missing code / type / bad area", async () => {
     const build = async () =>
-      buildTestApp({ resolveTenant: async () => SESSION, db: stubDb([[models, []]]) });
+      buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[models, []], [users, [callerUser]], [roles, [masterRole]]]),
+      });
 
     const noCode = await (await build()).inject({ method: "POST", url: "/api/v1/models", payload: { type: "x", area: "10" } });
     expect(noCode.statusCode).toBe(400);
@@ -291,5 +309,87 @@ describe("POST /api/v1/models — create starts draft, palette color, unique cod
 
     const badArea = await (await build()).inject({ method: "POST", url: "/api/v1/models", payload: { code: "Z-1", type: "x", area: "0" } });
     expect(badArea.statusCode).toBe(400);
+  });
+
+  it("403s a caller whose role lacks master.create (B-084 GAP-8 F1 consistency)", async () => {
+    const lowRole = { ...masterRole, id: "role-low", perms: { boq: { view: true, create: true, edit: false, approve: false, cancel: false } } };
+    const lowUser = { ...callerUser, roleId: "role-low" };
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[models, []], [users, [lowUser]], [roles, [lowRole]]]),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/models",
+      payload: { code: "Z-9", type: "x", area: "100" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /models/:id/bom — the BOM template lines (boq.bom / F5)
+// ---------------------------------------------------------------------------
+
+const bomRow = (unitType: string, items: unknown[]) => ({
+  id: `bom-${unitType}`,
+  companyId: COMPANY,
+  unitType,
+  items,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+});
+
+describe("GET /api/v1/models/:id/bom", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/models/m-b1/bom" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+
+  it("returns the model's BOM template lines (keyed by unit_type = code)", async () => {
+    const lines = [
+      { cat: "M", code: "01-001", name: "เสาเข็มเจาะ", unit: "ต้น", qty: 18, price: 4200 },
+      { cat: "M", code: "02-002", name: "คอนกรีตผสมเสร็จ", unit: "ลบ.ม.", qty: 42, price: 2150 },
+    ];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([
+          [models, [B1]],
+          [boms, [bomRow("B-1", lines)]],
+        ]),
+      })
+    ).inject({ url: "/api/v1/models/m-b1/bom" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(2);
+    expect(body.page).toBe(1);
+    expect(body.data).toEqual(lines);
+  });
+
+  it("returns an empty list honestly when the model has no matching BOM", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[models, [A1]], [boms, []]]),
+      })
+    ).inject({ url: "/api/v1/models/m-a1/bom" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(0);
+    expect(res.json().data).toEqual([]);
+  });
+
+  it("404s for a model not in this tenant (foreign / absent id)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[models, []]]),
+      })
+    ).inject({ url: "/api/v1/models/nope/bom" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("NOT_FOUND");
   });
 });

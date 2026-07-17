@@ -33,12 +33,61 @@ const INVALID_CREDENTIALS = {
   message: "Invalid email or password",
 } as const;
 
+// F4 (B-082): the public login endpoint had NO throttle — credential
+// brute-force / password-spraying was unbounded. A minimal fixed-window per-IP
+// limiter caps attempts without a new dependency. The window is generous enough
+// that a real user (who logs in rarely) is never affected, but a spray from one
+// source is cut off. State is per route-registration (per app instance), so it
+// resets between tests and never leaks across processes.
+const LOGIN_WINDOW_MS = 60_000;
+const LOGIN_MAX_ATTEMPTS = 10;
+
+interface AttemptWindow {
+  count: number;
+  resetAt: number;
+}
+
+/** Fixed-window per-IP counter; true once the window's attempt cap is exceeded. */
+function loginRateLimited(
+  windows: Map<string, AttemptWindow>,
+  ip: string,
+  now: number,
+): boolean {
+  const current = windows.get(ip);
+  if (!current || now >= current.resetAt) {
+    // Opportunistically drop expired windows so the map stays bounded even
+    // under IP-spraying (many distinct sources).
+    if (windows.size > 10_000) {
+      for (const [key, w] of windows) if (now >= w.resetAt) windows.delete(key);
+    }
+    windows.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    return false;
+  }
+  current.count += 1;
+  return current.count > LOGIN_MAX_ATTEMPTS;
+}
+
 /** Register POST /auth/login on the given (already /api/v1-prefixed) scope. */
 export async function registerAuthRoutes(
   app: FastifyInstance,
   options: AuthRouteOptions,
 ): Promise<void> {
+  // Per-app login attempt windows, keyed by client IP (F4).
+  const loginWindows = new Map<string, AttemptWindow>();
+
   app.post("/auth/login", async (request, reply) => {
+    // F4: throttle brute-force before touching the credential seam.
+    const ip = request.ip || "unknown";
+    if (loginRateLimited(loginWindows, ip, Date.now())) {
+      return reply
+        .code(429)
+        .header("retry-after", String(Math.ceil(LOGIN_WINDOW_MS / 1000)))
+        .send({
+          code: "RATE_LIMITED",
+          message: "Too many login attempts, please try again later",
+        });
+    }
+
     const body = request.body as
       | { email?: unknown; password?: unknown }
       | null

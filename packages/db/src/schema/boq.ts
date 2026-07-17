@@ -20,6 +20,7 @@ import {
   pgEnum,
   pgTable,
   index,
+  uniqueIndex,
   text,
   uuid,
   integer,
@@ -28,8 +29,9 @@ import {
   date,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { companies } from "./platform.js";
+import { companies, users } from "./platform.js";
 import { projects, costCenters, vendors } from "./project.js";
+import { subconContracts } from "./subcon.js";
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -107,13 +109,71 @@ export const boqDocs = pgTable("boq_doc", {
   scope: text("scope"),
   version: integer("version").notNull().default(1),
   status: boqDocStatus("status").notNull().default("draft"),
+  // B-081 (F4, migration 0021): the archive approver + approval timestamp. The
+  // audit_log cannot source these (its `entity` is a route template with no
+  // resolved id — recon), so the approve handler writes them directly here.
+  // Nullable — only set once a doc is approved. approvedBy -> users.
+  approvedBy: uuid("approved_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "date" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 FK-index migration (perf-audit §2.3): boq_doc is scoped THROUGH
+  // project_id (every selectThrough door hop) — with no index that JOIN is a
+  // seq-scan. The (project_id,status) composite serves the pending counts /
+  // dashboard-inbox filtered scans; the archive approver FK (approved_by) is a
+  // plain lookup key.
+  index("boq_doc_project_idx").on(t.projectId),
+  index("boq_doc_project_status_idx").on(t.projectId, t.status),
+  index("boq_doc_approved_by_idx").on(t.approvedBy),
+]);
+
+/**
+ * BOQVersionHistory — the Revise history of a BOQDoc (B-081 / F4, migration
+ * 0021). boq.jsx ARCHIVE[].history[] shows each version's approve/revise event
+ * with who did it, when, the value delta, and a note. This table persists that
+ * log so the archive screen's Revise-history expander + version-diff read from
+ * real rows. `delta` is stored as text (the mock's signed value string). `by` ->
+ * users (nullable — a system-generated entry has no user).
+ */
+export const boqVersionHistory = pgTable("boq_version_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  docId: uuid("doc_id")
+    .notNull()
+    .references(() => boqDocs.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(0),
+  action: text("action"),
+  by: uuid("by").references(() => users.id, { onDelete: "set null" }),
+  at: timestamp("at", { withTimezone: true, mode: "date" }),
+  delta: text("delta"),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  // 0024 (perf-audit §2.4): the version-history rows of a doc are read/written
+  // by doc_id (the Revise-history expander) — index the FK.
+  index("boq_version_history_doc_idx").on(t.docId),
+  // 0025 (B-085 fix 2 — TOCTOU): /boq/{id}/approve reads status=pending then
+  // writes an approve-history row; two concurrent approves could pass the
+  // read-then-write pending guard and double-insert. This DB-level UNIQUE on
+  // (doc_id, version, action) makes the second insert fail at the database, not
+  // silently double-write. Legitimate rows never collide: approve stamps
+  // doc.version, revise stamps the freshly bumped version+1, and the state
+  // machine only reaches approve once per version — so every (doc,version,action)
+  // key is distinct across the submit→approve→revise cycle.
+  uniqueIndex("boq_version_history_doc_version_action_uq").on(
+    t.docId,
+    t.version,
+    t.action,
+  ),
+]);
 
 /**
  * BOQGroup — a heading / cost category inside a BOQDoc (data-dictionary
@@ -132,7 +192,10 @@ export const boqGroups = pgTable("boq_group", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): boq_group → boq_doc is a selectThrough hop.
+  index("boq_group_boq_idx").on(t.boqId),
+]);
 
 /**
  * BOQItem — a priced line inside a BOQGroup. remain_qty is cut when a PR opens
@@ -149,6 +212,10 @@ export const boqItems = pgTable("boq_item", {
     .references(() => boqGroups.id, { onDelete: "cascade" }),
   code: text("code").notNull(),
   name: text("name").notNull(),
+  // Gap-5 (migration 0023): the boq.editor line-detail note (boq.jsx
+  // INITIAL_ROWS_BY_GROUP[].detail — e.g. "ขนาด 50 kg/ถุง · ตามมอก. 15-2562").
+  // Nullable free text; the editor shows it under the item name.
+  detail: text("detail"),
   cat: boqItemCat("cat").notNull(),
   qty: numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
   unit: text("unit"),
@@ -165,7 +232,11 @@ export const boqItems = pgTable("boq_item", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): boq_item → boq_group is a selectThrough hop
+  // and the hottest one (BOQ_ITEM_HOPS price-map + cut-remain).
+  index("boq_item_group_idx").on(t.groupId),
+]);
 
 /**
  * CBSBudget — budget control per BOQGroup + over-budget warning
@@ -189,7 +260,11 @@ export const cbsBudgets = pgTable("cbs_budget", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): cbs_budget → boq_group is a selectThrough
+  // hop (per-group CBS available = budget−used−committed).
+  index("cbs_budget_group_idx").on(t.groupId),
+]);
 
 /**
  * PR — purchase requisition against a project, with N lines pulled from BOQ
@@ -207,13 +282,37 @@ export const prs = pgTable("pr", {
   needDate: date("need_date"),
   status: text("status").notNull().default("draft"),
   approvalStep: integer("approval_step").notNull().default(0),
+  // Gap-2 (migration 0022): pr-list.jsx display fields that were genuinely absent
+  // from the schema (the list row shows title/vendor/requester/phase + submit/
+  // approve timestamps). vendor_id -> vendor, requester_id -> users (both
+  // nullable — expense/advance PRs carry no vendor, and a mock requester with no
+  // seeded user stays null). submitted_at/approved_at are null until the PR
+  // reaches that state.
+  title: text("title"),
+  vendorId: uuid("vendor_id").references(() => vendors.id, {
+    onDelete: "set null",
+  }),
+  requesterId: uuid("requester_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  phase: text("phase"),
+  submittedAt: timestamp("submitted_at", { withTimezone: true, mode: "date" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true, mode: "date" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): pr → project is a selectThrough hop; the
+  // (project_id,status) composite serves the pending-PR counts/inbox scans.
+  // vendor_id / requester_id (Gap-2, migration 0022) are display-JOIN FKs.
+  index("pr_project_idx").on(t.projectId),
+  index("pr_project_status_idx").on(t.projectId, t.status),
+  index("pr_vendor_idx").on(t.vendorId),
+  index("pr_requester_idx").on(t.requesterId),
+]);
 
 /**
  * PRItem — a PR line referencing the source BOQItem (erd.html "PR + Items ->
@@ -234,7 +333,12 @@ export const prItems = pgTable("pr_item", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): pr_item is read by pr_id (PR detail lines)
+  // and joined back to its source boq_item (the pricing map).
+  index("pr_item_pr_idx").on(t.prId),
+  index("pr_item_boq_item_idx").on(t.boqItemId),
+]);
 
 /**
  * PO — a material purchase order raised from an approved PR
@@ -265,7 +369,12 @@ export const pos = pgTable("po", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): po → pr is a selectThrough hop; the
+  // (pr_id,status) composite serves the pending-PO counts scans.
+  index("po_pr_idx").on(t.prId),
+  index("po_pr_status_idx").on(t.prId, t.status),
+]);
 
 /**
  * WO — a subcon work order, the PO counterpart raised for subcon work
@@ -285,6 +394,13 @@ export const wos = pgTable("wo", {
   vendorId: uuid("vendor_id")
     .notNull()
     .references(() => vendors.id, { onDelete: "restrict" }),
+  // B-080 (F3, migration 0020): link a WO to its subcon contract so the WO reuses
+  // the existing SubconContract -> WorkPeriod installment model (subcon.ts)
+  // instead of duplicating a per-installment table. Nullable — a WO without a
+  // matching contract (no shared subcon vendor) leaves it null.
+  contractId: uuid("contract_id").references(() => subconContracts.id, {
+    onDelete: "set null",
+  }),
   no: text("no"),
   value: numeric("value", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
@@ -299,7 +415,14 @@ export const wos = pgTable("wo", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): wo → pr is a selectThrough hop; the
+  // (pr_id,status) composite serves pending-WO scans. contract_id (B-080,
+  // migration 0020) joins the WO to its subcon contract's installment model.
+  index("wo_pr_idx").on(t.prId),
+  index("wo_pr_status_idx").on(t.prId, t.status),
+  index("wo_contract_idx").on(t.contractId),
+]);
 
 /**
  * VariationOrder — an add/cut amendment attached to a PO
@@ -321,7 +444,10 @@ export const variationOrders = pgTable("variation_order", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): variation_order → po JOIN key.
+  index("variation_order_po_idx").on(t.poId),
+]);
 
 /**
  * GR — goods receipt against a PO (material) OR a WO (subcon work; B-070
@@ -364,7 +490,56 @@ export const grs = pgTable("gr", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 1): a GR anchors on EITHER a PO or a WO — both
+  // FKs are selectThrough hops (findGr walks the po chain then the wo chain).
+  index("gr_po_idx").on(t.poId),
+  index("gr_wo_idx").on(t.woId),
+]);
+
+/**
+ * GRItem — a per-line detail row of a GR (B-078 / F1, migration 0018). The `gr`
+ * table keeps only the aggregate received/rejected total; the prototype detail
+ * panel (gr.jsx "รายการที่รับ") shows each received line with its
+ * ordered/received quantity + unit. This child table captures that per-line
+ * fidelity so a GR detail view renders real line rows instead of an aggregate.
+ *
+ * `boq_item_id` links a received line back to the source BOQ item where the line
+ * name resolves to a seeded item (nullable — free-text / non-BOQ receipts leave
+ * it null). `price` is money -> currency_code (the line's unit price; derived
+ * from the linked boq_item at seed time — the prototype detail array carries no
+ * per-line price of its own).
+ */
+export const grItems = pgTable("gr_item", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  grId: uuid("gr_id")
+    .notNull()
+    .references(() => grs.id, { onDelete: "cascade" }),
+  boqItemId: uuid("boq_item_id").references(() => boqItems.id, {
+    onDelete: "set null",
+  }),
+  name: text("name").notNull(),
+  orderedQty: numeric("ordered_qty", { precision: 18, scale: 4 })
+    .notNull()
+    .default("0"),
+  receivedQty: numeric("received_qty", { precision: 18, scale: 4 })
+    .notNull()
+    .default("0"),
+  unit: text("unit"),
+  price: numeric("price", { precision: 16, scale: 2 }).notNull().default("0"),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2 + task): gr_item is read by gr_id (GR detail
+  // lines) and joined back to its source boq_item.
+  index("gr_item_gr_idx").on(t.grId),
+  index("gr_item_boq_item_idx").on(t.boqItemId),
+]);
 
 /**
  * DefectReport — generated from a GR rejection (data-dictionary). Distinct from
@@ -382,4 +557,7 @@ export const defectReports = pgTable("defect_report", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0024 (perf-audit §2.3 Tier 2): defect_report → gr JOIN key.
+  index("defect_report_gr_idx").on(t.grId),
+]);

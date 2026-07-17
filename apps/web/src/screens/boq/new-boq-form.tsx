@@ -1,5 +1,5 @@
 /*
- * NewBOQForm — the "สร้าง BOQ ใหม่" modal body, ported 1:1 from pototype/boq-list.jsx
+ * NewBOQForm — the "create new BOQ" modal body, ported 1:1 from pototype/boq-list.jsx
  * NewBOQForm (L226-386) + the inline Excel dropzone (ExcelImportInline L389-454). Opened by
  * BOQList via ctx.openModal (size "xl").
  *

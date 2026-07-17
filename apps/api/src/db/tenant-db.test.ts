@@ -470,6 +470,117 @@ describe("updateThroughChain is the fail-closed UPDATE door for MULTI-HOP child 
   });
 });
 
+describe("updateThroughChainMany is the fail-closed BULK per-row UPDATE door (0024 perf)", () => {
+  // Same deepest chain as updateThroughChain: boq_item → boq_group → boq_doc →
+  // project. This door writes a DISTINCT value per id in ONE statement.
+  const ITEM_HOPS = [
+    { fk: boqItems.groupId, parent: boqGroups },
+    { fk: boqGroups.boqId, parent: boqDocs },
+    { fk: boqDocs.projectId, parent: projects },
+  ];
+
+  function fakeDb(
+    scopedRows: unknown[],
+    sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> },
+  ): Db {
+    const builder = {
+      $dynamic: () => builder,
+      innerJoin: () => builder,
+      where: (where: SQL) => {
+        sink.selWhere = where;
+        return Promise.resolve(scopedRows);
+      },
+    };
+    return {
+      select: () => ({ from: () => builder }),
+      update: () => ({
+        set: (set: Record<string, unknown>) => ({
+          where: (where: SQL) => ({
+            returning: () => {
+              sink.set = set;
+              sink.setWhere = where;
+              return Promise.resolve(scopedRows.map((r) => ({ ...(r as object) })));
+            },
+          }),
+        }),
+      }),
+    } as unknown as Db;
+  }
+
+  it("resolves ownership once (company_id anchored) then writes every id in ONE CASE update", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([{ id: "it-1" }, { id: "it-2" }], sink), COMPANY);
+    const rows = await t.updateThroughChainMany(
+      boqItems,
+      ITEM_HOPS,
+      boqItems.remainQty,
+      new Map([
+        ["it-1", "5"],
+        ["it-2", "3"],
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+    // Ownership resolution is anchored on company_id (via the project root).
+    expect(new PgDialect().sqlToQuery(sink.selWhere!).params).toContain(COMPANY);
+    // ONE update whose SET remain_qty is a CASE binding each id + its own value.
+    const caseParams = new PgDialect().sqlToQuery(sink.set!.remainQty as SQL).params;
+    expect(caseParams).toEqual(expect.arrayContaining(["it-1", "5", "it-2", "3"]));
+    // The UPDATE is scoped by id IN (<the RESOLVED scoped ids>).
+    const whereParams = new PgDialect().sqlToQuery(sink.setWhere!).params;
+    expect(whereParams).toEqual(expect.arrayContaining(["it-1", "it-2"]));
+  });
+
+  it("drops an id the hop chain did NOT resolve (a foreign id is never written)", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    // Caller asks to update it-1 (owned) + evil (not owned); selectThrough only
+    // resolves it-1 → the CASE and WHERE bind it-1 alone, evil is silently dropped.
+    const t = new TenantDb(fakeDb([{ id: "it-1" }], sink), COMPANY);
+    await t.updateThroughChainMany(
+      boqItems,
+      ITEM_HOPS,
+      boqItems.remainQty,
+      new Map([
+        ["it-1", "5"],
+        ["evil", "999"],
+      ]),
+    );
+    const caseParams = new PgDialect().sqlToQuery(sink.set!.remainQty as SQL).params;
+    expect(caseParams).toContain("it-1");
+    expect(caseParams).not.toContain("evil");
+    expect(caseParams).not.toContain("999");
+    const whereParams = new PgDialect().sqlToQuery(sink.setWhere!).params;
+    expect(whereParams).toContain("it-1");
+    expect(whereParams).not.toContain("evil");
+  });
+
+  it("issues NO query for an empty values map (returns [], not even the resolve)", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([{ id: "it-1" }], sink), COMPANY);
+    const rows = await t.updateThroughChainMany(
+      boqItems,
+      ITEM_HOPS,
+      boqItems.remainQty,
+      new Map(),
+    );
+    expect(rows).toEqual([]);
+    expect(sink.selWhere).toBeUndefined();
+    expect(sink.set).toBeUndefined();
+  });
+
+  it("updates NOTHING (returns []) when the hop chain resolves no tenant-owned rows", async () => {
+    const sink: { selWhere?: SQL; setWhere?: SQL; set?: Record<string, unknown> } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+    const rows = await t.updateThroughChainMany(
+      boqItems,
+      ITEM_HOPS,
+      boqItems.remainQty,
+      new Map([["foreign", "0"]]),
+    );
+    expect(rows).toEqual([]);
+    expect(sink.set).toBeUndefined(); // no UPDATE issued at all
+  });
+});
+
 describe("delete is always company_id-scoped", () => {
   it("scopes the WHERE by company_id", () => {
     const { sql, params } = tdb.delete(users).toSQL();

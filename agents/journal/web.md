@@ -269,3 +269,46 @@
   - **empty/loading state**: skeleton loading = token blocks (mirror master-company) · empty-state = empty tbody (mirror master-model empty grid · **ไม่ invent copy** — ไม่มี cc.* key สำหรับ empty message). th()/td() style helper port verbatim ds.jsx L214-220 (local ในจอ · ไม่มี shared).
   - **i18n key ล้วน**: header cc.thCode/fldName/fldType/thLink/thOwner/thBudget + common.status (t) · form cc.fldCode/phCode/errCodeRequired/fldType/optProject/optOverhead/optDept/fldName/phName/errNameRequired/fldLink/phLink/fldOwner/phOwner/fldBudget/errBudgetNumber/errCodeDup + common.cancel (t) · modal cc.modalTitle/modalSubtitle · title/subtitle/addBtn cc.title/subtitle/addBtn (t) · toast cc.toastAdd.replace('{code}') · tn navTitle `Cost Center`(nav_i18n) + tp statusDraft `ร่าง`/statusApproved `อนุมัติแล้ว` ผ่าน `cc-strings.json` (i18n-guard skip .json) · **B-068 3 key resolve แล้ว** (planning verify · grep-confirm ทุก key ∈ dict/nav_i18n/phrases) · 0 hardcode ไทย (code+comment English · link/owner default `—` em-dash = language-neutral · precedent org-add-form/role-matrix).
 - เจออะไร: **CI (agent):** typecheck 0 ✓ · vite build **242 modules** ✓ · **web unit 122/122 (13 files)** (+9 cc-rows: toCostCenterRow narrow+defaults+camelCase+numeric-string · typeBadgeTone Project/Overhead/Dept/other · statusTone approved/draft/pending-fallback · formatMoney 1e6→"1,000,000"/84.4M/800k/0/round/neg/NaN/Inf) ✓. **G5 + gate-4.5 = pending-orch** (ref `tests/visual/reference/gallery/g2/34-s.jpg` · loaded table 7 rows · no edit column). verify: route id `master.cc` ∈ registry.ts:178 + NAV-ROUTES L102 (component MasterCC) · contract `/cost-centers` GET(EntityList)+POST(Entity→EntityCreated) openapi.yaml:847. git: commit บน feature/web · **ไม่ merge เอง · orchestrator merge**.
+
+## 2026-07-16 20:45 · qa (orch-B) · LIVE-G5 QA PASS — 10 ported screens · 9 PASS / 1 FAIL
+- ทำอะไร: live compose (POSTGRES_PORT=5433 · rebuild stale api) + vite dev + Playwright 1600x1000 เทียบ gallery จริง (pixel · B-048 content-region) บนจอ merged ทั้งหมด (qa worktree synced dev 8361a93) — ปิด owed live-G5 debt (ก่อนหน้า structural-G5 เท่านั้น)
+- ผล: **9 PASS live-G5 debt CLEARED** = boq.list(g1/08) · master.company(g2/28) · project(g2/32) · ptype(g2/29) · cc(g2/34) · model(g2/33) · docnum(g2/35) · vendor(g2/30) · users(g2/36) — deltas = seed data + shell chrome adjudicated (B-044/047/048) · pixel-sample ยืนยัน token mapping ตรง (project tile --info/--accent · navy)
+- **1 FAIL: gr.list(g1/18)** = data-wire ไม่ครบ (GET /gr subset) → B-074 (orch-A/backend zone · ไม่แก้ = QA zone)
+- flags: GET /api/v1/notifications 404 (bell · backend gap) · derived-field em-dash (boq ผู้รับผิดชอบ/อัปเดต · model BOM/ยูนิต · vendor ยอดซื้อ = honest-empty backend ไม่คืน)
+- git: qa worktree clean · stack down · ไม่แตะ screen code · ไม่ commit code
+
+## 2026-07-16 21:34 · qa (orch-B) · LIVE-G5 QA ROUND 2 — 5 procurement screens · 0 regression · systemic data-wire finding
+- ทำอะไร: live compose (5433) + pixel เทียบ gallery จริง บน 5 จอ merged ใหม่ (qa worktree synced dev) — boq.overview(g1/07) · boq.editor(g1/11) · po.list(g1/16) · pr.list(g1/15) · wo.list(g1/17)
+- ผล: **0 PASS · 5 FAIL(data-wire) · 0 FAIL(regression)** — ports orch-A สะอาดเชิงโครงสร้างทุกจอ (layout/token/label/column-order/position ตรง ref หมด) · FAIL = honest em-dash จาก field ที่ backend ไม่คืน (แบบ gr.list/B-074)
+- **SYSTEMIC insight (key): root cause = SCHEMA-level ไม่ใช่ wire-projection.** route wire คืน column จริงของ table ครบแล้ว — field ที่ ref ต้องการ = **column/line-table ที่ไม่มีใน schema** → extend GET เฉยๆ คืน null · ต้อง add column/table + seed ก่อน. per-endpoint gap:
+  - GET /pr: ขาด requester/title/phase/doc_date/budget%/approval-timestamps/urgent (pr_item SEEDED ✓ · amount จริง · gap = doc-level columns)
+  - GET /po: **ไม่มี po_item line-table** + ขาด deposit/paid/GR%/doc_date/installment-schedule/closed
+  - GET /wo: **ไม่มี wo installment table** (งวดงาน) + ขาด scope/progress/doc_date/variation/warranty (retention wired ✓)
+  - GET /gr (B-074): **ไม่มี gr_item + money column** + vendor ไม่ join + ขาด date/ordered-qty/status-label
+  - GET /boq/items: ขาด `detail` column (รายละเอียด) · waterfall GR-bar inherit gr money gap
+  - recommendation: **1 backend task** = migration (add columns + po_item/wo-installment/gr_item tables + boq_item.detail) + seed FLOW-A + extend GET → re-run live-G5 → 6 จอ PASS. **hand เข้า orch-A data-completeness packet** (ไม่ file blocker ซ้ำ · B-074/075 มีแล้ว)
+- **pr.list DESIGN flag (แยกจาก data-wire):** ref g1/15 = 4 filter pills (โครงการ/ช่วงเวลา/ประเภท/วงเงิน) · port = 2 (โครงการ/ประเภท · pr-list.tsx L451-452 ตัด period/amount เป็น decorative). period ไม่มี wire source (data-wire) แต่ **วงเงิน/amount อยู่บน wire จริง** → droppable-but-implementable · §0 กฎ 1 (visual 100%) vs กฎ 3 (ไม่ลอก mock) → Wei adjudicate (เข้า packet)
+- git: qa worktree clean · stack down · ไม่แตะ screen code
+
+## 2026-07-16 22:25 · qa (orch-B) · LIVE-G5 QA ROUND 3 — 5 boq-flow screens · 0 regression
+- ทำอะไร: live compose (5433) + pixel เทียบ gallery จริง บน 5 จอ boq-flow (qa worktree synced dev 1a5b4bf) — boq.bom(g1/10) · boq.approval(g1/12) · boq.archive(g1/13) · boq.reports(g1/14) · boq.aiqto(g1/09)
+- ผล: **1 PASS · 4 FAIL(data-wire) · 0 FAIL(regression)** — boq.aiqto PASS (static demo) · ที่เหลือ faithful โครงสร้างครบ (column/token/label/stepper/tabs ตรง ref) แต่ em-dash จาก backend gap
+- **cumulative round 1-3 = ~20 จอ Phase-2 · 0 regression เลย** → ports orch-A สะอาดเชิงโครงสร้างทุกจอ · verify lane ปิดรอบ wave นี้
+- **gaps ใหม่เข้า FLOW-A packet:**
+  - boq.bom → **MISSING ENDPOINT + line-table**: /models คืน bom_item_count scalar เท่านั้น (B-1=17) · ไม่มี endpoint คืน bom line rows → table + 4 KPI (ต้นทุน/หลัง·Mat/Sub/Lab%) em-dash. ต้อง GET /models/:id/bom-items + aggregates
+  - boq.approval → **MISSING ENDPOINT (version-diff read model)**: POST approve wired แต่ read side ไม่มี (line diff ค่าเดิม/ค่าใหม่ · เพิ่ม/ลด counts · net-diff · prev-version total) · seed มีแค่ 1 pending v1/ใหม่ (ไม่มี prior version) → feature demonstrate ไม่ได้. ต้อง version-diff endpoint + seed v2+ pending
+  - boq.archive → **MISSING COLUMNS + line-table**: GET /boq ขาด last-approver/approved-at/attachment-count/revise-count → em-dash · + ไม่มี revise-history (v1→vN timeline row-expand). มูลค่า=0 (boq_item sparse)
+  - boq.reports → **WHOLE MISSING BACKEND FEATURE**: ไม่ call reports endpoint เลย (structural shell + honest empty per orch-A) · ต้อง reports-aggregation service (RPT-001 BOQ-vs-NonBOQ · RPT-002 revise-history · RPT-003 cost-type breakdown)
+- **methodology gotcha (บันทึกไว้ live-G5 รอบหน้า):** launch vite ด้วย `VITE_API_BASE_URL=` (empty) ไม่ override client `?? "/api/v1"` → base "" → fetch miss proxy = false empty. ต้อง temp proxy `/api`→:3000 + ไม่ set env เปล่า
+- git: qa worktree clean · stack down · ไม่แตะ screen code
+
+## 2026-07-17 01:25 · qa (orch-B) · LIVE-G5 ROUND 4 (real-data) + B-084 mutation-authz matrix
+- **round 4:** 5 PASS · 8 FAIL(data-wire) · 0 regression (12 FLOW-A + dashboard). **KEY: backend data-completeness สำเร็จ (API คืน field จริง verify curl) แต่ web ไม่ re-wire** → 8 จอ (gr/po/pr/wo.list · boq.list/bom/archive/reports) ยัง hardcode DASH → web re-wire task (orch-A · rows opaque Entity ไม่ต้องแก้ contract). PASS: boq.overview/editor/approval/aiqto + **dashboard real body**. B-083 = acceptable (approver=user:1 วิภา Director-role · ชื่อต่างจาก mock = honest). dashboard manifest unmask done.
+- **B-084 mutation-authz matrix** (`agents/orch-b-recon/b084-mutation-authz-matrix.md`): 27 mutation → 7 gated · 12 status-only · **8 UNGATED**. CRITICAL = POST /po/:id/variation-order (po.ts:416 · no authz+no status · tier-downgrade approval-bypass weaponize ladder · survives F1) · HIGH generate-pr · models/cc ไม่ gate master.create. Wei-gated (authz model ruling) · report+exploit only.
+- git: unmask merged dev · reports committed · ไม่แตะ screen code
+
+## 2026-07-17 01:42 · qa (orch-B) · CONTRACT-LIVE expansion (Lane 1) + drift-sweep gate (Lane 2)
+- Lane 1: tests/contract/live.spec.ts +14 READ endpoints schema-validated (getPo/getWo/getBoq/getPr + /projects/id/hierarchy + /models/id/bom + 7 dashboard + notifications) ALL PASS · /projects/id skip(404 declared-not-mounted)
+- Lane 2: tests/contract/drift.spec.ts NEW static gate — mounted-but-undeclared=**0 (B-086 class CLEAN)** · 105 declared-but-unmounted warned(scaffolding backlog · informational) · parser-floor guard กัน vacuous-pass
+- verified: static 452/84 · live 535/1 · 0 schema-drift FAIL (FLOW-A read surface contract-clean) · merged dev
+- durable: contract regression gate โตตามทุก backend wave · B-086 failure-class ปิดถาวร

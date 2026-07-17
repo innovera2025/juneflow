@@ -14,11 +14,16 @@
 - **P0-QA-03 (re-scope B-034):** `smoke.spec.ts` = **reachability smoke จริงบน compose dev** ผ่าน G4 —
   web GET `/` = 200 + Playwright โหลด document ได้ · api `/health` = 200 `{ ok: true }`
   (surface จาก `infra/docker-compose.yml`: web `$WEB_PORT`/5173 · api `$API_PORT`/3000)
-- **TODO Phase 1 (P0-WEB-05 / B-020):** smoke "login → shell load" เต็มตาม `extra-screens.jsx` (`ScreenLogin`)
-  + app shell + state machine ใน `docs/handoff/flows.html` — ลงเป็น `test.fixme` (todo ที่ยังไม่รัน)
-  เพราะ apps/web ยัง render แค่ `Placeholder` (ไม่มี login form/shell) · **ห้าม fabricate flow ที่ยังไม่มีจอ** (PLAN §0 กฎ 1+4)
-- config: `playwright.config.ts` — base URL ชี้ dev stack ผ่าน env `E2E_BASE_URL` · api ผ่าน `E2E_API_URL`
-- รัน: `pnpm --filter @juneflow/tests test:e2e` (ต้องมี compose dev up)
+- **DONE — login → shell load (real G4):** `smoke.spec.ts` ขับ flow จริงตาม `extra-screens.jsx` (`ScreenLogin`)
+  + app shell — (1) credential ว่าง → error `login.errRequired` + ไม่ navigate · (2) seed user
+  `somchai@rungrueang.co.th` / `juneflow-dev` → bearer-JWT จริง → shell render (aside + nav + header +
+  ชื่อจาก GET /me) · selector = i18n key ที่ Thai-ทุกภาษา (B-035/B-036) + โครงสร้าง ไม่ผูก pixel
+- **gate `E2E_LIVE`:** ไม่ตั้ง = reachability อย่างเดียว (login → shell ถูก skip · pattern เดียวกับ
+  contract `CONTRACT_API_URL`) · `E2E_LIVE=1` = รัน flow เต็มหลัง single-origin proxy
+- **`live-proxy.mjs`:** compose `web` (nginx) ไม่ proxy `/api/*` → api · proxy รวม SPA(:5173) + api(:3000)
+  เป็น origin เดียว ให้ browser ยิง same-origin `/api/v1` ถึง api จริง (harness plumbing เท่านั้น ไม่แตะ apps/**)
+- config: `playwright.config.ts` — base URL ผ่าน `E2E_BASE_URL` (default proxy เมื่อ LIVE) · api /health ผ่าน `E2E_API_URL`
+- รัน: `docker compose -f infra/docker-compose.yml up -d --wait` → `E2E_LIVE=1 pnpm --filter @juneflow/tests test:e2e` → `down`
 
 ## Gate ที่เกี่ยวข้อง (PLAN.md §9)
 

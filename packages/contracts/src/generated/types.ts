@@ -675,6 +675,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/models/{id}/bom": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get BOM line items for a house model (boms.items) */
+        get: operations["getModelBom"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/boq": {
         parameters: {
             query?: never;
@@ -978,6 +997,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/po/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get PO detail */
+        get: operations["getPo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/po/{id}/variation-order": {
         parameters: {
             query?: never;
@@ -1009,6 +1047,25 @@ export interface paths {
         put?: never;
         /** Create WO */
         post: operations["createWo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wo/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get WO detail */
+        get: operations["getWo"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3723,6 +3780,21 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    getModelBom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     listBoq: {
         parameters: {
             query?: {
@@ -3942,6 +4014,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Target project id (handler requires it; 400 if missing) — B-077 */
+                    project_id?: string;
                     mappings?: {
                         [key: string]: unknown;
                     }[];
@@ -4094,6 +4168,22 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    getPo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     createPoVariationOrder: {
         parameters: {
             query?: never;
@@ -4153,6 +4243,22 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    getWo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listGr: {
         parameters: {
             query?: {
@@ -4191,6 +4297,15 @@ export interface operations {
                     lines: {
                         qty_ok?: number;
                         qty_rejected?: number;
+                        /**
+                         * Format: uuid
+                         * @description BOQ item this line receives (F1 gr_item per-line)
+                         */
+                        boq_item_id?: string;
+                        name?: string;
+                        ordered_qty?: number;
+                        unit?: string;
+                        price?: number;
                         photos?: string[];
                     }[];
                 };

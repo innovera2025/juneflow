@@ -1,0 +1,1 @@
+ALTER TABLE "boq_item" ADD COLUMN "detail" text;

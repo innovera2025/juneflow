@@ -64,6 +64,21 @@ export const etaxStatus = pgEnum("etax_status", [
   "void",
 ]);
 
+/**
+ * APBilling.kind — B-079 (F2, migration 0019): the billing installment type that
+ * lets the PO paid-vs-deposit split be computed from real AP data. po-wo.jsx
+ * models a PO payment as มัดจำ (down payment) -> งวด 1 (progress) -> งวดสุดท้าย
+ * (final): `deposit` is the down-payment billing, `progress` an interim
+ * receipt-linked billing, `final` the closing billing. A screen then aggregates
+ * deposit = Σ(kind=deposit) and paid = Σ(all), both real. Defaults to the most
+ * common `progress`.
+ */
+export const apBillingKind = pgEnum("ap_billing_kind", [
+  "deposit",
+  "progress",
+  "final",
+]);
+
 // ---------------------------------------------------------------------------
 // GL / period
 // ---------------------------------------------------------------------------
@@ -147,13 +162,22 @@ export const apBillings = pgTable("ap_billing", {
   vat: numeric("vat", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("draft"),
+  // B-079 (F2): billing installment type (deposit | progress | final). Defaults
+  // to the most common `progress`; re-seeded per row from the PO payment state.
+  kind: apBillingKind("kind").notNull().default("progress"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("ap_billing_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("ap_billing_company_idx").on(t.companyId),
+  // 0024 (task + perf-audit §1.4): the 3-way match joins ap_billing back to its
+  // PO and GR — index both FK columns (nullable for non-PO expenses).
+  index("ap_billing_po_idx").on(t.poId),
+  index("ap_billing_gr_idx").on(t.grId),
+]);
 
 /**
  * PV — payment voucher settling one or more AP billings (data-dictionary

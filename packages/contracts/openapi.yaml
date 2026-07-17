@@ -994,6 +994,18 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /models/{id}/bom:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Get BOM line items for a house model (boms.items)
+      operationId: getModelBom
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ============================ BOQ / Procurement ===========================
   /boq:
@@ -1213,6 +1225,9 @@ paths:
             schema:
               type: object
               properties:
+                project_id:
+                  type: string
+                  description: Target project id (handler requires it; 400 if missing) — B-077
                 mappings:
                   type: array
                   items:
@@ -1349,6 +1364,20 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /po/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [boq]
+      summary: Get PO detail
+      operationId: getPo
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /po/{id}/variation-order:
     parameters:
       - $ref: "#/components/parameters/IdPath"
@@ -1405,6 +1434,20 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /wo/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [boq]
+      summary: Get WO detail
+      operationId: getWo
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /gr:
     get:
@@ -1446,6 +1489,18 @@ paths:
                       qty_ok:
                         type: number
                       qty_rejected:
+                        type: number
+                      boq_item_id:
+                        type: string
+                        format: uuid
+                        description: BOQ item this line receives (F1 gr_item per-line)
+                      name:
+                        type: string
+                      ordered_qty:
+                        type: number
+                      unit:
+                        type: string
+                      price:
                         type: number
                       photos:
                         type: array

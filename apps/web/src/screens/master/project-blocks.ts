@@ -151,3 +151,19 @@ export function typeHierarchy(
 export function phaseHead(name: string | undefined): string {
   return (name ?? "").split(" · ")[0];
 }
+
+/**
+ * The four render-slot labels [project, phase, block, unit] for MasterProject.
+ * The prototype (master.jsx:316-319) fills every missing WBS slot with a default so a
+ * project type with fewer than four levels still renders instead of blanking: slots
+ * 0-2 default to "" (every seeded type carries at least three labels) and the unit
+ * slot falls back to the caller-supplied unit word (the port passes projStrings.unit,
+ * the prototype's own unit default). When H already has four or more labels the tuple
+ * is H[0..3] verbatim, so the existing four-level layout is byte-identical (B-087).
+ */
+export function hierarchyLabels(
+  H: readonly string[],
+  unitFallback: string,
+): [string, string, string, string] {
+  return [H[0] ?? "", H[1] ?? "", H[2] ?? "", H[3] ?? unitFallback];
+}

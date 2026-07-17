@@ -15,6 +15,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
   boqDocs,
+  boqVersionHistory,
   boqGroups,
   boqItems,
   cbsBudgets,
@@ -149,6 +150,7 @@ const doc = (
   no: string,
   status: "draft" | "pending" | "approved" | "revise",
   version = 1,
+  approvedBy: string | null = null,
 ) => ({
   id,
   projectId: PROJECT,
@@ -157,8 +159,44 @@ const doc = (
   scope: "Block B",
   version,
   status,
+  // B-081 (F4): archive approver + timestamp (null unless approved).
+  approvedBy,
+  approvedAt: approvedBy ? new Date(1_700_000_000_000) : null,
   createdAt: new Date(1_700_000_000_000),
   updatedAt: new Date(1_700_000_000_000),
+});
+
+// A tenant dictionary user row (for approver / version-history name resolution).
+const user = (id: string, name: string) => ({
+  id,
+  companyId: COMPANY,
+  email: `${id}@t.co`,
+  name,
+  roleId: "role-dir",
+  status: "active",
+  createdAt: new Date(1_700_000_000_000),
+  updatedAt: new Date(1_700_000_000_000),
+});
+
+// A boq_version_history row (B-081 / F4).
+const vhRow = (
+  id: string,
+  docId: string,
+  version: number,
+  action: string,
+  by: string | null,
+  delta: string | null,
+  note: string | null,
+) => ({
+  id,
+  docId,
+  version,
+  action,
+  by,
+  at: new Date(1_700_000_000_000),
+  delta,
+  note,
+  createdAt: new Date(1_700_000_000_000),
 });
 
 const group = (id: string, boqId: string, name: string, seq: number) => ({
@@ -181,6 +219,7 @@ const item = (
   groupId,
   code: `C-${id}`,
   name: `item ${id}`,
+  detail: `detail ${id}`,
   cat,
   qty,
   unit: "ถุง",
@@ -232,6 +271,14 @@ const userRow = {
   status: "active",
 };
 
+// B-084 (matrix GAP-2): generate-PR mints PRs + consumes budget, so it now
+// requires the caller's role to carry pr.create. This role (id role-0, matched
+// by userRow.roleId) grants it; roleRow(level).perms is {} (no pr.create).
+const prCreatorRole = {
+  ...roleRow(0),
+  perms: { pr: { view: true, create: true, edit: false, approve: false, cancel: false } },
+};
+
 // ---------------------------------------------------------------------------
 // GET /boq — list envelope + derived total + tenant scope
 // ---------------------------------------------------------------------------
@@ -244,7 +291,7 @@ describe("GET /api/v1/boq — auth + list", () => {
   });
 
   it("returns the B-014 envelope with a DERIVED total per doc (C10, never hardcoded)", async () => {
-    const D0 = doc("d0", "BOQ-2026-B-02", "approved", 3);
+    const D0 = doc("d0", "BOQ-2026-B-02", "approved", 3, "u-dir");
     const D1 = doc("d1", "BOQ-2026-C-01", "draft");
     const G0 = group("g0", "d0", "02 งานโครงสร้าง", 1);
     // 2 items under d0's group: 10×100 + 3×50 = 1150. d1 has no items → total 0.
@@ -258,6 +305,7 @@ describe("GET /api/v1/boq — auth + list", () => {
             [boqDocs, [D0, D1]],
             [boqGroups, [G0]],
             [boqItems, [I0, I1]],
+            [users, [user("u-dir", "วิภา จันทร์เจริญ")]],
           ],
         }),
       })
@@ -274,10 +322,47 @@ describe("GET /api/v1/boq — auth + list", () => {
     expect(d0.status).toBe("approved");
     expect(d0.version).toBe(3);
     expect(d1.total).toBe(0);
-    // wire is real columns only — no company_id / timestamps leak.
+    // B-081 (F4): the approved doc carries a resolved approver; the draft one null.
+    expect(d0.approved_by).toBe("u-dir");
+    expect(d0.approved_by_name).toBe("วิภา จันทร์เจริญ");
+    expect(d1.approved_by).toBe(null);
+    expect(d1.approved_by_name).toBe(null);
+    // wire is real columns only — no company_id / update timestamp leak.
     expect(Object.keys(d0).sort()).toEqual(
-      ["currency_code", "id", "name", "no", "project_id", "scope", "status", "total", "version"],
+      [
+        "approved_at",
+        "approved_by",
+        "approved_by_name",
+        "currency_code",
+        "id",
+        "name",
+        "no",
+        "project_id",
+        "scope",
+        "status",
+        "total",
+        "version",
+      ],
     );
+  });
+
+  it("rounds the derived total to 2 dp — no JS-float accumulation drift (B-085 fix 3)", async () => {
+    const D0 = doc("d0", "BOQ-DRIFT", "draft");
+    const G0 = group("g0", "d0", "01", 1);
+    // 3 × 0.10 = 0.30000000000000004 in IEEE-754 → must round to 0.3, not leak the
+    // trailing digits to the FE / visual gate.
+    const I0 = item("i0", "g0", "M", "3", "0.10");
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[boqDocs, [D0]], [boqGroups, [G0]], [boqItems, [I0]], [users, []]],
+        }),
+      })
+    ).inject({ url: "/api/v1/boq" });
+    expect(res.statusCode).toBe(200);
+    const d0 = res.json().data.find((d: { id: string }) => d.id === "d0");
+    expect(d0.total).toBe(0.3);
   });
 
   it("binds company_id on the project root of every scoped read (no cross-tenant leak)", async () => {
@@ -362,8 +447,8 @@ describe("POST /api/v1/boq — create", () => {
 // ---------------------------------------------------------------------------
 
 describe("GET /api/v1/boq/:id — detail + CBS", () => {
-  it("returns the doc with per-group CBS available = budget − used − committed", async () => {
-    const D0 = doc("d0", "BOQ-1", "approved", 2);
+  it("returns the doc with per-group CBS available = budget − used − committed + F4 history", async () => {
+    const D0 = doc("d0", "BOQ-1", "approved", 2, "u-dir");
     const G0 = group("g0", "d0", "02 งานโครงสร้าง", 1);
     const I0 = item("i0", "g0", "M", "4", "25.00"); // total 100
     const C0 = cbs("c0", "g0", "1000000.00", "200000.00", "100000.00"); // avail 700000
@@ -376,6 +461,15 @@ describe("GET /api/v1/boq/:id — detail + CBS", () => {
             [boqGroups, [G0]],
             [boqItems, [I0]],
             [cbsBudgets, [C0]],
+            [users, [user("u-dir", "วิภา จันทร์เจริญ")]],
+            // out-of-order versions — the detail sorts newest-first.
+            [
+              boqVersionHistory,
+              [
+                vhRow("vh1", "d0", 1, "อนุมัติฉบับแรก", "u-dir", "11598000", "BOQ ฉบับแรก"),
+                vhRow("vh2", "d0", 2, "อนุมัติ", "u-dir", "-120000", "ลดสเปกประตู"),
+              ],
+            ],
           ],
         }),
       })
@@ -386,6 +480,12 @@ describe("GET /api/v1/boq/:id — detail + CBS", () => {
     expect(body.groups).toHaveLength(1);
     expect(body.groups[0].cbs.available).toBe(700000);
     expect(body.groups[0].cbs.budget).toBe(1000000);
+    // B-081 (F4): approver name + version-history (newest version first).
+    expect(body.approved_by_name).toBe("วิภา จันทร์เจริญ");
+    expect(body.version_history.map((v: { version: number }) => v.version)).toEqual([2, 1]);
+    expect(body.version_history[0].action).toBe("อนุมัติ");
+    expect(body.version_history[0].by_name).toBe("วิภา จันทร์เจริญ");
+    expect(body.version_history[1].delta).toBe("11598000");
   });
 
   it("404s for an id outside the tenant", async () => {
@@ -416,8 +516,9 @@ describe("GET /api/v1/boq/:id/items — list + group filter", () => {
     expect(body.data[0].qty).toBe(4800);
     expect(body.data[0].price).toBe(168.5);
     expect(body.data[0].cat).toBe("M");
+    expect(body.data[0].detail).toBe("detail i0");
     expect(Object.keys(body.data[0]).sort()).toEqual(
-      ["cat", "cc_id", "code", "currency_code", "element_id", "group_id", "id", "name", "price", "qty", "remain_qty", "unit"],
+      ["cat", "cc_id", "code", "currency_code", "detail", "element_id", "group_id", "id", "name", "price", "qty", "remain_qty", "unit"],
     );
   });
 
@@ -574,9 +675,10 @@ describe("BOQ state machine — submit/approve/revise", () => {
     expect(res.json().code).toBe("INVALID_STATE");
   });
 
-  it("approve: pending → approved (LOCK) with MD-tier authority", async () => {
-    const D0 = doc("d0", "N", "pending");
+  it("approve: pending → approved (LOCK) with MD-tier authority + F4 history", async () => {
+    const D0 = doc("d0", "N", "pending", 2);
     const updated: Updated[] = [];
+    const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
@@ -589,13 +691,27 @@ describe("BOQ state machine — submit/approve/revise", () => {
             [boqItems, []],
           ],
           updated,
-          updateBase: D0,
+          inserted,
+          updateBase: { ...D0, status: "approved", approvedBy: "u-0" },
         }),
       })
     ).inject({ method: "POST", url: "/api/v1/boq/d0/approve" });
     expect(res.statusCode).toBe(200);
     expect(res.json().status).toBe("approved");
     expect(updated[0]!.set.status).toBe("approved");
+    // B-081 (F4): the archive approver + timestamp are stamped on the doc.
+    expect(updated[0]!.set.approvedBy).toBe("u-0");
+    expect(updated[0]!.set.approvedAt).toBeInstanceOf(Date);
+    // ...and a version-history row is appended (action=approve, doc version).
+    const vhWrite = inserted.find((w) => w.table === boqVersionHistory);
+    expect(vhWrite).toBeTruthy();
+    const vh = vhWrite!.rows[0] as { action: string; version: number; by: string | null };
+    expect(vh.action).toBe("approve");
+    expect(vh.version).toBe(2);
+    expect(vh.by).toBe("u-0");
+    // echoed approver display name resolves from the user row.
+    expect(res.json().approved_by).toBe("u-0");
+    expect(res.json().approved_by_name).toBe("วิภา");
   });
 
   it("approve: 403 when the caller's role.approvalLevel is below the MD tier", async () => {
@@ -632,13 +748,19 @@ describe("BOQ state machine — submit/approve/revise", () => {
     expect(res.json().code).toBe("INVALID_STATE");
   });
 
-  it("revise: approved → revise with version += 1", async () => {
+  it("revise: approved → revise with version += 1 (+ B-085 fix 1 revise-history row)", async () => {
     const D0 = doc("d0", "N", "approved", 3);
     const updated: Updated[] = [];
+    const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]], [projects, [project]], [boqItems, []]], updated, updateBase: D0 }),
+        db: stubDb({
+          rows: [[boqDocs, [D0]], [users, [userRow]], [projects, [project]], [boqItems, []]],
+          updated,
+          inserted,
+          updateBase: D0,
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/boq/d0/revise" });
     expect(res.statusCode).toBe(200);
@@ -646,6 +768,14 @@ describe("BOQ state machine — submit/approve/revise", () => {
     expect(body.status).toBe("revise");
     expect(body.version).toBe(4); // v3 → v4
     expect(updated[0]!.set.version).toBe(4);
+    // B-085 fix 1: revise now writes a version-history row (action=revise) for the
+    // NEW version so the archive timeline shows revise events, not just approvals.
+    const vhWrite = inserted.find((w) => w.table === boqVersionHistory);
+    expect(vhWrite).toBeTruthy();
+    const vh = vhWrite!.rows[0] as { action: string; version: number; by: string | null };
+    expect(vh.action).toBe("revise");
+    expect(vh.version).toBe(4); // the freshly bumped version — distinct from approve keys
+    expect(vh.by).toBe("u-0"); // resolved reviser (mirrors /approve)
   });
 
   it("revise: 409 when the doc is not approved", async () => {
@@ -693,6 +823,8 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
             [boqItems, [IM, IS]],
             [projects, [project]],
             [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
           ],
           inserted,
           updated,
@@ -734,10 +866,16 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const prLines = inserted.filter((w) => w.table === prItems);
     expect((prLines[0]!.rows[0] as { boqItemId: string }).boqItemId).toBe("im");
 
-    // Cut-remain: each PR'd item's remain_qty was decremented (10−5, 8−3 → "5").
+    // Cut-remain: a SINGLE bulk CASE update decrements every PR'd item's
+    // remain_qty (10−5, 8−3 → both "5") in one statement — not one update per
+    // row (0024 perf fix, updateThroughChainMany). The CASE binds each item id
+    // with its new remainder; the WHERE scopes to the resolved ids.
     const remainWrites = updated.filter((u) => u.table === boqItems);
-    expect(remainWrites).toHaveLength(2);
-    expect(remainWrites.map((u) => u.set.remainQty)).toEqual(["5", "5"]);
+    expect(remainWrites).toHaveLength(1);
+    const caseParams = paramsOf(remainWrites[0]!.set.remainQty as SQL);
+    expect(caseParams).toEqual(expect.arrayContaining(["im", "is", "5"]));
+    const whereParams = paramsOf(remainWrites[0]!.where);
+    expect(whereParams).toEqual(expect.arrayContaining(["im", "is"]));
   });
 
   it("single category (only Material) → one PR, no subcon PR", async () => {
@@ -745,7 +883,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[boqDocs, [D0]], [boqItems, [IM]], [projects, [project]], [prs, []]],
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [projects, [project]],
+            [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
           updateBase: IM,
         }),
       })
@@ -765,7 +910,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[boqDocs, [D0]], [boqItems, [IM]], [projects, [project]], [prs, []]],
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [projects, [project]],
+            [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
           updateBase: IM,
         }),
       })
@@ -782,7 +934,13 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "draft")]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [doc("d0", "N", "draft")]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({
       method: "POST",
@@ -797,7 +955,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]], [boqItems, [IM]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({
       method: "POST",
@@ -812,7 +977,14 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]], [boqItems, [IM]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({
       method: "POST",
@@ -826,7 +998,13 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[boqDocs, [D0]]] }),
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/boq/d0/generate-pr", payload: { item_ids: [] } });
     expect(res.statusCode).toBe(400);
@@ -857,5 +1035,29 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
       payload: { item_ids: ["im"] },
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  it("403s a caller whose role lacks pr.create (B-084: no unauthorized spend initiation)", async () => {
+    // A zero-perms role (roleRow(4).perms is {}) — even an MD-tier approver — may
+    // not mint PRs unless it carries the pr.create right.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]], // approvalLevel 4 but perms {} → no pr.create
+          ],
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"], qty: { im: 1 } },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
   });
 });

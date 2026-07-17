@@ -12,11 +12,15 @@
 // `approval_step` (same state machine as PO/PR) and `retention_pct` (mirror of
 // subcon_contract.retention_pct) so the WO carries its own retention hold-back
 // rate. GAPs flagged to Wei (NOT invented columns):
-//   1) wo has NO line/installment table. The prototype's งวดงาน (installment)
-//      breakdown is modelled elsewhere (subcon_contract → work_period, subcon.ts)
-//      with NO FK from wo, and มัดจำ (downPct) is presentational — neither is
-//      persisted here. A WO's `value` is the client-supplied contract value
-//      (no BOQ line source exists for lump-sum subcon work — งานเหมา).
+//   1) RESOLVED (B-080 / F3, migration 0020): wo gained `contract_id` FK →
+//      subcon_contract, so the prototype's งวดงาน (installment) breakdown is read
+//      by reusing the existing subcon_contract → work_period model (subcon.ts) —
+//      no duplicate wo_installment table. woWire (list/detail) resolves the
+//      installments[], the derived `progress` (Σ done-installment amount / Σ plan
+//      amount), and `scope` (= the source PR's title — the only real description
+//      of งานเหมา). A WO with contract_id NULL honestly returns an empty plan /
+//      null progress. มัดจำ (downPct) stays presentational (not persisted).
+//      A WO's `value` is still the client-supplied contract value.
 //   2) The action endpoints declare only 200/401/404, so the 409/403 returned
 //      here are undocumented statuses — both use the flat Error envelope.
 //
@@ -36,8 +40,16 @@
 // MD > 5,000,000 (THB, strict >). Amount = the WO's stored `value`.
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
-import { wos, prs, projects, vendors } from "@juneflow/db/schema";
+import {
+  wos,
+  prs,
+  projects,
+  vendors,
+  subconContracts,
+  workPeriods,
+} from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
 import {
   callerApprovalLevel,
   has,
@@ -49,6 +61,7 @@ import {
 } from "./procurement.js";
 
 type WoRow = typeof wos.$inferSelect;
+type WorkPeriodRow = typeof workPeriods.$inferSelect;
 
 // The tenant anchor for a wo: pr_id → pr → project (company_id-scoped root).
 const WO_HOPS = [
@@ -56,26 +69,82 @@ const WO_HOPS = [
   { fk: prs.projectId, parent: projects },
 ];
 const PR_HOPS = [{ fk: prs.projectId, parent: projects }];
+// work_period → subcon_contract → project (B-080 / F3): the installment plan a WO
+// reuses via wo.contract_id. subcon_contract carries the tenant project_id FK.
+const WP_HOPS = [
+  { fk: workPeriods.contractId, parent: subconContracts },
+  { fk: subconContracts.projectId, parent: projects },
+];
+
+/** A work_period is "done" once it has passed inspection or been paid. */
+function isPeriodDone(status: string): boolean {
+  return status === "passed" || status === "paid";
+}
+
+/** The opaque Entity wire shape for one installment (real work_period columns). */
+function installmentWire(p: WorkPeriodRow): Record<string, unknown> {
+  return {
+    id: p.id,
+    seq: p.seq,
+    basis: p.basis,
+    target: Number(p.target),
+    pct: Number(p.pct),
+    amount: Number(p.amount),
+    status: p.status,
+    currency_code: p.currencyCode,
+  };
+}
 
 /**
  * The opaque Entity wire shape for a WO doc: real wo columns + the derived
- * retention_amount (value × retention_pct / 100) and `amount` (= value).
+ * retention_amount (value × retention_pct / 100), `amount` (= value), and the
+ * `contract_id` link (B-080 / F3). When the subcon installment plan is resolved
+ * (list / detail), it also carries `scope` (the source PR's title — the only real
+ * description of งานเหมา; WO/subcon carry no scope column), the derived `progress`
+ * (Σ done-installment amount / Σ plan amount, null when there is no plan), and the
+ * `installments[]` (work_period rows). A WO whose contract_id is null honestly
+ * reports an empty plan / null progress. NOTE (gap): work_period has no `label`
+ * column — the FE composes the งวด label from seq/basis (never fabricated here).
  */
-function woWire(wo: WoRow): Record<string, unknown> {
+function woWire(
+  wo: WoRow,
+  plan?: { scope: string | null; installments: WorkPeriodRow[] },
+): Record<string, unknown> {
   const value = Number(wo.value);
   const retentionPct = Number(wo.retentionPct);
-  return {
+  const base: Record<string, unknown> = {
     id: wo.id,
     no: wo.no,
     pr_id: wo.prId,
     vendor_id: wo.vendorId,
+    contract_id: wo.contractId,
     status: wo.status,
     approval_step: wo.approvalStep,
     currency_code: wo.currencyCode,
     value,
     retention_pct: retentionPct,
-    retention_amount: (value * retentionPct) / 100,
+    // value × pct / 100 is a JS-float product → round to the 2-dp minor unit at
+    // the wire so the held-back figure never shows drift (B-085 fix 3).
+    retention_amount: round2((value * retentionPct) / 100),
     amount: value,
+  };
+  if (!plan) return base;
+
+  const installments = [...plan.installments].sort((a, b) => a.seq - b.seq);
+  const totalPlan = installments.reduce((s, p) => s + Number(p.amount), 0);
+  const donePlan = installments
+    .filter((p) => isPeriodDone(p.status))
+    .reduce((s, p) => s + Number(p.amount), 0);
+  return {
+    ...base,
+    scope: plan.scope,
+    progress:
+      installments.length === 0
+        ? null
+        : totalPlan > 0
+          ? Math.round((donePlan / totalPlan) * 100)
+          : 0,
+    installments: installments.map(installmentWire),
   };
 }
 
@@ -89,8 +158,33 @@ export function registerWoRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
-    const docs = await db.selectThrough(wos, WO_HOPS);
-    return reply.code(200).send(listEnvelope(docs.map(woWire)));
+    // wos through pr → project; the installment plans (work_period) through
+    // subcon_contract → project; the source PRs (for scope = title) through
+    // project. Grouped in memory — no N+1.
+    const [docs, periods, prRows] = await Promise.all([
+      db.selectThrough(wos, WO_HOPS),
+      db.selectThrough(workPeriods, WP_HOPS),
+      db.selectThrough(prs, PR_HOPS),
+    ]);
+    const periodsByContract = new Map<string, WorkPeriodRow[]>();
+    for (const p of periods) {
+      const list = periodsByContract.get(p.contractId) ?? [];
+      list.push(p);
+      periodsByContract.set(p.contractId, list);
+    }
+    const prTitleById = new Map(prRows.map((p) => [p.id, p.title]));
+    return reply.code(200).send(
+      listEnvelope(
+        docs.map((wo) =>
+          woWire(wo, {
+            scope: wo.prId ? prTitleById.get(wo.prId) ?? null : null,
+            installments: wo.contractId
+              ? periodsByContract.get(wo.contractId) ?? []
+              : [],
+          }),
+        ),
+      ),
+    );
   });
 
   // POST /wo — raise a WO from an APPROVED PR (po-wo.jsx WOForm). Server owns
@@ -200,7 +294,20 @@ export function registerWoRoute(app: FastifyInstance): void {
     if (!wo) {
       return reply.code(404).send({ code: "NOT_FOUND", message: `WO ${id} not found` });
     }
-    return reply.code(200).send(woWire(wo));
+
+    // The subcon installment plan (only when this WO is linked to a contract) +
+    // the source PR's title for scope. contract_id null → empty plan honestly.
+    const [installments, scope] = await Promise.all([
+      wo.contractId
+        ? db.selectThrough(workPeriods, WP_HOPS, eq(workPeriods.contractId, wo.contractId))
+        : Promise.resolve([] as WorkPeriodRow[]),
+      wo.prId
+        ? db
+            .selectThrough(prs, PR_HOPS, eq(prs.id, wo.prId))
+            .then((rows) => rows[0]?.title ?? null)
+        : Promise.resolve(null),
+    ]);
+    return reply.code(200).send(woWire(wo, { scope, installments }));
   });
 
   // POST /wo/:id/submit — draft → pending.

@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { costCenters, projects } from "@juneflow/db";
+import { costCenters, projects, users, roles } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -124,6 +124,21 @@ async function buildTestApp(
 // the route reads (budget = the numeric column's 2-decimal string).
 const PROJECT_RJP = "pr-rjp-0000-0000-0000-000000000001";
 const PROJECT_ROW = { id: PROJECT_RJP, companyId: COMPANY, name: "ราชพฤกษ์" };
+
+// B-084 (matrix GAP-8): creating a cost center is master-data administration,
+// now gated on master.create (F1 consistency with /users + /roles). The
+// caller's role carries it; the session email resolves to this scoped user.
+const masterRole = {
+  id: "role-admin", companyId: COMPANY, name: "Admin", approvalLimits: {},
+  perms: { master: { view: true, create: true, edit: true, approve: true, cancel: true } },
+  approvalLevel: 4, approvalLimit: null, currencyCode: "THB",
+  createdAt: new Date(), updatedAt: new Date(),
+};
+const callerUser = {
+  id: "u-caller", companyId: COMPANY, email: SESSION.user.email, name: "สมชาย",
+  roleId: "role-admin", status: "active", department: null,
+  createdAt: new Date(), updatedAt: new Date(),
+};
 const ccRow = (
   code: string,
   name: string,
@@ -282,7 +297,7 @@ describe("POST /api/v1/cost-centers — create is Add-only, server-owned draft s
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubJoinDb(
-          [[costCenters, seedCostCenters], [projects, [PROJECT_ROW]]],
+          [[costCenters, seedCostCenters], [projects, [PROJECT_ROW]], [users, [callerUser]], [roles, [masterRole]]],
           captured,
           inserted,
         ),
@@ -340,7 +355,7 @@ describe("POST /api/v1/cost-centers — create is Add-only, server-owned draft s
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubJoinDb(
-          [[costCenters, []], [projects, [PROJECT_ROW]]],
+          [[costCenters, []], [projects, [PROJECT_ROW]], [users, [callerUser]], [roles, [masterRole]]],
           [],
           inserted,
         ),
@@ -366,7 +381,7 @@ describe("POST /api/v1/cost-centers — create is Add-only, server-owned draft s
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubJoinDb([[costCenters, seedCostCenters], [projects, [PROJECT_ROW]]]),
+        db: stubJoinDb([[costCenters, seedCostCenters], [projects, [PROJECT_ROW]], [users, [callerUser]], [roles, [masterRole]]]),
       })
     ).inject({
       method: "POST",
@@ -381,7 +396,7 @@ describe("POST /api/v1/cost-centers — create is Add-only, server-owned draft s
     const build = async () =>
       buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubJoinDb([[costCenters, []], [projects, [PROJECT_ROW]]]),
+        db: stubJoinDb([[costCenters, []], [projects, [PROJECT_ROW]], [users, [callerUser]], [roles, [masterRole]]]),
       });
 
     const noCode = await (await build()).inject({ method: "POST", url: "/api/v1/cost-centers", payload: { code: "CC-", name: "x", project_id: PROJECT_RJP } });
@@ -413,7 +428,7 @@ describe("POST /api/v1/cost-centers — create is Add-only, server-owned draft s
         // No project row canned → the scoped project read resolves nothing,
         // exactly what a foreign tenant's project id looks like through the
         // scoped door.
-        db: stubJoinDb([[costCenters, seedCostCenters]], captured, inserted),
+        db: stubJoinDb([[costCenters, seedCostCenters], [users, [callerUser]], [roles, [masterRole]]], captured, inserted),
       })
     ).inject({
       method: "POST",
@@ -434,5 +449,29 @@ describe("POST /api/v1/cost-centers — create is Add-only, server-owned draft s
     expect(projectRead).toBeTruthy();
     expect(paramsOf(projectRead!.where)).toContain(COMPANY);
     expect(paramsOf(projectRead!.where)).toContain("pr-foreign-0000-0000-000000000009");
+  });
+
+  it("403s a caller whose role lacks master.create (B-084 GAP-8 F1 consistency)", async () => {
+    const lowRole = { ...masterRole, id: "role-low", perms: { boq: { view: true, create: true, edit: false, approve: false, cancel: false } } };
+    const lowUser = { ...callerUser, roleId: "role-low" };
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubJoinDb(
+          [[costCenters, seedCostCenters], [projects, [PROJECT_ROW]], [users, [lowUser]], [roles, [lowRole]]],
+          [],
+          inserted,
+        ),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/cost-centers",
+      payload: { code: "CC-NEW", name: "ศูนย์ใหม่", project_id: PROJECT_RJP },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    // fail-closed: nothing was written.
+    expect(inserted).toHaveLength(0);
   });
 });

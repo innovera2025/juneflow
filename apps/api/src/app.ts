@@ -30,6 +30,7 @@ import { FeatureFlags, registerFeatureFlags } from "./plugins/feature-flags.js";
 import { registerFilesRoute, type FileStorage } from "./routes/files.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerMeRoute } from "./routes/me.js";
+import { loadUserByEmail } from "./routes/profile-data.js";
 import { registerProjectsRoute } from "./routes/projects.js";
 import { registerCountsRoute } from "./routes/counts.js";
 import { registerCompaniesRoute } from "./routes/companies.js";
@@ -48,6 +49,7 @@ import { registerPrRoute } from "./routes/pr.js";
 import { registerPoRoute } from "./routes/po.js";
 import { registerWoRoute } from "./routes/wo.js";
 import { registerGrRoute } from "./routes/gr.js";
+import { registerNotificationsRoute } from "./routes/notifications.js";
 import { registerDashboardRoute } from "./routes/dashboard.js";
 import type { SignIn } from "./auth.js";
 
@@ -118,8 +120,26 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerFeatureFlags(app, deps.features ?? new FeatureFlags());
 
   // Every successful mutation writes an AuditLog row (single choke point).
+  // Attribute the row to the DICTIONARY user (audit_log.user_id FK), resolved
+  // from the session email exactly like GET /me — the session carries the
+  // better-auth auth_user id, which is NOT the dictionary user id (F2 fix). The
+  // lookup runs only on successful mutations (the audit hook fires there) and
+  // fails closed to a null actor when the caller has no dictionary row.
   await registerAuditLog(app, {
     sink: deps.auditSink ?? createDbAuditSink(deps.db),
+    resolveUserId: async (request) => {
+      const db = request.db;
+      const authUser = request.authUser;
+      if (!db || !authUser) return null;
+      try {
+        const user = await loadUserByEmail(db, authUser.email);
+        return user?.id ?? null;
+      } catch {
+        // A transient actor-lookup failure must not drop the whole audit row —
+        // degrade to a null actor (the mutation is still recorded).
+        return null;
+      }
+    },
   });
 
   // Compose healthcheck probe (root — not part of the contract surface).
@@ -148,6 +168,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerPoRoute(v1);
       registerWoRoute(v1);
       registerGrRoute(v1);
+      registerNotificationsRoute(v1);
       registerDashboardRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,

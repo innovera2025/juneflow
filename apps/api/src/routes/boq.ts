@@ -46,20 +46,25 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { and, eq } from "drizzle-orm";
 import {
   boqDocs,
+  boqVersionHistory,
   boqGroups,
   boqItems,
   cbsBudgets,
   projects,
   prItems,
   prs,
+  users,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
+import { loadCaller, permAllowed } from "./authz.js";
 
 type BoqDocRow = typeof boqDocs.$inferSelect;
 type BoqItemRow = typeof boqItems.$inferSelect;
 type CbsRow = typeof cbsBudgets.$inferSelect;
+type VersionHistoryRow = typeof boqVersionHistory.$inferSelect;
 
 /** boq_item_cat enum values (boq.ts): M material · L labor · S lump-sum. */
 const BOQ_ITEM_CATS = new Set(["M", "L", "S"]);
@@ -87,6 +92,11 @@ const ITEM_HOPS = [
 const CBS_HOPS = [
   { fk: cbsBudgets.groupId, parent: boqGroups },
   { fk: boqGroups.boqId, parent: boqDocs },
+  { fk: boqDocs.projectId, parent: projects },
+];
+// boq_version_history → boq_doc → project (B-081 / F4): the Revise/approve log.
+const VH_HOPS = [
+  { fk: boqVersionHistory.docId, parent: boqDocs },
   { fk: boqDocs.projectId, parent: projects },
 ];
 // PR is scoped through its own project (the whole PR tree, like the BOQ tree,
@@ -165,6 +175,7 @@ function docWire(
   doc: BoqDocRow,
   total: number,
   currency: string,
+  approverName: string | null = null,
 ): Record<string, unknown> {
   return {
     id: doc.id,
@@ -175,17 +186,29 @@ function docWire(
     version: doc.version,
     status: doc.status,
     currency_code: currency,
-    total,
+    // Σ(qty × price) over the doc's items is a JS-float product-sum → round to
+    // the 2-dp minor unit at the wire so accumulation drift never surfaces to the
+    // BOQ list/detail (B-085 fix 3).
+    total: round2(total),
+    // B-081 (F4, migration 0021): the archive approver + approval timestamp. id +
+    // timestamp are real columns; the display name is resolved for list/detail.
+    approved_by: doc.approvedBy,
+    approved_by_name: approverName,
+    approved_at: doc.approvedAt,
   };
 }
 
-/** The opaque Entity wire shape for one BOQ item (real boq_item columns only). */
+/**
+ * The opaque Entity wire shape for one BOQ item: real boq_item columns incl.
+ * `detail` (the editor's per-line note — migration 0023, gap-5).
+ */
 function itemWire(it: BoqItemRow): Record<string, unknown> {
   return {
     id: it.id,
     group_id: it.groupId,
     code: it.code,
     name: it.name,
+    detail: it.detail,
     cat: it.cat,
     qty: Number(it.qty),
     unit: it.unit,
@@ -194,6 +217,27 @@ function itemWire(it: BoqItemRow): Record<string, unknown> {
     cc_id: it.ccId,
     remain_qty: Number(it.remainQty),
     element_id: it.elementId,
+  };
+}
+
+/**
+ * The opaque Entity wire shape for one version-history row (B-081 / F4): the
+ * archive's Revise/approve log. `by` is the real actor id; `by_name` is the
+ * resolved display name (null when the actor is a system entry or unresolvable).
+ */
+function versionHistoryWire(
+  v: VersionHistoryRow,
+  byName: string | null,
+): Record<string, unknown> {
+  return {
+    id: v.id,
+    version: v.version,
+    action: v.action,
+    by: v.by,
+    by_name: byName,
+    at: v.at,
+    delta: v.delta,
+    note: v.note,
   };
 }
 
@@ -210,7 +254,9 @@ function cbsWire(c: CbsRow): Record<string, unknown> {
     budget,
     used,
     committed,
-    available: budget - used - committed,
+    // budget − used − committed is a JS-float difference → round to the 2-dp
+    // minor unit at the wire so subtraction drift never surfaces (B-085 fix 3).
+    available: round2(budget - used - committed),
     currency_code: c.currencyCode,
   };
 }
@@ -225,10 +271,11 @@ function docTotal(items: BoqItemRow[]): { total: number; currency: string } {
 async function docWireWithTotal(
   db: TenantDb,
   doc: BoqDocRow,
+  approverName: string | null = null,
 ): Promise<Record<string, unknown>> {
   const items = await db.selectThrough(boqItems, ITEM_HOPS, eq(boqDocs.id, doc.id));
   const { total, currency } = docTotal(items);
-  return docWire(doc, total, currency);
+  return docWire(doc, total, currency, approverName);
 }
 
 /**
@@ -260,10 +307,13 @@ export function registerBoqRoute(app: FastifyInstance): void {
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
 
-    const [docs, groups, items] = await Promise.all([
+    const [docs, groups, items, userRows] = await Promise.all([
       db.selectThrough(boqDocs, DOC_HOPS),
       db.selectThrough(boqGroups, GROUP_HOPS),
       db.selectThrough(boqItems, ITEM_HOPS),
+      // user carries its own company_id (scoped select) — resolve the archive
+      // approver display name (B-081 / F4).
+      db.select(users),
     ]);
 
     // item → group → doc, so each item's amount lands on its owning doc.
@@ -276,11 +326,17 @@ export function registerBoqRoute(app: FastifyInstance): void {
       totalByDoc.set(docId, (totalByDoc.get(docId) ?? 0) + itemAmount(it));
       if (!currencyByDoc.has(docId)) currencyByDoc.set(docId, it.currencyCode);
     }
+    const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
 
     return reply.code(200).send(
       listEnvelope(
         docs.map((d) =>
-          docWire(d, totalByDoc.get(d.id) ?? 0, currencyByDoc.get(d.id) ?? "THB"),
+          docWire(
+            d,
+            totalByDoc.get(d.id) ?? 0,
+            currencyByDoc.get(d.id) ?? "THB",
+            d.approvedBy ? userNameById.get(d.approvedBy) ?? null : null,
+          ),
         ),
       ),
     );
@@ -357,10 +413,14 @@ export function registerBoqRoute(app: FastifyInstance): void {
       return reply.code(404).send({ code: "NOT_FOUND", message: `BOQ ${id} not found` });
     }
 
-    const [groups, items, cbs] = await Promise.all([
+    const [groups, items, cbs, history, userRows] = await Promise.all([
       db.selectThrough(boqGroups, GROUP_HOPS, eq(boqGroups.boqId, id)),
       db.selectThrough(boqItems, ITEM_HOPS, eq(boqDocs.id, id)),
       db.selectThrough(cbsBudgets, CBS_HOPS, eq(boqDocs.id, id)),
+      // B-081 (F4): the doc's Revise/approve history so the archive expander +
+      // version-diff render from real rows (newest version first).
+      db.selectThrough(boqVersionHistory, VH_HOPS, eq(boqVersionHistory.docId, id)),
+      db.select(users),
     ]);
 
     const { total, currency } = docTotal(items);
@@ -371,10 +431,23 @@ export function registerBoqRoute(app: FastifyInstance): void {
         const c = cbsByGroup.get(g.id);
         return { id: g.id, name: g.name, seq: g.seq, cbs: c ? cbsWire(c) : null };
       });
+    const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
+    const wireHistory = [...history]
+      .sort((a, b) => b.version - a.version)
+      .map((v) =>
+        versionHistoryWire(v, v.by ? userNameById.get(v.by) ?? null : null),
+      );
 
-    return reply
-      .code(200)
-      .send({ ...docWire(doc, total, currency), groups: wireGroups });
+    return reply.code(200).send({
+      ...docWire(
+        doc,
+        total,
+        currency,
+        doc.approvedBy ? userNameById.get(doc.approvedBy) ?? null : null,
+      ),
+      groups: wireGroups,
+      version_history: wireHistory,
+    });
   });
 
   // GET /boq/:id/items?group= — the doc's priced lines, optionally narrowed to
@@ -547,6 +620,24 @@ export function registerBoqRoute(app: FastifyInstance): void {
     if (!doc) {
       return reply.code(404).send({ code: "NOT_FOUND", message: `BOQ ${id} not found` });
     }
+
+    // B-084 (matrix GAP-2): generate-PR mints real draft PR / PR-Subcon docs and
+    // IRREVERSIBLY decrements each item's remain_qty — a financial-commitment
+    // initiation + a budget-consumption vector. It was gated by doc status only,
+    // so any tenant member (even a zero-perms role) could initiate spend and burn
+    // down the remaining budget. Since it creates PRs, gate it on the `pr.create`
+    // right of the tenant's 11×5 perms matrix — reusing the exact F1 mechanism
+    // (loadCaller/permAllowed), inventing no new policy. Fail-closed: an
+    // unattributable caller (no session / no dictionary user / no role) has no
+    // perms and is denied.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, "pr", "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "generating PRs requires pr.create permission",
+      });
+    }
+
     // Only an APPROVED (locked) BOQ can be PR'd — you buy against the approved
     // budget, never a draft/pending/revise doc (flows.html FLOW-A).
     if (doc.status !== "approved") {
@@ -676,16 +767,20 @@ export function registerBoqRoute(app: FastifyInstance): void {
 
     // Cut-remain: decrement each PR'd item's remain_qty by the generated qty.
     // boq_item has no direct tenant FK, so the scoped-write door resolves the
-    // item THROUGH its ancestry to the company_id root before updating it.
-    for (const l of lines) {
-      const newRemain = Number(l.item.remainQty) - l.qty;
-      await db.updateThroughChain(
-        boqItems,
-        ITEM_HOPS,
-        { remainQty: String(newRemain) },
-        eq(boqItems.id, l.item.id),
-      );
-    }
+    // items THROUGH their ancestry to the company_id root before updating them.
+    // Perf (0024 audit): a SINGLE bulk CASE update keyed by item id — not one
+    // ownership-resolve + update per row — so N cut lines cost 2 queries, not
+    // 2·N. `lines` holds distinct item ids (item_ids[] was de-duped above), so
+    // the id→new-remain map has no key collisions.
+    const remainByItem = new Map(
+      lines.map((l) => [l.item.id, String(Number(l.item.remainQty) - l.qty)]),
+    );
+    await db.updateThroughChainMany(
+      boqItems,
+      ITEM_HOPS,
+      boqItems.remainQty,
+      remainByItem,
+    );
 
     return reply.code(201).send({ prs: createdPrs });
   });
@@ -754,15 +849,42 @@ export function registerBoqRoute(app: FastifyInstance): void {
       });
     }
 
+    // The approving user (B-081 / F4): level != null already implies the caller
+    // resolved to a tenant user + role, so re-resolve the row for its id/name to
+    // stamp the archive approver + write the version-history entry.
+    const approver = request.authUser
+      ? await loadUserByEmail(db, request.authUser.email)
+      : null;
+    const approvedAt = new Date();
+
     const [updated] = await db.updateThrough(
       boqDocs,
       projects,
       boqDocs.projectId,
       doc.projectId,
-      { status: "approved" },
+      // Stamp the archive approver + timestamp so the archive screen reads real
+      // rows (audit_log cannot source these — its entity is a route template).
+      { status: "approved", approvedBy: approver?.id ?? null, approvedAt },
       eq(boqDocs.id, id),
     );
-    return reply.code(200).send(await docWireWithTotal(db, updated!));
+
+    // Append a version-history row (action=approve) so the archive's Revise
+    // history + the approval version-diff render from a real log entry.
+    await db.insertThrough(boqVersionHistory, projects, doc.projectId, [
+      {
+        docId: id,
+        version: doc.version,
+        action: "approve",
+        by: approver?.id ?? null,
+        at: approvedAt,
+        delta: null,
+        note: null,
+      },
+    ]);
+
+    return reply
+      .code(200)
+      .send(await docWireWithTotal(db, updated!, approver?.name ?? null));
   });
 
   // POST /boq/:id/revise — approved → revise, version += 1 (a new editable
@@ -787,14 +909,39 @@ export function registerBoqRoute(app: FastifyInstance): void {
       });
     }
 
+    // Resolve the revising user (mirrors /approve) so the version-history row is
+    // attributed to a real actor; a system/unresolvable caller stamps `by` null.
+    const reviser = request.authUser
+      ? await loadUserByEmail(db, request.authUser.email)
+      : null;
+    const revisedAt = new Date();
+    const newVersion = doc.version + 1;
+
     const [updated] = await db.updateThrough(
       boqDocs,
       projects,
       boqDocs.projectId,
       doc.projectId,
-      { status: "revise", version: doc.version + 1 },
+      { status: "revise", version: newVersion },
       eq(boqDocs.id, id),
     );
+
+    // Append a version-history row (action=revise) for the NEW version so the
+    // archive's Revise-history timeline shows revise events, not just approvals
+    // (B-085 fix 1; previously only /approve logged a row). version = the freshly
+    // bumped version so it never collides with this doc's approve-history keys.
+    await db.insertThrough(boqVersionHistory, projects, doc.projectId, [
+      {
+        docId: id,
+        version: newVersion,
+        action: "revise",
+        by: reviser?.id ?? null,
+        at: revisedAt,
+        delta: null,
+        note: null,
+      },
+    ]);
+
     return reply.code(200).send(await docWireWithTotal(db, updated!));
   });
 }

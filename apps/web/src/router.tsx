@@ -26,13 +26,26 @@ import {
   SIDEBAR_ROUTES,
 } from "./routes/registry";
 import { LoginScreen } from "./screens/login/login-screen";
+import { Dashboard } from "./screens/dashboard/dashboard";
+import { BOQOverview } from "./screens/boq/boq-overview";
 import { BOQList } from "./screens/boq/boq-list";
+import { BOQEditor } from "./screens/boq/boq-editor";
+import { BOMTemplates } from "./screens/boq/boq-bom";
+import { BOQApproval } from "./screens/boq/boq-approval";
+import { BOQArchive } from "./screens/boq/boq-archive";
+import { BOQReports } from "./screens/boq/boq-reports";
+import { AIQuantityTakeoff } from "./screens/boq/aiqto";
+import { GRList } from "./screens/gr/gr-list";
+import { PRList } from "./screens/pr/pr-list";
+import { POList } from "./screens/po-wo/po-list";
+import { WOList } from "./screens/po-wo/wo-list";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
 import { MasterCompany } from "./screens/master/master-company";
 import { MasterModel } from "./screens/master/master-model";
 import { MasterProject } from "./screens/master/master-project";
 import { MasterProjectType } from "./screens/master/master-project-type";
+import { MasterVendor } from "./screens/master/master-vendor";
 import { UsersPermissions } from "./screens/master/users-permissions";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
@@ -44,13 +57,26 @@ import { Placeholder } from "./shell/page";
  */
 const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
+  dashboard: Dashboard,
+  "boq.overview": BOQOverview,
   "boq.list": BOQList,
+  "boq.editor": BOQEditor,
+  "boq.bom": BOMTemplates,
+  "boq.approval": BOQApproval,
+  "boq.archive": BOQArchive,
+  "boq.reports": BOQReports,
+  "boq.aiqto": AIQuantityTakeoff,
+  "gr.list": GRList,
+  "pr.list": PRList,
+  "po.list": POList,
+  "wo.list": WOList,
   "master.cc": MasterCC,
   "master.docnum": MasterDocNum,
   "master.company": MasterCompany,
   "master.model": MasterModel,
   "master.project": MasterProject,
   "master.ptype": MasterProjectType,
+  "master.vendor": MasterVendor,
   users: UsersPermissions,
 };
 

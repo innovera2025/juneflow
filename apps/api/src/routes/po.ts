@@ -19,9 +19,12 @@
 //      vendor-negotiated per-line prices are therefore NOT modelled — the full
 //      source-PR line total is used. (Amount is real-derived at creation, then
 //      stored; it is not a live re-sum.)
-//   2) po has NO deposit / down-payment / paid columns — the prototype's
-//      มัดจำ (downPct/downPaid) + งวด payment-schedule + GR% panels are
-//      presentational and are NOT persisted here.
+//   2) RESOLVED (B-079 / F2, migration 0019): the prototype's มัดจำ / จ่ายไป
+//      split now comes from real AP data — ap_billing.kind (deposit|progress|
+//      final) lets the read derive paid = Σ(all ap_billing on this PO) and
+//      deposit = Σ(kind=deposit). Both are real sums (a PO with no billing rows
+//      reports 0/0 honestly). doc_date = created_at. The งวด payment-schedule +
+//      GR% panels remain presentational and are still NOT persisted here.
 //   3) The action endpoints declare only 200/401/404, so the 409 (invalid state)
 //      and 403 (insufficient approval authority) returned here are undocumented
 //      statuses — both still use the flat Error envelope.
@@ -51,8 +54,16 @@
 // (the highest triggered tier); a lower tier — or an unattributable caller — 403.
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
-import { pos, prs, projects, variationOrders, vendors } from "@juneflow/db/schema";
+import {
+  pos,
+  prs,
+  projects,
+  variationOrders,
+  vendors,
+  apBillings,
+} from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
 import {
   callerApprovalLevel,
   has,
@@ -66,6 +77,26 @@ import {
 
 type PoRow = typeof pos.$inferSelect;
 type VariationOrderRow = typeof variationOrders.$inferSelect;
+type ApBillingRow = typeof apBillings.$inferSelect;
+
+/**
+ * The PO payment split from real AP data (B-079 / F2): paid = Σ of every
+ * ap_billing on this PO; deposit = Σ of the down-payment billings (kind=deposit).
+ * Both are real sums — a PO with no ap_billing rows reports 0/0 honestly, never
+ * a fabricated มัดจำ/จ่ายไป figure (the old poWire GAP-2 em-dash).
+ */
+function sumBillings(bills: ApBillingRow[]): { paid: number; deposit: number } {
+  let paid = 0;
+  let deposit = 0;
+  for (const b of bills) {
+    const amount = Number(b.amount);
+    paid += amount;
+    if (b.kind === "deposit") deposit += amount;
+  }
+  // Σ ap_billing is a JS-float sum → round both to the 2-dp minor unit at the
+  // wire so accumulation drift never surfaces (B-085 fix 3).
+  return { paid: round2(paid), deposit: round2(deposit) };
+}
 
 // The tenant anchor for a po: pr_id → pr → project (company_id-scoped root).
 const PO_HOPS = [
@@ -77,10 +108,16 @@ const PR_HOPS = [{ fk: prs.projectId, parent: projects }];
 
 /**
  * The opaque Entity wire shape for a PO doc: real po columns + `amount` (= the
- * stored total; see header GAP 1). The mock's presentational vendor-name /
- * requester / มัดจำ / GR% strings are NOT stored, so they are not returned.
+ * stored total; see header GAP 1) + `doc_date` (= created_at). When AP billing
+ * data is resolved (list / detail), it also carries the real `paid` / `deposit`
+ * split (B-079 / F2 — Σ ap_billing / Σ kind=deposit); the state-machine echoes
+ * omit those two rather than fabricate 0 for a mid-flow PO (the FE re-reads the
+ * list after an action).
  */
-function poWire(po: PoRow): Record<string, unknown> {
+function poWire(
+  po: PoRow,
+  billing?: { paid: number; deposit: number },
+): Record<string, unknown> {
   const total = Number(po.total);
   return {
     id: po.id,
@@ -94,6 +131,8 @@ function poWire(po: PoRow): Record<string, unknown> {
     total,
     vat: Number(po.vat),
     amount: total,
+    doc_date: po.createdAt,
+    ...(billing ? { paid: billing.paid, deposit: billing.deposit } : {}),
   };
 }
 
@@ -119,8 +158,27 @@ export function registerPoRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
-    const docs = await db.selectThrough(pos, PO_HOPS);
-    return reply.code(200).send(listEnvelope(docs.map(poWire)));
+    // pos through pr → project; ap_billing carries its own company_id (scoped
+    // select). Group the billings by po_id in memory to compute paid/deposit — no
+    // N+1.
+    const [docs, bills] = await Promise.all([
+      db.selectThrough(pos, PO_HOPS),
+      db.select(apBillings),
+    ]);
+    const billsByPo = new Map<string, ApBillingRow[]>();
+    for (const b of bills) {
+      if (!b.poId) continue;
+      const list = billsByPo.get(b.poId) ?? [];
+      list.push(b);
+      billsByPo.set(b.poId, list);
+    }
+    return reply
+      .code(200)
+      .send(
+        listEnvelope(
+          docs.map((po) => poWire(po, sumBillings(billsByPo.get(po.id) ?? []))),
+        ),
+      );
   });
 
   // POST /po — raise a PO from an APPROVED PR (po-wo.jsx POForm; data-dictionary
@@ -223,18 +281,22 @@ export function registerPoRoute(app: FastifyInstance): void {
       return reply.code(404).send({ code: "NOT_FOUND", message: `PO ${id} not found` });
     }
 
-    const vos = await db.selectThrough(
-      variationOrders,
-      [
-        { fk: variationOrders.poId, parent: pos },
-        { fk: pos.prId, parent: prs },
-        { fk: prs.projectId, parent: projects },
-      ],
-      eq(variationOrders.poId, id),
-    );
-    return reply
-      .code(200)
-      .send({ ...poWire(po), variation_orders: vos.map(voWire) });
+    const [vos, bills] = await Promise.all([
+      db.selectThrough(
+        variationOrders,
+        [
+          { fk: variationOrders.poId, parent: pos },
+          { fk: pos.prId, parent: prs },
+          { fk: prs.projectId, parent: projects },
+        ],
+        eq(variationOrders.poId, id),
+      ),
+      db.select(apBillings, eq(apBillings.poId, id)),
+    ]);
+    return reply.code(200).send({
+      ...poWire(po, sumBillings(bills)),
+      variation_orders: vos.map(voWire),
+    });
   });
 
   // POST /po/:id/submit — draft → pending.
@@ -385,6 +447,54 @@ export function registerPoRoute(app: FastifyInstance): void {
         .send({ code: "VALIDATION", message: "amount must be a number >= 0" });
     }
 
+    // B-084 hardening — this endpoint was the CRITICAL FLOW-A authz gap: it
+    // rewrites the PO's stored `total`, and that stored total is exactly what the
+    // /approve gate reads to decide which tier must sign off (po.ts:350). Left
+    // ungated, a low-tier caller could cut a PO below its tier, get it approved
+    // cheaply, then add the amount back after approval — turning the working
+    // approve-ladder into a full in-tenant financial-authorization bypass
+    // (matrix GAP-1 exploit-B). Three defenses (matrix Option C):
+    //
+    //  (1) status guard — only a draft or an approved PO may be amended; a
+    //      pending doc is mid-approval and a rejected/closed one is terminal
+    //      (mirrors how submit/approve/reject 409 on the wrong state).
+    //  (2) non-negative floor — a `cut` may not drive the stored total below 0
+    //      (a negative total would otherwise resolve to the lowest tier).
+    //  (3) approval-authority gate — the caller must hold approval authority for
+    //      the HIGHER of the current total and the resulting total, computed with
+    //      the SAME B-070 thresholds /approve uses (requiredApprovalLevel). This
+    //      makes amending a PO cost at least as much authority as approving it at
+    //      either amount, so the cut-then-add tier-downgrade is denied at the
+    //      FIRST step. Fail-closed: an unattributable caller (no session / no
+    //      dictionary user / no role) resolves to null and is denied.
+    if (po.status !== "draft" && po.status !== "approved") {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a draft or approved PO can be amended",
+      });
+    }
+
+    const currentTotal = Number(po.total);
+    const newTotal = dir === "add" ? currentTotal + amount : currentTotal - amount;
+    if (newTotal < 0) {
+      return reply.code(400).send({
+        code: "VALIDATION",
+        message: "a cut cannot drive the PO total below 0",
+      });
+    }
+
+    const needed = Math.max(
+      requiredApprovalLevel(currentTotal),
+      requiredApprovalLevel(newTotal),
+    );
+    const level = await callerApprovalLevel(request);
+    if (level == null || level < needed) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `amending this PO requires approval level ${needed}`,
+      });
+    }
+
     // Resolve the source PR's project to anchor the scoped VO insert. po.prId is
     // guaranteed non-null (the PO_HOPS INNER JOIN filters null-anchored rows).
     const [pr] = await db.selectThrough(prs, PR_HOPS, eq(prs.id, po.prId!));
@@ -404,8 +514,6 @@ export function registerPoRoute(app: FastifyInstance): void {
       },
     ]);
 
-    const newTotal =
-      dir === "add" ? Number(po.total) + amount : Number(po.total) - amount;
     const [updated] = await db.updateThroughChain(
       pos,
       PO_HOPS,

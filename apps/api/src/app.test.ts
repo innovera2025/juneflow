@@ -478,6 +478,27 @@ describe("POST /api/v1/auth/login", () => {
   });
 });
 
+describe("POST /api/v1/auth/login — brute-force throttle (B-082 F4)", () => {
+  it("429s after too many attempts from one IP with the flat RATE_LIMITED error", async () => {
+    const built = await buildTestApp({ signIn: async () => null });
+    let last;
+    for (let i = 0; i < 11; i++) {
+      last = await built.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        headers: { "content-type": "application/json" },
+        payload: { email: "spray@example.test", password: "guess" },
+      });
+    }
+    expect(last!.statusCode).toBe(429);
+    expect(last!.json()).toEqual({
+      code: "RATE_LIMITED",
+      message: "Too many login attempts, please try again later",
+    });
+    expect(last!.headers["retry-after"]).toBe("60");
+  });
+});
+
 describe("contract prefix /api/v1 (audit debt 1)", () => {
   it("mounts POST /files under /api/v1", async () => {
     const res = await (
