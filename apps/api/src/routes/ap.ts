@@ -426,8 +426,16 @@ async function listPv(db: TenantDb): Promise<Record<string, unknown>[]> {
 //     over the gross at wht_pct (F-AP1). currency inherits the first billing's.
 // status starts `pending` — a PV has a SEPARATE approval step (POST
 // /pv/{id}/approve), unlike an AP billing. company_id is force-set on insert.
+//
+// B-094-3 (SoD): the DICTIONARY user who created the PV is captured on the row
+// (created_by) so the approval step can enforce separation-of-duties (a creator
+// may not approve their own PV). The creator is resolved via loadCaller — the
+// same email→dictionary-user mechanism as the audit actor / approval ladder, NOT
+// the better-auth auth_user id (which would violate the FK). An unattributable
+// caller leaves created_by null (honest — the SoD gate then fails SAFE).
 async function createPv(
   db: TenantDb,
+  request: FastifyRequest,
   body: Record<string, unknown>,
   reply: FastifyReply,
 ): Promise<FastifyReply> {
@@ -492,6 +500,12 @@ async function createPv(
     ownedBills[0]?.currencyCode ??
     "THB";
 
+  // B-094-3 (SoD): stamp the creator's DICTIONARY user id (loadCaller — email→
+  // user, tenant-scoped). null when the caller can't be attributed (honest — the
+  // approve gate then can't prove self-approval and won't block).
+  const caller = await loadCaller(request);
+  const createdBy = caller?.userId ?? null;
+
   const [created] = (await db
     .insert(pvs, {
       billingIds,
@@ -504,6 +518,7 @@ async function createPv(
       chequeBank,
       chequeDate,
       currencyCode: currency,
+      createdBy,
       status: "pending",
     })
     .returning()) as PvRow[];
@@ -529,6 +544,12 @@ async function createPv(
 // finmgr / dir) — AND (b) reach the approvalLevel the PV's gross demands. Reuses
 // authz.ts (loadCaller/permAllowed); it invents no new policy. Fail-closed: an
 // unattributable caller, or one missing the perm or the tier, is denied 403.
+//
+// B-094-3 (separation-of-duties): AFTER the perm + tier checks, a proven creator
+// may not approve their own PV — if the caller's DICTIONARY user id equals the
+// row's non-null created_by, the approval is denied 403. Fail-SAFE, not just
+// fail-closed: a null created_by (legacy / unattributed PV) can't prove a
+// self-approval, so it is NOT blocked — only a proven creator==approver is.
 async function approvePvHandler(
   db: TenantDb,
   request: FastifyRequest,
@@ -565,6 +586,17 @@ async function approvePvHandler(
     return reply.code(403).send({
       code: "FORBIDDEN",
       message: `PV approval of ${gross} requires approval level ${needed}`,
+    });
+  }
+
+  // B-094-3 (SoD): a proven creator may not approve their own PV. Only block when
+  // created_by is non-null AND equals the caller — a null creator (legacy /
+  // unattributed) can't prove self-approval, so it is left to the ladder above.
+  if (pv.createdBy != null && caller.userId === pv.createdBy) {
+    return reply.code(403).send({
+      code: "FORBIDDEN",
+      message:
+        "a payment voucher cannot be approved by its creator (separation of duties)",
     });
   }
 
@@ -623,7 +655,7 @@ export function registerApRoute(app: FastifyInstance): void {
   app.post("/ap/pv", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
-    return createPv(db, (request.body ?? {}) as Record<string, unknown>, reply);
+    return createPv(db, request, (request.body ?? {}) as Record<string, unknown>, reply);
   });
 
   app.post("/pv/:id/approve", async (request, reply) => {
