@@ -18,7 +18,7 @@
     "@juneflow/db": "workspace:*",
     "better-auth": "^1.2.8",
     "bullmq": "^5.34.0",
-    "drizzle-orm": "^0.38.3",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.2.0",
     "ioredis": "^5.4.2",
     "pg": "^8.13.1",
