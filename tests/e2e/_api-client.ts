@@ -92,7 +92,11 @@ export async function login(email: string, password = SEED_PASSWORD): Promise<st
   try {
     const res = await ctx.post("/api/v1/auth/login", { data: { email, password } });
     if (res.status() !== 200) {
-      throw new Error(`login ${email} failed: HTTP ${res.status()} ${await res.text()}`);
+      const err = new Error(`login ${email} failed: HTTP ${res.status()} ${await res.text()}`);
+      // Tag the login throttle (B-082 F4) so a describe can gracefully skip rather
+      // than fail while F4 tuning (B-099) is pending — see isRateLimited() below.
+      if (res.status() === 429) (err as Error & { rateLimited?: boolean }).rateLimited = true;
+      throw err;
     }
     const body = (await res.json()) as { token?: unknown };
     if (typeof body.token !== "string" || !body.token) {
@@ -112,6 +116,17 @@ export async function clientFor(email: string): Promise<APIRequestContext> {
     baseURL: API_URL,
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
+}
+
+/**
+ * True when an error is a login rate-limit (B-082 F4 / 429). A live describe uses
+ * this to gracefully SKIP (not fail) when the per-IP login throttle blocks its
+ * multi-tier setup logins, while F4 tuning is pending (B-099).
+ */
+export function isRateLimited(e: unknown): boolean {
+  return Boolean(
+    e && typeof e === "object" && (e as { rateLimited?: boolean }).rateLimited,
+  );
 }
 
 /** Parse a 200-OK JSON body, else throw with the status + text (fail loud). */
