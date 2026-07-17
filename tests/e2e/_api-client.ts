@@ -79,7 +79,15 @@ export function uniqueNo(prefix: string): string {
  * token. Throws loudly (not a silent skip) if login fails — a broken seed/stack
  * must fail the gate, not pass vacuously.
  */
+// Per-worker token cache: the login endpoint now enforces a rate limit (B-082 F4),
+// and the money-path logs in several seed identities. Memoising the bearer per email
+// means each identity authenticates ONCE per worker, keeping the burst under the
+// throttle instead of tripping it (429). Tokens are stateless bearers — safe to reuse.
+const _tokenCache = new Map<string, string>();
+
 export async function login(email: string, password = SEED_PASSWORD): Promise<string> {
+  const cached = _tokenCache.get(email);
+  if (cached) return cached;
   const ctx = await pwRequest.newContext({ baseURL: API_URL });
   try {
     const res = await ctx.post("/api/v1/auth/login", { data: { email, password } });
@@ -90,6 +98,7 @@ export async function login(email: string, password = SEED_PASSWORD): Promise<st
     if (typeof body.token !== "string" || !body.token) {
       throw new Error(`login ${email} returned no bearer token`);
     }
+    _tokenCache.set(email, body.token);
     return body.token;
   } finally {
     await ctx.dispose();

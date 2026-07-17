@@ -34,6 +34,6 @@ E2E_LIVE=1 \
   PROXY_PORT="${PROXY_PORT}" \
   PROXY_WEB_TARGET="http://localhost:${WEB_PORT}" \
   PROXY_API_TARGET="http://localhost:${API_PORT}" \
-  pnpm exec playwright test --config e2e/playwright.config.ts finance-flow 2>&1 | tail -45
+  pnpm exec playwright test --config e2e/playwright.config.ts finance-flow --workers=1 2>&1 | tail -45
 
 echo "== done (teardown on exit) =="
