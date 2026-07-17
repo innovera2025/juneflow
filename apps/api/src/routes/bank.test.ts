@@ -475,6 +475,38 @@ describe("GET /api/v1/bank/statements/:id/lines", () => {
     // the GROSS line no longer matches (the old gross-comparison bug) → none
     expect(gross.suggestions).toEqual([]);
   });
+
+  // B-096 fix 3: a MATCHED PV's matched_doc shows its NET (the real cash-out and
+  // the SAME figure buildSuggestions matched on), not its GROSS `amount` — so the
+  // matched line's displayed amount agrees with the suggestion + the withdrawal.
+  it("shows a matched PV's NET in matched_doc (display consistency, not gross)", async () => {
+    const LINE_PV = "line0000-0000-0000-0000-0000000000p1";
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [bankStatements, [statementRow(STMT0)]],
+            [
+              bankStatementLines,
+              [lineRow(LINE_PV, { amount: "-892400.00", matched: true, pvId: PVA })],
+            ],
+            [cheques, []],
+            // gross 920000, net 892400 — the matched_doc must report net
+            [pvs, [pvRow(PVA, { amount: "920000.00", net: "892400.00" })]],
+            [rvs, []],
+          ],
+        }),
+      })
+    ).inject({ url: `/api/v1/bank/statements/${STMT0}/lines` });
+
+    expect(res.statusCode).toBe(200);
+    const line = res.json().data.find((r: { id: string }) => r.id === LINE_PV);
+    expect(line.matched).toBe(true);
+    // matched_doc.amount = pv.net (892400), NOT pv.amount gross (920000)
+    expect(line.matched_doc).toMatchObject({ type: "pv", id: PVA, amount: 892400 });
+    expect(line.matched_doc.amount).not.toBe(920000);
+  });
 });
 
 // ===========================================================================
@@ -812,6 +844,48 @@ describe("POST /api/v1/bank/statements/import", () => {
     const unmatched = lineRows.find((r) => r.matched === false)!;
     expect(unmatched.chequeId).toBeNull();
     expect(unmatched.pvId).toBeNull();
+  });
+
+  // B-096 fix 1: a second import must NOT auto-match a doc already consumed by an
+  // existing matched line — the migration-0028 partial-unique index would reject
+  // the duplicate FK (a 500). The consumed doc is filtered from the import pool
+  // and the row is left unmatched (manual flow), never guessed (C10).
+  it("leaves a row unmatched when its only candidate is already consumed (no double-match / no 500)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            ...financeCaller, // finance.create — passes the import gate
+            [bankStatements, [statementRow(STMT0)]], // insertThrough parent re-read
+            // an EXISTING matched line already consumed CHQ_HIT → loadConsumedDocs
+            // must filter it out of the import auto-match pool.
+            [bankStatementLines, [lineRow(L_MATCHED, { matched: true, chequeId: CHQ_HIT })]],
+            [cheques, [chequeRow(CHQ_HIT, { no: "CH-040130", amount: "15240.00", dueDate: "2026-05-20" })]],
+            [pvs, []],
+            [rvs, []],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/bank/statements/import",
+      // this row's amount (15240) + date (05-22) exact-matches CHQ_HIT (due
+      // 05-20, in ±7d) — but CHQ_HIT is already consumed, so it must be skipped.
+      payload: { period: "2569-05", file: "2026-05-22,FT PAYMENT,-15240.00" },
+    });
+
+    expect(res.statusCode).toBe(200); // graceful — NOT a 500 from the unique index
+    const body = res.json();
+    expect(body.line_count).toBe(1);
+    expect(body.matched_count).toBe(0); // the consumed cheque was not re-matched
+    const lineWrite = inserted.find((i) => i.table === bankStatementLines);
+    const lineRows = lineWrite!.values as unknown as Array<Record<string, unknown>>;
+    expect(lineRows).toHaveLength(1);
+    expect(lineRows[0]!.matched).toBe(false);
+    expect(lineRows[0]!.chequeId).toBeNull(); // never linked the consumed cheque
   });
 
   it("accepts a structured lines[] array (already-parsed alternative form)", async () => {
