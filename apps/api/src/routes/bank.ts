@@ -320,7 +320,12 @@ function buildSuggestions(
 function resolveMatchedDoc(line: BankStatementLineRow, pools: DocPools): DocRef | null {
   if (line.pvId) {
     const pv = pools.pv.find((p) => p.id === line.pvId);
-    return pv ? { type: "pv", id: pv.id, ref: pv.chequeNo ?? null, amount: num(pv.amount), date: pvDate(pv) } : null;
+    // Show the PV's NET (real bank cash-out) — the SAME figure buildSuggestions
+    // matches + displays a candidate on — so a matched line's matched_doc amount
+    // agrees with the suggestion and the actual withdrawal, instead of the GROSS
+    // `amount` (B-096 fix 3: gross→net display consistency). Cheque/RV keep their
+    // own `amount` (their stored figure IS the cash movement).
+    return pv ? { type: "pv", id: pv.id, ref: pv.chequeNo ?? null, amount: num(pv.net), date: pvDate(pv) } : null;
   }
   if (line.chequeId) {
     const c = pools.cheque.find((x) => x.id === line.chequeId);
@@ -516,6 +521,14 @@ async function matchLine(
       `${matchFieldName(target.field)} is already matched to another statement line`,
     );
   }
+  // B-096 note: this scoped pre-check (the project's uniqueness convention — cf.
+  // users.ts DUPLICATE_EMAIL) gracefully rejects the common double-reconcile. A
+  // residual concurrent-race (two matches passing this check before either
+  // writes) would still hit the migration-0028 unique index (a 500), which no
+  // pre-check can close — only a transactional/locking door can. That is the same
+  // B-085-class door-layer gap flagged for importStatement; catching the raw
+  // constraint error is deliberately NOT done here (no such pattern exists in the
+  // codebase and it would risk masking a genuine error).
 
   // Set matched=true + the chosen FK (the other two stay null). updateThrough
   // re-proves this tenant owns the line's statement before writing the row.
@@ -714,19 +727,36 @@ async function exportBatch(
 // A real bank-specific statement parser (KBANK/SCB/BBL layouts) is a future
 // integration behind this same endpoint.
 //
-// The import (a) creates the bank_statement (scoped insert door — company_id
-// force-set) keeping the raw parsed rows in the additive `lines` jsonb, (b)
-// creates one normalized bank_statement_line per row THROUGH the statement
-// (insertThrough re-proves this tenant owns the parent), and (c) runs the SAME
-// F-BANK1 buildSuggestions (exact-amount + ±date-window) to PRE-mark a line
-// matched ONLY when it has EXACTLY ONE candidate doc that no earlier row in this
-// same import already consumed. A row with zero or multiple candidates stays
-// unmatched for the user to resolve via POST /bank/lines/{id}/match — the import
-// NEVER fabricates or guesses a match (C10). (Cross-statement dedup — a doc
-// already matched to a PRIOR statement's line — is out of scope here; the manual
-// match flow is the backstop.) A malformed file (no lines, or a row whose amount
-// is not a finite number) → 400. Returns { statement_id, period, line_count,
-// matched_count, currency_code }.
+// The import (c) runs the SAME F-BANK1 buildSuggestions (exact-amount +
+// ±date-window) over this tenant's pv/cheque/rv pool to PRE-mark a line matched
+// ONLY when it has EXACTLY ONE candidate doc that no earlier row in this same
+// import already consumed, then (a) creates the bank_statement (scoped insert
+// door — company_id force-set) keeping the raw parsed rows in the additive
+// `lines` jsonb, and (b) creates one normalized bank_statement_line per row
+// THROUGH the statement (insertThrough re-proves this tenant owns the parent). A
+// row with zero or multiple candidates stays unmatched for the user to resolve
+// via POST /bank/lines/{id}/match — the import NEVER fabricates or guesses a
+// match (C10).
+//
+// B-096 fix 1 (graceful reverse-uniqueness): the auto-match pool EXCLUDES any
+// doc already linked to an existing matched bank_statement_line (loadConsumedDocs
+// — the import-side mirror of matchLine's B-094-2 scoped reverse-check). Without
+// this, a second import auto-matching an already-consumed pv/cheque/rv would hit
+// the migration-0028 partial-unique index and 500; instead the consumed doc is
+// simply left unmatched for the manual flow (still C10-honest — never guessed).
+//
+// B-096 fix 2 (atomicity / no orphaned statement): TenantDb exposes NO
+// transaction door (see tenant-db.ts — the base handle is private and there is
+// no db.transaction()), so a true all-or-nothing statement+lines write is a
+// B-085-class door-layer fix flagged separately, NOT invented here. As a partial
+// mitigation the reads + the auto-match DECISIONS are all computed FIRST and the
+// statement is created LAST among the writes, so a failure in the read/compute
+// phase leaves no orphaned statement — the only residual orphan window is a
+// failing insertThrough (whose common consumed-doc collision fix 1 removes; a
+// concurrent-race collision remains the transactional-door concern).
+//
+// A malformed file (no lines, or a row whose amount is not a finite number) →
+// 400. Returns { statement_id, period, line_count, matched_count, currency_code }.
 
 /** One parsed import row (pre-insert): SIGNED amount + calendar date + memo. */
 interface ImportLine {
@@ -790,6 +820,38 @@ function parseLines(raw: unknown): ImportLine[] | ParseError {
   return out;
 }
 
+/**
+ * The pv / cheque / rv already linked to a MATCHED bank_statement_line, keyed by
+ * type — the import-side mirror of matchLine's B-094-2 reverse-uniqueness guard
+ * (B-096 fix 1). Scoped THROUGH the statement (LINE_HOPS anchors company_id on
+ * the tenant root), so a foreign line is invisible → fail closed. The `matched`
+ * predicate is authoritative in prod; the in-memory re-check keeps it correct
+ * where a stub/candidate row is returned unfiltered (same pattern matchLine uses).
+ * The import filters these out of its auto-match pool so a consumed doc is never
+ * re-linked (the migration-0028 partial-unique index would otherwise 500).
+ */
+async function loadConsumedDocs(
+  db: TenantDb,
+): Promise<{ pv: Set<string>; cheque: Set<string>; rv: Set<string> }> {
+  const matchedLines = (await db.selectThrough(
+    bankStatementLines,
+    LINE_HOPS,
+    eq(bankStatementLines.matched, true),
+  )) as BankStatementLineRow[];
+  const consumed = {
+    pv: new Set<string>(),
+    cheque: new Set<string>(),
+    rv: new Set<string>(),
+  };
+  for (const l of matchedLines) {
+    if (!l.matched) continue; // in-memory re-check (the WHERE is authoritative)
+    if (l.pvId) consumed.pv.add(l.pvId);
+    if (l.chequeId) consumed.cheque.add(l.chequeId);
+    if (l.rvId) consumed.rv.add(l.rvId);
+  }
+  return consumed;
+}
+
 async function importStatement(
   db: TenantDb,
   body: Record<string, unknown>,
@@ -814,8 +876,42 @@ async function importStatement(
   const period = str(pick(body, "period")).trim() || null;
   const currency = str(pick(body, "currency_code", "currencyCode")).trim() || "THB";
 
-  // (a) Create the statement (scoped insert — company_id force-set). The raw
-  // imported rows are kept in the additive `lines` jsonb record.
+  // Read + compute the auto-match DECISIONS BEFORE writing anything, so a failure
+  // in this phase leaves NO orphaned statement (B-096 fix 2 — TenantDb has no
+  // transaction door; the statement is created LAST among the writes).
+  //
+  // (c) F-BANK1 auto-match candidate pools (this tenant's pv/cheque/rv), MINUS
+  // any doc already consumed by a matched line (B-096 fix 1 — the migration-0028
+  // partial-unique index would reject a duplicate FK; a consumed doc is left
+  // unmatched for the manual flow, never guessed — C10).
+  const [pvAll, chequeAll, rvAll, consumed] = await Promise.all([
+    db.select(pvs) as Promise<PvRow[]>,
+    db.select(cheques) as Promise<ChequeRow[]>,
+    db.select(rvs) as Promise<RvRow[]>,
+    loadConsumedDocs(db),
+  ]);
+  const pools: DocPools = {
+    pv: pvAll.filter((p) => !consumed.pv.has(p.id)),
+    cheque: chequeAll.filter((c) => !consumed.cheque.has(c.id)),
+    rv: rvAll.filter((r) => !consumed.rv.has(r.id)),
+  };
+
+  // (b′) Decide each row's auto-match while the statement does NOT yet exist —
+  // pure in-memory over the read pools: PRE-mark a match ONLY on an unambiguous
+  // single candidate not already consumed EARLIER IN THIS import (never guess).
+  const usedDocs = new Set<string>();
+  const decisions = parsed.map((row) => {
+    const amountStr = moneyStr(row.amount); // SIGNED numeric-column string
+    const suggestions = buildSuggestions({ amount: amountStr, lineDate: row.lineDate }, pools);
+    const only = suggestions.length === 1 ? suggestions[0]! : null;
+    const autoDoc = only && !usedDocs.has(docKey(only)) ? only : null;
+    if (autoDoc) usedDocs.add(docKey(autoDoc));
+    return { row, amountStr, autoDoc };
+  });
+  const matchedCount = decisions.filter((d) => d.autoDoc !== null).length;
+
+  // (a) Create the statement LAST among the reads (scoped insert — company_id
+  // force-set). The raw imported rows are kept in the additive `lines` jsonb.
   const [statement] = (await db
     .insert(bankStatements, {
       period,
@@ -825,39 +921,19 @@ async function importStatement(
     .returning()) as BankStatementRow[];
   const statementId = statement!.id;
 
-  // (c) F-BANK1 auto-match candidate pools (this tenant's pv/cheque/rv).
-  const [pv, cheque, rv] = await Promise.all([
-    db.select(pvs) as Promise<PvRow[]>,
-    db.select(cheques) as Promise<ChequeRow[]>,
-    db.select(rvs) as Promise<RvRow[]>,
-  ]);
-  const pools: DocPools = { pv, cheque, rv };
-
-  // (b) Build one normalized line per row; PRE-mark a match ONLY on an
-  // unambiguous single candidate not already consumed this import (never guess).
-  const usedDocs = new Set<string>();
-  let matchedCount = 0;
-  const lineRows = parsed.map((row) => {
-    const amountStr = moneyStr(row.amount); // SIGNED numeric-column string
-    const suggestions = buildSuggestions({ amount: amountStr, lineDate: row.lineDate }, pools);
-    const only = suggestions.length === 1 ? suggestions[0]! : null;
-    const autoDoc = only && !usedDocs.has(docKey(only)) ? only : null;
-    if (autoDoc) {
-      usedDocs.add(docKey(autoDoc));
-      matchedCount += 1;
-    }
-    return {
-      statementId,
-      lineDate: row.lineDate,
-      description: row.description,
-      amount: amountStr,
-      currencyCode: currency,
-      matched: autoDoc !== null,
-      pvId: autoDoc?.type === "pv" ? autoDoc.id : null,
-      chequeId: autoDoc?.type === "cheque" ? autoDoc.id : null,
-      rvId: autoDoc?.type === "rv" ? autoDoc.id : null,
-    };
-  });
+  // (b) Materialize the decided lines under the created statement; insertThrough
+  // re-proves this tenant owns the parent before writing.
+  const lineRows = decisions.map((d) => ({
+    statementId,
+    lineDate: d.row.lineDate,
+    description: d.row.description,
+    amount: d.amountStr,
+    currencyCode: currency,
+    matched: d.autoDoc !== null,
+    pvId: d.autoDoc?.type === "pv" ? d.autoDoc.id : null,
+    chequeId: d.autoDoc?.type === "cheque" ? d.autoDoc.id : null,
+    rvId: d.autoDoc?.type === "rv" ? d.autoDoc.id : null,
+  }));
   await db.insertThrough(bankStatementLines, bankStatements, statementId, lineRows);
 
   return reply.code(200).send({
