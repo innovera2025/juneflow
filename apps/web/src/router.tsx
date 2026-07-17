@@ -51,6 +51,9 @@ import { GLChartOfAccounts } from "./screens/gl/gl-coa";
 import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
+import { BankCheque } from "./screens/bank/bank-cheque";
+import { BankReconciliation } from "./screens/bank/bank-recon";
+import { BankExport } from "./screens/bank/bank-export";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -86,6 +89,9 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.jv": GLJournalVoucher,
   "ap.billing": APBilling,
   "ap.pv": APPaymentVoucher,
+  "bank.cheque": BankCheque,
+  "bank.recon": BankReconciliation,
+  "bank.export": BankExport,
 };
 
 const rootRoute = createRootRoute({
