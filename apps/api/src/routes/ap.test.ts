@@ -233,6 +233,9 @@ const pvRow = (
     chequeDate: null,
     currencyCode: "THB",
     batchId: null,
+    // B-094-3 (SoD): a legacy/unattributed PV leaves created_by null (the default);
+    // the self-approve gate then can't prove self-approval and does not block.
+    createdBy: null,
     status: "pending",
     createdAt: D,
     updatedAt: D,
@@ -608,6 +611,51 @@ describe("POST /api/v1/ap/pv", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().message).toMatch(/method must be one of/);
   });
+
+  it("captures the creator's DICTIONARY user id in created_by (B-094-3 SoD)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [apBillings, [apBilling(AP0)]],
+            [vendors, [vendorRow]],
+            // loadCaller resolves the caller via email → dictionary user (u-0) → role.
+            [users, [userRow]],
+            [roles, [roleRow(0)]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      payload: { billing_ids: [AP0], amount: 400000 },
+    });
+    expect(res.statusCode).toBe(201);
+    const ins = inserted.find((i) => i.table === pvs);
+    // The DICTIONARY user id (userRow.id), NOT the better-auth au-0 session id.
+    expect(ins!.values.createdBy).toBe("u-0");
+  });
+
+  it("leaves created_by null when the caller can't be attributed (honest, fail-safe)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // No users row → loadCaller returns null → created_by null.
+        db: okDb(inserted),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      payload: { billing_ids: [AP0], amount: 400000 },
+    });
+    expect(res.statusCode).toBe(201);
+    const ins = inserted.find((i) => i.table === pvs);
+    expect(ins!.values.createdBy).toBeNull();
+  });
 });
 
 // ===========================================================================
@@ -723,5 +771,47 @@ describe("POST /api/v1/pv/:id/approve — ladder (บัญชี → ผจก.
     ).inject({ method: "POST", url: `/api/v1/pv/${PV0}/approve` });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  // B-094-3 — separation of duties (a creator may not approve their own PV).
+  it("403s when the approver IS the creator (self-approve, SoD) — even with the tier", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // created_by === the caller's dictionary user id (userRow.id = "u-0").
+        db: ladderDb(pvRow(PV0, { amount: "400000.00", createdBy: "u-0" }), 4, true, updated),
+      })
+    ).inject({ method: "POST", url: `/api/v1/pv/${PV0}/approve` });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toMatch(/separation of duties/);
+    // Fail closed: the PV was NOT approved.
+    expect(updated.find((u) => u.table === pvs)).toBeUndefined();
+  });
+
+  it("approves when a DIFFERENT authorized approver signs off (creator ≠ approver) → 200", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // A different creator ("u-99") — the caller ("u-0") is not the creator.
+        db: ladderDb(pvRow(PV0, { amount: "400000.00", createdBy: "u-99" }), 0, true, updated),
+      })
+    ).inject({ method: "POST", url: `/api/v1/pv/${PV0}/approve` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("approved");
+    expect(updated.find((u) => u.table === pvs)!.set.status).toBe("approved");
+  });
+
+  it("does NOT block a legacy/unattributed PV (created_by null) — fail SAFE, not fail closed", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // created_by null (the pvRow default) — self-approval can't be proven.
+        db: ladderDb(pvRow(PV0, { amount: "400000.00", createdBy: null }), 0),
+      })
+    ).inject({ method: "POST", url: `/api/v1/pv/${PV0}/approve` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("approved");
   });
 });
