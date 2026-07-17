@@ -3,6 +3,7 @@ import {
   API_URL,
   boqItemsByPrice,
   clientFor,
+  isRateLimited,
   firstProjectId,
   firstVendorId,
   okJson,
@@ -48,21 +49,38 @@ liveDescribe("FLOW-A procurement money-path state machine (G4, live seeded stack
   let procApprover: APIRequestContext; // proc, level 2 — the LOWER tier (must 403)
   let pmApprover: APIRequestContext; // PM, level 3 — the correct tier (must advance)
   let anon: APIRequestContext; // no bearer — must be rejected everywhere
+  // Set when the F4 login throttle (429) blocks setup — every test then skips
+  // gracefully instead of failing while F4 tuning (B-099) is pending.
+  let rateLimited = false;
 
   test.beforeAll(async () => {
-    requester = await clientFor(USER_SITE_L1);
-    procApprover = await clientFor(USER_PROC_L2);
-    pmApprover = await clientFor(USER_PM_L3);
-    anon = await pwRequest.newContext({ baseURL: API_URL });
+    try {
+      requester = await clientFor(USER_SITE_L1);
+      procApprover = await clientFor(USER_PROC_L2);
+      pmApprover = await clientFor(USER_PM_L3);
+      anon = await pwRequest.newContext({ baseURL: API_URL });
+    } catch (e) {
+      if (isRateLimited(e)) {
+        rateLimited = true; // graceful skip — see beforeEach
+        return;
+      }
+      throw e; // a real setup failure still fails loud
+    }
+  });
+
+  test.beforeEach(() => {
+    test.skip(
+      rateLimited,
+      "B-082 F4 login rate-limiter (429): the per-IP throttle blocks the ladder's multi-tier setup logins. Skipping until F4 is tuned (per-user / higher threshold / test-mode bypass) — B-099.",
+    );
   });
 
   test.afterAll(async () => {
-    await Promise.all([
-      requester.dispose(),
-      procApprover.dispose(),
-      pmApprover.dispose(),
-      anon.dispose(),
-    ]);
+    await Promise.all(
+      [requester, procApprover, pmApprover, anon]
+        .filter(Boolean)
+        .map((c) => c.dispose()),
+    );
   });
 
   test("PR → approval-ladder → PO → GR drives each spec state transition", async () => {
