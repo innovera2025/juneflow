@@ -323,3 +323,9 @@
 - agents/orch-b-recon/PROJECT-STATUS.md — full project-wide status (5 audit-lane synth): board 130 tasks · 26/100 screens · 84/186 endpoints · 28 migrations · ~173 function register (BE/FE per item) · tech report (security/perf/dep/i18n/a11y) · deferred/roadmap
 - interactive artifact: claude.ai/code/artifact/9cdd1315 (Wei-requested)
 - read-only reference · orch-B zone · no board touch
+
+## 2026-07-17 16:37 · qa (orch-B) · batch-8 verify references committed + 2 findings captured
+- committed 12 orch-b-recon refs (4ca6ffa): B-095 fix-spec/handoff/reaudit · type-stripping-scan · live-G5 runners(finance+batch8)+readiness+verdict+harness-notes · promote-batch8-runbook · batch8-audit · b084 matrix +P2-BE-20
+- gitignore *-results/ (transient diff PNGs not committed)
+- finding 1: live-G5 harness gaps documented (worktree-install · storageState-auth · per-screen-viewport for g5 924x540 · lossy-jpg threshold · manifest self-check drift) → harness-notes.md
+- finding 2: P2-BE-20 adds 2 ungated mutations (import + reconcile/period-lock) → b084 matrix updated (reconcile = finance-mgr gate candidate)
