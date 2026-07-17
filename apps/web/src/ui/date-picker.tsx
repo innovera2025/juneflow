@@ -38,6 +38,10 @@ const WEEKDAYS: string[] = Array.from({ length: 7 }, (_, i) =>
 
 /** Prototype fmtThaiDate(d) — short Thai-Buddhist date via Intl (no Thai literal here). */
 export function formatThaiShort(d: Date): string {
+  // Intl.DateTimeFormat.format() throws RangeError on an Invalid Date (e.g. a
+  // malformed `as_of` on the wire -> new Date(bad) in the dashboard header). Guard
+  // it: an invalid date yields an empty placeholder rather than a render crash (B-087).
+  if (Number.isNaN(d.getTime())) return "";
   return SHORT_FMT.format(d);
 }
 

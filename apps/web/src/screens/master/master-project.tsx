@@ -45,6 +45,7 @@ import {
   unitCode,
   typeHierarchy,
   phaseHead,
+  hierarchyLabels,
   type Block,
   type ModelLite,
   type UnitStatus,
@@ -188,8 +189,11 @@ export function MasterProject() {
   const totals = blockTotals(blocks);
 
   const H = typeHierarchy(typesQ.data ?? [], active?.type);
-  // Needs project/phase/block/unit labels (H[0..3]); real-estate has 5, so this holds.
-  const ready = !!active && H.length >= 4;
+  // Render once the active project + its WBS labels have resolved. The prototype pads
+  // any missing slot (master.jsx:316-319 `H[i] || default`), so a project type with
+  // fewer than four levels still renders — only an unresolved type (H empty) shows the
+  // loading skeleton. Gating on a hardcoded depth of 4 blanked every <4-level type (B-087).
+  const ready = !!active && H.length > 0;
 
   const addPrefix = tp(projStrings.addPrefix as PhraseKey);
   const unitWord = tp(projStrings.unit as PhraseKey);
@@ -197,7 +201,7 @@ export function MasterProject() {
 
   // add phase/block (master.jsx:321-332): fire the create mutation + the add toast.
   const openAdd = (H4: string[]) => {
-    const [, Lphase, Lblock, Lunit] = H4;
+    const [, Lphase, Lblock, Lunit] = hierarchyLabels(H4, unitWord);
     const phaseName = phaseHead(active?.phases?.[0]?.name);
     ctx.openModal({
       title: `${addPrefix} ${Lphase} / ${Lblock}`,
@@ -262,7 +266,7 @@ export function MasterProject() {
     );
   }
 
-  const [Lproject, Lphase, Lblock, Lunit] = H;
+  const [Lproject, Lphase, Lblock, Lunit] = hierarchyLabels(H, unitWord);
   const phaseValue = phaseHead(active?.phases?.[0]?.name);
 
   return (
