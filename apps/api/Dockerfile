@@ -22,6 +22,9 @@ RUN pnpm install --frozen-lockfile
 # (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). Its `default` export
 # condition resolves the compiled JS at runtime (P0-FIX-08 / B-033).
 RUN pnpm --filter @juneflow/db build
+RUN pnpm --filter @juneflow/tax-engine build
+RUN pnpm --filter @juneflow/bank-file build
+RUN pnpm --filter @juneflow/notifications build
 RUN pnpm --filter @juneflow/api build
 # Self-contained production deploy of @juneflow/api (prod deps only).
 # Includes @juneflow/db with its built dist/ so `node dist/index.js` boots.

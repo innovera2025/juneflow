@@ -1,0 +1,14 @@
+{
+  // Production build config for @juneflow/notifications (B-095, mirrors @juneflow/db P0-FIX-08/B-033).
+  // Emits dist/ (JS + .d.ts) so the packed prod image resolves compiled JS instead of raw .ts
+  // under node_modules (node refuses to type-strip: ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING).
+  // Dev (tsx) + tests (vitest) still resolve src via the `development` export condition.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+}
