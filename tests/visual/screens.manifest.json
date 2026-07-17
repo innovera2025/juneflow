@@ -2,11 +2,12 @@
   "note": "Real-capture list for the visual gate (P0-QA-04). Each entry: {screen, route, ref, masks?} where ref is relative to tests/visual/reference/ and masks is an OPT-IN list of Wei-approved mask keys from lib/masks.ts MASK_REGISTRY (P0-QA-07) — shell-bearing screens list \"sidebar-logo-b044\" (B-044: reference logo lockup is an older locale render); screens without the sidebar lockup (e.g. login, P1-WEB-01) must omit masks. A route whose body screen is not ported yet (only shell chrome delivered) also lists \"content-area-b048\" (B-048/P0-QA-08: shell-only G5 — compare chrome only, x>=244,y>=56 excluded), and drops it once the body screen lands so full-page G5 returns. Populate a row when the matching apps/web screen exists and is reachable at VISUAL_BASE_URL. route→ref mapping is authoritative in tests/visual/reference-index.md (P0-QA-01). The harness self-verifies its engine meanwhile.",
   "screens": [
     {
-      "screen": "dashboard",
+      "screen": "app-shell",
       "route": "dashboard",
       "ref": "gallery/g1/01-s.jpg",
       "masks": [
-        "sidebar-logo-b044"
+        "sidebar-logo-b044",
+        "content-area-b048"
       ]
     }
   ]

@@ -79,8 +79,10 @@ for route in sorted(sweep):
     ref = route_ref.get(route)
     if not ref:
         missing.append(route); continue
+    # viewport = reference size (folded into the committed spec, P0-QA-04): g5 = 924x540, else 1600x1000
+    vp = {"width": 924, "height": 540} if ref.startswith("gallery/g5/") else {"width": 1600, "height": 1000}
     d["screens"].append({"screen": route, "route": route, "ref": ref,
-                         "masks": ["sidebar-logo-b044"]})
+                         "masks": ["sidebar-logo-b044"], "viewport": vp})
     added.append(route)
 mpath.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
 print(f"sweep screens: {len(d['screens'])}  (+{len(added)} added)")
@@ -89,21 +91,12 @@ if missing:
     print("!! no reference for (skipped):", ", ".join(missing))
 PY
 
-echo "== 3. patch throwaway visual config: storageState from env =="
-python3 - "$WT" <<'PY'
-import pathlib, sys
-p = pathlib.Path(sys.argv[1]) / "tests/visual/playwright.visual.config.ts"
-s = p.read_text(encoding="utf-8")
-needle = 'baseURL: process.env.VISUAL_BASE_URL ?? "http://localhost:5173",'
-# references are 1600x1000 → capture MUST match viewport or every screen auto-FAILs on dimension.
-inject = (needle
-  + '\n    storageState: process.env.VISUAL_STORAGE_STATE || undefined,'
-  + '\n    viewport: { width: 1600, height: 1000 },')
-if "VISUAL_STORAGE_STATE" not in s:
-    s = s.replace(needle, inject, 1)
-    p.write_text(s, encoding="utf-8")
-print("config patched (storageState + viewport 1600x1000)")
-PY
+echo "== 3. (config patch no longer needed — folded into committed tests/visual · P0-QA-04) =="
+# Committed playwright.visual.config.ts reads storageState from VISUAL_STORAGE_STATE (set in step 6);
+# visual-gate.spec.ts sets the per-screen viewport from the manifest `viewport` field (added in step 2).
+grep -q 'VISUAL_STORAGE_STATE' "$WT/tests/visual/playwright.visual.config.ts" \
+  && echo "   committed config supports storageState ✓ (fold present on this SHA)" \
+  || echo "   WARN: committed config lacks the fold on this SHA — capture may render logged-out"
 
 echo "== 4. build + bring up ISOLATED stack (--wait = the B-095 boot gate) =="
 $COMPOSE up -d --build --wait

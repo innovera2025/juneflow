@@ -31,3 +31,15 @@ References are lossy `.jpg`; captures are `.png`; `VISUAL_MAX_DIFF_PIXEL_RATIO=0
 
 ## Recommendation
 Make live-G5 push-button by folding Gaps 1–3 + 5 into the **committed** harness (config viewport-per-screen + storageState-from-env; runner with install; manifest self-check aligned), then a single verification run confirms the self-checks stay green and captures compare at correct dimensions. Gap 4 (threshold vs lossy-jpg) stays a Wei/BLOCKERS decision. Until then, the runner here works for g1/g2 screens; g5 screens need the per-screen-viewport fix before their verdicts are meaningful.
+
+
+---
+
+## FOLD APPLIED — 2026-07-17 (QA harness fold · P0-QA-04)
+Gaps 2, 3, 5 folded into the committed `tests/visual/` harness (verified: `test:visual` = 16 passed · 1 skipped · 0 fail · the app-shell self-check now PASSes):
+- **Gap 2 (storageState):** `playwright.visual.config.ts` `use.storageState = process.env.VISUAL_STORAGE_STATE || undefined` — a run injects the auth localStorage state; unset = unchanged.
+- **Gap 3 (viewport):** `visual-gate.spec.ts` capture sets `page.setViewportSize(entry.viewport ?? {1600,1000})` + `fullPage:false` → shoots at the reference size (g1/g2 1600x1000, g5 924x540 via the manifest `viewport` field) so no dimension auto-FAIL. `ManifestEntry.viewport?` added.
+- **Gap 5 (app-shell drift):** `screens.manifest.json` row → `screen:"app-shell"` + masks `[sidebar-logo-b044, content-area-b048]` = matches the self-check.
+- **Runner** `live-g5-batch8.sh`: manifest-build now emits `viewport` per screen (g5→924x540); the throwaway config-patch step is retired (committed config handles it).
+STILL open: Gap 1 (worktree `pnpm install`) = runner-only (already in the scripts). Gap 4 (lossy-jpg + threshold 0) = Wei/BLOCKERS threshold decision (read the diff, not the pass/fail). `live-g5-finance.sh` config-patch is now redundant too (lower priority; batch8 is the primary sweep).
+Net: a future live-G5 run needs no ad-hoc config patching — set `VISUAL_STORAGE_STATE` + a viewport-carrying manifest and capture compares at correct dimensions on first try.
