@@ -22,8 +22,10 @@ git -C "$ROOT" worktree add --force --detach "$WT" "$DEV_REF"
 ( cd "$WT" && pnpm install --frozen-lockfile --prefer-offline )
 ( cd "$WT" && pnpm --dir tests exec playwright install chromium ) 2>/dev/null || true
 
-echo "== 2. compose up --wait (migrate-seed + api node-dist boot) =="
-$COMPOSE up -d --build --wait api
+echo "== 2. compose up --wait ALL (migrate-seed + api node-dist boot + web for the proxy) =="
+# --wait (all, not just api) so the web service is up before playwright's live-proxy
+# webServer health-check forwards / → web (otherwise 502 → 60s webServer timeout).
+$COMPOSE up -d --build --wait
 
 echo "== 3. run finance-flow.spec LIVE (E2E_LIVE=1 · api-level via E2E_API_URL · proxy→compose) =="
 cd "$WT/tests"
@@ -32,6 +34,6 @@ E2E_LIVE=1 \
   PROXY_PORT="${PROXY_PORT}" \
   PROXY_WEB_TARGET="http://localhost:${WEB_PORT}" \
   PROXY_API_TARGET="http://localhost:${API_PORT}" \
-  pnpm exec playwright test --config e2e/playwright.config.ts e2e/finance-flow.spec.ts 2>&1 | tail -40
+  pnpm exec playwright test --config e2e/playwright.config.ts finance-flow 2>&1 | tail -45
 
 echo "== done (teardown on exit) =="
