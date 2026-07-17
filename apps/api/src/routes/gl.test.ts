@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  accountingPeriods,
   glAccounts,
   grs,
   jvLines,
@@ -125,6 +126,17 @@ const glAcc = (id: string, code: string, name: string, parentId: string | null) 
   parentId,
   code,
   name,
+  createdAt: D,
+  updatedAt: D,
+});
+
+// An accounting_period row (B-094-1 locked-period guard).
+const PERIOD = "per00000-0000-0000-0000-0000000000p1";
+const periodRow = (id: string, locked: boolean) => ({
+  id,
+  companyId: COMPANY,
+  period: "2569-05",
+  locked,
   createdAt: D,
   updatedAt: D,
 });
@@ -433,6 +445,56 @@ describe("POST /api/v1/gl/jv", () => {
     const read = captured.find((c) => c.table === glAccounts);
     expect(read).toBeTruthy();
     expect(paramsOf(read!.where)).toContain(COMPANY);
+  });
+
+  // B-094-1: back-posting a JV into a LOCKED (closed) accounting period must be
+  // rejected (409 INVALID_STATE) — a closed period must stay closed.
+  it("rejects a JV posted to a LOCKED accounting period (409, nothing written)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [glAccounts, [glAcc(ACC_COST, "5020", "x", null), glAcc(ACC_AR, "1030", "y", null)]],
+            [jvs, [{ id: "any", companyId: COMPANY }]],
+            [accountingPeriods, [periodRow(PERIOD, true)]], // the period is CLOSED
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/jv",
+      payload: { ...balancedBody, period_id: PERIOD },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/locked/);
+    expect(inserted).toHaveLength(0); // the closed period held — no JV persisted
+  });
+
+  it("allows a JV posted to an OPEN period (201) — the guard does not over-block", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [glAccounts, [glAcc(ACC_COST, "5020", "x", null), glAcc(ACC_AR, "1030", "y", null)]],
+            [jvs, [{ id: "any", companyId: COMPANY }]],
+            [accountingPeriods, [periodRow(PERIOD, false)]], // the period is OPEN
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/jv",
+      payload: { ...balancedBody, period_id: PERIOD },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.find((i) => i.table === jvs)).toBeTruthy();
   });
 });
 

@@ -1343,6 +1343,13 @@ async function seed(): Promise<void> {
           chequeNo: pv.chequeNo,
           chequeBank: pv.chequeBank,
           chequeDate: null,
+          // B-094-3 (SoD, migration 0029): backfill created_by to user:4 — the
+          // seeded Accounting-role holder (ROLE_DEFS[4] = `acc`, at(ROLE_DEFS, 4)),
+          // a finance-STAFF member (approval level 0). This is DISTINCT from every
+          // PV approver tier — finmgr (user:9, level 3) and dir (user:1, level 4) —
+          // so the new self-approve gate never blocks an existing seeded approval
+          // flow (the accountant records the PV; a manager/director approves it).
+          createdBy: det(`user:4`),
         })),
       );
 

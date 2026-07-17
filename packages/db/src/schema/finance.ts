@@ -28,10 +28,12 @@
 // Any NEW conflict outside PLAN.md Appendix C -> BLOCKERS.md, never decide
 // locally.
 
+import { sql } from "drizzle-orm";
 import {
   pgEnum,
   pgTable,
   index,
+  uniqueIndex,
   text,
   uuid,
   integer,
@@ -43,7 +45,7 @@ import {
   unique,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { companies } from "./platform.js";
+import { companies, users } from "./platform.js";
 import { projects, costCenters, vendors, customers } from "./project.js";
 import { pos, grs, wos } from "./boq.js";
 
@@ -245,6 +247,16 @@ export const pvs = pgTable("pv", {
   chequeDate: date("cheque_date"),
   currencyCode: text("currency_code").notNull().default("THB"),
   batchId: uuid("batch_id"),
+  // B-094-3 (SoD, migration 0029 · Wei ruled "ทำเลย"): the DICTIONARY `user` who
+  // created the PV, captured at POST /ap/pv from the caller's resolved dictionary
+  // user id (loadCaller — NOT the better-auth auth_user id, which is FK-invalid
+  // here, the F2 audit-actor precedent). Separation-of-duties: POST /pv/{id}/approve
+  // rejects an approver whose id === created_by (a creator may not approve their own
+  // PV). Nullable + ON DELETE set null: a legacy/unattributed PV leaves it null and
+  // the SoD gate fails SAFE (an unprovable creator is never blocked).
+  createdBy: uuid("created_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
   status: text("status").notNull().default("draft"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
@@ -481,6 +493,20 @@ export const bankStatementLines = pgTable(
     // 0027 (B-092/F-BANK2): a statement's lines are read/matched together — index
     // the parent FK, mirroring the child-table FK-index precedent (gr_item).
     index("bank_statement_line_statement_idx").on(t.statementId),
+    // 0028 (B-094-2): a single PV / cheque / RV settles at most ONE statement line
+    // — a partial UNIQUE index makes the reverse double-reconcile (the handler
+    // 409s first) impossible at the DB layer too. WHERE ... IS NOT NULL keeps the
+    // many unmatched lines (all three FKs null) from colliding on NULL. Mirrors
+    // the org_unit partial-unique precedent (extensions.ts).
+    uniqueIndex("bank_statement_line_pv_uq")
+      .on(t.pvId)
+      .where(sql`${t.pvId} is not null`),
+    uniqueIndex("bank_statement_line_cheque_uq")
+      .on(t.chequeId)
+      .where(sql`${t.chequeId} is not null`),
+    uniqueIndex("bank_statement_line_rv_uq")
+      .on(t.rvId)
+      .where(sql`${t.rvId} is not null`),
   ],
 );
 

@@ -57,6 +57,11 @@ function badRequest(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(400).send({ code: "VALIDATION", message });
 }
 
+/** Flat 409 INVALID_STATE error (contract Error shape). */
+function conflict(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(409).send({ code: "INVALID_STATE", message });
+}
+
 /** Coerce opaque JSON (number | numeric string) to a finite number, else null. */
 function toNum(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -299,6 +304,16 @@ async function createJv(
     );
     if (!period) {
       return badRequest(reply, `period_id ${parsed.periodId} not found in this tenant`);
+    }
+    // B-094-1: a locked (closed) accounting period is closed to back-posting —
+    // the data-dictionary "ปิดงวดล็อก" invariant (accounting_period.locked). A JV
+    // posted into a closed period would silently reopen the books, so reject it
+    // (409) rather than persist the leg. Tenant-scoped read above (fail closed).
+    if (period.locked) {
+      return conflict(
+        reply,
+        `period ${parsed.periodId} is locked — posting to a closed period is not allowed`,
+      );
     }
   }
 

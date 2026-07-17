@@ -1,0 +1,3 @@
+CREATE UNIQUE INDEX "bank_statement_line_pv_uq" ON "bank_statement_line" USING btree ("pv_id") WHERE "bank_statement_line"."pv_id" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "bank_statement_line_cheque_uq" ON "bank_statement_line" USING btree ("cheque_id") WHERE "bank_statement_line"."cheque_id" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "bank_statement_line_rv_uq" ON "bank_statement_line" USING btree ("rv_id") WHERE "bank_statement_line"."rv_id" is not null;

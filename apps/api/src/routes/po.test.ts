@@ -635,13 +635,17 @@ describe("PO state machine — approve (tiered authority, B-070 PO/WO 1M/5M)", (
 });
 
 describe("PO state machine — reject", () => {
-  it("reject: pending → rejected with a reason", async () => {
+  it("reject: pending → rejected with a reason (by an authorized approver)", async () => {
     const P0 = po("p0", "N", "pending", 1000);
     const updated: Updated[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[pos, [P0]]], updated, updateBase: P0 }),
+        db: stubDb({
+          rows: [[pos, [P0]], [users, [userRow]], [roles, [roleRow(2)]]],
+          updated,
+          updateBase: P0,
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: { reason: "ราคาเกินงบ" } });
     expect(res.statusCode).toBe(200);
@@ -653,7 +657,7 @@ describe("PO state machine — reject", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[pos, [po("p0", "N", "pending", 1000)]]] }),
+        db: stubDb({ rows: [[pos, [po("p0", "N", "pending", 1000)]], [users, [userRow]], [roles, [roleRow(2)]]] }),
       })
     ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: {} });
     expect(res.statusCode).toBe(400);
@@ -664,11 +668,41 @@ describe("PO state machine — reject", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[pos, [po("p0", "N", "draft", 1000)]]] }),
+        db: stubDb({ rows: [[pos, [po("p0", "N", "draft", 1000)]], [users, [userRow]], [roles, [roleRow(2)]]] }),
       })
     ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: { reason: "x" } });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  // B-084-reject: a low-tier member must not be able to reject a high-value
+  // pending PO (workflow sabotage) — reject is gated on the same authority as
+  // approve (>5M needs MD level 4; a level-2 หน.จัดซื้อ is denied 403).
+  it("reject: 403 when a below-tier caller rejects a high-value pending PO (no write)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[pos, [po("p0", "N", "pending", 6_000_000)]], [users, [userRow]], [roles, [roleRow(2)]]],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: { reason: "x" } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(updated).toHaveLength(0); // gate precedes the write — nothing rejected
+  });
+
+  it("reject: 403 when the caller has no attributable role (fail closed)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pos, [po("p0", "N", "pending", 1000)]], [users, []], [roles, []]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/po/p0/reject", payload: { reason: "x" } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
   });
 });
 

@@ -398,6 +398,20 @@ export function registerWoRoute(app: FastifyInstance): void {
       return reply.code(404).send({ code: "NOT_FOUND", message: `WO ${id} not found` });
     }
 
+    // B-084-reject: reject is the approver's counterpart to approve — gate it on
+    // the SAME B-070 approval authority the WO's value demands, so a low-tier
+    // member cannot sabotage a high-value pending doc by rejecting it. Fail-closed:
+    // an unattributable caller (or one below the tier) is denied 403.
+    const rejectAmount = Number(wo.value);
+    const rejectNeeded = requiredApprovalLevel(rejectAmount);
+    const rejectLevel = await callerApprovalLevel(request);
+    if (rejectLevel == null || rejectLevel < rejectNeeded) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `WO rejection of ${rejectAmount} requires approval level ${rejectNeeded}`,
+      });
+    }
+
     const body = (request.body ?? {}) as Record<string, unknown>;
     const reason = str(pick(body, "reason")).trim();
     if (!reason) {
