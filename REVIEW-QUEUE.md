@@ -57,3 +57,5 @@
 > ✅ **batch #3 (21 งาน) promoted → `main` `43e0b70` เมื่อ 2026-07-14** — sacred rounds 4 (i18n §1/§5/§7/§8 + envelope B-014 + contract §4/§6) · routes 6 · shell 5b · Dart regen · audit อิสระ 14-agent = 0 blocker (main tree == fde14e6 เป๊ะ · diff ว่าง) · queue เคลียร์ · **batch #4 เริ่มสะสมจาก WEB-08 (master.company กำลัง port)**
 > ✅ **batch #2 (46 งาน) promoted → `main` `1eb2ecb` เมื่อ 2026-07-13** — Phase 0 ครบ + P1 login · audit อิสระ 0 defects (sacred integrity · migration 0000-0008 · gates 28/29 · api 81/web 24 · seed 113/113) · queue เคลียร์
 > แถวใหม่จะสะสมเมื่อมีงาน merge เข้า `dev` รอบถัดไป (WEB-05 shell · DEV-06 secret กำลังจะเดิน)
+
+> **batch-8 PROMOTED → main 041013a (2026-07-17 · Wave-2 finance + B-095 · 0-drift)** — rows above ที่เป็น Wave-2/B-095 = promoted · P2-BE-20 (B-093 bank import/reconcile) = batch-9 (next).
