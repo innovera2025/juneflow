@@ -15,6 +15,7 @@ import {
   unitCode,
   typeHierarchy,
   phaseHead,
+  hierarchyLabels,
   type Block,
 } from "./project-blocks";
 
@@ -133,6 +134,41 @@ describe("phaseHead", () => {
   it("takes the first ' · ' segment of a phase name", () => {
     expect(phaseHead("เฟส 1 · Block A (บ้านเดี่ยว)")).toBe("เฟส 1");
     expect(phaseHead(undefined)).toBe("");
+  });
+});
+
+describe("hierarchyLabels (B-087 over-strict gate fix)", () => {
+  const UNIT = "UNIT_FALLBACK";
+
+  it("returns H[0..3] verbatim when the type has >= 4 levels (layout unchanged)", () => {
+    expect(hierarchyLabels(["Project", "Phase", "Block", "Unit", "Model"], UNIT)).toEqual([
+      "Project",
+      "Phase",
+      "Block",
+      "Unit",
+    ]);
+    // The unit fallback is never consulted when H already carries the unit slot.
+    expect(hierarchyLabels(["A", "B", "C", "D"], UNIT)[3]).toBe("D");
+  });
+
+  it("pads the missing unit slot for a 3-level type (the civil/service seed case)", () => {
+    // Real seed shape: [project, section/phase, WBS] with no explicit unit label.
+    expect(hierarchyLabels(["Project", "Section", "WBS"], UNIT)).toEqual([
+      "Project",
+      "Section",
+      "WBS",
+      UNIT,
+    ]);
+  });
+
+  it("pads block + unit for a 2-level type (never blanks, never undefined)", () => {
+    const [p, ph, b, u] = hierarchyLabels(["Site", "Zone"], UNIT);
+    expect(p).toBe("Site");
+    expect(ph).toBe("Zone");
+    expect(b).toBe("");
+    expect(u).toBe(UNIT);
+    // No slot is ever undefined (would render "undefined" in the template strings).
+    expect([p, ph, b, u].every((x) => typeof x === "string")).toBe(true);
   });
 });
 

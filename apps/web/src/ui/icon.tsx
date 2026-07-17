@@ -163,6 +163,12 @@ export function Icon({
     strokeLinecap: "round",
     strokeLinejoin: "round",
   };
+  // Guard the glyph lookup: `name` is typed IconName, but callers feed it opaque
+  // server strings (e.g. master-company passes `r.icon as IconName` from GET
+  // /org-units). Any value outside the glyph table makes GLYPHS[name] undefined, so
+  // calling it would throw. Reproduce the prototype's `paths[name] || null` blank
+  // (ds.jsx) — render nothing for an unknown name instead of crashing (B-087).
+  const glyph = GLYPHS[name];
   return (
     <svg
       width={size}
@@ -171,7 +177,7 @@ export function Icon({
       style={style}
       aria-hidden="true"
     >
-      {GLYPHS[name](p, color)}
+      {typeof glyph === "function" ? glyph(p, color) : null}
     </svg>
   );
 }
