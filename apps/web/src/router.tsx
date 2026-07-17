@@ -47,6 +47,8 @@ import { MasterProject } from "./screens/master/master-project";
 import { MasterProjectType } from "./screens/master/master-project-type";
 import { MasterVendor } from "./screens/master/master-vendor";
 import { UsersPermissions } from "./screens/master/users-permissions";
+import { GLChartOfAccounts } from "./screens/gl/gl-coa";
+import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -78,6 +80,8 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "master.ptype": MasterProjectType,
   "master.vendor": MasterVendor,
   users: UsersPermissions,
+  "gl.coa": GLChartOfAccounts,
+  "gl.jv": GLJournalVoucher,
 };
 
 const rootRoute = createRootRoute({
