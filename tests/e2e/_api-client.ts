@@ -162,3 +162,88 @@ export async function boqItemsByPrice(client: APIRequestContext): Promise<BoqIte
   if (!items.length) throw new Error("no priced BOQ items in the seed");
   return items.sort((a, b) => a.price - b.price);
 }
+
+// ---------------------------------------------------------------------------
+// Wave-2 FINANCE money-path plumbing (finance-flow.spec.ts, Gate G4).
+//
+// The finance ladder + net formula + double-entry guard the spec asserts come
+// from the flows.html state machine, NOT the api implementation (tests/CLAUDE.md
+// iron rule) — they are transcribed here as the source of truth the api must
+// MATCH. Only the mechanics (which seed user holds which finance tier) come from
+// the central seed (packages/db seed COMPANY_USERS + ROLE_DEFS + the migration
+// 0026 Finance Manager role).
+//
+// PV approval ladder (flows.html PV row "บัญชี → ผจก.การเงิน (>500K) → MD (>2M)"):
+//   - บัญชี (Accounting `acc`)     — approvalLevel 0, HAS finance.approve. Tier-1:
+//       approves any PV up to 500K; is REJECTED on a PV above 500K.
+//   - ผจก.การเงิน (Finance Manager `finmgr`, seed migration 0026) — approvalLevel
+//       3. Tier-2: the required signer for a PV in the >500K…≤2M band.
+//   - MD (Director `dir`)          — approvalLevel 4. Tier-3: required above 2M.
+// The perm gate (finance.approve) is independent of the tier: a caller without it
+// is denied regardless of amount (USER_PROC_L2 below — Procurement Mgr, level 2,
+// no finance.approve).
+// ---------------------------------------------------------------------------
+
+/** Accounting (บัญชี) — approvalLevel 0, HAS finance.approve. PV tier-1 (≤500K only). */
+export const USER_ACC_TIER1 = "somsak@rungrueang.co.th";
+/** Finance Manager (ผจก.การเงิน) — approvalLevel 3, HAS finance.approve. PV tier-2 (>500K…≤2M). */
+export const USER_FINMGR_TIER2 = "suda@rungrueang.co.th";
+// USER_MD_L4 (Director, approvalLevel 4) above = PV tier-3 (>2M).
+// USER_PROC_L2 (Procurement Mgr, approvalLevel 2, NO finance.approve) above =
+// the perm-gate negative: denied a PV approval regardless of the amount tier.
+
+/** PV ladder tier lines (THB, strict >), flows.html PV row: >500K → ผจก.การเงิน; >2M → MD. */
+export const PV_TIER_FINMGR = 500_000;
+export const PV_TIER_MD = 2_000_000;
+
+/** Thai construction/subcontract-service withholding-tax rate (percent) — ap.jsx WHT 3%. */
+export const WHT_PCT_SERVICE = 3;
+
+/** Round a money magnitude to the 2-dp minor unit (mirrors the ledger's rounding). */
+export function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/** Expected withholding tax = ratePercent of gross, 2-dp (tax-engine.calcWht spec). */
+export function expectedWht(gross: number, ratePercent: number): number {
+  return round2((gross * ratePercent) / 100);
+}
+
+/** Expected PV net = gross − WHT − retention, 2-dp (flows.html PV net formula). */
+export function expectedNet(gross: number, wht: number, retention: number): number {
+  return round2(gross - wht - retention);
+}
+
+/** The tenant's first PO id — the PO leg of a 3-way-match (PO+GR+INV) AP billing. */
+export async function firstPoId(client: APIRequestContext): Promise<string> {
+  const body = await okJson(await client.get("/api/v1/po"), "GET /po");
+  const data = body.data as Array<{ id: string }>;
+  if (!data?.length) throw new Error("no seeded POs");
+  return data[0]!.id;
+}
+
+/** The tenant's first GR id — the goods-receipt leg of a 3-way-match AP billing. */
+export async function firstGrId(client: APIRequestContext): Promise<string> {
+  const body = await okJson(await client.get("/api/v1/gr"), "GET /gr");
+  const data = body.data as Array<{ id: string }>;
+  if (!data?.length) throw new Error("no seeded GRs");
+  return data[0]!.id;
+}
+
+/** The tenant's chart-of-accounts ids (JV legs must reference tenant accounts). */
+export async function glAccountIds(client: APIRequestContext): Promise<string[]> {
+  const body = await okJson(await client.get("/api/v1/gl/coa"), "GET /gl/coa");
+  const data = body.data as Array<{ id: string }>;
+  if (!data || data.length < 2) throw new Error("need ≥2 seeded GL accounts");
+  return data.map((a) => a.id);
+}
+
+/** Find a payment voucher by id in the tenant's PV list (there is no GET /pv/:id). */
+export async function pvById(
+  client: APIRequestContext,
+  id: string,
+): Promise<Record<string, unknown> | undefined> {
+  const body = await okJson(await client.get("/api/v1/ap/pv"), "GET /ap/pv");
+  const data = body.data as Array<Record<string, unknown>>;
+  return data.find((pv) => pv.id === id);
+}
