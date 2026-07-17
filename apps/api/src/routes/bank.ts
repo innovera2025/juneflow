@@ -78,6 +78,7 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 import { pick, str, toNum } from "./procurement.js";
+import { loadCaller, permAllowed } from "./authz.js";
 
 type BankStatementRow = typeof bankStatements.$inferSelect;
 type BankStatementLineRow = typeof bankStatementLines.$inferSelect;
@@ -101,6 +102,15 @@ const MATCH_DATE_WINDOW_DAYS = 7;
 
 /** One calendar day in ms — the date-window comparison unit. */
 const MS_PER_DAY = 86_400_000;
+
+/**
+ * The perms-matrix module (seed MODULE_IDS) that governs finance actions — the
+ * same `finance` module ap.ts gates PV approval on. The two bank mutations
+ * enforce the EXISTING 11×5 perms matrix (they invent no new policy): the
+ * period-lock reconcile needs finance `approve`, the statement import needs
+ * finance `create`. Reuses authz.ts (loadCaller/permAllowed), fail-closed.
+ */
+const FINANCE_MODULE = "finance";
 
 /**
  * The bank-file formatter (mock-first, PLAN.md §4). The env-selected driver
@@ -961,12 +971,37 @@ export function registerBankRoute(app: FastifyInstance): void {
   app.post("/bank/statements/import", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
+    // Statement import is finance-staff work (loads a statement + auto-matches);
+    // gate on the finance `create` perm. Fail-closed: an unattributable caller,
+    // or one lacking the perm, is denied 403 (mirrors ap.ts PV-approve).
+    const caller = await loadCaller(request);
+    if (!caller || !permAllowed(caller.perms, FINANCE_MODULE, "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "bank statement import requires the finance create permission",
+      });
+    }
     return importStatement(db, (request.body ?? {}) as Record<string, unknown>, reply);
   });
 
   app.post("/bank/reconcile", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
+    // Reconcile LOCKS the period (closes the books) — the priority gate. Require
+    // the finance `approve` perm. Fail-closed: an unattributable caller is denied
+    // 403 before the period can be locked (mirrors ap.ts PV-approve).
+    const caller = await loadCaller(request);
+    if (!caller) {
+      return reply
+        .code(403)
+        .send({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    }
+    if (!permAllowed(caller.perms, FINANCE_MODULE, "approve")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "bank reconciliation lock requires the finance approve permission",
+      });
+    }
     return reconcileBank(db, (request.body ?? {}) as Record<string, unknown>, reply);
   });
 }
