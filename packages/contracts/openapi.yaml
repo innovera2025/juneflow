@@ -1962,9 +1962,21 @@ paths:
 
   # ========================= Finance-Accounting =============================
   /ap/billing:
+    get:
+      tags: [finance]
+      summary: List AP billings
+      operationId: listApBilling
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [finance]
-      summary: AP billing ({po_id,gr_id,invoice_no}) — 3-way match
+      summary: AP billing ({po_id|wo_id,gr_id,vendor_id,invoice_no,amount,vat,wht,retention,due_date}) — 3-way match
       operationId: createApBilling
       requestBody:
         required: true
@@ -1976,20 +1988,49 @@ paths:
                 po_id:
                   type: string
                   format: uuid
+                wo_id:
+                  type: string
+                  format: uuid
                 gr_id:
+                  type: string
+                  format: uuid
+                vendor_id:
                   type: string
                   format: uuid
                 invoice_no:
                   type: string
+                amount:
+                  type: number
+                vat:
+                  type: number
+                wht:
+                  type: number
+                retention:
+                  type: number
+                due_date:
+                  type: string
+                  format: date
       responses:
         "201":
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /ap/pv:
+    get:
+      tags: [finance]
+      summary: List payment vouchers
+      operationId: listApPv
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [finance]
-      summary: AP payment voucher ({billing_ids[],wht_pct})
+      summary: AP payment voucher ({billing_ids[],method,amount,wht_pct,retention,cheque_no,cheque_bank,cheque_date})
       operationId: createApPv
       requestBody:
         required: true
@@ -2003,8 +2044,21 @@ paths:
                   items:
                     type: string
                     format: uuid
+                method:
+                  type: string
+                amount:
+                  type: number
                 wht_pct:
                   type: number
+                retention:
+                  type: number
+                cheque_no:
+                  type: string
+                cheque_bank:
+                  type: string
+                cheque_date:
+                  type: string
+                  format: date
       responses:
         "201":
           $ref: "#/components/responses/EntityCreated"
@@ -2245,6 +2299,76 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /bank/statements:
+    get:
+      tags: [finance]
+      summary: List bank statements
+      operationId: listBankStatements
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /bank/statements/{id}/lines:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [finance]
+      summary: List a bank statement's lines (with auto-match suggestions per unmatched line)
+      operationId: listBankStatementLines
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /bank/lines/{id}/match:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [finance]
+      summary: Match a bank statement line to a pv/cheque/rv (manual confirm · action endpoint)
+      operationId: matchBankLine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pv_id:
+                  type: string
+                  format: uuid
+                cheque_id:
+                  type: string
+                  format: uuid
+                rv_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /bank/cheque:
+    get:
+      tags: [finance]
+      summary: List cheque register
+      operationId: listBankCheque
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /gl/close-period:

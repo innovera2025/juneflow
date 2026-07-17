@@ -99,7 +99,7 @@ const REPORT_DERIVED = [
   "MRR/OPEX-monthly/cashflow chart series — chart data, not entity records",
   "e-Tax queue (etax.jsx ETAX_SEED 6) — status view over ar_invoice.etax_status",
   "แผน PM (pm2.jsx PM_PLAN_ITEMS 6) — calendar view over pm_asset.next_due",
-  "NO_RECORD: ai_usage, acceptance, defect, attendance, payroll, cheque (expected 0)",
+  "NO_RECORD: ai_usage, acceptance, defect, attendance, payroll (expected 0)",
 ];
 
 // ---------------------------------------------------------------------------
@@ -180,6 +180,27 @@ const ROLE_DEFS: { key: string; name: string; limit: number | null; level: numbe
   { key: "wh", name: "Warehouse", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[0,0,0,0,0],[1,1,1,1,0],[0,0,0,0,0],[1,1,1,1,0],[1,1,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
   { key: "exec", name: "ผู้บริหาร / ดูได้อย่างเดียว", limit: null, level: 0, perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0]] },
 ];
+
+// B-089 (F-PV1, migration 0026 · Wei ruled ข = seed a NEW role): the prototype's
+// 8 ROLE_PRESETS have no Finance Manager, yet flows.html's PV approval ladder is
+// บัญชี → ผจก.การเงิน (>500K) → MD (>2M). Seed a "Finance Manager" that gates the PV
+// tier-2. LEVEL 3 = PM's tier: the PR/PO handlers already require approvalLevel 3
+// for their >500K/>1M second tier, and MD (>2M) is the existing `dir` role at level
+// 4 — so a level-3 finance role is the faithful ">500K, below MD" gate. LIMIT =
+// 2,000,000 ฿, the ceiling of that tier (above it the PV escalates to MD). PERMS
+// clone the accounting base role (`acc`) — which already carries finance.approve —
+// since a Finance Manager supervises accounting; the only material lift over `acc`
+// is the approval tier/limit (finance.cancel stays dir-only per the mock). Kept
+// OUT of ROLE_DEFS so the 12-user cyclic role pick (at(ROLE_DEFS, i)) is unchanged.
+const FINANCE_MGR: { key: string; name: string; limit: number; level: number; perms: Matrix } = {
+  key: "finmgr", name: "Finance Manager", limit: 2000000, level: 3,
+  perms: [[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,0],[1,1,1,1,0],[1,0,0,0,0]],
+};
+// The seeded user (COMPANY_USERS index) that holds the Finance Manager role.
+// user:9 (สุดา แสงทอง, active) currently duplicates the Director cyclic pick
+// (9 % 8 = 1 = dir), so re-tasking it as Finance Manager strips no base role of
+// its only holder (user:1 วิภา still holds dir).
+const FINANCE_MGR_USER_IDX = 9;
 
 // subscription-admin.jsx:19 COMPANY_USERS["T-1001"] (12 users)
 const COMPANY_USERS = [
@@ -765,12 +786,19 @@ const LAND_PLOTS = [
 ];
 
 // ap.jsx:3 AP_BILL (5) / :160 PV_LIST (4) / ar.jsx:7 AR_INV (6) / accounting-extra2 ARCN_SEED (3)
-const AP_BILL = [
-  { no: "AP-2026-0184", inv: "INV-CPC-118", amount: 920000, vat: 60187, status: "approved" },
-  { no: "AP-2026-0183", inv: "INV-TOA-042", amount: 96800, vat: 6334, status: "approved" },
-  { no: "AP-2026-0182", inv: "INV-FI-271", amount: 415400, vat: 27184, status: "approved" },
-  { no: "AP-2026-0181", inv: "INV-TST-028", amount: 268000, vat: 17542, status: "approved" },
-  { no: "AP-2026-0180", inv: "—", amount: 645000, vat: 42196, status: "pending" },
+// B-089 (F-AP1, migration 0026): `wht` (all rows) + `retention` (WO row only)
+// transcribed from ap.jsx:4-8. Row AP-2026-0180's ref is "WO-2026-0117 งวด 3" (a
+// subcon WO billing, not a PO/GR): `wo` = the seeded WO index (WO_NOS[0] = wo:0),
+// and it carries retention 64,500. Rows without a value omit the field -> null.
+const AP_BILL: {
+  no: string; inv: string; amount: number; vat: number; wht: number;
+  retention?: number; wo?: number; status: string;
+}[] = [
+  { no: "AP-2026-0184", inv: "INV-CPC-118", amount: 920000, vat: 60187, wht: 27600, status: "approved" },
+  { no: "AP-2026-0183", inv: "INV-TOA-042", amount: 96800, vat: 6334, wht: 2904, status: "approved" },
+  { no: "AP-2026-0182", inv: "INV-FI-271", amount: 415400, vat: 27184, wht: 12462, status: "approved" },
+  { no: "AP-2026-0181", inv: "INV-TST-028", amount: 268000, vat: 17542, wht: 8040, status: "approved" },
+  { no: "AP-2026-0180", inv: "—", amount: 645000, vat: 42196, wht: 19350, retention: 64500, wo: 0, status: "pending" },
 ];
 // ap_billing.kind per row (B-079 / F2, migration 0019), index-aligned to AP_BILL
 // (each row is the sole billing of po:i). Derived from the PO payment state in
@@ -779,8 +807,40 @@ const AP_BILL = [
 // PO-0287 po:4 closed); otherwise `progress` (PO-0290 po:1, nothing paid yet).
 // So deposit = Σ(kind=deposit) and paid = Σ(all) are both real, non-equal sums.
 const AP_KIND = ["deposit", "progress", "deposit", "final", "final"] as const;
-const PV_LIST = [
-  { net: 561154, wht: 19350 }, { net: 892400, wht: 27600 }, { net: 93896, wht: 2904 }, { net: 402938, wht: 12462 },
+// B-089 (F-AP1, migration 0026): gross `amount`, `retention`, `method`, and cheque
+// details transcribed from ap.jsx:161-164. method codes are the mock's own English
+// keys (PVCreateForm:252-257: "เช็ค"->cheque, "โอน"->transfer). cheque_no/cheque_bank
+// are populated only for cheque-method PVs (the mock lists "—" for transfer rows,
+// whose "chequeBank" is really the transfer account, not a cheque bank -> null).
+// cheque_date is not carried by PV_LIST rows -> null (per C10 no-fabrication).
+// `no` = the PV document number (ap.jsx:161-164), carried so the bank statement
+// reconcile (F-BANK2) can resolve a matched line's "PV-2026-xxxx" ref to the
+// seeded pv row by number. The pv table has no `no` column, so the pv insert
+// ignores this field — it is a seed-side lookup key only.
+const PV_LIST: {
+  no: string;
+  net: number; wht: number; amount: number; retention: number;
+  method: "cash" | "transfer" | "cheque" | "deposit";
+  chequeNo: string | null; chequeBank: string | null;
+}[] = [
+  { no: "PV-2026-0184", net: 561154, wht: 19350, amount: 645000, retention: 64500, method: "cheque",   chequeNo: "CH-040128", chequeBank: "SCB · บัญชี OD" },
+  { no: "PV-2026-0183", net: 892400, wht: 27600, amount: 920000, retention: 0,     method: "transfer", chequeNo: null,        chequeBank: null },
+  { no: "PV-2026-0182", net: 93896,  wht: 2904,  amount: 96800,  retention: 0,     method: "transfer", chequeNo: null,        chequeBank: null },
+  { no: "PV-2026-0181", net: 402938, wht: 12462, amount: 415400, retention: 0,     method: "cheque",   chequeNo: "CH-040127", chequeBank: "SCB" },
+];
+// bank.jsx:46-52 Cheque Register (6 issued cheques). no/amount/status verbatim;
+// the "วันที่ในเช็ค" Thai-BE date (dd พ.ค. 69, พ.ค.=May, 69=2569 BE=2026 CE) -> the
+// cheque's dueDate (calendar date). `pvIdx` = the issuing PV's PV_LIST index when
+// that PV is seeded (CH-040128->PV-2026-0184=pv:0, CH-040127->PV-2026-0181=pv:3);
+// the other 4 reference PVs outside the 4 seeded rows -> pv_id null. status codes
+// wait|cleared|returned (Thai labels รอขึ้น/ขึ้นเงิน/เช็คคืน are an i18n concern).
+const CHEQUE_REG: { no: string; amount: number; date: string; status: string; pvIdx: number | null }[] = [
+  { no: "CH-040128", amount: 561150, date: "2026-05-25", status: "wait",     pvIdx: 0 },
+  { no: "CH-040127", amount: 402938, date: "2026-05-23", status: "wait",     pvIdx: 3 },
+  { no: "CH-040126", amount: 184500, date: "2026-05-20", status: "cleared",  pvIdx: null },
+  { no: "CH-040125", amount: 380400, date: "2026-05-18", status: "cleared",  pvIdx: null },
+  { no: "CH-040124", amount: 84500,  date: "2026-05-15", status: "returned", pvIdx: null },
+  { no: "CH-040123", amount: 268000, date: "2026-05-14", status: "cleared",  pvIdx: null },
 ];
 const AR_INV = [
   { no: "INV-2026-0418", amount: 728000, vat: 0 }, { no: "INV-2026-0417", amount: 485000, vat: 0 },
@@ -880,7 +940,8 @@ async function seed(): Promise<void> {
       ]);
 
       await tx.insert(schema.roles).values(
-        ROLE_DEFS.map((r) => ({
+        // B-089 (F-PV1): the 8 ROLE_DEFS + the new Finance Manager (FINANCE_MGR).
+        [...ROLE_DEFS, FINANCE_MGR].map((r) => ({
           id: det(`role:${r.key}`), companyId: CO1, name: r.name,
           approvalLimits: r.limit == null ? {} : { default: r.limit },
           perms: permsFrom(r.perms),
@@ -894,7 +955,11 @@ async function seed(): Promise<void> {
       await tx.insert(schema.users).values(
         COMPANY_USERS.map((u, i) => ({
           id: det(`user:${i}`), companyId: CO1, email: u.email, name: u.name,
-          roleId: det(`role:${at(ROLE_DEFS, i).key}`),
+          // B-089 (F-PV1): user:9 holds the new Finance Manager role; all other
+          // users keep the unchanged 8-role cyclic pick (at(ROLE_DEFS, i)).
+          roleId: i === FINANCE_MGR_USER_IDX
+            ? det("role:finmgr")
+            : det(`role:${at(ROLE_DEFS, i).key}`),
           status: (u.status === "active" ? "active" : "blocked") as "active" | "blocked",
         })),
       );
@@ -1249,8 +1314,18 @@ async function seed(): Promise<void> {
       await tx.insert(schema.apBillings).values(
         AP_BILL.map((a, i) => ({
           id: det(`ap:${i}`), companyId: CO1, vendorId: at(SUPPLIER_VENDORS, i),
-          poId: det(`po:${i}`), grId: det(`gr:${i}`), invoiceNo: a.inv,
-          dueDate: null, amount: m(a.amount), vat: m(a.vat), status: a.status,
+          // B-089 (F-AP1): a WO-billed row (a.wo != null) references its Work Order,
+          // NOT a PO/GR (ap.jsx AP-2026-0180 ref "WO-2026-0117 งวด 3") — so null
+          // poId/grId and set woId. PO/GR-billed rows keep po:i/gr:i, woId null.
+          poId: a.wo == null ? det(`po:${i}`) : null,
+          grId: a.wo == null ? det(`gr:${i}`) : null,
+          woId: a.wo == null ? null : det(`wo:${a.wo}`),
+          invoiceNo: a.inv,
+          dueDate: null, amount: m(a.amount), vat: m(a.vat),
+          // B-089 (F-AP1): withholding-tax amount (all rows) + retention (WO row).
+          wht: m(a.wht),
+          retention: a.retention == null ? null : m(a.retention),
+          status: a.status,
           kind: at(AP_KIND, i), // B-079 (F2): installment type per PO payment state
         })),
       );
@@ -1259,6 +1334,15 @@ async function seed(): Promise<void> {
         PV_LIST.map((pv, i) => ({
           id: det(`pv:${i}`), companyId: CO1, billingIds: [det(`ap:${i}`)],
           whtPct: "3.00", net: m(pv.net), status: "approved",
+          // B-089 (F-AP1): gross AP value settled + method + cheque details +
+          // retention (ap.jsx PV_LIST). cheque_no/cheque_bank populated only for
+          // cheque-method PVs; cheque_date absent from the list rows -> null.
+          amount: m(pv.amount),
+          retention: m(pv.retention),
+          method: pv.method,
+          chequeNo: pv.chequeNo,
+          chequeBank: pv.chequeBank,
+          chequeDate: null,
         })),
       );
 
@@ -1309,6 +1393,54 @@ async function seed(): Promise<void> {
           lines: [{ date: s.date, desc: s.desc, amount: s.v, matched: s.matched }],
           locked: false,
         })),
+      );
+
+      // B-089 (F-AP1, migration 0026): the bank.jsx cheque register (6 issued
+      // cheques). pv_id back-links a cheque to the PV that issued it where that PV
+      // is one of the 4 seeded PV_LIST rows (CHEQUE_REG.pvIdx); the register's other
+      // 4 cheques reference PVs outside the seed -> pv_id null. Cheque `amount` is
+      // the register value (bank.jsx), which for CH-040128 (561,150) differs from
+      // its PV net (561,154) — each stays faithful to its own mock source.
+      await tx.insert(schema.cheques).values(
+        CHEQUE_REG.map((c, i) => ({
+          id: det(`cheque:${i}`), companyId: CO1, no: c.no,
+          amount: m(c.amount), dueDate: c.date, status: c.status,
+          pvId: c.pvIdx == null ? null : det(`pv:${c.pvIdx}`),
+        })),
+      );
+
+      // B-092 (F-BANK2, migration 0027): normalize the 8 bank.jsx STMT lines into
+      // real bank_statement_line rows (one per statement, mirroring the existing
+      // 1-statement-per-line BANK_STMT layout). `amount` is SIGNED — kept via
+      // .toFixed(2) (NOT the m() helper, which strips the sign with Math.abs).
+      // line_date derives the calendar date from the statement period 2569-05
+      // (พ.ค. = May, 2569 BE = 2026 CE) + the Thai day number. matched=true when
+      // the mock line carries a doc no; the FK is resolved by that no against the
+      // seeded PV / cheque rows. RV-matched lines stay matched=true (faithful to
+      // the mock's matched flag) but rv_id is null — no RV rows are seeded (AR is
+      // Phase-5-deferred) and the rv table has no doc-no column to resolve by.
+      const pvIdByNo = new Map(PV_LIST.map((pv, i) => [pv.no, det(`pv:${i}`)]));
+      const chequeIdByNo = new Map(
+        CHEQUE_REG.map((c, i) => [c.no, det(`cheque:${i}`)]),
+      );
+      await tx.insert(schema.bankStatementLines).values(
+        BANK_STMT.map((s, i) => {
+          const ref = s.matched;
+          const day = Number.parseInt(s.date, 10); // leading day; all rows = พ.ค. (2569-05)
+          return {
+            id: det(`bankline:${i}`),
+            statementId: det(`bank:${i}`),
+            lineDate: `2026-05-${String(day).padStart(2, "0")}`,
+            description: s.desc,
+            amount: s.v.toFixed(2), // SIGNED — deposits +, withdrawals −
+            matched: ref != null,
+            pvId: ref?.startsWith("PV-") ? (pvIdByNo.get(ref) ?? null) : null,
+            chequeId: ref?.startsWith("CH-")
+              ? (chequeIdByNo.get(ref) ?? null)
+              : null,
+            rvId: null, // RV-* refs: no seeded rv (AR Phase-5-deferred)
+          };
+        }),
       );
 
       await tx.insert(schema.fixedAssets).values(

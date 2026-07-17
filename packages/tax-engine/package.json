@@ -4,14 +4,25 @@
   "private": true,
   "description": "TaxEngine compliance interface + thailand implementation (skeleton + fake, mock-first). Credentials via env only (P0-INT-04) - never committed.",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./thailand": "./src/thailand/index.ts",
-    "./config": "./src/config.ts"
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./thailand": {
+      "development": "./src/thailand/index.ts",
+      "types": "./dist/thailand/index.d.ts",
+      "default": "./dist/thailand/index.js"
+    },
+    "./config": {
+      "development": "./src/config.ts",
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
