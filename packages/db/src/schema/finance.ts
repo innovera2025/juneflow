@@ -209,6 +209,9 @@ export const apBillings = pgTable("ap_billing", {
   // 0026 (B-089/F-AP1): WO-based subcon billings join back to their Work Order —
   // index the nullable wo_id FK, mirroring the po/gr FK-index precedent.
   index("ap_billing_wo_idx").on(t.woId),
+  // 0030 (perf-reaudit-finance): AP aging + vendor statements filter ap_billing
+  // by vendor — index the vendor FK (mirrors the po/gr/wo FK-index precedent).
+  index("ap_billing_vendor_idx").on(t.vendorId),
 ]);
 
 /**
@@ -353,7 +356,12 @@ export const jvs = pgTable("jv", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("jv_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("jv_company_idx").on(t.companyId),
+  // 0030 (perf-reaudit-finance): GL period-close + reporting filter jv by its
+  // accounting period — index the nullable period FK. Mirrors 0024.
+  index("jv_period_idx").on(t.periodId),
+]);
 
 /**
  * JVLine — one debit/credit leg of a JV (decision C9:
@@ -383,7 +391,12 @@ export const jvLines = pgTable("jv_line", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // 0030 (perf-reaudit-finance §P1): jv_line has no company_id — it scopes
+  // through jv via selectThrough, so every tenant read of a JV's lines filters
+  // on jv_id. Index the hot FK (the highest-traffic finance join). Mirrors 0024.
+  index("jv_line_jv_idx").on(t.jvId),
+]);
 
 // ---------------------------------------------------------------------------
 // Bank
@@ -535,7 +548,14 @@ export const reconciles = pgTable("reconcile", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("reconcile_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("reconcile_company_idx").on(t.companyId),
+  // 0030 (perf-reaudit-finance): reconcile joins back to its bank statement and
+  // its accounting period — index both FKs (statement_id NOT NULL, period_id
+  // nullable). Mirrors 0024.
+  index("reconcile_statement_idx").on(t.statementId),
+  index("reconcile_period_idx").on(t.periodId),
+]);
 
 // ---------------------------------------------------------------------------
 // Fixed assets

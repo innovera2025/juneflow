@@ -761,7 +761,7 @@ describe("BOQ state machine — submit/approve/revise", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [[boqDocs, [D0]], [users, [userRow]], [projects, [project]], [boqItems, []]],
+          rows: [[boqDocs, [D0]], [users, [userRow]], [roles, [roleRow(4)]], [projects, [project]], [boqItems, []]],
           updated,
           inserted,
           updateBase: D0,
@@ -781,6 +781,28 @@ describe("BOQ state machine — submit/approve/revise", () => {
     expect(vh.action).toBe("revise");
     expect(vh.version).toBe(4); // the freshly bumped version — distinct from approve keys
     expect(vh.by).toBe("u-0"); // resolved reviser (mirrors /approve)
+  });
+
+  // B-084 (authz-reaudit GAP-1): revise re-opens an approved BOQ — it demands the
+  // SAME MD authority the approval did. A sub-MD caller cannot silently un-approve.
+  it("revise: 403 when the caller's role.approvalLevel is below the MD tier", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [doc("d0", "N", "approved", 3)]],
+            [users, [userRow]],
+            [roles, [roleRow(3)]], // Project Manager — cannot un-lock an approved BOQ
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/boq/d0/revise" });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(updated).toHaveLength(0); // fail-closed: the approved BOQ was NOT re-opened
   });
 
   it("revise: 409 when the doc is not approved", async () => {

@@ -478,10 +478,11 @@ describe("POST /api/v1/auth/login", () => {
   });
 });
 
-describe("POST /api/v1/auth/login — brute-force throttle (B-082 F4)", () => {
-  it("429s after too many attempts from one IP with the flat RATE_LIMITED error", async () => {
+describe("POST /api/v1/auth/login — brute-force throttle (B-082 F4 · B-099)", () => {
+  it("429s after too many attempts against ONE account (per-user cap) with the flat RATE_LIMITED error", async () => {
     const built = await buildTestApp({ signIn: async () => null });
     let last;
+    // 11 attempts against the SAME account trip the per-user cap (10) on the 11th.
     for (let i = 0; i < 11; i++) {
       last = await built.inject({
         method: "POST",
@@ -496,6 +497,42 @@ describe("POST /api/v1/auth/login — brute-force throttle (B-082 F4)", () => {
       message: "Too many login attempts, please try again later",
     });
     expect(last!.headers["retry-after"]).toBe("60");
+  });
+
+  it("B-099: distinct accounts behind one office IP are NOT blocked by the per-user cap", async () => {
+    // The motivating regression (orch-B finance-E2E): several approvers share one
+    // office NAT egress IP and each logs in a few times. The primary cap keys on the
+    // ACCOUNT, so 11 DISTINCT accounts from one IP each stay at 1 attempt — none is
+    // throttled (they get 401 bad-creds), where the old per-IP-10 throttle blocked them.
+    const built = await buildTestApp({ signIn: async () => null });
+    let last;
+    for (let i = 0; i < 11; i++) {
+      last = await built.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        headers: { "content-type": "application/json" },
+        payload: { email: `approver${i}@rungrueang.co.th`, password: "pw" },
+      });
+    }
+    expect(last!.statusCode).toBe(401); // not throttled — the office is not the attacker
+    expect(last!.json().code).toBe("INVALID_CREDENTIALS");
+  });
+
+  it("B-099: a broad spray of distinct accounts from one IP still trips the coarse per-IP backstop", async () => {
+    // Each distinct account stays under the per-user cap, but the per-IP backstop
+    // (50) still counts every attempt from the source and cuts off a 51-wide spray.
+    const built = await buildTestApp({ signIn: async () => null });
+    let last;
+    for (let i = 0; i < 51; i++) {
+      last = await built.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        headers: { "content-type": "application/json" },
+        payload: { email: `spray${i}@example.test`, password: "guess" },
+      });
+    }
+    expect(last!.statusCode).toBe(429); // per-IP coarse guard holds
+    expect(last!.json().code).toBe("RATE_LIMITED");
   });
 });
 
