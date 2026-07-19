@@ -6,6 +6,7 @@
 # Usage: bash finance-e2e-live.sh <dev-sha>
 set -uo pipefail
 DEV_REF="${1:-dev}"
+FILTER="${2:-finance-flow}"   # playwright test filter (spec substring). e.g. b097-rollback
 ROOT="/Users/innovera/Documents/juneflow"
 WT="/Users/innovera/juneflow-wt/fine2e"
 export COMPOSE_PROJECT_NAME="juneflow-fine2e"
@@ -34,6 +35,6 @@ E2E_LIVE=1 \
   PROXY_PORT="${PROXY_PORT}" \
   PROXY_WEB_TARGET="http://localhost:${WEB_PORT}" \
   PROXY_API_TARGET="http://localhost:${API_PORT}" \
-  pnpm exec playwright test --config e2e/playwright.config.ts finance-flow --workers=1 2>&1 | tail -45
+  pnpm exec playwright test --config e2e/playwright.config.ts "$FILTER" --workers=1 2>&1 | tail -45
 
 echo "== done (teardown on exit) =="

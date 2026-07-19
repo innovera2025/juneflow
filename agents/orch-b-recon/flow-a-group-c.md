@@ -334,3 +334,19 @@ Only **ONE** new table is genuinely required for group-C: **`evm_snapshot`** (§
 ## 8. Pattern to mirror
 
 `apps/api/src/routes/dashboard.ts` is the exact precedent for every group-C endpoint: TenantDb `selectThrough` door-chains (group→doc→project), optional `project_id` via `ownedProject()` (foreign id→404), 401 fail-closed, C10 discipline (NO fabricated numbers; honest empty/null where source data is absent, with a code comment naming the gap). RPT-004/RPT-005 and the budget-actual S-curve must follow `dashboard.budgetActual`'s honest-empty-series precedent rather than fabricating. i18n: dashboard keys already applied (P1-PLAT-06); exec/reports-hub/boq.reports CVR + RPT-001…005 labels ('BOQ'/'Non-BOQ'/'Material'/'Subcon'/'Labor'/'Plan'/'Actual'/'Variance'/'PV'/'EV'/'AC'/'SPI'/'CPI') must resolve to existing `docs/extract/i18n-full.json` keys before FE port — missing key → BLOCKERS.md.
+
+---
+
+## RECON REFRESH — 2026-07-18 (orch-B · validated vs main `eb88544` · post batch-8/9/10/11)
+Re-checked the 2026-07-16 recon against current main. **Recon holds; 2 assumptions updated:**
+
+| Assumption (2026-07-16) | Status now | Impact |
+|---|---|---|
+| 7 `/dashboard/*` endpoints built (70% reuse) | ✅ **CONFIRMED** — all 7 still in dashboard.ts on dev/main | reuse claim holds · Wave-1 verify-only unchanged |
+| `evm_snapshot` migration "0024+" | 🔄 **UPDATE → 0031** — 0024(FK-idx)/0025(TOCTOU)/0026-0029(finance/SoD) are USED; **batch-12 claims 0030** (perf FK-index) → evm_snapshot = **migration 0031** (CLAIM via channel at write time) | Wave-3 DDL header must say 0031, not 0024 |
+| ap_billing.due_date "depends on group-A, don't own" | 🔄 **RESOLVED — column LANDED** (finance.ts:177/404 · batch-8/9 AP work) | **cross-cutting dependency #1 GONE.** dashboard cashflow-forecast + overdue-payable alert now need ONLY a SEED populate (spread due_date), NO schema wait, NO group-A coordination. Wave-1 can light these up directly. |
+| GET /audit-log unimplemented (activity feed net-new) | ✅ still net-new (no route on dev) | Wave-1 item #1 unchanged |
+| evm_snapshot / cost_baseline net-new | ✅ still absent from schema | the one new store still the only DDL |
+| B-049 board blocker | ✅ still recorded BLOCKED (P1-WEB-07 dashboard) — the group-C wave lights up its honest-empty widgets to close it | wave goal unchanged |
+
+**Net after refresh:** the plan is execution-ready. Wave-1 (audit-log + reuse verify + seed) is now BIGGER-value than before (ap_billing.due_date seed is unblocked → cashflow/overdue widgets light up in Wave-1, not deferred). Wave-3 evm_snapshot = **migration 0031**. Everything else in §0-§8 stands.

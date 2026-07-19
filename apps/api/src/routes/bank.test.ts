@@ -530,7 +530,7 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
   it("400s when neither one nor exactly one id is given", async () => {
     const appx = await buildTestApp({
       resolveTenant: async () => SESSION,
-      db: stubDb({ rows: [[bankStatementLines, [lineRow(L_HIT)]]] }),
+      db: stubDb({ rows: [...financeCaller, [bankStatementLines, [lineRow(L_HIT)]]] }),
     });
     const none = await appx.inject({
       method: "POST",
@@ -552,7 +552,7 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[bankStatementLines, []]] }),
+        db: stubDb({ rows: [...financeCaller, [bankStatementLines, []]] }),
       })
     ).inject({ method: "POST", url: `/api/v1/bank/lines/${L_HIT}/match`, payload: { pv_id: PVA } });
     expect(res.statusCode).toBe(404);
@@ -562,7 +562,7 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[bankStatementLines, [lineRow(L_MATCHED, { matched: true, chequeId: CHQ0 })]]] }),
+        db: stubDb({ rows: [...financeCaller, [bankStatementLines, [lineRow(L_MATCHED, { matched: true, chequeId: CHQ0 })]]] }),
       })
     ).inject({ method: "POST", url: `/api/v1/bank/lines/${L_MATCHED}/match`, payload: { pv_id: PVA } });
     expect(res.statusCode).toBe(409);
@@ -575,7 +575,7 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [
+          rows: [...financeCaller,
             [bankStatementLines, [lineRow(L_HIT)]],
             [bankStatements, [statementRow(STMT0)]],
             [pvs, []], // referenced pv absent in this tenant → foreign
@@ -595,7 +595,7 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [
+          rows: [...financeCaller,
             [bankStatementLines, [lineRow(L_HIT)]],
             [bankStatements, [statementRow(STMT0)]],
             [pvs, [pvRow(PVA)]],
@@ -623,7 +623,7 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [
+          rows: [...financeCaller,
             [bankStatementLines, [lineRow(L_HIT)]], // unmatched line
             [bankStatements, [statementRow(STMT0, { locked: true })]], // but the period is closed
             [pvs, [pvRow(PVA)]],
@@ -646,7 +646,7 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
-          rows: [
+          rows: [...financeCaller,
             // rows[0] = the UNMATCHED target line; rows[1] = a DIFFERENT line
             // already matched to PVA → matching PVA here would double-reconcile.
             [
@@ -667,6 +667,32 @@ describe("POST /api/v1/bank/lines/:id/match", () => {
     expect(res.json().code).toBe("INVALID_STATE");
     expect(res.json().message).toMatch(/already matched to another/);
     expect(updated).toHaveLength(0); // no write — the double-reconcile was blocked
+  });
+
+  // B-084 (authz-reaudit GAP-2): matching a bank line to a document is finance
+  // bookkeeping — a caller lacking the finance `create` perm is denied 403
+  // before any ledger link is written (mirrors the import gate). Regression.
+  it("403s (fail closed) a caller lacking the finance create perm — no match runs", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [userRow]],
+            [roles, [financeRole(/* create */ false, /* approve */ true)]],
+            [bankStatementLines, [lineRow(L_HIT)]],
+            [bankStatements, [statementRow(STMT0)]],
+            [pvs, [pvRow(PVA)]],
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/bank/lines/${L_HIT}/match`, payload: { pv_id: PVA } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/finance create permission/);
+    expect(updated).toHaveLength(0); // no ledger link was written
   });
 });
 

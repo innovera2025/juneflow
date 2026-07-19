@@ -178,3 +178,16 @@
   - **G4 e2e smoke FAIL = ต้อง `docker compose up`** (ERR_CONNECTION_REFUSED web:5173/api:3000 · offline round ไม่มี stack) — **pre-existing env · ไม่เกี่ยวกับ change tests/visual** (diff = 3 ไฟล์ visual เท่านั้น) → ไม่ใช่ regression · G5 (gate ของ P0-QA-08) เขียว
   - full-page G5 ของ app-shell กลับมาเมื่อ dashboard port (P1-WEB-07) → ตอนนั้น drop key `content-area-b048` จาก manifest row
   - commit บน feature/qa · ตั้ง P0-QA-08 → review + REVIEW-QUEUE row · **ไม่ merge dev** (รอ gate 4.5 diff-reviewer + Wei)
+
+## 2026-07-19 — batch-12 live-verify closeout + finance-flow SoD spec fix (orch-B)
+- ทำอะไร: verify batch-12 (dev e81c1fe · P2-BE-27/28/29) ก่อน Wei promote — static + skeptic + full live E2E
+- เจออะไร:
+  - **VERDICT = GO (promote-ready).** static: sacred สะอาด · G3 api 565/565 · migration 0030 additive SOUND (5 idx · cols มีจริง · _journal 0..30 clean · finance.ts exact mirror)
+  - **skeptic adversarial (3+synth):** authz gates boq /revise + bank /match = **SOUND** (fail-closed · mirror /approve+import · sharp negative tests) · B-099 throttle = net brute-force IMPROVEMENT + **1 HIGH residual → B-100** (per-user cap keyed on unauth email = targeted account-lockout DoS ~11req/min · availability-only/self-healing/ไม่แตะ active session) + 2 MED (spray ceiling 5× · userWindows sprayable in-window) → non-block
+  - **full live E2E (throwaway wt @ e81c1fe · isolated ports · compose up --wait · PG16):** live migrate 0000→0030 + seed OK · smoke 4/4 · procurement 1/1 · b084 3/3 · b097-rollback 1/1 (txn door ยัง atomic)
+  - **DIFFERENTIAL พิสูจน์ B-099 live:** finance-flow บน main eb88544 = 3 fail (2 SoD + 1 login-429 office-NAT over-block) → บน batch-12 = 2 fail (SoD only · 429 หาย) → batch-12 แก้ over-block จริง (2→5 passed)
+  - **2 finance-flow SoD failures = PRE-EXISTING spec bug** (main+batch-12 fail เหมือนกันเป๊ะ ไม่ใช่ batch-12) — spec สร้าง+approve PV ด้วย user เดียว ชน Wei ruling B-094-3 (creator≠approver 403) → **FIXED (feature/qa-sod-finance-spec 5d47092 · gate-4.5 PASS · merged dev d7c2d1d):** FinMgr-tier PV drafted by md · MD-tier PV by accountant · assertions ไม่เปลี่ยน · **finance-flow 7/7 live**
+  - เพิ่ม durable tooling: full-suite-e2e-live.sh + diff-finance-e2e.sh (agents/orch-b-recon/)
+  - **LESSON:** SoD (B-094-3) = Wei ruling ทับ flows.html (ที่ spec แค่ tier ladder) → E2E ที่เขียนก่อนมันจะละเมิดเงียบ ๆ · live-verify + differential-across-SHAs คือสิ่งที่แยก "pre-existing spec bug" ออกจาก "batch regression" (single-run จะโทษ batch-12 ผิด) · summary-grep `tail -1` พลาดบรรทัด "N failed" → เกือบ false-green (fixed)
+- ไม่แตะ: sacred · apps/** · board นอก CLAIM · เขต tests/ + agents/orch-b-recon/ + bookkeeping ล้วน
+- เหลือ Wei: promote dev d7c2d1d (batch-12 + spec fix) → main (0-drift) · B-100 throttle residual (non-block)
