@@ -538,3 +538,11 @@
 - Wave-1b: activity card wired via apiClient.GET("/audit-log") (op was already in the generated client); strings via dashboard-strings.json keys byte-exact to SR-2 phrases; time-ago capped at นาที/ชม. (approved set; top-5 spread 0-16h so no วัน unit needed); sysActor key for the null-user fallback (B-073 no-raw-Thai).
 - Combined gates: typecheck db/contracts/api/web 4/4 · api 594 · web 490 · live PG16: migrate 0000→0031 + seed + curl 5 proofs (cost-type 50/47/3 · nonboq honest · portfolio 21M/7 projects · budget-actual 12 periods danger-tail TRUE · audit-log ok).
 - G5-dynamic (widget) + wave-verify = orch-B lane per C-127/C-129.
+
+## 2026-07-19 · orch-A · B-102=ก portfolio health rework (P2-BE-36 · commit 3cdc3e9 · migration 0032)
+- orch-B's C10 skeptic caught a real §0 misread in my W2 acceptance: exec-audit.jsx:89 `over` only styles the actual-spend cell; the สุขภาพ column renders STORED curated roll.health. Mock data disproves the 0.9 formula on 3/7 (slr over→ดี · rama/rdb under→เฝ้าระวัง). LESSON: "accepted-on-fidelity" needs the RENDER path traced, not just a nearby formula.
+- Mechanism chosen (Wei allowed either): project.health nullable text column — migration 0032 = exactly `ALTER TABLE "project" ADD COLUMN "health" text;` (additive, seed-safe). Chose column over seed-side map so the endpoint surfaces a REAL stored value (C10) and future screens reuse it.
+- Seed: PROJECT_HEALTH map verbatim (exec-audit.jsx:14-20) keyed by PROJECTS.key → insert health per project. Handler: health = p.health ?? null; atRisk = health != null && health !== "ดี" (mock L26; null not at-risk — mock r() fallback defaults ดี). HEALTH_WATCH const removed (unused).
+- Tests rewritten as disproof-row fixtures: over-utilised + stored ดี stays ดี; under-utilised + stored เฝ้าระวัง stays เฝ้าระวัง; null → honest null + excluded from at_risk. (A derivation would flip the first two — the test now guards the exact bug class.)
+- Live: migrate 0000→0032 + seed → SQL 7 rows + /analytics/portfolio health 7/7 byte-exact + at_risk_count=2. api 594 · typecheck clean.
+- Wei-confirmed keeps: foreign-id 200-empty (no rework) · total_actual rename = deferred cosmetic (mock-named field; W2b FE labels via i18n).

@@ -228,6 +228,14 @@ const PROJECT_TYPES = [
 
 // chrome.jsx:3 PROJECTS (7 projects / 16 phases). short/color stamped verbatim
 // per B-041(ก+) (migration 0009 columns — the ProjectSwitcher chip fields).
+// B-102 (Wei = ก, migration 0032): curated per-project health — an EDITORIAL
+// label transcribed byte-exact from the exec mock's roll{} (exec-audit.jsx:14-20).
+// NOT a formula (the skeptic disproved actual>budget*0.9 on 3/7 mock rows);
+// /analytics/portfolio surfaces the stored value verbatim. atRisk = health≠'ดี'.
+const PROJECT_HEALTH: Record<string, string> = {
+  rjp: "ดี", bbt: "ดี", rama: "เฝ้าระวัง", phk: "ดี", slr: "ดี", rdb: "เฝ้าระวัง", erp: "ดี",
+};
+
 const PROJECTS = [
   { key: "rjp", name: "juneflow พาร์ค ราชพฤกษ์", short: "RJP", color: "#0B2A4A", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · Block A (บ้านเดี่ยว)" }, { k: "p2", l: "เฟส 2 · Block B+C (ทาวน์โฮม)" }, { k: "p3", l: "เฟส 3 · Block D (บ้านแฝด)" }] },
   { key: "bbt", name: "juneflow บางบัวทอง", short: "BBT", color: "#0F766E", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม" }, { k: "p2", l: "เฟส 2 · บ้านเดี่ยว" }] },
@@ -1033,6 +1041,8 @@ async function seed(): Promise<void> {
           id: det(`project:${p.key}`), companyId: CO1, typeId: det(`ptype:${p.type}`),
           name: p.name, short: p.short, color: p.color,
           budget: m((i + 5) * 10_000_000), status: "active",
+          // B-102 (Wei = ก): curated health verbatim (exec-audit.jsx:14-20).
+          health: PROJECT_HEALTH[p.key] ?? null,
         })),
       );
 
