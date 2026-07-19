@@ -66,6 +66,21 @@ at=d.get("totals",{}).get("at_risk_count", d.get("at_risk_count"))
 assert at in (2,None) , f"at_risk={at} (want 2)"
 PY
 
+echo "== 4b. W3b evm/variance endpoints (RPT-005/004 · reuse loadEvmSeries) =="
+# evm: PV/EV/AC series + SPI/CPI (orch-A: live spi 0.94 = seed ratio)
+EV=$(curl -s "${AUTH[@]}" "${API}/boq/reports/evm?project_id=${PID}")
+python3 - "$EV" <<'PY' && ok "evm: PV/EV/AC series + SPI/CPI real (BUILD-ONCE from evm_snapshot)" || bad "evm shape/values fail: $(echo "$EV"|head -c150)"
+import sys,json
+d=json.loads(sys.argv[1])
+ser=d.get("series",[]); spi=d.get("spi"); cpi=d.get("cpi")
+assert len(ser)>=10, f"series len {len(ser)}"
+assert all(("pv" in r and "ev" in r and "ac" in r) for r in ser), "series missing pv/ev/ac"
+assert spi is not None and 0 < float(spi) < 2, f"spi={spi}"
+PY
+# variance (RPT-004): served from SAME evm_snapshot (plan=budget, actual=ac)
+VR=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "${API}/boq/reports/variance?project_id=${PID}")
+[ "$VR" = "200" ] && ok "variance 200 (RPT-004 from same evm_snapshot · build-once)" || bad "variance = $VR"
+
 echo "== 5. W3 BUILD-ONCE proof: budget-actual S-curve lit by evm_snapshot =="
 BA=$(curl -s "${AUTH[@]}" "${API}/dashboard/budget-actual?project_id=${PID}")
 NPER=$(echo "$BA" | jqp 'import json; print(len(d.get("period_label",[])))')
