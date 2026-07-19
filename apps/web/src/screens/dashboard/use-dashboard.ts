@@ -26,6 +26,7 @@ import {
   parseAlerts,
   parseCashflow,
   parseContractors,
+  parseActivity,
   type Ent,
   type DashSummary,
   type BudgetActual,
@@ -34,6 +35,7 @@ import {
   type AlertRow,
   type Cashflow,
   type ContractorRow,
+  type ActivityRow,
 } from "./dashboard-agg";
 
 /** True when a bearer token is present — queries stay disabled otherwise. */
@@ -168,6 +170,21 @@ export function useDashboardContractors(projectId: string | undefined) {
           ),
         ),
       ),
+    enabled: authed(),
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * GET /audit-log — the recent-activity feed (group-C Wave-1b). Unlike the /dashboard/*
+ * reads this op is NOT project-scoped: the contract exposes only ?entity/user/action/
+ * page (company-scope is enforced server-side), so the whole-company feed is fetched
+ * unfiltered and parseActivity keeps the 5 newest (API is already newest-first).
+ */
+export function useDashboardActivity() {
+  return useQuery<ActivityRow[]>({
+    queryKey: ["dashboard", "activity"],
+    queryFn: async () => parseActivity(rowsOf(await unwrap(apiClient.GET("/audit-log")))),
     enabled: authed(),
     staleTime: 30_000,
   });

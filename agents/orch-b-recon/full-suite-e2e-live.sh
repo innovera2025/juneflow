@@ -29,7 +29,7 @@ echo "== 2. compose up --wait ALL (live migrate 0000..0030 + seed + api node-dis
 $COMPOSE up -d --build --wait || { echo "COMPOSE UP FAILED"; $COMPOSE ps; $COMPOSE logs api | tail -40; exit 1; }
 
 echo "== 2b. confirm migration 0030 applied on live PG =="
-$COMPOSE exec -T db psql -U juneflow -d juneflow -c \
+$COMPOSE exec -T postgres psql -U juneflow -d juneflow -c \
   "select indexname from pg_indexes where indexname in ('ap_billing_vendor_idx','jv_line_jv_idx','jv_period_idx','reconcile_statement_idx','reconcile_period_idx') order by 1;" 2>&1 || echo "(psql index check skipped)"
 
 echo "== 3. run each live spec (E2E_LIVE=1 · workers=1 · own invocation) =="

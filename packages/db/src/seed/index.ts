@@ -228,6 +228,14 @@ const PROJECT_TYPES = [
 
 // chrome.jsx:3 PROJECTS (7 projects / 16 phases). short/color stamped verbatim
 // per B-041(ก+) (migration 0009 columns — the ProjectSwitcher chip fields).
+// B-102 (Wei = ก, migration 0032): curated per-project health — an EDITORIAL
+// label transcribed byte-exact from the exec mock's roll{} (exec-audit.jsx:14-20).
+// NOT a formula (the skeptic disproved actual>budget*0.9 on 3/7 mock rows);
+// /analytics/portfolio surfaces the stored value verbatim. atRisk = health≠'ดี'.
+const PROJECT_HEALTH: Record<string, string> = {
+  rjp: "ดี", bbt: "ดี", rama: "เฝ้าระวัง", phk: "ดี", slr: "ดี", rdb: "เฝ้าระวัง", erp: "ดี",
+};
+
 const PROJECTS = [
   { key: "rjp", name: "juneflow พาร์ค ราชพฤกษ์", short: "RJP", color: "#0B2A4A", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · Block A (บ้านเดี่ยว)" }, { k: "p2", l: "เฟส 2 · Block B+C (ทาวน์โฮม)" }, { k: "p3", l: "เฟส 3 · Block D (บ้านแฝด)" }] },
   { key: "bbt", name: "juneflow บางบัวทอง", short: "BBT", color: "#0F766E", type: "realestate", phases: [{ k: "p1", l: "เฟส 1 · ทาวน์โฮม" }, { k: "p2", l: "เฟส 2 · บ้านเดี่ยว" }] },
@@ -413,6 +421,11 @@ const BOQ_GROUPS = [
   "05 งานประปา/สุขาภิบาล",
   "06 งานเก็บงาน + ตกแต่ง",
 ];
+// The per-group CBS budget (baht) for the hero project's boq groups, factored out
+// so the group-C Wave-3 EVM snapshot BAC (Σ over the rjp groups) references the
+// SAME source as the cbs_budget seed rather than re-typing the 1M literal — C10
+// forbids fabricated/duplicated numbers. Group i (0-based) budget = 1M × (i+1).
+const cbsGroupBudget = (i: number): number => 1_000_000 * (i + 1);
 
 // boq.jsx:326 INITIAL_ROWS_BY_GROUP (21 BOQItem rows across the 6 groups)
 // g = group index; cat M/L/S; qty/unit/price verbatim. `detail` (gap-5, migration
@@ -785,6 +798,20 @@ const LAND_PLOTS = [
   { deed: "นส.3ก 451", rai: 95, ngan: 2, wa: 0, gps: "14.7588, 100.7301", pricePerRai: 880000, stage: "source", tenure: "lease", proj: "slr" },
 ];
 
+// group-C Wave-1 (C-SEED-DUEDATE): ONE UTC-floored "seed today" anchor. Every
+// relative date below derives from it so the dashboard's overdue-payable alert
+// (due < today) and 7-day cashflow window (due in [today, today+7d]) light up on
+// ANY seed date — never hardcode calendar literals (they rot as the clock moves).
+const SEED_NOW = new Date();
+const SEED_TODAY = new Date(SEED_NOW);
+SEED_TODAY.setUTCHours(0, 0, 0, 0);
+/** ISO calendar date (YYYY-MM-DD) exactly n days from the UTC-floored seed today. */
+function isoDaysFromToday(n: number): string {
+  const d = new Date(SEED_TODAY);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 // ap.jsx:3 AP_BILL (5) / :160 PV_LIST (4) / ar.jsx:7 AR_INV (6) / accounting-extra2 ARCN_SEED (3)
 // B-089 (F-AP1, migration 0026): `wht` (all rows) + `retention` (WO row only)
 // transcribed from ap.jsx:4-8. Row AP-2026-0180's ref is "WO-2026-0117 งวด 3" (a
@@ -807,6 +834,13 @@ const AP_BILL: {
 // PO-0287 po:4 closed); otherwise `progress` (PO-0290 po:1, nothing paid yet).
 // So deposit = Σ(kind=deposit) and paid = Σ(all) are both real, non-equal sums.
 const AP_KIND = ["deposit", "progress", "deposit", "final", "final"] as const;
+// group-C Wave-1 (C-SEED-DUEDATE): ap_billing.due_date offsets in DAYS relative
+// to SEED_TODAY, index-aligned to AP_BILL. ap.jsx lists no due column, so the
+// spread is chosen (Wei ruling 2026-07-19: payables-only negative net accepted)
+// to exercise both dashboard legs on any seed date: i0 PAST + approved (never
+// paid/settled) → OVERDUE_PAYABLE alert; i1/i4 inside [today, today+7d] →
+// cashflow payables; i2/i3 beyond the window (realistic tail, proves the bound).
+const AP_DUE_DAYS = [-10, 3, 14, 30, 5] as const;
 // B-089 (F-AP1, migration 0026): gross `amount`, `retention`, `method`, and cheque
 // details transcribed from ap.jsx:161-164. method codes are the mock's own English
 // keys (PVCreateForm:252-257: "เช็ค"->cheque, "โอน"->transfer). cheque_no/cheque_bank
@@ -1007,6 +1041,8 @@ async function seed(): Promise<void> {
           id: det(`project:${p.key}`), companyId: CO1, typeId: det(`ptype:${p.type}`),
           name: p.name, short: p.short, color: p.color,
           budget: m((i + 5) * 10_000_000), status: "active",
+          // B-102 (Wei = ก): curated health verbatim (exec-audit.jsx:14-20).
+          health: PROJECT_HEALTH[p.key] ?? null,
         })),
       );
 
@@ -1161,7 +1197,7 @@ async function seed(): Promise<void> {
       await tx.insert(schema.cbsBudgets).values(
         BOQ_GROUPS.map((_, i) => ({
           id: det(`cbs:${i}`), groupId: det(`boqgrp:${i}`),
-          budget: m(1_000_000 * (i + 1)), used: m(200_000 * (i + 1)), committed: m(100_000 * (i + 1)),
+          budget: m(cbsGroupBudget(i)), used: m(200_000 * (i + 1)), committed: m(100_000 * (i + 1)),
         })),
       );
 
@@ -1321,7 +1357,10 @@ async function seed(): Promise<void> {
           grId: a.wo == null ? det(`gr:${i}`) : null,
           woId: a.wo == null ? null : det(`wo:${a.wo}`),
           invoiceNo: a.inv,
-          dueDate: null, amount: m(a.amount), vat: m(a.vat),
+          // C-SEED-DUEDATE: clock-relative due date (AP_DUE_DAYS) — was null
+          // (the dashboard GAP: alerts/cashflow stayed empty on seed).
+          dueDate: isoDaysFromToday(at(AP_DUE_DAYS, i)),
+          amount: m(a.amount), vat: m(a.vat),
           // B-089 (F-AP1): withholding-tax amount (all rows) + retention (WO row).
           wht: m(a.wht),
           retention: a.retention == null ? null : m(a.retention),
@@ -1505,6 +1544,63 @@ async function seed(): Promise<void> {
         })),
       );
 
+      // === EVM snapshot (group-C Wave-3, B-101) ===========================
+      // ~12 monthly Earned-Value snapshots for the hero project (project:rjp)
+      // tracing an HONEST S-curve derived from that project's REAL seeded BAC
+      // (Σ cbs_budget.budget over the rjp groups via cbsGroupBudget — NOT the
+      // mock's literal 26.4/22.2, which C10 forbids). Periods are the 12 calendar
+      // months ENDING at SEED_TODAY's month (clock-relative — no hardcoded years).
+      const EVM_BAC = BOQ_GROUPS.reduce((s, _g, i) => s + cbsGroupBudget(i), 0);
+      const EVM_PERIODS = 12;
+      // Cumulative planned fraction: smoothstep S-curve (slow -> fast -> slow).
+      const evmSCurve = (t: number): number => t * t * (3 - 2 * t);
+      // EV runs a flat ~6% behind PV (SPI ≈ 0.94) — "slightly behind schedule".
+      const EVM_SPI = 0.94;
+      // Per-period cost multiplier on the period's PLANNED budget increment: <1 =
+      // under-spent that month (healthy); the single OVERRUN month k=10 spikes the
+      // running cumulative AC ABOVE the cumulative budget line, so the final two
+      // snapshots (k=10,11) are the DANGER bars (AC > budget) that trip the
+      // dashboard over-budget alert. Deterministic (no Math.random); AC is a
+      // running cumulative sum, so the series is monotonically increasing.
+      const evmSpend = (k: number): number => (k === 10 ? 3.0 : 0.92);
+      const evmRows: (typeof schema.evmSnapshots.$inferInsert)[] = [];
+      let evmAcCum = 0;
+      for (let k = 0; k < EVM_PERIODS; k++) {
+        const t = (k + 1) / EVM_PERIODS;
+        const tPrev = k / EVM_PERIODS;
+        // budget bars = cumulative time-phased BAC on the SAME S fraction as PV.
+        const budgetCum = EVM_BAC * evmSCurve(t);
+        const pv = budgetCum; // Planned Value = the planned S-curve baseline.
+        const ev = pv * EVM_SPI; // Earned Value tracks PV slightly behind.
+        // AC accumulates each month's real spend (planned increment × cost ratio).
+        evmAcCum += (budgetCum - EVM_BAC * evmSCurve(tPrev)) * evmSpend(k);
+        // period 'YYYY-MM' + month-end; k=11 = SEED_TODAY's month, clock-relative.
+        const monthStart = new Date(
+          Date.UTC(
+            SEED_TODAY.getUTCFullYear(),
+            SEED_TODAY.getUTCMonth() - (EVM_PERIODS - 1 - k),
+            1,
+          ),
+        );
+        const y = monthStart.getUTCFullYear();
+        const mo = monthStart.getUTCMonth(); // 0-based
+        const period = `${y}-${String(mo + 1).padStart(2, "0")}`;
+        // Last day of the month = day 0 of the next month (UTC).
+        const periodEnd = new Date(Date.UTC(y, mo + 1, 0)).toISOString().slice(0, 10);
+        evmRows.push({
+          id: det(`evmsnap:${period}`),
+          projectId: det("project:rjp"),
+          period,
+          periodEnd,
+          pv: m(pv),
+          ev: m(ev),
+          ac: m(evmAcCum),
+          budget: m(budgetCum),
+          bac: m(EVM_BAC),
+        });
+      }
+      await tx.insert(schema.evmSnapshots).values(evmRows);
+
       // === Land / Sales / Solar / Inventory / DMS / etc. ==================
       await tx.insert(schema.landPlots).values(
         LAND_PLOTS.map((p, i) => ({
@@ -1619,6 +1715,11 @@ async function seed(): Promise<void> {
         AUDIT_ENTRIES.map((a, i) => ({
           id: det(`audit:${i}`), companyId: CO1, userId: det(`user:${i % 12}`),
           action: a.act, entity: a.obj, before: null, after: { detail: a.detail }, ip: null,
+          // group-C Wave-1: spread `at` into a real time series (defaultNow
+          // collapsed all 13 rows to one instant → the activity feed's time-ago
+          // was useless). i=0 newest, stepping 4h back per row (~2 days of
+          // history), relative to the seed instant — clock-relative, no literals.
+          at: new Date(SEED_NOW.getTime() - i * 4 * 60 * 60 * 1000),
         })),
       );
 

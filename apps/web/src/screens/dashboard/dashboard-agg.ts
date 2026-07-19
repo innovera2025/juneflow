@@ -257,6 +257,95 @@ export function parseContractors(rows: Ent[]): ContractorRow[] {
   }));
 }
 
+/* ── Activity feed (GET /audit-log → typed rows) ──────────────────────────────────
+ * The prototype's recent-activity card (pototype/dashboard.jsx L531-550) is a 5-row
+ * MOCK; this reads the real GET /audit-log (B-014 envelope, rows newest-first). Each
+ * row is `{ id, user_id, user_name, action, entity, at }` (apps/api/src/routes/
+ * audit-log.ts). `action` is classified to a known verb (label rendered by the view
+ * via i18n — no Thai here); `entity` (doc) is shown RAW (Wei ruling C-127, no mapping);
+ * an unknown action keeps its raw string honestly (§0 rule 3, never invented).
+ */
+
+/** Known audit verbs (pototype/exec-audit.jsx AUDIT_ACT, L177-180). */
+export type AuditVerb = "create" | "edit" | "approve" | "delete" | "post" | "sync";
+
+const KNOWN_VERBS: readonly AuditVerb[] = ["create", "edit", "approve", "delete", "post", "sync"];
+
+/** A raw action string → known verb, else null (unknown → view shows the raw action). */
+export function classifyVerb(action: string): AuditVerb | null {
+  return (KNOWN_VERBS as readonly string[]).includes(action) ? (action as AuditVerb) : null;
+}
+
+/**
+ * Status-dot colour by verb — transcribed from the prototype's 5 mock row tones
+ * (pototype/dashboard.jsx L535-539: create=var(--brand) · approve=#15803D ·
+ * sync=#1D4ED8 · delete=#B91C1C · edit/post neutral #475569). An unknown verb takes
+ * the neutral tone. Hexes are prototype-verbatim (mirrors B-037(a) status-dot rule).
+ */
+const AUDIT_DOT: Record<AuditVerb, string> = {
+  create: "var(--brand)",
+  approve: "#15803D",
+  sync: "#1D4ED8",
+  delete: "#B91C1C",
+  edit: "#475569",
+  post: "#475569",
+};
+const AUDIT_DOT_DEFAULT = "#475569";
+
+export function auditDotColor(verb: AuditVerb | null): string {
+  return verb ? AUDIT_DOT[verb] : AUDIT_DOT_DEFAULT;
+}
+
+/** One parsed activity-feed row (i18n/time-ago applied by the view, not here). */
+export interface ActivityRow {
+  id: string;
+  /** users.name resolved by the API (the system-actor label for system rows; null when unresolved). */
+  who: string | null;
+  verb: AuditVerb | null;
+  /** Raw action string — shown honestly when `verb` is null (unknown action). */
+  actionRaw: string;
+  /** entity RAW as stored (Wei ruling C-127 — no display mapping). */
+  doc: string;
+  /** ISO timestamp; the view derives time-ago against the current clock. */
+  atIso: string;
+}
+
+/**
+ * Map the newest `limit` audit rows (API is already newest-first) to typed feed rows.
+ * The prototype shows 5 (L534-539), so `limit` defaults to 5.
+ */
+export function parseActivity(rows: Ent[], limit = 5): ActivityRow[] {
+  return rows.slice(0, limit).map((r) => {
+    const action = entStr(r, "action") ?? "";
+    return {
+      id: entStr(r, "id") ?? "",
+      who: entStr(r, "user_name"),
+      verb: classifyVerb(action),
+      actionRaw: action,
+      doc: entStr(r, "entity") ?? "",
+      atIso: entStr(r, "at") ?? "",
+    };
+  });
+}
+
+/** Time-ago quantity + unit (pototype/dashboard.jsx L535-539, e.g. "5 min" / "1 hr"). */
+export interface TimeAgo {
+  n: number;
+  unit: "min" | "hr";
+}
+
+/**
+ * Whole-unit time-ago of `atIso` before `nowMs`, rounded down. Under 60 min → minutes
+ * (floor, min 1 — never a zero-minute label); otherwise hours (floor). The seed feed
+ * spans 0-16h, so minute/hour cover it — no day unit is invented (not in the i18n set).
+ */
+export function timeAgo(atIso: string, nowMs: number): TimeAgo {
+  const atMs = Date.parse(atIso);
+  const diffMin = Number.isFinite(atMs) ? Math.floor((nowMs - atMs) / 60000) : 0;
+  if (diffMin < 60) return { n: Math.max(1, diffMin), unit: "min" };
+  return { n: Math.floor(diffMin / 60), unit: "hr" };
+}
+
 /* ── Formatters ───────────────────────────────────────────────────────────────── */
 
 /** Baht → "millions, 1 decimal" (prototype KPI shows "284.5"), NaN/∞ → "0.0". */

@@ -39,5 +39,15 @@
   "kpiSolarRevenue": "รายได้ค่าไฟ YTD",
   "kpiSolarPayback": "จุดคืนทุน (Payback)",
   "deltaOnPlan": "ตามแผน",
-  "deltaStart": "เริ่มงาน"
+  "deltaStart": "เริ่มงาน",
+  "actCreate": "สร้าง",
+  "actEdit": "แก้ไข",
+  "actApprove": "อนุมัติ",
+  "actDelete": "ลบ",
+  "actPost": "ลงบัญชี",
+  "actSync": "ซิงก์",
+  "agoSuffix": "ที่แล้ว",
+  "unitMin": "นาที",
+  "unitHr": "ชม.",
+  "sysActor": "ระบบ"
 }

@@ -27,6 +27,7 @@ import {
 } from "./routes/registry";
 import { LoginScreen } from "./screens/login/login-screen";
 import { Dashboard } from "./screens/dashboard/dashboard";
+import { ExecDashboard } from "./screens/exec/exec";
 import { BOQOverview } from "./screens/boq/boq-overview";
 import { BOQList } from "./screens/boq/boq-list";
 import { BOQEditor } from "./screens/boq/boq-editor";
@@ -65,6 +66,7 @@ import { Placeholder } from "./shell/page";
 const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
   dashboard: Dashboard,
+  exec: ExecDashboard,
   "boq.overview": BOQOverview,
   "boq.list": BOQList,
   "boq.editor": BOQEditor,

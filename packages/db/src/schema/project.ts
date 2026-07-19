@@ -158,6 +158,13 @@ export const projects = pgTable("project", {
   budget: numeric("budget", { precision: 16, scale: 2 }),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("active"),
+  // B-102 (Wei = ก, migration 0032): curated per-project health label — an
+  // EDITORIAL judgment ("ดี"/"เฝ้าระวัง"), verbatim from the exec mock's roll{}
+  // (exec-audit.jsx:14-20). NOT derived from any budget formula: the C10 skeptic
+  // disproved actual>budget*0.9 on 3/7 mock rows (slr over yet ดี · rama/rdb
+  // under yet เฝ้าระวัง). Nullable — a project without a curated label reads
+  // honest null (and is not counted at-risk).
+  health: text("health"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
