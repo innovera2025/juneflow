@@ -19,20 +19,10 @@
 
 ## คิวรอ promote
 
-> **group-C WAVE-1 QUEUED (2026-07-19 · orch-A)** — P2-BE-31/32/33 on dev await Wei promote. Prior: **QUEUE EMPTY (2026-07-19 · batch-12 + B-100 PROMOTED → main `a1421bf` · 0-drift)** — the 5 rows (P2-BE-27/28/29/30 + QA-B094-fix) promoted, moved to history below. New rows accumulate when work merges to `dev` for the next batch (group-C Wave-1). The `>` records below are the durable promote history.
+> **QUEUE EMPTY (2026-07-19 · group-C PROGRAM PROMOTED → main `e416f17` · 0-drift)** — all 10 group-C rows (P2-BE-31..37 + P2-WEB-16/17/18) promoted, moved to history below. New rows accumulate when work merges to `dev` for the next batch. The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-| P2-BE-31 | seed (group-C W1 due_date/audit-at) | 453969b feature/backend | — (data · G3 573 api · live PG16 proof: alert+cashflow trip clock-relative) | 2026-07-19 |
-| P2-BE-32 | audit-log (group-C W1 activity feed) | 453969b feature/backend | — (backend · G2 contract-op reuse · G3 +6 unit · live-curl 13 rows+filters) | 2026-07-19 |
-| P2-BE-33 | dashboard verify (group-C W1) | 453969b feature/backend | — (verify-only · 7/7 live-curl PASS · budget-actual honest-empty as-spec) | 2026-07-19 |
-| P2-BE-34 | boq-reports+analytics (group-C W2) | d497b48 feature/backend | — (backend · G3 594 api · live-curl 3 endpoints · gate 4.5) | 2026-07-19 |
-| P2-BE-35 | evm_snapshot 0031 (group-C W3) | d497b48 feature/backend | — (schema+seed · G1 live 0000→0031 · danger-tail TRUE · gate 4.5) | 2026-07-19 |
-| P2-WEB-16 | dashboard activity widget (W1b) | e1e40fe feature/backend | — (web · G3 490 · G5-dynamic per C-127 → orch-B · gate 4.5) | 2026-07-19 |
-| P2-BE-36 | portfolio health (B-102=ก) | 3cdc3e9 feature/backend | — (backend · G3 594 api · G1 live 0000→0032 · health 7/7 vs mock + at_risk=2 · gate 4.5) | 2026-07-19 |
-| P2-BE-37 | evm/variance handlers (W3b) | 09d8a3f feature/backend | — (backend · G3 608 api · BUILD-ONCE verified · live spi 0.94/variance danger · gate 4.5) | 2026-07-19 |
-| P2-WEB-17 | RPT cards wire (W2b/3b) | 576dede feature/backend | tests/visual g1/14 (orch-B live-G5) · G3 533 web · build ✓ | 2026-07-19 |
-| P2-WEB-18 | ExecDashboard port (W2b) | 576dede feature/backend | exec-audit.jsx reference (orch-B live-G5 dynamic) · G3 533 web · B-103 i18n | 2026-07-19 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
@@ -43,3 +33,4 @@
 > ✅ **batch #9 (MVP-B hardening) → `main` `2051e40` (2026-07-17 · 0-drift)** — bank import/reconcile (B-093) + B-094 3/3 (gl.jv locked-period · bank reverse-unique · PV SoD) + B-084 reject/reconcile/import authz gates · migrations 0028/0029 · adversarial skeptic 6/6 SOUND.
 > ✅ **batch #10+11 → `main` `eb88544` (2026-07-17 · 0-drift · pin 4c64ef7)** — B-096 bank hygiene + **B-097 TenantDb transaction door** (atomic multi-write · scope-safe · **live-rollback proven**) + B-098 atomic generate-PR + orch-B audits/finance-E2E · gate-4.5 PASS · closes the B-085-class txn-door loop.
 > ✅ **batch-12 + B-100 → `main` `a1421bf` (2026-07-19 · 0-drift · pin c7838ac)** — B-084 authz residual (boq /revise MD-lock + bank /match finance.create · **B-084 fully closed**) + B-099 per-user login throttle (fixes office-NAT 429) + **B-100 account-lockout DoS closed** + migration 0030 FK-index + finance-flow SoD spec-fix (**7/7 live**) + group-C Wave-1 spec · orch-B verified (full live E2E green + adversarial skeptic on authz/throttle/B-100 · 567 api) · differential-proven B-099 live · gate-4.5 PASS.
+> ✅ **group-C PROGRAM → `main` `e416f17` (2026-07-19 · 0-drift · pin 985acdb)** — Dashboard/Analytics complete: Wave-1 (GET /audit-log + clock-relative seed + dashboard) + W2 (cost-type/boq-vs-nonboq/portfolio) + W3 (evm_snapshot mig 0031 + S-curve BUILD-ONCE) + W1b (activity feed) + W2b (RPT-001/003/004/005 cards + ExecDashboard) + W3b (evm/variance handlers) + B-102 (health stored-curated mig 0032) + B-103 (exec i18n +22) + SR-1/2/3 sacred · orch-B verified (sacred PERFECT · live migrate 0000-0032 · BUILD-ONCE SOUND · C10 skeptic · health mock-exact) · api 608 web 533 · non-block B-104. Wave-4 deferred.
