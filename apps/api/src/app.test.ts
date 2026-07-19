@@ -478,7 +478,7 @@ describe("POST /api/v1/auth/login", () => {
   });
 });
 
-describe("POST /api/v1/auth/login — brute-force throttle (B-082 F4 · B-099)", () => {
+describe("POST /api/v1/auth/login — brute-force throttle (B-082 F4 · B-099 · B-100)", () => {
   it("429s after too many attempts against ONE account (per-user cap) with the flat RATE_LIMITED error", async () => {
     const built = await buildTestApp({ signIn: async () => null });
     let last;
@@ -533,6 +533,66 @@ describe("POST /api/v1/auth/login — brute-force throttle (B-082 F4 · B-099)",
     }
     expect(last!.statusCode).toBe(429); // per-IP coarse guard holds
     expect(last!.json().code).toBe("RATE_LIMITED");
+  });
+
+  it("B-100: a wrong-password spray does NOT lock out the victim's correct login (account-lockout DoS closed)", async () => {
+    const validSession = {
+      token: "tok-1",
+      companyId: COMPANY,
+      user: { id: "au-0", email: "somchai@rungrueang.co.th", name: "สมชาย วัฒนกุล" },
+    };
+    const built = await buildTestApp({
+      signIn: async (_email, pw) => (pw === "right" ? validSession : null),
+      db: fullDb(),
+    });
+    // An attacker sprays the victim's email with WRONG passwords — the attacker's
+    // own (account+IP) failure window fills and they are throttled (429).
+    let sprayed;
+    for (let i = 0; i < 11; i++) {
+      sprayed = await built.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        headers: { "content-type": "application/json" },
+        payload: { email: "somchai@rungrueang.co.th", password: "wrong" },
+      });
+    }
+    expect(sprayed!.statusCode).toBe(429);
+    // The REAL victim, with the CORRECT password, still gets in — a valid
+    // credential bypasses the account counter (B-100 ข). The spray cannot lock them out.
+    const victim = await built.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      headers: { "content-type": "application/json" },
+      payload: { email: "somchai@rungrueang.co.th", password: "right" },
+    });
+    expect(victim.statusCode).toBe(200);
+    expect(victim.json().token).toBe("tok-1");
+  });
+
+  it("B-100: the account throttle is scoped to the source IP — a victim from a different IP starts fresh", async () => {
+    const built = await buildTestApp({ signIn: async () => null, db: fullDb() });
+    // Attacker sprays the victim's email from THEIR ip → throttled (429) on that ip.
+    let sprayed;
+    for (let i = 0; i < 11; i++) {
+      sprayed = await built.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        remoteAddress: "203.0.113.9",
+        headers: { "content-type": "application/json" },
+        payload: { email: "somchai@rungrueang.co.th", password: "wrong" },
+      });
+    }
+    expect(sprayed!.statusCode).toBe(429);
+    // The victim, from a DIFFERENT ip, has an untouched (account+IP) window — a
+    // single wrong attempt returns the normal 401, never a pre-emptive 429.
+    const fromVictimIp = await built.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      remoteAddress: "198.51.100.7",
+      headers: { "content-type": "application/json" },
+      payload: { email: "somchai@rungrueang.co.th", password: "wrong" },
+    });
+    expect(fromVictimIp.statusCode).toBe(401); // not 429 — the spray never touched (victim|victimIP)
   });
 });
 
