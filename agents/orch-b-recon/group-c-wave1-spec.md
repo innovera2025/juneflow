@@ -31,10 +31,12 @@ Confirm all 7 /dashboard/* handlers are real + C10-honest (they ARE — zero stu
 ## Sacred round (Wei-gated · defers FE widget only)
 **i18n round** — net-new activity-feed keys CONFIRMED ABSENT (grep): (1) `dashboard.activityTitle` = "กิจกรรมล่าสุด"; (2) action verb→label map for approve/create/edit/delete/post/sync (existing dashboard.activitySyncSAP/RejectRevise/AutoBudget are specific mock strings, NOT a general map); (3) time-ago suffix "ที่แล้ว" + units "นาที"/"ชม.". Glyph byte-exact (U+2014 em-dash · U+00B7 middot · ฿ U+0E3F · curly quotes). → file BLOCKERS.md i18n round; wire the FE activity widget in Wave-1b.
 
-## Wei decision items (non-gating for the demo — surface, don't block)
-1. **Entity fidelity:** audit_log.entity is a route-template `table:uuid` at write-time (plugins/audit-log.ts) but SEED writes friendly labels ("WO-2026-0055 · งวด 3"). Demo/G5 feed looks right, but a REAL mutation-driven feed shows raw `boq_doc:<uuid>`. Display-mapping layer in scope, or raw entity accepted?
-2. **G5 tension:** prototype activity section = fixed 5-row hardcoded mock (dashboard.jsx:539-543 = gallery g1/01). Real endpoint renders dynamic rows → confirm visual gate treats this as legitimate API-driven data (port-screen C-rule), not a pixel-match fail.
-3. **Cashflow net = payables-only/negative on seed** (ar_invoice creditTerm=30d → receivables ~today+30d, outside 7d window). Acceptable for demo, or shorten one ar term for a mixed net? (out of Wave-1 scope).
+## Wei rulings — RESOLVED 2026-07-19 (all 3 answered, none block)
+1. **Entity fidelity → RAW ACCEPTED.** No display-mapping layer. The real mutation-driven feed shows raw `table:uuid` entity refs; the demo seed's friendly labels are a bonus, not a requirement. C-BE-AUDITLOG returns `entity` as-stored, no lookup layer to build.
+2. **G5 activity widget → DYNAMIC OK.** The visual gate treats the activity feed as legitimate API-driven real/empty data (port-screen C-rule), NOT a pixel-match against the prototype's fixed 5-row mock (g1/01). No G5 fail for the widget rendering different/real rows.
+3. **Cashflow net → NEGATIVE (payables-only) ACCEPTED for demo.** No ar_invoice credit-term tweak needed; the 7-day window showing payables-only negative net is fine. (ar receivables at ~today+30d stay out of window — expected.)
+
+Net effect: the FE activity widget (Wave-1b) is simplified (raw entity, no mapping) and its ONLY remaining gate is the net-new i18n round. All three flags cleared — group-C Wave-1 has zero open Wei questions.
 
 ## Sequencing
 C-SEED-DUEDATE (first, proves the reuse claim) ‖ C-BE-AUDITLOG (parallel) → C-BE-DASHVERIFY (after seed) → [Wei i18n round] → Wave-1b FE activity widget. orch-A executes; orch-B verifies (live E2E clock-relative + dashboard render).
