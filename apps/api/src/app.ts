@@ -51,6 +51,7 @@ import { registerWoRoute } from "./routes/wo.js";
 import { registerGrRoute } from "./routes/gr.js";
 import { registerNotificationsRoute } from "./routes/notifications.js";
 import { registerDashboardRoute } from "./routes/dashboard.js";
+import { registerAuditLogRoute } from "./routes/audit-log.js";
 import { registerGlRoute } from "./routes/gl.js";
 import { registerApRoute } from "./routes/ap.js";
 import { registerBankRoute } from "./routes/bank.js";
@@ -173,6 +174,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerGrRoute(v1);
       registerNotificationsRoute(v1);
       registerDashboardRoute(v1);
+      registerAuditLogRoute(v1);
       registerGlRoute(v1);
       registerApRoute(v1);
       registerBankRoute(v1);
