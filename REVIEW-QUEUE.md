@@ -19,14 +19,10 @@
 
 ## คิวรอ promote
 
-> **PHASE-4 W0+W1 QUEUED (2026-07-20 · orch-B)** — P2-BE-38/39 (backend) + P2-WEB-19/20 (web) on dev await Wei promote. Prior: **QUEUE EMPTY (2026-07-19 · group-C PROGRAM PROMOTED → main `e416f17` · 0-drift)** — all 10 group-C rows (P2-BE-31..37 + P2-WEB-16/17/18) promoted, moved to history below. New rows accumulate when work merges to `dev` for the next batch. The `>` records below are the durable promote history.
+> **QUEUE EMPTY (2026-07-20 · PHASE-4 Wave-0+1 PROMOTED → main `7741e1b` · 0-drift)** — P2-BE-38/39 + P2-WEB-19/20 promoted, moved to history. New rows accumulate for the next batch (Phase-4 Wave-2). The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-| P2-BE-38 | subcon.ts (Phase-4 W0) | ba09747 feature/backend | — (backend · G3 680 api · live state-machine C3 + tenant-door + gated→404 · gate 4.5) | 2026-07-19 |
-| P2-BE-39 | pm.ts (Phase-4 W0) | ba09747 feature/backend | — (backend · G3 680 api · live CRUD + items-snapshot + gated→404 · gate 4.5) | 2026-07-19 |
-| P2-WEB-19 | subcon.contracts (Phase-4 W1) | aa9a586 feature/web-subcon | tests/visual reference (structural-G5 · live-pixel debt) · gate-4.5 PASS · orch-B verify | 2026-07-20 |
-| P2-WEB-20 | pm.assets (Phase-4 W1) | cdc6cb6 feature/web-pm | tests/visual reference · B-110 honest em-dash · gate-4.5 PASS · orch-B verify | 2026-07-20 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
@@ -38,3 +34,4 @@
 > ✅ **batch #10+11 → `main` `eb88544` (2026-07-17 · 0-drift · pin 4c64ef7)** — B-096 bank hygiene + **B-097 TenantDb transaction door** (atomic multi-write · scope-safe · **live-rollback proven**) + B-098 atomic generate-PR + orch-B audits/finance-E2E · gate-4.5 PASS · closes the B-085-class txn-door loop.
 > ✅ **batch-12 + B-100 → `main` `a1421bf` (2026-07-19 · 0-drift · pin c7838ac)** — B-084 authz residual (boq /revise MD-lock + bank /match finance.create · **B-084 fully closed**) + B-099 per-user login throttle (fixes office-NAT 429) + **B-100 account-lockout DoS closed** + migration 0030 FK-index + finance-flow SoD spec-fix (**7/7 live**) + group-C Wave-1 spec · orch-B verified (full live E2E green + adversarial skeptic on authz/throttle/B-100 · 567 api) · differential-proven B-099 live · gate-4.5 PASS.
 > ✅ **group-C PROGRAM → `main` `e416f17` (2026-07-19 · 0-drift · pin 985acdb)** — Dashboard/Analytics complete: Wave-1 (GET /audit-log + clock-relative seed + dashboard) + W2 (cost-type/boq-vs-nonboq/portfolio) + W3 (evm_snapshot mig 0031 + S-curve BUILD-ONCE) + W1b (activity feed) + W2b (RPT-001/003/004/005 cards + ExecDashboard) + W3b (evm/variance handlers) + B-102 (health stored-curated mig 0032) + B-103 (exec i18n +22) + SR-1/2/3 sacred · orch-B verified (sacred PERFECT · live migrate 0000-0032 · BUILD-ONCE SOUND · C10 skeptic · health mock-exact) · api 608 web 533 · non-block B-104. Wave-4 deferred.
+> ✅ **Phase-4 Wave-0+1 → `main` `7741e1b` (2026-07-20 · 0-drift · pin b312f5a)** — Subcon+PM start: subcon.ts + pm.ts backend (8+8 ops · tenant-door AIRTIGHT · no migration · contract frozen) + i18n R1/R2 sacred (B-105/B-106 · +550 keys) + subcon.contracts + pm.assets web ports · orch-B verified (tenant-door skeptic AIRTIGHT + glyph-fidelity SOUND + gate-4.5 ×2 + live) · api 680 · web 560. Wave-2 gated (B-107/B-108).
