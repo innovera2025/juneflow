@@ -13,8 +13,8 @@
  * fires 401s.
  *
  * WIRE NOTE: /boq/reports/boq-vs-nonboq + /boq/reports/cost-type are live on the
- * backend; /boq/reports/variance + /boq/reports/evm are in the contract but not yet
- * registered server-side (another lane). A not-yet-wired op simply errors → the
+ * backend; all four /boq/reports/* ops are live (W2 cost-type/boq-vs-nonboq · W3b
+ * variance/evm via the shared evm_snapshot reader). A failing op simply errors → the
  * query's data stays undefined → parse*() returns null → the view renders the honest
  * empty-state shell (never a fabricated number).
  */

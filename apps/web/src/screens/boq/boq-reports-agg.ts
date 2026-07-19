@@ -322,10 +322,9 @@ export type VarianceStatusKey = "boq.repStatusDone" | "boq.repStatusPending";
  * status is ABSENT the classification mirrors the prototype's own rule (a period is
  * pending until it has a real actual), so `hasActual` drives the fallback.
  *
- * NOTE (provisional): the GET /boq/reports/variance handler is not yet wired on the
- * backend, so this status vocabulary is forward-compat; the code-set below covers
- * the obvious done/pending spellings and every other code falls through to raw
- * passthrough + a BLOCKED-key flag.
+ * The live handler (boq-reports.ts, W3b) emits the stable codes "pending"/"done"
+ * (derived from period_end vs today). The wider code-set below is forward-compat
+ * only; any unknown code falls through to raw passthrough (never invented Thai).
  */
 export function varianceStatusKey(
   status: string | null,
