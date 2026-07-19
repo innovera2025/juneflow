@@ -413,6 +413,11 @@ const BOQ_GROUPS = [
   "05 งานประปา/สุขาภิบาล",
   "06 งานเก็บงาน + ตกแต่ง",
 ];
+// The per-group CBS budget (baht) for the hero project's boq groups, factored out
+// so the group-C Wave-3 EVM snapshot BAC (Σ over the rjp groups) references the
+// SAME source as the cbs_budget seed rather than re-typing the 1M literal — C10
+// forbids fabricated/duplicated numbers. Group i (0-based) budget = 1M × (i+1).
+const cbsGroupBudget = (i: number): number => 1_000_000 * (i + 1);
 
 // boq.jsx:326 INITIAL_ROWS_BY_GROUP (21 BOQItem rows across the 6 groups)
 // g = group index; cat M/L/S; qty/unit/price verbatim. `detail` (gap-5, migration
@@ -1182,7 +1187,7 @@ async function seed(): Promise<void> {
       await tx.insert(schema.cbsBudgets).values(
         BOQ_GROUPS.map((_, i) => ({
           id: det(`cbs:${i}`), groupId: det(`boqgrp:${i}`),
-          budget: m(1_000_000 * (i + 1)), used: m(200_000 * (i + 1)), committed: m(100_000 * (i + 1)),
+          budget: m(cbsGroupBudget(i)), used: m(200_000 * (i + 1)), committed: m(100_000 * (i + 1)),
         })),
       );
 
@@ -1528,6 +1533,63 @@ async function seed(): Promise<void> {
           status: p.status, cat: p.cat, ref: p.ref, ccId: det(`cc:${at(CC_SEED, i).code}`),
         })),
       );
+
+      // === EVM snapshot (group-C Wave-3, B-101) ===========================
+      // ~12 monthly Earned-Value snapshots for the hero project (project:rjp)
+      // tracing an HONEST S-curve derived from that project's REAL seeded BAC
+      // (Σ cbs_budget.budget over the rjp groups via cbsGroupBudget — NOT the
+      // mock's literal 26.4/22.2, which C10 forbids). Periods are the 12 calendar
+      // months ENDING at SEED_TODAY's month (clock-relative — no hardcoded years).
+      const EVM_BAC = BOQ_GROUPS.reduce((s, _g, i) => s + cbsGroupBudget(i), 0);
+      const EVM_PERIODS = 12;
+      // Cumulative planned fraction: smoothstep S-curve (slow -> fast -> slow).
+      const evmSCurve = (t: number): number => t * t * (3 - 2 * t);
+      // EV runs a flat ~6% behind PV (SPI ≈ 0.94) — "slightly behind schedule".
+      const EVM_SPI = 0.94;
+      // Per-period cost multiplier on the period's PLANNED budget increment: <1 =
+      // under-spent that month (healthy); the single OVERRUN month k=10 spikes the
+      // running cumulative AC ABOVE the cumulative budget line, so the final two
+      // snapshots (k=10,11) are the DANGER bars (AC > budget) that trip the
+      // dashboard over-budget alert. Deterministic (no Math.random); AC is a
+      // running cumulative sum, so the series is monotonically increasing.
+      const evmSpend = (k: number): number => (k === 10 ? 3.0 : 0.92);
+      const evmRows: (typeof schema.evmSnapshots.$inferInsert)[] = [];
+      let evmAcCum = 0;
+      for (let k = 0; k < EVM_PERIODS; k++) {
+        const t = (k + 1) / EVM_PERIODS;
+        const tPrev = k / EVM_PERIODS;
+        // budget bars = cumulative time-phased BAC on the SAME S fraction as PV.
+        const budgetCum = EVM_BAC * evmSCurve(t);
+        const pv = budgetCum; // Planned Value = the planned S-curve baseline.
+        const ev = pv * EVM_SPI; // Earned Value tracks PV slightly behind.
+        // AC accumulates each month's real spend (planned increment × cost ratio).
+        evmAcCum += (budgetCum - EVM_BAC * evmSCurve(tPrev)) * evmSpend(k);
+        // period 'YYYY-MM' + month-end; k=11 = SEED_TODAY's month, clock-relative.
+        const monthStart = new Date(
+          Date.UTC(
+            SEED_TODAY.getUTCFullYear(),
+            SEED_TODAY.getUTCMonth() - (EVM_PERIODS - 1 - k),
+            1,
+          ),
+        );
+        const y = monthStart.getUTCFullYear();
+        const mo = monthStart.getUTCMonth(); // 0-based
+        const period = `${y}-${String(mo + 1).padStart(2, "0")}`;
+        // Last day of the month = day 0 of the next month (UTC).
+        const periodEnd = new Date(Date.UTC(y, mo + 1, 0)).toISOString().slice(0, 10);
+        evmRows.push({
+          id: det(`evmsnap:${period}`),
+          projectId: det("project:rjp"),
+          period,
+          periodEnd,
+          pv: m(pv),
+          ev: m(ev),
+          ac: m(evmAcCum),
+          budget: m(budgetCum),
+          bac: m(EVM_BAC),
+        });
+      }
+      await tx.insert(schema.evmSnapshots).values(evmRows);
 
       // === Land / Sales / Solar / Inventory / DMS / etc. ==================
       await tx.insert(schema.landPlots).values(

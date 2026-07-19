@@ -59,6 +59,10 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+// group-C Wave-3 (B-101): the shared EVM snapshot loader that backfills this
+// handler's previously honest-empty budget-vs-actual time-series (the one store
+// that closes the S-curve DATA GAP). Read through the projects hop — see below.
+import { loadEvmSeries } from "./evm-series.js";
 // Approver-tier authority reuse (P2-BE-07, B-070): the inbox filters each doc by
 // the SAME tier gate its approve handler enforces, so the inbox and the write
 // path can never drift. PR thresholds (500K/2M) live in pr.ts; PO/WO thresholds
@@ -313,11 +317,14 @@ async function summary(db: TenantDb, ctx: DashCtx): Promise<Result> {
 // Real source: cost_categories = per-boq_group cbs_budget (category_label =
 // group name, actual_value = used, plan_value = budget). project_id → that
 // project (404 if not owned); omitted → PRIMARY project.
-// DATA GAP: the period time-series (per week/month/quarter/year bars) has NO
-// backing data — there is no time-bucketed cost-posting table (jv_line rows all
-// carry the seed's single created_at, cbs_budget has no time axis). Returning
-// fabricated bars would violate C10, so the series is honestly EMPTY; the real,
-// non-fabricated part of the widget is the cost_categories breakdown.
+// TIME-SERIES (group-C Wave-3, B-101): the period bars are now BACKFILLED from
+// evm_snapshot (the new project-anchored EVM store) via loadEvmSeries — period_
+// label = period, plan_amount = pv, budget_amount = budget, actual_amount = ac,
+// ordered by period ASC. The contract shape is UNCHANGED (same keys as before —
+// only the values that were the documented DATA GAP are now filled). C10 holds:
+// the arrays stay honestly EMPTY when a tenant/project has no snapshots seeded,
+// never fabricated. The real, non-time-phased part of the widget stays the
+// cost_categories breakdown.
 async function budgetActual(db: TenantDb, ctx: DashCtx): Promise<Result> {
   let target: ProjectRow | undefined;
   if (ctx.projectId) {
@@ -344,9 +351,13 @@ async function budgetActual(db: TenantDb, ctx: DashCtx): Promise<Result> {
     };
   }
 
-  const [cbs, groups] = await Promise.all([
+  const [cbs, groups, evmSeries] = await Promise.all([
     cbsScoped(db, target.id),
     boqGroupsScoped(db, target.id),
+    // EVM snapshot S-curve for THIS project (group-C Wave-3, B-101). evm_snapshot
+    // is project-anchored (no company_id) → read through the projects hop inside
+    // loadEvmSeries; ordered period ASC. Empty when no snapshots exist (honest).
+    loadEvmSeries(db, target.id),
   ]);
   const nameByGroup = new Map(groups.map((g) => [g.id, g.name]));
 
@@ -361,12 +372,15 @@ async function budgetActual(db: TenantDb, ctx: DashCtx): Promise<Result> {
     body: {
       range: ctx.range,
       range_label: ctx.range,
-      // GAP: no time-bucketed cost data in seed → honest empty series.
-      period_label: [],
-      budget_amount: [],
-      actual_amount: [],
-      plan_amount: [],
+      // Backfilled from evm_snapshot (period ASC). Honestly EMPTY when a
+      // project has no snapshots — the series source is then genuinely absent.
+      period_label: evmSeries.map((s) => s.period),
+      budget_amount: evmSeries.map((s) => round2(s.budget)),
+      actual_amount: evmSeries.map((s) => round2(s.ac)),
+      plan_amount: evmSeries.map((s) => round2(s.pv)),
       cost_categories: costCategories,
+      // Unchanged: the project's currency (== the snapshots' currency); stays
+      // non-null even when the series is empty.
       currency_code: target.currencyCode,
     },
   };

@@ -14,6 +14,7 @@ import {
   boqGroups,
   boqItems,
   cbsBudgets,
+  evmSnapshots,
   pos,
   ppaInvoices,
   prItems,
@@ -255,7 +256,8 @@ describe("GET /api/v1/dashboard/budget-actual", () => {
       captured,
     );
 
-  it("cost_categories from cbs_budget + boq_group; time-series honestly empty", async () => {
+  it("cost_categories from cbs_budget + boq_group; time-series honestly empty when no snapshots", async () => {
+    // db() seeds NO evm_snapshot rows → the series stays honestly empty (C10).
     const res = await get("/api/v1/dashboard/budget-actual", db());
     expect(res.statusCode).toBe(200);
     const b = res.json();
@@ -265,7 +267,41 @@ describe("GET /api/v1/dashboard/budget-actual", () => {
     ]);
     expect(b.period_label).toEqual([]);
     expect(b.budget_amount).toEqual([]);
+    expect(b.actual_amount).toEqual([]);
+    expect(b.plan_amount).toEqual([]);
+    // currency stays non-null (project currency) even with an empty series.
     expect(b.currency_code).toBe("THB");
+  });
+
+  it("backfills the period series from evm_snapshot, ordered by period ASC (group-C Wave-3)", async () => {
+    const captured: Captured[] = [];
+    const res = await get(
+      "/api/v1/dashboard/budget-actual",
+      stubJoinDb(
+        [
+          [projects, [{ id: "p", companyId: COMPANY, typeId: "t", name: "X", status: "active", currencyCode: "THB", createdAt: D }]],
+          [cbsBudgets, []],
+          [boqGroups, []],
+          // deliberately OUT OF ORDER → the handler must sort by period ASC.
+          [evmSnapshots, [
+            { period: "2026-02", periodEnd: "2026-02-28", pv: "2000000.00", ev: "1880000.00", ac: "2100000.00", budget: "2000000.00", bac: "21000000.00", currencyCode: "THB" },
+            { period: "2026-01", periodEnd: "2026-01-31", pv: "1000000.00", ev: "940000.00", ac: "920000.00", budget: "1000000.00", bac: "21000000.00", currencyCode: "THB" },
+          ]],
+        ],
+        captured,
+      ),
+    );
+    expect(res.statusCode).toBe(200);
+    const b = res.json();
+    expect(b.period_label).toEqual(["2026-01", "2026-02"]);
+    expect(b.plan_amount).toEqual([1000000, 2000000]); // pv
+    expect(b.budget_amount).toEqual([1000000, 2000000]); // budget
+    expect(b.actual_amount).toEqual([920000, 2100000]); // ac (2026-02 is a danger period: ac > budget)
+    // evm_snapshot is project-anchored → read THROUGH the projects hop (1 join),
+    // company_id bound on the joined project root (no cross-tenant leak).
+    const evm = captured.find((c) => c.table === evmSnapshots);
+    expect(evm?.joins.length).toBe(1);
+    expect(paramsOf(evm?.where)).toContain(COMPANY);
   });
 
   it("echoes ?range and binds tenant scope on every query", async () => {

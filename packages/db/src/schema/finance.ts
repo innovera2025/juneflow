@@ -683,3 +683,71 @@ export const opexBudgets = pgTable(
   },
   (t) => [unique("opex_budget_company_dept_year_uq").on(t.companyId, t.dept, t.year)],
 );
+
+// ---------------------------------------------------------------------------
+// EVM (Earned Value) snapshot — the one genuinely-new group-C store
+// ---------------------------------------------------------------------------
+
+/**
+ * EVMSnapshot — a periodic per-project Earned-Value time-series row (PV/EV/AC +
+ * time-phased budget), the ONE genuinely-new group-C store (Wei-approved B-101;
+ * recon agents/orch-b-recon/flow-a-group-c.md §3.4). Point-in-time analytics
+ * (BAC / AC / committed / %complete) are derivable on-the-fly and largely
+ * already implemented, but the S-curve (PV/EV/AC over time) is NOT — no existing
+ * table is time-phased (cbs_budget is flat; jv_line/ap_billing collapse to one
+ * seed instant) and past EV/AC is LOST once variation_order / boq-revise
+ * overwrite balances, so the as-at history must be CAPTURED. This snapshot backs
+ * the dashboard budget-vs-actual S-curve (GET /dashboard/budget-actual backfill),
+ * RPT-005 EVM, and RPT-004 variance (§3.2 build-once — one store, three surfaces).
+ *
+ * TENANT SCOPE — PROJECT-ANCHORED: there is deliberately NO company_id column.
+ * Company scope flows through project_id -> project.company_id, read via
+ * TenantDb.selectThrough() over the projects hop — exactly the same door pattern
+ * as boq_doc / subcon_contract / project_node, matching the project-anchored doc
+ * convention. A snapshot can never be read outside its project's tenant.
+ *
+ * Global-readiness (PLAN.md §4): every money column (pv/ev/ac/budget/bac) carries
+ * currency_code; all timestamps are UTC (timestamptz). period is a 'YYYY-MM'
+ * bucket key; period_end is the as-at date (the time axis). UNIQUE(project_id,
+ * period) makes one snapshot per project per period the source of truth
+ * (idempotent re-capture / re-seed).
+ */
+export const evmSnapshots = pgTable(
+  "evm_snapshot",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    period: text("period").notNull(), // 'YYYY-MM' bucket key
+    periodEnd: date("period_end").notNull(), // snapshot as-at date (the time axis)
+    // Planned Value — the time-phased baseline, cumulative to period_end.
+    pv: numeric("pv", { precision: 16, scale: 2 }).notNull().default("0"),
+    // Earned Value — %complete × BAC, cumulative.
+    ev: numeric("ev", { precision: 16, scale: 2 }).notNull().default("0"),
+    // Actual Cost to date, cumulative.
+    ac: numeric("ac", { precision: 16, scale: 2 }).notNull().default("0"),
+    // Period cumulative BAC allocation (the dashboard mock's 'budget' bars).
+    budget: numeric("budget", { precision: 16, scale: 2 }).notNull().default("0"),
+    // Budget At Completion — the project total (constant across a project's rows).
+    bac: numeric("bac", { precision: 16, scale: 2 }).notNull().default("0"),
+    currencyCode: text("currency_code").notNull().default("THB"),
+    // captured_at = when the snapshot was taken (period-close); UTC.
+    capturedAt: timestamp("captured_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // One snapshot per project per period — the source of truth (idempotent re-seed).
+    unique("evm_snapshot_project_period_uq").on(t.projectId, t.period),
+    // 0031 (B-101): the series read scopes project_id → projects (selectThrough
+    // hop) and filters by project_id — index the anchoring FK.
+    index("evm_snapshot_project_idx").on(t.projectId),
+  ],
+);
