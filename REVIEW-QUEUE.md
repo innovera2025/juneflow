@@ -29,6 +29,7 @@
 | P2-BE-34 | boq-reports+analytics (group-C W2) | d497b48 feature/backend | — (backend · G3 594 api · live-curl 3 endpoints · gate 4.5) | 2026-07-19 |
 | P2-BE-35 | evm_snapshot 0031 (group-C W3) | d497b48 feature/backend | — (schema+seed · G1 live 0000→0031 · danger-tail TRUE · gate 4.5) | 2026-07-19 |
 | P2-WEB-16 | dashboard activity widget (W1b) | e1e40fe feature/backend | — (web · G3 490 · G5-dynamic per C-127 → orch-B · gate 4.5) | 2026-07-19 |
+| P2-BE-36 | portfolio health (B-102=ก) | 3cdc3e9 feature/backend | — (backend · G3 594 api · G1 live 0000→0032 · health 7/7 vs mock + at_risk=2 · gate 4.5) | 2026-07-19 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
