@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { boqGroups, boqItems, prItems } from "@juneflow/db";
+import { boqDocs, boqGroups, boqItems, evmSnapshots, prItems } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -113,6 +113,8 @@ describe("GET /api/v1/boq/reports/* — auth (fail closed)", () => {
   const URLS = [
     "/api/v1/boq/reports/cost-type",
     "/api/v1/boq/reports/boq-vs-nonboq",
+    "/api/v1/boq/reports/evm",
+    "/api/v1/boq/reports/variance",
   ];
   for (const url of URLS) {
     it(`401s flat without a session: ${url}`, async () => {
@@ -303,5 +305,209 @@ describe("GET /api/v1/boq/reports/boq-vs-nonboq", () => {
     expect(b.rows).toEqual([]);
     expect(b.totals).toEqual({ boq: 0, non_boq: 0, total_actual: 0, pct_over: null });
     expect(b.currency_code).toBe("THB");
+  });
+});
+
+// ===========================================================================
+// RPT-005 evm — PV/EV/AC series + SPI/CPI, sourced from the ONE build-once
+// loadEvmSeries helper (evm_snapshot read THROUGH the projects door — B-101 D3).
+// ===========================================================================
+describe("GET /api/v1/boq/reports/evm", () => {
+  const PROJECT = "f84b0f07-ed67-522c-8ced-df72a883aaee";
+  // Two periods GIVEN OUT OF ORDER — loadEvmSeries must return them period ASC.
+  const db = (captured: Captured[] = []) =>
+    stubJoinDb(
+      [
+        [evmSnapshots, [
+          { projectId: PROJECT, period: "2026-06", periodEnd: "2026-06-30", pv: "12400000.00", ev: "11600000.00", ac: "12300000.00", budget: "12000000.00", bac: "26400000.00", currencyCode: "THB" },
+          { projectId: PROJECT, period: "2026-02", periodEnd: "2026-02-28", pv: "2800000.00", ev: "2700000.00", ac: "2720000.00", budget: "2800000.00", bac: "26400000.00", currencyCode: "THB" },
+        ]],
+      ],
+      captured,
+    );
+
+  it("series ordered period ASC; SPI/CPI = EV/PV & EV/AC of the LAST period, rounded 2dp", async () => {
+    const res = await get("/api/v1/boq/reports/evm", db());
+    expect(res.statusCode).toBe(200);
+    const b = res.json();
+    expect(b.series).toEqual([
+      { period_label: "2026-02", pv: 2800000, ev: 2700000, ac: 2720000 },
+      { period_label: "2026-06", pv: 12400000, ev: 11600000, ac: 12300000 },
+    ]);
+    // last period: SPI = 11.6/12.4 = 0.9355→0.94 ; CPI = 11.6/12.3 = 0.9431→0.94
+    expect(b.spi).toBe(0.94);
+    expect(b.cpi).toBe(0.94);
+    expect(b.currency_code).toBe("THB");
+  });
+
+  it("honest em-dash: no snapshots → empty series + null SPI/CPI (never fabricated)", async () => {
+    const res = await get(
+      "/api/v1/boq/reports/evm",
+      stubJoinDb([[evmSnapshots, []]]),
+    );
+    const b = res.json();
+    expect(b.series).toEqual([]);
+    expect(b.spi).toBeNull();
+    expect(b.cpi).toBeNull();
+    expect(b.currency_code).toBe("THB");
+  });
+
+  it("zero PV on the last period → SPI null; CPI still computed; series still renders", async () => {
+    const res = await get(
+      "/api/v1/boq/reports/evm",
+      stubJoinDb([[evmSnapshots, [
+        { projectId: PROJECT, period: "2026-02", periodEnd: "2026-02-28", pv: "0", ev: "2700000.00", ac: "2720000.00", budget: "0", bac: "0", currencyCode: "THB" },
+      ]]]),
+    );
+    const b = res.json();
+    expect(b.series).toHaveLength(1);
+    expect(b.spi).toBeNull();
+    // CPI = 2.7M/2.72M = 0.9926 → 0.99 (a zero denominator nulls ONLY its index)
+    expect(b.cpi).toBe(0.99);
+  });
+
+  it("zero AC on the last period → CPI null; SPI still computed", async () => {
+    const res = await get(
+      "/api/v1/boq/reports/evm",
+      stubJoinDb([[evmSnapshots, [
+        { projectId: PROJECT, period: "2026-02", periodEnd: "2026-02-28", pv: "2800000.00", ev: "2700000.00", ac: "0", budget: "0", bac: "0", currencyCode: "THB" },
+      ]]]),
+    );
+    const b = res.json();
+    expect(b.cpi).toBeNull();
+    // SPI = 2.7M/2.8M = 0.9643 → 0.96
+    expect(b.spi).toBe(0.96);
+    expect(b.series).toHaveLength(1);
+  });
+
+  it("reads evm_snapshot THROUGH the projects hop with company bound (tenant scope)", async () => {
+    const captured: Captured[] = [];
+    await get("/api/v1/boq/reports/evm", db(captured));
+    expectTenantScoped(captured);
+    expect(captured.find((c) => c.table === evmSnapshots)?.joins.length).toBe(1);
+  });
+
+  it("project_id given → filters the series by that project directly (no doc lookup)", async () => {
+    const captured: Captured[] = [];
+    const RJP = "f84b0f07-ed67-522c-8ced-df72a883aaee";
+    await get(`/api/v1/boq/reports/evm?project_id=${RJP}`, db(captured));
+    // project_id is used directly — no boq_doc resolution happens
+    expect(captured.find((c) => c.table === boqDocs)).toBeUndefined();
+    const evmRead = captured.find((c) => c.table === evmSnapshots);
+    expect(paramsOf(evmRead?.where)).toEqual(expect.arrayContaining([COMPANY, RJP]));
+  });
+
+  it("boq_id → resolves the doc's OWNING project (scoped doc read), then filters the series by it", async () => {
+    const captured: Captured[] = [];
+    const BOQ = "aaaaaaaa-1111-2222-3333-444444444444";
+    const RESOLVED = "b2b2b2b2-1111-2222-3333-444444444444";
+    await get(
+      `/api/v1/boq/reports/evm?boq_id=${BOQ}`,
+      stubJoinDb([
+        [boqDocs, [{ projectId: RESOLVED }]],
+        [evmSnapshots, [
+          { projectId: RESOLVED, period: "2026-02", periodEnd: "2026-02-28", pv: "1", ev: "1", ac: "1", budget: "1", bac: "1", currencyCode: "THB" },
+        ]],
+      ], captured),
+    );
+    // the doc lookup is tenant-scoped (company + boq_id) and reads doc→project (1 hop)
+    const docRead = captured.find((c) => c.table === boqDocs);
+    expect(docRead?.joins.length).toBe(1);
+    expect(paramsOf(docRead?.where)).toEqual(expect.arrayContaining([COMPANY, BOQ]));
+    // the series is then filtered by the RESOLVED project id (never tenant-wide)
+    const evmRead = captured.find((c) => c.table === evmSnapshots);
+    expect(paramsOf(evmRead?.where)).toEqual(
+      expect.arrayContaining([COMPANY, RESOLVED]),
+    );
+  });
+});
+
+// ===========================================================================
+// RPT-004 variance — Plan(budget) vs Actual(ac) per period (Wei D3), from the
+// SAME loadEvmSeries store. status is derived from the REAL time fact period_end
+// vs now; a pending row mirrors the mock's "—" with honest-null variance/pct.
+// ===========================================================================
+describe("GET /api/v1/boq/reports/variance", () => {
+  const PROJECT = "f84b0f07-ed67-522c-8ced-df72a883aaee";
+  const db = (captured: Captured[] = []) =>
+    stubJoinDb(
+      [
+        [evmSnapshots, [
+          // done + UNDER budget (period_end far past): variance = 2.72M−2.8M = −80,000
+          { projectId: PROJECT, period: "2026-01", periodEnd: "2020-01-31", budget: "2800000.00", ac: "2720000.00", pv: "0", ev: "0", bac: "0", currencyCode: "THB" },
+          // done + OVER budget: variance = 2.98M−2.6M = +380,000
+          { projectId: PROJECT, period: "2026-04", periodEnd: "2020-04-30", budget: "2600000.00", ac: "2980000.00", pv: "0", ev: "0", bac: "0", currencyCode: "THB" },
+          // pending (period_end far future): variance/pct null, status pending, actual = ac (D3)
+          { projectId: PROJECT, period: "2999-05", periodEnd: "2999-12-31", budget: "2700000.00", ac: "0", pv: "0", ev: "0", bac: "0", currencyCode: "THB" },
+        ]],
+      ],
+      captured,
+    );
+
+  it("plan=budget, actual=ac; variance sign + pct_dev per mock; status from period_end vs now", async () => {
+    const res = await get("/api/v1/boq/reports/variance", db());
+    expect(res.statusCode).toBe(200);
+    const b = res.json();
+    expect(b.rows).toEqual([
+      // under budget → negative variance ; −80000/2800000×100 = −2.857 → −2.86
+      { period_label: "2026-01", plan: 2800000, actual: 2720000, variance: -80000, pct_dev: -2.86, status: "done" },
+      // over budget → positive variance ; 380000/2600000×100 = 14.615 → 14.62
+      { period_label: "2026-04", plan: 2600000, actual: 2980000, variance: 380000, pct_dev: 14.62, status: "done" },
+      // future/current period → pending; variance/pct null (mock "—"); actual = ac (D3)
+      { period_label: "2999-05", plan: 2700000, actual: 0, variance: null, pct_dev: null, status: "pending" },
+    ]);
+    expect(b.currency_code).toBe("THB");
+  });
+
+  it("pct_dev null when plan (budget) is 0 on a done period — no ratio without a baseline (never ÷0)", async () => {
+    const res = await get(
+      "/api/v1/boq/reports/variance",
+      stubJoinDb([[evmSnapshots, [
+        { projectId: PROJECT, period: "2026-03", periodEnd: "2020-03-31", budget: "0", ac: "50000.00", pv: "0", ev: "0", bac: "0", currencyCode: "THB" },
+      ]]]),
+    );
+    const b = res.json();
+    expect(b.rows).toEqual([
+      { period_label: "2026-03", plan: 0, actual: 50000, variance: 50000, pct_dev: null, status: "done" },
+    ]);
+  });
+
+  it("honest-empty: no snapshots → empty rows", async () => {
+    const res = await get(
+      "/api/v1/boq/reports/variance",
+      stubJoinDb([[evmSnapshots, []]]),
+    );
+    const b = res.json();
+    expect(b.rows).toEqual([]);
+    expect(b.currency_code).toBe("THB");
+  });
+
+  it("reads evm_snapshot THROUGH the projects hop with company bound (tenant scope)", async () => {
+    const captured: Captured[] = [];
+    await get("/api/v1/boq/reports/variance", db(captured));
+    expectTenantScoped(captured);
+    expect(captured.find((c) => c.table === evmSnapshots)?.joins.length).toBe(1);
+  });
+
+  it("boq_id → resolves the doc's OWNING project (scoped doc read), then filters the series by it", async () => {
+    const captured: Captured[] = [];
+    const BOQ = "aaaaaaaa-1111-2222-3333-444444444444";
+    const RESOLVED = "b2b2b2b2-1111-2222-3333-444444444444";
+    await get(
+      `/api/v1/boq/reports/variance?boq_id=${BOQ}`,
+      stubJoinDb([
+        [boqDocs, [{ projectId: RESOLVED }]],
+        [evmSnapshots, [
+          { projectId: RESOLVED, period: "2026-01", periodEnd: "2020-01-31", budget: "1", ac: "1", pv: "0", ev: "0", bac: "0", currencyCode: "THB" },
+        ]],
+      ], captured),
+    );
+    const docRead = captured.find((c) => c.table === boqDocs);
+    expect(docRead?.joins.length).toBe(1);
+    expect(paramsOf(docRead?.where)).toEqual(expect.arrayContaining([COMPANY, BOQ]));
+    const evmRead = captured.find((c) => c.table === evmSnapshots);
+    expect(paramsOf(evmRead?.where)).toEqual(
+      expect.arrayContaining([COMPANY, RESOLVED]),
+    );
   });
 });

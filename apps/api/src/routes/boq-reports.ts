@@ -1,10 +1,12 @@
-// GET /boq/reports/* — tenant-scoped BOQ analytics reports (group-C Wave-2,
-// B-101). Two read-only aggregation cards of pototype/boq-extra.jsx +
-// pototype/boq.jsx, each an aggregate over the EXISTING seed business tables —
-// no new table, no migration.
+// GET /boq/reports/* — tenant-scoped BOQ analytics reports (group-C Wave-2/W3b,
+// B-101). Four read-only report cards of pototype/boq-extra.jsx + pototype/
+// boq.jsx: RPT-003 cost-type + RPT-001 boq-vs-nonboq aggregate over the EXISTING
+// seed business tables (no new table); RPT-005 evm + RPT-004 variance read the
+// evm_snapshot time-series through the ONE shared build-once helper loadEvmSeries
+// (evm-series.ts) — NEVER a second reader of evm_snapshot (B-101 D3).
 //
-// Contract (openapi.yaml, B-101 sacred batch 6533f44): 2 GET ops, Entity-opaque
-// JSON. Both return the object directly (EntityOk), are tenant-scoped through
+// Contract (openapi.yaml, B-101 sacred batch 6533f44): 4 GET ops, Entity-opaque
+// JSON. Each returns the object directly (EntityOk), is tenant-scoped through
 // request.db (the TenantDb doors) and 401 without a tenant (fail closed),
 // exactly like dashboard.ts / counts.ts.
 //
@@ -33,6 +35,7 @@ import {
   prs,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+import { loadEvmSeries } from "./evm-series.js";
 
 type GroupRow = typeof boqGroups.$inferSelect;
 type ItemRow = typeof boqItems.$inferSelect;
@@ -324,6 +327,148 @@ async function boqVsNonboq(db: TenantDb, ctx: ReportCtx): Promise<Result> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// EVM scope resolution — shared by /evm + /variance (both read the ONE store)
+// ---------------------------------------------------------------------------
+// A sentinel project id that matches no row: a foreign/absent boq_id resolves
+// here so the series is HONEST-EMPTY, never tenant-wide (which would widen scope).
+const NO_PROJECT_MATCH = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Resolve the evm_snapshot scope key (a single project_id) for the two
+ * time-series reports. evm_snapshot is PROJECT-anchored (no boq_id column), so:
+ *   - project_id given → that project directly;
+ *   - else boq_id given → the BOQ doc's OWNING project, resolved through a
+ *     tenant-scoped selectThrough (doc → project); a foreign/absent doc resolves
+ *     to NO_PROJECT_MATCH → honest-empty series, never another tenant's scope;
+ *   - else → null → every owned project (loadEvmSeries stays tenant-scoped by the
+ *     project hop) — the same tenant-wide default the sibling reports use.
+ */
+async function resolveEvmProjectId(
+  db: TenantDb,
+  ctx: ReportCtx,
+): Promise<string | null> {
+  if (ctx.projectId) return ctx.projectId;
+  if (ctx.boqId) {
+    const docs = (await db.selectThrough(
+      boqDocs,
+      [{ fk: boqDocs.projectId, parent: projects }],
+      eq(boqDocs.id, ctx.boqId),
+    )) as { projectId: string }[];
+    return docs[0]?.projectId ?? NO_PROJECT_MATCH;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// 3. GET /boq/reports/evm — RPT-005 PV/EV/AC time-series + SPI/CPI
+// ---------------------------------------------------------------------------
+// Sources the series from the ONE shared build-once helper loadEvmSeries
+// (evm-series.ts, which reads evm_snapshot THROUGH the projects door) — this file
+// NEVER queries evm_snapshot directly nor duplicates the aggregation (B-101 D3).
+// series = the loaded rows ordered period ASC (loadEvmSeries sorts). SPI/CPI are
+// the mock's own indices off the LAST period (boq-extra.jsx:428-429): SPI = EV/PV,
+// CPI = EV/AC, rounded to 2 dp. Em-dash discipline (mirror the screen): no
+// snapshots (no last period) → series [] + null indices; a ZERO denominator on the
+// last period → that index is null (never a fabricated index) while the series
+// still renders. currency from the rows (default THB).
+async function evm(db: TenantDb, ctx: ReportCtx): Promise<Result> {
+  const projectId = await resolveEvmProjectId(db, ctx);
+  const series = await loadEvmSeries(db, projectId);
+
+  const rows = series.map((r) => ({
+    period_label: r.period,
+    pv: round2(r.pv),
+    ev: round2(r.ev),
+    ac: round2(r.ac),
+  }));
+
+  const last = series[series.length - 1];
+  const spi = last && last.pv > 0 ? round2(last.ev / last.pv) : null;
+  const cpi = last && last.ac > 0 ? round2(last.ev / last.ac) : null;
+
+  return {
+    status: 200,
+    body: {
+      series: rows,
+      spi,
+      cpi,
+      currency_code: series[0]?.currencyCode ?? "THB",
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 4. GET /boq/reports/variance — RPT-004 Plan-vs-Actual by period (Wei D3)
+// ---------------------------------------------------------------------------
+// Same build-once loadEvmSeries source as /evm (NO second reader of evm_snapshot).
+// Wei D3: plan = budget, actual = ac. The mock (boq-extra.jsx:395-408) computes
+// variance = actual − plan (>0 = over budget → danger; <0 = under → ok) and
+// pct_dev = variance / plan × 100. status is derived HONESTLY from a REAL time
+// fact — period_end vs now — instead of the mock's hardcoded `pending` flag: the
+// mock's presentational Thai labels ("รอดำเนิน"/"เสร็จ") map to the stable codes
+// its data carries → a period whose end date is in the PAST is "done" (with a
+// computed variance); a current/future period is "pending", and — mirroring the
+// mock's "—" cells for pending rows — its variance/pct_dev are honest null (not
+// yet meaningful; actual still carries ac per D3). No snapshots → rows [].
+async function variance(db: TenantDb, ctx: ReportCtx): Promise<Result> {
+  const projectId = await resolveEvmProjectId(db, ctx);
+  const series = await loadEvmSeries(db, projectId);
+
+  // "done" is the real time fact "the period's end date is in the PAST". Compare
+  // at UTC-date granularity so a period ending TODAY (current) is still pending
+  // (mock's future/current → รอดำเนิน). period_end is a 'YYYY-MM-DD' date string.
+  const now = new Date();
+  const startOfTodayUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+
+  interface VarianceRow {
+    period_label: string;
+    plan: number;
+    actual: number;
+    variance: number | null;
+    pct_dev: number | null;
+    status: string;
+  }
+
+  const rows: VarianceRow[] = series.map((r) => {
+    const plan = round2(r.budget);
+    const actual = round2(r.ac);
+    // A NaN period_end (malformed) fails closed to pending — never claim "done"
+    // without a real past end date.
+    const done = new Date(r.periodEnd).getTime() < startOfTodayUtc;
+    if (!done) {
+      return {
+        period_label: r.period,
+        plan,
+        actual,
+        variance: null,
+        pct_dev: null,
+        status: "pending",
+      };
+    }
+    const v = round2(actual - plan);
+    return {
+      period_label: r.period,
+      plan,
+      actual,
+      variance: v,
+      // pct_dev = variance/plan×100 (mock :396); null when plan is 0 — no ratio
+      // without a baseline (honest, never ÷0).
+      pct_dev: plan !== 0 ? round2((v / plan) * 100) : null,
+      status: "done",
+    };
+  });
+
+  return {
+    status: 200,
+    body: { rows, currency_code: series[0]?.currencyCode ?? "THB" },
+  };
+}
+
 /** Parse ?project_id / ?boq_id (uuid scope params); null when absent/blank. */
 function parseUuid(raw: unknown): string | null {
   const s = typeof raw === "string" ? raw.trim() : "";
@@ -371,4 +516,6 @@ export function registerBoqReportsRoute(app: FastifyInstance): void {
 
   app.get("/boq/reports/cost-type", withTenant(costType));
   app.get("/boq/reports/boq-vs-nonboq", withTenant(boqVsNonboq));
+  app.get("/boq/reports/evm", withTenant(evm));
+  app.get("/boq/reports/variance", withTenant(variance));
 }
