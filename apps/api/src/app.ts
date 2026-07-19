@@ -49,6 +49,8 @@ import { registerPrRoute } from "./routes/pr.js";
 import { registerPoRoute } from "./routes/po.js";
 import { registerWoRoute } from "./routes/wo.js";
 import { registerGrRoute } from "./routes/gr.js";
+import { registerSubconRoute } from "./routes/subcon.js";
+import { registerPmRoute } from "./routes/pm.js";
 import { registerNotificationsRoute } from "./routes/notifications.js";
 import { registerDashboardRoute } from "./routes/dashboard.js";
 import { registerAuditLogRoute } from "./routes/audit-log.js";
@@ -174,6 +176,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerPoRoute(v1);
       registerWoRoute(v1);
       registerGrRoute(v1);
+      registerSubconRoute(v1);
+      registerPmRoute(v1);
       registerNotificationsRoute(v1);
       registerDashboardRoute(v1);
       registerAuditLogRoute(v1);
