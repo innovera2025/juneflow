@@ -19,6 +19,10 @@ import {
   parseAlerts,
   parseCashflow,
   parseContractors,
+  parseActivity,
+  classifyVerb,
+  auditDotColor,
+  timeAgo,
   millions1,
   formatInt,
   pctOf,
@@ -188,6 +192,75 @@ describe("list parsers", () => {
     const cf = parseCashflow({ net_total: 0, currency_code: "THB", rows: [] });
     expect(cf!.netTotal).toBe(0);
     expect(cf!.rows).toEqual([]);
+  });
+});
+
+describe("activity feed (GET /audit-log)", () => {
+  // A mocked B-014 row page (newest-first), one per known verb + one unknown action.
+  // ASCII placeholders stand in for the (Thai) server user_name — parseActivity passes
+  // user_name through raw, so the value is opaque to the logic under test (no raw Thai
+  // in source, B-073). "system-actor" mirrors the API's system-row label passthrough.
+  const feed = [
+    { id: "a1", user_id: "u1", user_name: "Wipha", action: "create", entity: "PR-2026-0418", at: "2026-07-19T09:55:00.000Z" },
+    { id: "a2", user_id: "u2", user_name: "Somporn", action: "approve", entity: "PO-2026-0290", at: "2026-07-19T09:37:00.000Z" },
+    { id: "a3", user_id: null, user_name: "system-actor", action: "sync", entity: "SAP REM", at: "2026-07-19T09:00:00.000Z" },
+    { id: "a4", user_id: "u4", user_name: null, action: "delete", entity: "AC-2569-09", at: "2026-07-19T08:00:00.000Z" },
+    { id: "a5", user_id: "u5", user_name: "Teerapong", action: "recompute", entity: "GL-04", at: "2026-07-19T07:00:00.000Z" },
+    { id: "a6", user_id: "u6", user_name: "extra", action: "edit", entity: "MT-018", at: "2026-07-19T06:00:00.000Z" },
+  ];
+
+  it("classifyVerb maps known verbs, else null", () => {
+    expect(classifyVerb("create")).toBe("create");
+    expect(classifyVerb("edit")).toBe("edit");
+    expect(classifyVerb("approve")).toBe("approve");
+    expect(classifyVerb("delete")).toBe("delete");
+    expect(classifyVerb("post")).toBe("post");
+    expect(classifyVerb("sync")).toBe("sync");
+    expect(classifyVerb("recompute")).toBeNull();
+    expect(classifyVerb("")).toBeNull();
+  });
+
+  it("auditDotColor per verb (prototype tones), neutral for unknown", () => {
+    expect(auditDotColor("create")).toBe("var(--brand)");
+    expect(auditDotColor("approve")).toBe("#15803D");
+    expect(auditDotColor("sync")).toBe("#1D4ED8");
+    expect(auditDotColor("delete")).toBe("#B91C1C");
+    expect(auditDotColor("edit")).toBe("#475569");
+    expect(auditDotColor("post")).toBe("#475569");
+    expect(auditDotColor(null)).toBe("#475569");
+  });
+
+  it("parseActivity keeps the 5 newest rows and maps who/verb/doc", () => {
+    const rows = parseActivity(feed);
+    expect(rows).toHaveLength(5); // sliced to 5 though the page carries 6
+    expect(rows[0]).toEqual({
+      id: "a1",
+      who: "Wipha",
+      verb: "create",
+      actionRaw: "create",
+      doc: "PR-2026-0418", // entity RAW (no mapping — Wei ruling C-127)
+      atIso: "2026-07-19T09:55:00.000Z",
+    });
+    // system + unresolved user_name flow through honestly (view supplies the fallback).
+    expect(rows[2].who).toBe("system-actor");
+    expect(rows[3].who).toBeNull();
+    // an unknown action keeps verb null + the raw action string.
+    expect(rows[4].verb).toBeNull();
+    expect(rows[4].actionRaw).toBe("recompute");
+  });
+
+  it("parseActivity on an empty page returns [] (→ EmptyState)", () => {
+    expect(parseActivity([])).toEqual([]);
+  });
+
+  it("timeAgo: minutes under an hour (floor, min 1) then hours (floor)", () => {
+    const now = Date.parse("2026-07-19T10:00:00.000Z");
+    expect(timeAgo("2026-07-19T09:55:00.000Z", now)).toEqual({ n: 5, unit: "min" }); // 5 min
+    expect(timeAgo("2026-07-19T09:59:30.000Z", now)).toEqual({ n: 1, unit: "min" }); // <1 min → 1
+    expect(timeAgo("2026-07-19T10:00:00.000Z", now)).toEqual({ n: 1, unit: "min" }); // 0 → 1
+    expect(timeAgo("2026-07-19T09:00:00.000Z", now)).toEqual({ n: 1, unit: "hr" });  // 60 min → 1 hr
+    expect(timeAgo("2026-07-19T07:30:00.000Z", now)).toEqual({ n: 2, unit: "hr" });  // 150 min → 2 hr
+    expect(timeAgo("not-a-date", now)).toEqual({ n: 1, unit: "min" });               // bad ISO → safe
   });
 });
 

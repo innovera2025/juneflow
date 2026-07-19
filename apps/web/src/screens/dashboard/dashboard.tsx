@@ -27,7 +27,8 @@
  *     mock's 3 alerts / -18.4M.
  *  5. summary.health_score is a single budget-utilisation ratio (not the mock's opaque
  *     "5-indicator" score) → the donut shows the real %, the qualitative descriptor is —.
- *  6. There is NO recent-activity endpoint in the contract → that card is an empty state.
+ *  6. The recent-activity card reads the real GET /audit-log (group-C Wave-1b): the 5
+ *     newest audit rows (who/action-verb/entity/time-ago), honest EmptyState when none.
  *  7. KPI deltas the seed cannot derive (edit-count, MoM, committed doc-count, remain-days)
  *     are omitted rather than reproduced; the derivable ones (over/below-plan, work-progress
  *     on-plan/start) are shown from real figures.
@@ -63,6 +64,7 @@ import {
   useDashboardAlerts,
   useDashboardCashflow,
   useDashboardContractors,
+  useDashboardActivity,
 } from "./use-dashboard";
 import {
   buildBudgetActualConfig,
@@ -74,12 +76,16 @@ import {
   roleVisibility,
   statusKind,
   kpiBranch,
+  auditDotColor,
+  timeAgo,
   type DashRole,
   type DashSummary,
   type ApprovalItem,
   type PhaseRow,
   type ContractorRow,
   type CashflowRow,
+  type ActivityRow,
+  type AuditVerb,
 } from "./dashboard-agg";
 import strings from "./dashboard-strings.json" with { type: "json" };
 
@@ -238,6 +244,7 @@ export function Dashboard() {
   const alertsQ = useDashboardAlerts(projectId);
   const cashflowQ = useDashboardCashflow(projectId);
   const contractorsQ = useDashboardContractors(projectId);
+  const activityQ = useDashboardActivity();
 
   const summary = summaryQ.data ?? null;
   const budgetActual = baQ.data ?? null;
@@ -246,6 +253,9 @@ export function Dashboard() {
   const alerts = alertsQ.data ?? [];
   const cashflow = cashflowQ.data ?? null;
   const contractors = contractorsQ.data ?? [];
+  // Activity feed defaults to empty exactly like the other widgets: a loading or
+  // errored query leaves data undefined → [] → the honest EmptyState renders.
+  const activity = activityQ.data ?? [];
 
   const vis = roleVisibility(role);
 
@@ -561,10 +571,36 @@ export function Dashboard() {
               )}
             </Card>
 
-            {/* Recent activity — NO endpoint in the contract → honest empty state. */}
+            {/* Recent activity — the 5 newest GET /audit-log rows (group-C Wave-1b). */}
             <Card pad={18}>
               <div style={{ fontSize: 12.5, color: "var(--text-2)", fontWeight: 500, marginBottom: 8 }}>{tp(P("activityTitle"))}</div>
-              <EmptyState />
+              {activity.length === 0 ? (
+                <EmptyState />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 14 }}>
+                  {activity.map((a) => (
+                    <ActivityFeedRow
+                      key={a.id}
+                      row={a}
+                      now={Date.now()}
+                      labels={{
+                        verb: {
+                          create: tp(P("actCreate")),
+                          edit: tp(P("actEdit")),
+                          approve: tp(P("actApprove")),
+                          delete: tp(P("actDelete")),
+                          post: tp(P("actPost")),
+                          sync: tp(P("actSync")),
+                        },
+                        sysActor: tp(P("sysActor")),
+                        agoSuffix: tp(P("agoSuffix")),
+                        unitMin: tp(P("unitMin")),
+                        unitHr: tp(P("unitHr")),
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </Card>
           </div>
         )}
@@ -671,6 +707,39 @@ function ContractorLine({ row }: { row: ContractorRow }) {
       </div>
       <div style={{ fontSize: 10.5, color: "var(--text-3)", marginBottom: 4 }}>{row.workScope ?? DASH}</div>
       <Bar value={row.progressPct} max={100} height={5} />
+    </div>
+  );
+}
+
+/** One activity-feed row — ported from pototype/dashboard.jsx L541-547 (mock → wire). */
+function ActivityFeedRow({
+  row,
+  now,
+  labels,
+}: {
+  row: ActivityRow;
+  now: number;
+  labels: { verb: Record<AuditVerb, string>; sysActor: string; agoSuffix: string; unitMin: string; unitHr: string };
+}) {
+  // who: the server user_name (raw), falling back to the system actor when unresolved.
+  const who = row.who ?? labels.sysActor;
+  // what: the verb's i18n label, or the raw action honestly when unknown (§0 rule 3).
+  const what = row.verb ? labels.verb[row.verb] : row.actionRaw;
+  const ago = timeAgo(row.atIso, now);
+  const unitLabel = ago.unit === "min" ? labels.unitMin : labels.unitHr;
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+      <span style={{ width: 6, height: 6, borderRadius: 999, background: auditDotColor(row.verb), marginTop: 6 }} />
+      <div style={{ flex: 1, fontSize: 11.5, lineHeight: 1.5 }}>
+        <div>
+          <b style={{ fontWeight: 600 }}>{who}</b>{" "}
+          <span style={{ color: "var(--text-2)" }}>{what}</span>{" "}
+          <span style={{ color: "var(--brand)", fontWeight: 600 }}>{row.doc}</span>
+        </div>
+        <div style={{ color: "var(--text-3)", fontSize: 10.5 }}>
+          {ago.n} {unitLabel} {labels.agoSuffix}
+        </div>
+      </div>
     </div>
   );
 }
