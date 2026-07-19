@@ -1,0 +1,3665 @@
+{
+  "override_id": "wei-approved:B-105",
+  "namespaces": [
+    "subcon.*",
+    "accept.*"
+  ],
+  "convention": "each key -> dict[key] = {th,en,zh,ar} ALL = the verbatim 'th' below (glyph-exact). No translation sourced.",
+  "net_new_count": 289,
+  "reused_common": [
+    "common.status (subcon.progress L159/215/333; subcon.accept L90)",
+    "common.total (subcon.progress L190/370)",
+    "common.print (subcon.progress L383; subcon.handover L255)",
+    "common.cancel (subcon.progress L461/522; subcon.contracts L161)",
+    "common.export (subcon.contracts L78)",
+    "common.all (accept L179)"
+  ],
+  "blockers": [
+    {
+      "th": "PERIOD_STATE labels (subcon-accept.jsx L50-53: ตรวจรับแล้ว/ขอตรวจรับ/ยังไม่ถึง/ตีกลับแก้ไข) + ACCEPT_CHECKLIST labels (L57-63, 5 items) were DROPPED by both raw extractors (called dynamic/data-array), but RECOVERED here as keys by parity — SUB_TYPES (subcon.jsx L396, const string array) and SUBC_METHOD .l labels (const object) are keyed in this same round, and these are the same shape (fixed hardcoded Thai UI labels rendered verbatim: PERIOD_STATE via <StatusBadge>{st.l}</StatusBadge> subcon-accept2 L102; ACCEPT_CHECKLIST via {label} L195).",
+      "issue": "REVIEWER DECISION NEEDED: if the port sources period-status labels or the acceptance-criteria checklist from the API instead of hardcoding, drop these 9 keys (subcon.statusRequested + the 3 deduped status keys' PERIOD_STATE usage + subcon.checkItem*×5). Current prototype hardcodes them → keyed for fidelity. Non-blocking for apply; port can prune unused."
+    },
+    {
+      "th": "Unit-suffix props: subcon.unitMBaht (\"M ฿\", subcon.jsx L55/56/57, subcon-accept L81, subcon-accept2 L42) and subcon.unitBaht (\"฿\", subcon-accept2 L43/44) are MiniKpi unit= props.",
+      "issue": "BORDERLINE UI-vs-formatting: kept as keys (structural unit slots; \"M ฿\" carries the 'M' abbreviation). Bare table-header \"%\" (subcon.jsx L154, subcon-accept2 L88) was NOT keyed — dropped as symbol, consistent with progress-screen ruling. Reviewer may downgrade unitBaht \"฿\" to static formatting if desired."
+    }
+  ],
+  "notes": "SCOPE: 4 subcon screens (subcon.progress=subcon.jsx; subcon.contracts=subcon-accept.jsx; subcon.accept+subcon.handover=subcon-accept2.jsx) share ONE namespace subcon.* → I resolved every slug collision so the flat dict has NO duplicate keys. Renames from raw extractions: pageTitle→progressTitle/contractsTitle/acceptTitle/handoverTitle (4 different values); subtitle→progressSubtitle/contractsSubtitle; addBtn kept for progress \\\"เพิ่มผู้รับเหมา\\\" but contracts \\\"สร้างสัญญา/WO\\\"→createContractBtn; kpiTotalLabel kept progress \\\"ผู้รับเหมาทั้งหมด\\\" but contracts \\\"มูลค่ารวม\\\"→kpiTotalValueLabel; kpiPendingLabel kept progress \\\"งวดรออนุมัติ\\\" but contracts/accept \\\"งวดรอตรวจรับ\\\"→kpiPendingAccept; colProgress kept progress \\\"คืบหน้า\\\" but contracts \\\"ความคืบหน้า\\\"→colProgressLong; colValue kept progress \\\"มูลค่า\\\" but \\\"มูลค่า (฿)\\\"→colValueBaht; progress kpiPendingSub \\\"มูลค่า {value} M ฿\\\"→kpiPendingSubValue (distinct from shared kpiPendingSub \\\"ผู้รับเหมาขอตรวจ\\\"). DEDUP within subcon namespace (byte-identical→ONE key): subcon.subcontractor \\\"ผู้รับเหมา\\\" (all 4 screens), unitContract \\\"สัญญา\\\", unitMBaht \\\"M ฿\\\", colValueBaht \\\"มูลค่า (฿)\\\", colPeriod \\\"งวด\\\", colDetail \\\"รายละเอียด\\\", colMethod \\\"วิธีแบ่งงวด\\\", colAccept \\\"ตรวจรับ\\\", handoverDoc \\\"เอกสารส่งมอบ\\\", closeBtn \\\"ปิด\\\", kpiAccepted \\\"ตรวจรับแล้ว\\\" (KPI+PERIOD_STATE.accepted), statusNotReached \\\"ยังไม่ถึง\\\" (payment status+PERIOD_STATE.pending), rejectBtn \\\"ตีกลับแก้ไข\\\" (AcceptForm btn+PERIOD_STATE.rejected). RECLASSIFIED-DROPPED: bare \\\"%\\\" table headers (subcon.jsx L154 already dropped by extractor; subcon-accept2 L88 extractor had keyed as subcon.colPct — I DROPPED it as ICON_OR_NUMBER for consistency). CROSS-NAMESPACE twins kept separate by design (fixed namespace per screen): \\\"มูลค่า (฿)\\\"=subcon.colValueBaht vs accept.colValue; \\\"ปิด\\\"=subcon.closeBtn vs accept.closeBtn; \\\"โหลด\\\"=subcon.downloadBtn vs accept.docLoadBtn; \\\"ดาวน์โหลด {name}\\\"=subcon.downloadToast vs accept.toastDownload; \\\"ประเภท\\\"/\\\"โครงการ\\\" etc. GLYPH: all tricky glyphs byte-verified via xxd/python — U+2212 MINUS (paymentBreakdown L232, NOT hyphen), U+2192 arrow (distanceCalcHint/infoExisting/acceptSubmitBtn/approvePeriodToast), U+00B7 middot (pervasive), U+2014 em-dash (infoExisting/infoNew/modalSubtitle/noDocsEmpty/failWarning/partialWarn/accept.subtitle/footerInfo), U+26A0 warn (defectLabel/partialWarn/tabRejected/rejectDefectLine), U+2713 check (thresholdMet), U+0E3F ฿, ASCII 0x22 quotes in toastBind/toastAdd/infoNew (NOT curly), sigDateLine dots=12/9/9. English-literal keys (lang=en, all 4 slots=literal): subcon.progressBreadcrumb/colRetention/rowDp/exportExcelBtn/typeLandscape/phEmail/colMilestone/docSubtitle, accept.exportBtn. verified_glyph=true on all (every source line read + tricky codepoints dumped). All *.jsx line refs are 1-indexed to the files as read. CompanySwitcher (company-accept.jsx L24-99) correctly excluded (already ported). Placeholder skeletons preserve static skeleton; interpolated {n}/{value}/{pct}/{qty}/{unit}/{name}/{code}/{no}/{desc}/{start}/{due}/{range}/{target}/{net}/{count}/{total}/{retention} are DATA.",
+  "keys": [
+    {
+      "key": "subcon.subcontractor",
+      "th": "ผู้รับเหมา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress",
+        "subcon.contracts",
+        "subcon.accept",
+        "subcon.handover"
+      ],
+      "role": "breadcrumb root / report col header / field label",
+      "source_line": "subcon.jsx:33",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitContract",
+      "th": "สัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress",
+        "subcon.contracts"
+      ],
+      "role": "unit word / KPI unit / report col header",
+      "source_line": "subcon.jsx:85",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitMBaht",
+      "th": "M ฿",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress",
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "KPI million-baht unit suffix",
+      "source_line": "subcon.jsx:55",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colValueBaht",
+      "th": "มูลค่า (฿)",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept",
+        "subcon.handover",
+        "subcon.progress"
+      ],
+      "role": "table column header (value in baht)",
+      "source_line": "subcon-accept.jsx:89",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colPeriod",
+      "th": "งวด",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress",
+        "subcon.accept",
+        "subcon.handover"
+      ],
+      "role": "table column header (period no)",
+      "source_line": "subcon.jsx:152",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colDetail",
+      "th": "รายละเอียด",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress",
+        "subcon.accept"
+      ],
+      "role": "table column header (detail)",
+      "source_line": "subcon.jsx:153",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colMethod",
+      "th": "วิธีแบ่งงวด",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.handover"
+      ],
+      "role": "table column header / doc field label (split method)",
+      "source_line": "subcon-accept.jsx:89",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colAccept",
+      "th": "ตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "table column header + row primary action button",
+      "source_line": "subcon-accept.jsx:90",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiPendingAccept",
+      "th": "งวดรอตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "KPI label (periods awaiting acceptance)",
+      "source_line": "subcon-accept.jsx:82",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiPendingSub",
+      "th": "ผู้รับเหมาขอตรวจ",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "KPI sub-caption",
+      "source_line": "subcon-accept.jsx:82",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitMeter",
+      "th": "เมตร",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "unit select option + useState default",
+      "source_line": "subcon-accept.jsx:151",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.handoverDoc",
+      "th": "เอกสารส่งมอบ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept",
+        "subcon.handover"
+      ],
+      "role": "header action button + breadcrumb leaf",
+      "source_line": "subcon-accept2.jsx:39",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.closeBtn",
+      "th": "ปิด",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress",
+        "subcon.accept"
+      ],
+      "role": "modal close button (report modal + warn modal)",
+      "source_line": "subcon.jsx:382",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statContractTotal",
+      "th": "มูลค่าสัญญารวม",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi/DiffStat/report KPI label",
+      "source_line": "subcon.jsx:55",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statRetention",
+      "th": "Retention ค้าง",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi/DiffStat/report KPI label",
+      "source_line": "subcon.jsx:57",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.retentionReturn12mo",
+      "th": "คืน 12 เดือนหลังส่งงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi sub / DiffStat note",
+      "source_line": "subcon.jsx:57",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statPaid",
+      "th": "จ่ายไป",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "DiffStat / report KPI label",
+      "source_line": "subcon.jsx:120",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colPaid",
+      "th": "จ่ายแล้ว",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "table col header + payment status chip (done)",
+      "source_line": "subcon.jsx:156",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colRetention",
+      "th": "Retention",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "table column header (English literal)",
+      "source_line": "subcon.jsx:157",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statusClosing",
+      "th": "ปิดสัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "status chip (closing) + disabled close button",
+      "source_line": "subcon.jsx:83",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statusActive",
+      "th": "เดิน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "status chip (active)",
+      "source_line": "subcon.jsx:83",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statusPending",
+      "th": "รอเริ่ม",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "status chip (pending)",
+      "source_line": "subcon.jsx:83",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldWorkType",
+      "th": "ประเภทงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label (work type)",
+      "source_line": "subcon.jsx:444",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiAccepted",
+      "th": "ตรวจรับแล้ว",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "KPI label + PERIOD_STATE.accepted status badge",
+      "source_line": "subcon-accept2.jsx:43",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statusRequested",
+      "th": "ขอตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "PERIOD_STATE.requested status badge (recovered)",
+      "source_line": "subcon-accept.jsx:51",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statusNotReached",
+      "th": "ยังไม่ถึง",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress",
+        "subcon.accept"
+      ],
+      "role": "payment status chip + PERIOD_STATE.pending badge",
+      "source_line": "subcon.jsx:182",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.rejectBtn",
+      "th": "ตีกลับแก้ไข",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm reject button + PERIOD_STATE.rejected badge",
+      "source_line": "subcon-accept2.jsx:234",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.progressBreadcrumb",
+      "th": "Progress Subcontractor",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "breadcrumb leaf (English literal)",
+      "source_line": "subcon.jsx:33",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.progressTitle",
+      "th": "ผู้รับเหมา · Progress",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "page title",
+      "source_line": "subcon.jsx:34",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.progressSubtitle",
+      "th": "จัดการสัญญา · มัดจำ · งวดงาน · งานเพิ่ม/ลด · Retention · ปิดสัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "page subtitle",
+      "source_line": "subcon.jsx:35",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.reportModalTitle",
+      "th": "รายงานสรุปผู้รับเหมาทุกราย",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report modal title",
+      "source_line": "subcon.jsx:39",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.reportModalSubtitle",
+      "th": "ภาพรวมสัญญา · มูลค่ารวม · จ่ายแล้ว · Retention · ความคืบหน้า",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report modal subtitle",
+      "source_line": "subcon.jsx:40",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.reportAllBtn",
+      "th": "รายงานสรุปทุกราย",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "header action button (open report modal)",
+      "source_line": "subcon.jsx:43",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.addModalTitle",
+      "th": "เพิ่มผู้รับเหมาใหม่",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add modal title",
+      "source_line": "subcon.jsx:45",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.addModalSubtitle",
+      "th": "บันทึกข้อมูลผู้รับเหมา · ระบบจะสร้างรหัสและพร้อมเปิดสัญญา WO",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add modal subtitle",
+      "source_line": "subcon.jsx:46",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.addBtn",
+      "th": "เพิ่มผู้รับเหมา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "header action button (open add modal)",
+      "source_line": "subcon.jsx:49",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiTotalLabel",
+      "th": "ผู้รับเหมาทั้งหมด",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi label",
+      "source_line": "subcon.jsx:54",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiTotalSub",
+      "th": "กำลังทำงาน {n} ราย",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi sub (count is data)",
+      "source_line": "subcon.jsx:54",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiAllProjects",
+      "th": "ทุกโครงการ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi sub (static)",
+      "source_line": "subcon.jsx:55",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiPaidLabel",
+      "th": "จ่ายไปแล้ว",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi label",
+      "source_line": "subcon.jsx:56",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiPctOfTotal",
+      "th": "{pct} ของมูลค่ารวม",
+      "placeholders": [
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi sub (percent is data)",
+      "source_line": "subcon.jsx:56",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiPendingLabel",
+      "th": "งวดรออนุมัติ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi label (distinct from kpiPendingAccept)",
+      "source_line": "subcon.jsx:58",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiPendingSubValue",
+      "th": "มูลค่า {value} M ฿",
+      "placeholders": [
+        "{value}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "MiniKpi sub (value is data)",
+      "source_line": "subcon.jsx:58",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.searchPh",
+      "th": "ค้นหาผู้รับเหมา...",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "search input placeholder (ASCII ellipsis; not common.search)",
+      "source_line": "subcon.jsx:66",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.pctDone",
+      "th": "{pct} เสร็จ",
+      "placeholders": [
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "list-row completion label",
+      "source_line": "subcon.jsx:88",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.startedWork",
+      "th": "เริ่มงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "inline label in detail meta line",
+      "source_line": "subcon.jsx:108",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.contractsBtn",
+      "th": "สัญญา ({n})",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "detail header button (count is data)",
+      "source_line": "subcon.jsx:113",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.contactBtn",
+      "th": "ติดต่อ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "detail header button",
+      "source_line": "subcon.jsx:114",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statRemaining",
+      "th": "คงเหลือต้องจ่าย",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "DiffStat label",
+      "source_line": "subcon.jsx:121",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statVariation",
+      "th": "งานเพิ่ม/ลด",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "DiffStat label (no spaces; distinct from variationTitle)",
+      "source_line": "subcon.jsx:123",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.itemsCount",
+      "th": "{n} รายการ",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "DiffStat pct note (count is data)",
+      "source_line": "subcon.jsx:123",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.activeContractTitle",
+      "th": "สัญญาที่กำลังเดินอยู่",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "active-contract card title",
+      "source_line": "subcon.jsx:132",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.contractMeta",
+      "th": "{desc} · เริ่ม {start} · กำหนดส่ง {due}",
+      "placeholders": [
+        "{desc}",
+        "{start}",
+        "{due}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "active-contract meta line",
+      "source_line": "subcon.jsx:138",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.paymentPlanTitle",
+      "th": "แผนการจ่ายเงินตามงวด",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "payment timeline section header",
+      "source_line": "subcon.jsx:147",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colValue",
+      "th": "มูลค่า",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "table col header (value, no baht; distinct from colValueBaht)",
+      "source_line": "subcon.jsx:155",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colGrDate",
+      "th": "GR / วันที่",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "payment table column header",
+      "source_line": "subcon.jsx:158",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.rowDp",
+      "th": "DP",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "payment row down-payment abbreviation (English literal)",
+      "source_line": "subcon.jsx:168",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.statusReceiving",
+      "th": "กำลังรับงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "payment status chip (current)",
+      "source_line": "subcon.jsx:182",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.variationTitle",
+      "th": "งานเพิ่ม / ลด (Variation Orders)",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "variations card title (spaced; mixed TH+EN)",
+      "source_line": "subcon.jsx:205",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.addVrBtn",
+      "th": "เพิ่ม VR",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "variations card button + notify",
+      "source_line": "subcon.jsx:206",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colNo",
+      "th": "เลขที่",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "variations table column header",
+      "source_line": "subcon.jsx:211",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colDate",
+      "th": "วันที่",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "variations table column header",
+      "source_line": "subcon.jsx:212",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colReason",
+      "th": "เหตุผล",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "variations table column header",
+      "source_line": "subcon.jsx:213",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.contractValueAdjusted",
+      "th": "มูลค่าสัญญาหลังปรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "variations total-row label",
+      "source_line": "subcon.jsx:231",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.closingTitle",
+      "th": "การปิดสัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "closing card title",
+      "source_line": "subcon.jsx:240",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkAllPeriods",
+      "th": "งานครบทุกงวด",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "CheckRow label",
+      "source_line": "subcon.jsx:243",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkRemainingNote",
+      "th": "เหลืองวด {range} ({pct})",
+      "placeholders": [
+        "{range}",
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "CheckRow note (range/pct data)",
+      "source_line": "subcon.jsx:243",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkHandover",
+      "th": "ส่งมอบ + ตรวจรับงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "CheckRow label",
+      "source_line": "subcon.jsx:244",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkRetentionHandover",
+      "th": "คืน Retention 50% เมื่อส่งมอบ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "CheckRow label (50% fixed policy)",
+      "source_line": "subcon.jsx:245",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkRetentionWarranty",
+      "th": "คืน Retention 50% เมื่อพ้นประกัน 12 ด.",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "CheckRow label (50%/12 fixed policy; ASCII period)",
+      "source_line": "subcon.jsx:246",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.closingRemainingInfo",
+      "th": "คงเหลือต้องจ่ายจริง {value} + Retention {value2}",
+      "placeholders": [
+        "{value}",
+        "{value2}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "closing info line (two money values data; Retention static EN)",
+      "source_line": "subcon.jsx:251",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.approvePeriodBtn",
+      "th": "อนุมัติงวด {n}",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "approve-installment button",
+      "source_line": "subcon.jsx:255",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.approvePeriodToast",
+      "th": "อนุมัติงวด {n} → จ่าย {value}",
+      "placeholders": [
+        "{n}",
+        "{value}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "approve-installment toast (arrow U+2192)",
+      "source_line": "subcon.jsx:255",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.reportContractsEntities",
+      "th": "{n} สัญญา · {count} ราย",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report KPI sub (counts data)",
+      "source_line": "subcon.jsx:302",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.pctOfContractTotal",
+      "th": "{pct} ของสัญญารวม",
+      "placeholders": [
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report KPI sub (percent data)",
+      "source_line": "subcon.jsx:307",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.returnAfterWarranty",
+      "th": "คืนเมื่อพ้นประกัน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report KPI sub (retention)",
+      "source_line": "subcon.jsx:312",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.avgProgress",
+      "th": "ความคืบหน้าเฉลี่ย",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report KPI label",
+      "source_line": "subcon.jsx:315",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.entitiesDelivered",
+      "th": "{n} ราย ส่งงานเสร็จ",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report KPI sub (count data)",
+      "source_line": "subcon.jsx:317",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.summaryByEntity",
+      "th": "สรุปรายผู้รับเหมา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report table section header",
+      "source_line": "subcon.jsx:321",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colType",
+      "th": "ประเภท",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report table column header",
+      "source_line": "subcon.jsx:327",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colProgress",
+      "th": "คืบหน้า",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report table column header (distinct from colProgressLong)",
+      "source_line": "subcon.jsx:332",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.printToast",
+      "th": "ส่งคำสั่งพิมพ์รายงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "print toast",
+      "source_line": "subcon.jsx:383",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.exportExcelBtn",
+      "th": "Export Excel",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "report modal footer button (English literal)",
+      "source_line": "subcon.jsx:385",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.exportToast",
+      "th": "Export รายงานเป็น Excel แล้ว",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "export toast (mixed TH+EN)",
+      "source_line": "subcon.jsx:385",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.tabExisting",
+      "th": "เลือกจากทะเบียนผู้ขาย",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form mode toggle (existing)",
+      "source_line": "subcon.jsx:431",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.tabNew",
+      "th": "เพิ่มผู้ขายใหม่",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form mode toggle (new)",
+      "source_line": "subcon.jsx:431",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldSubconRegistry",
+      "th": "ผู้รับเหมา (จากทะเบียนผู้ขายกลาง)",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label (existing mode)",
+      "source_line": "subcon.jsx:441",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.lblTaxId",
+      "th": "เลขผู้เสียภาษี",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "vendor info row label",
+      "source_line": "subcon.jsx:450",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.lblCreditTerm",
+      "th": "เครดิตเทอม",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "vendor info row label",
+      "source_line": "subcon.jsx:451",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.lblTransferAccount",
+      "th": "บัญชีโอนเงิน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "vendor info row label",
+      "source_line": "subcon.jsx:452",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.lblAccumSpend",
+      "th": "ยอดซื้อสะสม",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "vendor info row label",
+      "source_line": "subcon.jsx:453",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.infoExisting",
+      "th": "ใช้ข้อมูลจาก Vendor Master เดียวกัน — ไม่ต้องกรอกซ้ำ · แก้ไขข้อมูลคู่ค้าได้ที่ ข้อมูลกลาง → ผู้ขาย/ผู้รับเหมา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "existing-mode info line (em-dash U+2014, middot, arrow U+2192)",
+      "source_line": "subcon.jsx:458",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.bindActivateBtn",
+      "th": "ผูก + เปิดใช้งาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "existing-mode submit button",
+      "source_line": "subcon.jsx:463",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldName",
+      "th": "ชื่อผู้รับเหมา / บริษัท",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:469",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.phName",
+      "th": "เช่น บจก. รุ่งเรืองก่อสร้าง",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "name input placeholder (static hint)",
+      "source_line": "subcon.jsx:470",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldTaxId13",
+      "th": "เลขผู้เสียภาษี 13 หลัก",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:478",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldGrade",
+      "th": "เกรดผู้รับเหมา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:481",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.gradeASpecial",
+      "th": "A — พิเศษ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "grade dropdown option (em-dash U+2014)",
+      "source_line": "subcon.jsx:482",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.gradeNewPending",
+      "th": "ใหม่ · รอประเมิน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "grade dropdown option (middot)",
+      "source_line": "subcon.jsx:482",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldCreditLimit",
+      "th": "วงเงินเครดิต (฿)",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:484",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldContact",
+      "th": "ผู้ติดต่อ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:490",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.phContact",
+      "th": "คุณ ...",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "contact input placeholder (ASCII ellipsis)",
+      "source_line": "subcon.jsx:491",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldPhone",
+      "th": "เบอร์โทร",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:493",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.phPhone",
+      "th": "08x-xxx-xxxx",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "phone input placeholder (format mask)",
+      "source_line": "subcon.jsx:494",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldEmail",
+      "th": "อีเมล",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:496",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.phEmail",
+      "th": "email@example.com",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "email input placeholder (English literal)",
+      "source_line": "subcon.jsx:497",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldAddress",
+      "th": "ที่อยู่บริษัท",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:499",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.phAddress",
+      "th": "เลขที่ ถ. แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "address input placeholder (format hint)",
+      "source_line": "subcon.jsx:500",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.financeSection",
+      "th": "ข้อมูลการเงิน · สำหรับโอนเงิน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form finance section header (middot)",
+      "source_line": "subcon.jsx:505",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldBank",
+      "th": "ธนาคาร",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:507",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldBankAccount",
+      "th": "เลขที่บัญชี / ชื่อบัญชี",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "add-form field label",
+      "source_line": "subcon.jsx:510",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.phBankAccount",
+      "th": "xxx-x-xxxxx-x · ชื่อบัญชี",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "bank-account input placeholder (middot)",
+      "source_line": "subcon.jsx:511",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.infoNew",
+      "th": "เพิ่มเข้า ทะเบียนผู้ขายกลาง (Vendor Master) เป็นประเภท \"รับเหมา\" — ใช้ร่วมกับ AP / PO / WO ได้ทันที",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "new-mode info line (ASCII quotes 0x22, em-dash U+2014; <b> re-applied in port)",
+      "source_line": "subcon.jsx:518",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.saveActivateBtn",
+      "th": "บันทึก + เปิดใช้งาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "new-mode submit button (distinct from common.save)",
+      "source_line": "subcon.jsx:524",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.toastBind",
+      "th": "ผูกผู้รับเหมา \"{name}\" ({code}) · พร้อมเปิดสัญญา WO",
+      "placeholders": [
+        "{name}",
+        "{code}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "existing-mode submit toast (ASCII quotes, middot)",
+      "source_line": "subcon.jsx:418",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.toastAdd",
+      "th": "เพิ่มผู้รับเหมา \"{name}\" ({code}) เข้าทะเบียนผู้ขายกลางแล้ว · พร้อมเปิด WO",
+      "placeholders": [
+        "{name}",
+        "{code}"
+      ],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "new-mode submit toast (ASCII quotes, middot)",
+      "source_line": "subcon.jsx:425",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typeStructure",
+      "th": "งานโครงสร้าง",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option",
+      "source_line": "subcon.jsx:396",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typeArchitecture",
+      "th": "งานสถาปัตยกรรม",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option",
+      "source_line": "subcon.jsx:396",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typeElectrical",
+      "th": "งานระบบไฟฟ้า",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option",
+      "source_line": "subcon.jsx:396",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typePlumbing",
+      "th": "งานประปา-สุขาภิบาล",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option (ASCII hyphen)",
+      "source_line": "subcon.jsx:396",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typePainting",
+      "th": "งานสี + เก็บงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option",
+      "source_line": "subcon.jsx:396",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typeLandscape",
+      "th": "Landscape",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option (English literal)",
+      "source_line": "subcon.jsx:396",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typeRoofing",
+      "th": "งานหลังคา",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option",
+      "source_line": "subcon.jsx:396",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.typeOther",
+      "th": "งานอื่นๆ",
+      "placeholders": [],
+      "screens": [
+        "subcon.progress"
+      ],
+      "role": "SUB_TYPES dropdown option",
+      "source_line": "subcon.jsx:396",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.contractsBreadcrumb",
+      "th": "ทะเบียนสัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "breadcrumb leaf",
+      "source_line": "subcon-accept.jsx:76",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.contractsTitle",
+      "th": "ทะเบียนสัญญาผู้รับเหมา · Contracts",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "page title (mixed TH+EN)",
+      "source_line": "subcon-accept.jsx:76",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.contractsSubtitle",
+      "th": "สัญญา/PO/WO ของผู้รับเหมา · วิธีแบ่งงวด (ตาม % / ตามระยะทาง / ตาม Milestone) · สถานะตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "page subtitle (middots)",
+      "source_line": "subcon-accept.jsx:77",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.toastExport",
+      "th": "ส่งออกทะเบียนสัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "export toast",
+      "source_line": "subcon-accept.jsx:78",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.createContractBtn",
+      "th": "สร้างสัญญา/WO",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "primary action button (no spaces; distinct from modalTitle/createBtn)",
+      "source_line": "subcon-accept.jsx:78",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiActiveLabel",
+      "th": "สัญญาที่ใช้งาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "KPI label",
+      "source_line": "subcon-accept.jsx:80",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiTotalValueLabel",
+      "th": "มูลค่ารวม",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "KPI label (distinct from statContractTotal)",
+      "source_line": "subcon-accept.jsx:81",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiDistanceLabel",
+      "th": "วิธีตามระยะทาง",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "KPI label",
+      "source_line": "subcon-accept.jsx:83",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiDistanceSub",
+      "th": "วางท่อ/ถนน",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "KPI sub-caption",
+      "source_line": "subcon-accept.jsx:83",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colWoPo",
+      "th": "เลขที่ WO/PO",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "table column header",
+      "source_line": "subcon-accept.jsx:88",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colSubconWork",
+      "th": "ผู้รับเหมา / งาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "table column header (spaced slash)",
+      "source_line": "subcon-accept.jsx:88",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colProgressLong",
+      "th": "ความคืบหน้า",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "table column header (distinct from colProgress)",
+      "source_line": "subcon-accept.jsx:90",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.distanceQtyDetail",
+      "th": "{n}/{count} {unit} · ทุก {qty}{unit}",
+      "placeholders": [
+        "{n}",
+        "{count}",
+        "{qty}",
+        "{unit}"
+      ],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "distance-method sub-detail (only 'ทุก' static; middot)",
+      "source_line": "subcon-accept.jsx:102",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.badgePendingReview",
+      "th": "{n} งวดรอตรวจ",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "StatusBadge in acceptance column (count data)",
+      "source_line": "subcon-accept.jsx:105",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.methodPercent",
+      "th": "ตาม % ความคืบหน้า",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "SUBC_METHOD.percent enum label (table/picker/toast/badge)",
+      "source_line": "subcon-accept.jsx:45",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.methodDistance",
+      "th": "ตามปริมาณ/ระยะทาง",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "SUBC_METHOD.distance enum label",
+      "source_line": "subcon-accept.jsx:46",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.methodUnit",
+      "th": "ตามยูนิต/หลัง/ชั้น",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "SUBC_METHOD.unit enum label",
+      "source_line": "subcon-accept.jsx:47",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.methodMilestone",
+      "th": "ตาม Milestone",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts",
+        "subcon.accept"
+      ],
+      "role": "SUBC_METHOD.milestone enum label (mixed TH+EN)",
+      "source_line": "subcon-accept.jsx:48",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.modalTitle",
+      "th": "สร้างสัญญา / WO ผู้รับเหมา",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "create-contract modal title (spaced slash)",
+      "source_line": "subcon-accept.jsx:118",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.modalSubtitle",
+      "th": "เลือกวิธีแบ่งงวด — ตาม % / ตามระยะทาง / ตาม Milestone",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "create-contract modal subtitle (em-dash U+2014)",
+      "source_line": "subcon-accept.jsx:118",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldContractValue",
+      "th": "มูลค่าสัญญา (฿)",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form field label",
+      "source_line": "subcon-accept.jsx:135",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldMethod",
+      "th": "วิธีแบ่งงวดงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form field label (method picker; distinct from colMethod)",
+      "source_line": "subcon-accept.jsx:137",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.distanceSectionTitle",
+      "th": "ตั้งค่างานตามปริมาณ/ระยะทาง",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "distance-config panel section title",
+      "source_line": "subcon-accept.jsx:149",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldUnit",
+      "th": "หน่วย",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form field label (unit dropdown)",
+      "source_line": "subcon-accept.jsx:151",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitSqm",
+      "th": "ตร.ม.",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "unit select option",
+      "source_line": "subcon-accept.jsx:151",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitCbm",
+      "th": "ลบ.ม.",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "unit select option",
+      "source_line": "subcon-accept.jsx:151",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitTree",
+      "th": "ต้น",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "unit select option",
+      "source_line": "subcon-accept.jsx:151",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitPoint",
+      "th": "จุด",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "unit select option",
+      "source_line": "subcon-accept.jsx:151",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldTotalQty",
+      "th": "ปริมาณรวม",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form field label",
+      "source_line": "subcon-accept.jsx:152",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldPerPeriod",
+      "th": "ต่องวด ({unit})",
+      "placeholders": [
+        "{unit}"
+      ],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form field label (unit interpolated)",
+      "source_line": "subcon-accept.jsx:153",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldRatePerUnit",
+      "th": "ราคา/{unit}",
+      "placeholders": [
+        "{unit}"
+      ],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form field label (unit interpolated)",
+      "source_line": "subcon-accept.jsx:154",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.distanceCalcHint",
+      "th": "→ ระบบจะแบ่งเป็น {n} งวด · งวดละ {value} ฿ (ทำได้ครบ {qty} {unit} = รับ 1 งวดอัตโนมัติ)",
+      "placeholders": [
+        "{n}",
+        "{value}",
+        "{qty}",
+        "{unit}"
+      ],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "distance auto-calc hint (arrow U+2192, middot, ฿; '1 งวด' literal)",
+      "source_line": "subcon-accept.jsx:156",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldRetention",
+      "th": "เงินประกันผลงาน (Retention %)",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form field label (mixed TH+EN)",
+      "source_line": "subcon-accept.jsx:159",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.createBtn",
+      "th": "สร้างสัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "form submit button (distinct from createContractBtn/modalTitle)",
+      "source_line": "subcon-accept.jsx:162",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.toastCreated",
+      "th": "สร้างสัญญา WO แบบ{name} แล้ว",
+      "placeholders": [
+        "{name}"
+      ],
+      "screens": [
+        "subcon.contracts"
+      ],
+      "role": "create toast ({name}=method enum label)",
+      "source_line": "subcon-accept.jsx:162",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.acceptTitle",
+      "th": "งวดงาน & ตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "page title + breadcrumb leaf (ampersand)",
+      "source_line": "subcon-accept2.jsx:36",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.cannotAcceptTitle",
+      "th": "ยังรับงวดนี้ไม่ได้",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "warn-modal title",
+      "source_line": "subcon-accept2.jsx:24",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.cannotAcceptSubtitle",
+      "th": "งวด {no} · ต้องการความคืบหน้า {pct}%",
+      "placeholders": [
+        "{no}",
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "warn-modal subtitle (middot)",
+      "source_line": "subcon-accept2.jsx:24",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.cannotAcceptBody",
+      "th": "ความคืบหน้าโครงการปัจจุบัน {pct}% · งวดนี้ต้องถึง {target}% ก่อนจึงตรวจรับได้ — รออัปเดต % งานจากหน้างาน/Timeline",
+      "placeholders": [
+        "{pct}",
+        "{target}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "warn-modal body (middot, em-dash U+2014; trailing '% งาน' literal)",
+      "source_line": "subcon-accept2.jsx:24",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.viewTimelineBtn",
+      "th": "ดู Timeline",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "warn-modal primary button (mixed TH+EN)",
+      "source_line": "subcon-accept2.jsx:25",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.acceptModalTitle",
+      "th": "ตรวจรับงาน · งวด {no}",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "accept-modal title (middot)",
+      "source_line": "subcon-accept2.jsx:29",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiContractValue",
+      "th": "มูลค่าสัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "KPI label",
+      "source_line": "subcon-accept2.jsx:42",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.unitBaht",
+      "th": "฿",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "KPI baht unit suffix (BORDERLINE — see blockers)",
+      "source_line": "subcon-accept2.jsx:43",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiPeriodsCount",
+      "th": "{n}/{count} งวด",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "KPI sub (accepted of total periods)",
+      "source_line": "subcon-accept2.jsx:43",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiRetentionHeld",
+      "th": "เงินประกันหัก",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "KPI label",
+      "source_line": "subcon-accept2.jsx:44",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.kpiRetentionSub",
+      "th": "{pct}% ของงานที่รับ",
+      "placeholders": [
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "KPI sub (retention percent)",
+      "source_line": "subcon-accept2.jsx:44",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.progressRefTitle",
+      "th": "อ้างอิงความคืบหน้าโครงการ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "percent-method card header",
+      "source_line": "subcon-accept2.jsx:51",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.actualProgress",
+      "th": "ความคืบหน้าจริง {pct}%",
+      "placeholders": [
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "progress bar legend (actual %)",
+      "source_line": "subcon-accept2.jsx:59",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.progressLegend",
+      "th": "เส้นแบ่ง = % สะสมของแต่ละงวด · รับได้เมื่อ % โครงการถึงเกณฑ์",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "progress bar legend (static; middot)",
+      "source_line": "subcon-accept2.jsx:60",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.progressByUnit",
+      "th": "ความคืบหน้าตามยูนิต/หลัง",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "unit-method card header",
+      "source_line": "subcon-accept2.jsx:68",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.progressByDistance",
+      "th": "ความคืบหน้าตามระยะทาง",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "distance-method card header",
+      "source_line": "subcon-accept2.jsx:68",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.lastSurvey",
+      "th": "สำรวจล่าสุด {value}",
+      "placeholders": [
+        "{value}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "tracker meta (survey branch)",
+      "source_line": "subcon-accept2.jsx:68",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.deliveredQty",
+      "th": "ส่งมอบแล้ว {qty}/{total} {unit}",
+      "placeholders": [
+        "{qty}",
+        "{total}",
+        "{unit}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "tracker meta (delivered branch)",
+      "source_line": "subcon-accept2.jsx:68",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.doneUnitFull",
+      "th": "ทำได้ {qty} {unit} = {n} งวดเต็ม",
+      "placeholders": [
+        "{qty}",
+        "{unit}",
+        "{n}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "tracker legend left",
+      "source_line": "subcon-accept2.jsx:76",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.targetPerPeriod",
+      "th": "เป้าหมาย {total} {unit} · งวดละ {qty} {unit} = {value} ฿",
+      "placeholders": [
+        "{total}",
+        "{unit}",
+        "{qty}",
+        "{value}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "tracker legend right (middot, ฿)",
+      "source_line": "subcon-accept2.jsx:77",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.periodFlowTitle",
+      "th": "ขั้นตอนการรับงานแต่ละงวด",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "period-table card header",
+      "source_line": "subcon-accept2.jsx:84",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colQty",
+      "th": "ปริมาณ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "table column header (distance/unit branch)",
+      "source_line": "subcon-accept2.jsx:88",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colMilestone",
+      "th": "Milestone",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "table column header (milestone branch; English literal)",
+      "source_line": "subcon-accept2.jsx:88",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colDoc",
+      "th": "เอกสาร",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "table column header (document)",
+      "source_line": "subcon-accept2.jsx:90",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.defectLabel",
+      "th": "⚠ Defect: {value}",
+      "placeholders": [
+        "{value}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "inline defect note (warn U+26A0 + English 'Defect')",
+      "source_line": "subcon-accept2.jsx:98",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.reinspectCount",
+      "th": "ขอตรวจซ้ำ · ครั้งที่ {n}",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "inline re-inspect count note (middot; distinct from reinspectBtn)",
+      "source_line": "subcon-accept2.jsx:98",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.acceptCertBtn",
+      "th": "ใบรับงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "row action button (accepted state)",
+      "source_line": "subcon-accept2.jsx:105",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.reinspectBtn",
+      "th": "ขอตรวจซ้ำ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "row action button (rejected state)",
+      "source_line": "subcon-accept2.jsx:106",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.reinspectToast",
+      "th": "งวด {no} ขอตรวจซ้ำ (ครั้งที่ {n}) · ผู้รับเหมาแก้ไขเสร็จ",
+      "placeholders": [
+        "{no}",
+        "{n}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "re-inspect toast (middot)",
+      "source_line": "subcon-accept2.jsx:106",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.waitForPeriod",
+      "th": "รอถึงงวด",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "row action placeholder (pending period)",
+      "source_line": "subcon-accept2.jsx:107",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.dmsCardTitle",
+      "th": "เอกสารสัญญาในศูนย์เอกสาร (DMS)",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "DMS card header",
+      "source_line": "subcon-accept2.jsx:120",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fileCount",
+      "th": "· {n} ไฟล์",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "DMS card file-count meta (leading middot)",
+      "source_line": "subcon-accept2.jsx:121",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.uploadBtn",
+      "th": "อัปโหลด",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "DMS card upload button (not common.import)",
+      "source_line": "subcon-accept2.jsx:123",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.uploadToast",
+      "th": "อัปโหลดเอกสารผูกกับสัญญา {no}",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "upload toast",
+      "source_line": "subcon-accept2.jsx:123",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.openDmsBtn",
+      "th": "เปิดศูนย์เอกสาร",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "DMS card open button",
+      "source_line": "subcon-accept2.jsx:124",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.downloadBtn",
+      "th": "โหลด",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "per-file download button (not common.export)",
+      "source_line": "subcon-accept2.jsx:132",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.downloadToast",
+      "th": "ดาวน์โหลด {name}",
+      "placeholders": [
+        "{name}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "file download toast",
+      "source_line": "subcon-accept2.jsx:132",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.dmsInfoLine",
+      "th": "รูป/เอกสารที่แนบตอนตรวจรับงวด จะถูกจัดเก็บเข้า DMS อัตโนมัติ ผูกกับสัญญา {no}",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "DMS card footer info line",
+      "source_line": "subcon-accept2.jsx:137",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.acceptToast",
+      "th": "ตรวจรับงวด {no} ผ่าน · ออก GR + ตั้งหนี้ AP {value} ฿ (หักประกัน {retention})",
+      "placeholders": [
+        "{no}",
+        "{value}",
+        "{retention}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm accept toast (middot, ฿, English GR/AP)",
+      "source_line": "subcon-accept2.jsx:165",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.defectDefault",
+      "th": "มีรายการไม่ผ่านการตรวจ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm default defect fallback",
+      "source_line": "subcon-accept2.jsx:166",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.rejectToast",
+      "th": "ตีกลับงวด {no} · แจ้งผู้รับเหมาแก้ไข (บันทึก Defect เข้าระบบ)",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm reject toast (middot, English Defect)",
+      "source_line": "subcon-accept2.jsx:166",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.projectProgressPlan",
+      "th": "ความคืบหน้าโครงการ {pct}% · งวดนี้ตามแผน {target}%",
+      "placeholders": [
+        "{pct}",
+        "{target}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm percent banner (middot)",
+      "source_line": "subcon-accept2.jsx:173",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.thresholdMet",
+      "th": "✓ ถึงเกณฑ์ รับงานได้",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm banner status (met; check U+2713)",
+      "source_line": "subcon-accept2.jsx:174",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.thresholdNotMet",
+      "th": "ยังไม่ถึงเกณฑ์",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm banner status (not met)",
+      "source_line": "subcon-accept2.jsx:174",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.measureOnSite",
+      "th": "วัดปริมาณจริงหน้างาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm distance/unit measure banner label",
+      "source_line": "subcon-accept2.jsx:180",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.equalsValue",
+      "th": "= มูลค่า {value} ฿",
+      "placeholders": [
+        "{value}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm measured-value suffix (฿)",
+      "source_line": "subcon-accept2.jsx:183",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checklistTitle",
+      "th": "รายการตรวจรับ ({n}/{count} ผ่าน)",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm checklist section title",
+      "source_line": "subcon-accept2.jsx:187",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkPass",
+      "th": "ผ่าน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm per-check chip (pass)",
+      "source_line": "subcon-accept2.jsx:191",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkFail",
+      "th": "ไม่ผ่าน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm per-check chip (fail)",
+      "source_line": "subcon-accept2.jsx:191",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkNone",
+      "th": "ยังไม่ตรวจ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm per-check chip (none)",
+      "source_line": "subcon-accept2.jsx:191",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.photosTitle",
+      "th": "ภาพการรับงาน ({n}/3)",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm photos section title ('3' fixed slot count)",
+      "source_line": "subcon-accept2.jsx:202",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.photoBefore",
+      "th": "รูปก่อน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm photo slot label (before)",
+      "source_line": "subcon-accept2.jsx:204",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.photoAfter",
+      "th": "รูปหลัง",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm photo slot label (after)",
+      "source_line": "subcon-accept2.jsx:204",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.photoGps",
+      "th": "พิกัด GPS",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm photo slot label (GPS)",
+      "source_line": "subcon-accept2.jsx:204",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.attachDocsTitle",
+      "th": "เอกสารแนบ ({n})",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm attached-docs section title",
+      "source_line": "subcon-accept2.jsx:216",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.attachDocBtn",
+      "th": "แนบเอกสาร",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm attach-document button",
+      "source_line": "subcon-accept2.jsx:217",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.noDocsEmpty",
+      "th": "ยังไม่มีเอกสาร — แนบใบส่งของ / ผลทดสอบ / Shop Drawing ฯลฯ",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm docs empty-state (em-dash U+2014, English Shop Drawing, ฯลฯ)",
+      "source_line": "subcon-accept2.jsx:220",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.failWarning",
+      "th": "มี {n} รายการไม่ผ่าน — ควรตีกลับให้แก้ไขก่อนรับงาน",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm fail warning (em-dash U+2014)",
+      "source_line": "subcon-accept2.jsx:230",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.paymentBreakdown",
+      "th": "รับงาน {value} − ประกัน {pct}% {retention} = จ่าย {net} ฿",
+      "placeholders": [
+        "{value}",
+        "{pct}",
+        "{retention}",
+        "{net}"
+      ],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm footer payment breakdown (MINUS SIGN U+2212, ฿)",
+      "source_line": "subcon-accept2.jsx:232",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.acceptSubmitBtn",
+      "th": "ผ่าน → ออกใบรับงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "AcceptForm accept button (arrow U+2192)",
+      "source_line": "subcon-accept2.jsx:235",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkItemQty",
+      "th": "ปริมาณงานตรงตามที่แจ้ง (วัดหน้างาน)",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "ACCEPT_CHECKLIST item (recovered; see blockers)",
+      "source_line": "subcon-accept.jsx:58",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkItemMaterial",
+      "th": "คุณภาพวัสดุตรงตามสเปก",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "ACCEPT_CHECKLIST item (recovered)",
+      "source_line": "subcon-accept.jsx:59",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkItemWorkmanship",
+      "th": "ฝีมือ-ความเรียบร้อยของงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "ACCEPT_CHECKLIST item (recovered; ASCII hyphen)",
+      "source_line": "subcon-accept.jsx:60",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkItemSafety",
+      "th": "ความปลอดภัย + ความสะอาดหน้างาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "ACCEPT_CHECKLIST item (recovered)",
+      "source_line": "subcon-accept.jsx:61",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.checkItemDocs",
+      "th": "เอกสาร/ผลทดสอบครบ (ถ้ามี)",
+      "placeholders": [],
+      "screens": [
+        "subcon.accept"
+      ],
+      "role": "ACCEPT_CHECKLIST item (recovered)",
+      "source_line": "subcon-accept.jsx:62",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.handoverTitle",
+      "th": "เอกสารส่งมอบงาน · Handover",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "page title (mixed TH+EN, middot)",
+      "source_line": "subcon-accept2.jsx:253",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.backToPeriods",
+      "th": "กลับงวดงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "header action button (navigate to accept)",
+      "source_line": "subcon-accept2.jsx:255",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.toastPrint",
+      "th": "ส่งพิมพ์เอกสารส่งมอบงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "print toast",
+      "source_line": "subcon-accept2.jsx:255",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.docTitle",
+      "th": "ใบส่งมอบและตรวจรับงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "printable doc header title",
+      "source_line": "subcon-accept2.jsx:260",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.docSubtitle",
+      "th": "Work Delivery & Acceptance Certificate",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "printable doc header subtitle (English literal)",
+      "source_line": "subcon-accept2.jsx:261",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldWoNo",
+      "th": "เลขที่ WO/สัญญา",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "doc field label (':' is markup separator)",
+      "source_line": "subcon-accept2.jsx:264",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldPoRef",
+      "th": "PO อ้างอิง",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "doc field label",
+      "source_line": "subcon-accept2.jsx:264",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldProject",
+      "th": "โครงการ",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "doc field label",
+      "source_line": "subcon-accept2.jsx:264",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.fieldScope",
+      "th": "ขอบเขตงาน",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "doc field label",
+      "source_line": "subcon-accept2.jsx:264",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colDelivered",
+      "th": "รายการงานที่ส่งมอบ",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "table column header",
+      "source_line": "subcon-accept2.jsx:271",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.colAcceptDate",
+      "th": "วันตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "table column header",
+      "source_line": "subcon-accept2.jsx:271",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.totalAccepted",
+      "th": "รวมมูลค่างานที่ตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "table footer label",
+      "source_line": "subcon-accept2.jsx:285",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.retentionDeduct",
+      "th": "หักเงินประกันผลงาน {pct}%",
+      "placeholders": [
+        "{pct}"
+      ],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "table footer label (retention deduction)",
+      "source_line": "subcon-accept2.jsx:288",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.netPayable",
+      "th": "คงเหลือจ่ายสุทธิ",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "table footer label (net payable)",
+      "source_line": "subcon-accept2.jsx:289",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.conditionLabel",
+      "th": "เงื่อนไข:",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "warranty note bold label (includes trailing ':')",
+      "source_line": "subcon-accept2.jsx:294",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.conditionText",
+      "th": "รับประกันผลงาน 12 เดือนนับจากวันส่งมอบ · คืนเงินประกัน 50% เมื่อส่งมอบครบ และอีก 50% เมื่อพ้นระยะประกัน",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "warranty/retention policy text (12/50%/50% fixed literals; middot)",
+      "source_line": "subcon-accept2.jsx:294",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.partialWarn",
+      "th": "⚠ ยังตรวจรับไม่ครบทุกงวด ({n}/{count}) — เป็นใบส่งมอบบางส่วน",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "partial-handover warning (warn U+26A0, em-dash U+2014)",
+      "source_line": "subcon-accept2.jsx:295",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.sigDeliverer",
+      "th": "ผู้รับเหมา (ผู้ส่งมอบ)",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "signature block label",
+      "source_line": "subcon-accept2.jsx:299",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.sigInspector",
+      "th": "ผู้ควบคุมงาน (ผู้ตรวจรับ)",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "signature block label",
+      "source_line": "subcon-accept2.jsx:299",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.sigApprover",
+      "th": "ผู้จัดการโครงการ (อนุมัติ)",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "signature block label",
+      "source_line": "subcon-accept2.jsx:299",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "subcon.sigDateLine",
+      "th": "วันที่ ............/........./.........",
+      "placeholders": [],
+      "screens": [
+        "subcon.handover"
+      ],
+      "role": "signature date line (ASCII dot groups 12/9/9)",
+      "source_line": "subcon-accept2.jsx:303",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.crumbMain",
+      "th": "งานหลัก",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "breadcrumb root",
+      "source_line": "company-accept.jsx:164",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.crumbSelf",
+      "th": "ศูนย์ตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "breadcrumb leaf",
+      "source_line": "company-accept.jsx:164",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.pageTitle",
+      "th": "ศูนย์ตรวจรับ · Acceptance Center",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "page title (mixed TH+EN, middot)",
+      "source_line": "company-accept.jsx:165",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.subtitle",
+      "th": "รวมทุกรายการที่รอตรวจรับจากทุกโมดูลไว้ที่เดียว — คลิกเพื่อเด้งไปตรวจที่โมดูลต้นทาง (inbox แบบอ่านรวม)",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "page subtitle (em-dash U+2014)",
+      "source_line": "company-accept.jsx:166",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.exportBtn",
+      "th": "Export",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "header action button (English literal; not common.export)",
+      "source_line": "company-accept.jsx:167",
+      "lang": "en",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.exportTitle",
+      "th": "รายการรอตรวจรับ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "export modal title arg",
+      "source_line": "company-accept.jsx:167",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.kpiTotalLabel",
+      "th": "รอตรวจรวม",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI card label",
+      "source_line": "company-accept.jsx:170",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.unitItems",
+      "th": "รายการ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI unit (total + GR)",
+      "source_line": "company-accept.jsx:170",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.kpiTotalSub",
+      "th": "เกินกำหนด {n} · ตีกลับแก้ไข {count}",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI total sub (two counts data; middot)",
+      "source_line": "company-accept.jsx:170",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.typeSubcon",
+      "th": "งวดงานผู้รับเหมา",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "ACCEPT_TYPES.subcon label (tab + badge + KPI label)",
+      "source_line": "company-accept.jsx:103",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.unitPhase",
+      "th": "งวด",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI unit (subcon)",
+      "source_line": "company-accept.jsx:171",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.kpiSubconSub",
+      "th": "รอวิศวกรตรวจ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI sub (subcon)",
+      "source_line": "company-accept.jsx:171",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.typeGr",
+      "th": "รับของเข้าคลัง (GR)",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "ACCEPT_TYPES.gr label (tab + badge; distinct from kpiGrLabel)",
+      "source_line": "company-accept.jsx:104",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.kpiGrLabel",
+      "th": "รับของ (GR)",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI label (GR; distinct from typeGr)",
+      "source_line": "company-accept.jsx:172",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.kpiGrSub",
+      "th": "รอสโตร์ตรวจนับ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI sub (GR)",
+      "source_line": "company-accept.jsx:172",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.typePm",
+      "th": "ใบงาน PM",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "ACCEPT_TYPES.pm label (tab + badge + KPI label)",
+      "source_line": "company-accept.jsx:105",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.unitSheet",
+      "th": "ใบ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI unit (PM)",
+      "source_line": "company-accept.jsx:173",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.kpiPmSub",
+      "th": "รอปิดงาน+ลายเซ็น",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI sub (PM)",
+      "source_line": "company-accept.jsx:173",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.typeHandover",
+      "th": "ส่งมอบลูกค้า",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "ACCEPT_TYPES.handover label (tab + badge + KPI label)",
+      "source_line": "company-accept.jsx:106",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.unitJob",
+      "th": "งาน",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI unit (handover)",
+      "source_line": "company-accept.jsx:174",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.kpiHandoverSub",
+      "th": "ตรวจรับก่อนโอน/UAT",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "KPI sub (handover)",
+      "source_line": "company-accept.jsx:174",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.tabRejected",
+      "th": "⚠ ตีกลับแก้ไข",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "rejected tab label (warn U+26A0)",
+      "source_line": "company-accept.jsx:179",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.searchPh",
+      "th": "ค้นหาเอกสาร/โครงการ...",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "search placeholder (ASCII ellipsis; not common.search)",
+      "source_line": "company-accept.jsx:184",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.colType",
+      "th": "ประเภท",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "table column header",
+      "source_line": "company-accept.jsx:189",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.colDoc",
+      "th": "เอกสาร / รายการ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "table column header (spaced slash)",
+      "source_line": "company-accept.jsx:189",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.colProject",
+      "th": "โครงการ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "table column header",
+      "source_line": "company-accept.jsx:190",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.colOwner",
+      "th": "ผู้รับผิดชอบ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "table column header (distinct from modalOwner)",
+      "source_line": "company-accept.jsx:190",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.colValue",
+      "th": "มูลค่า (฿)",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "table column header (฿)",
+      "source_line": "company-accept.jsx:191",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.colWait",
+      "th": "รอ (วัน)",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "table column header",
+      "source_line": "company-accept.jsx:192",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.colDue",
+      "th": "กำหนด",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "table column header + modal field label",
+      "source_line": "company-accept.jsx:192",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.rejectDefectLine",
+      "th": "⚠ ตีกลับ: {name}",
+      "placeholders": [
+        "{name}"
+      ],
+      "screens": [
+        "accept"
+      ],
+      "role": "row reject line prefix (warn U+26A0; defect data)",
+      "source_line": "company-accept.jsx:203",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.followFixBtn",
+      "th": "ติดตามแก้",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "row action button (rejected)",
+      "source_line": "company-accept.jsx:210",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.gotoInspectBtn",
+      "th": "ไปตรวจ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "row action button (default)",
+      "source_line": "company-accept.jsx:210",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.footerInfo",
+      "th": "หน้านี้เป็นศูนย์รวมแบบอ่านอย่างเดียว — การตรวจรับจริงทำที่โมดูลต้นทางตามสิทธิ์ผู้ใช้ (วิศวกร/สโตร์/ช่าง/ฝ่ายขาย)",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "card footer info line (em-dash U+2014)",
+      "source_line": "company-accept.jsx:217",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.modalOwner",
+      "th": "ผู้รับผิดชอบตรวจ",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "detail modal field label (distinct from colOwner)",
+      "source_line": "company-accept.jsx:135",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.modalValue",
+      "th": "มูลค่า",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "detail modal field label (distinct from colValue)",
+      "source_line": "company-accept.jsx:135",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.modalWaited",
+      "th": "รอตรวจมาแล้ว",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "detail modal field label",
+      "source_line": "company-accept.jsx:135",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.waitDaysValue",
+      "th": "{n} วัน",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "accept"
+      ],
+      "role": "modal wait value skeleton (static 'วัน')",
+      "source_line": "company-accept.jsx:135",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.dmsHeader",
+      "th": "เอกสารประกอบการตรวจ (DMS) · {n}",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "accept"
+      ],
+      "role": "modal DMS attachments section header (middot; count data)",
+      "source_line": "company-accept.jsx:143",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.docLoadBtn",
+      "th": "โหลด",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "modal per-doc download button",
+      "source_line": "company-accept.jsx:148",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.toastDownload",
+      "th": "ดาวน์โหลด {name}",
+      "placeholders": [
+        "{name}"
+      ],
+      "screens": [
+        "accept"
+      ],
+      "role": "download toast skeleton",
+      "source_line": "company-accept.jsx:148",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.openDmsBtn",
+      "th": "+ เปิดศูนย์เอกสาร (DMS) · อัปโหลดเพิ่ม",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "modal open-DMS dashed button (leading '+ ', middot)",
+      "source_line": "company-accept.jsx:151",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.closeBtn",
+      "th": "ปิด",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "detail modal close button",
+      "source_line": "company-accept.jsx:154",
+      "lang": "th",
+      "verified_glyph": true
+    },
+    {
+      "key": "accept.gotoModuleBtn",
+      "th": "ไปตรวจที่โมดูลต้นทาง",
+      "placeholders": [],
+      "screens": [
+        "accept"
+      ],
+      "role": "detail modal primary button",
+      "source_line": "company-accept.jsx:155",
+      "lang": "th",
+      "verified_glyph": true
+    }
+  ]
+}

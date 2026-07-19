@@ -1,0 +1,3294 @@
+{
+  "override_id": "wei-approved:B-106",
+  "namespaces": [
+    "pm.*"
+  ],
+  "convention": "each key -> dict[key] = {th,en,zh,ar} ALL = the verbatim 'th' below (glyph-exact). No translation sourced.",
+  "net_new_count": 261,
+  "reused_common": [
+    "common.all",
+    "common.status",
+    "common.cancel",
+    "common.back"
+  ],
+  "blockers": [
+    {
+      "th": "status-enum labels — PM_STATUS (ตามแผน/ใกล้ถึงกำหนด/เกินกำหนด, pm.jsx:33-36), PMWO_STATUS (รอดำเนินการ/กำลังดำเนินการ/เกินกำหนด/เสร็จสิ้น, pm.jsx:55-58), PMC_STATUS (ใช้งาน/ใกล้หมดอายุ/รอต่ออายุ, pm.jsx:68-71)",
+      "issue": "These are defined OUTSIDE the R2 components and render dynamically via st.l (StatusBadge). They are NOT pm.* keys — they belong in a shared status-enum i18n surface. NOTE several DUPLICATE static keys minted this round (e.g. static tab pm.tabOpen 'รอดำเนินการ' vs dynamic PMWO_STATUS.open 'รอดำเนินการ'; static pm.tabOverdue/pm.legendOverdue 'เกินกำหนด' vs PM_STATUS/PMWO_STATUS overdue 'เกินกำหนด'). Decide whether the sacred round should also mint the shared status keys or defer to a separate status-enum round; if deferred, the static UI keys above stand and the status map is wired separately."
+    },
+    {
+      "th": "SLA (contracts pm2.jsx:207 inline)",
+      "issue": "Hardcoded acronym 'SLA' prefix inside the fully-dynamic drill-down line `{cycle} · SLA {sla} · {start} – {end}`. Did NOT mint a separate key — porter should reuse pm.sla inline or keep as a language-neutral literal. Flagged as porter judgment, not a blocker to the i18n round."
+    },
+    {
+      "th": "มิถุนายน 2569 (PMCalendar default title param, pm2.jsx:552)",
+      "issue": "Hardcoded default prop that is a Buddhist-era month/year DATE. Classified DYNAMIC (no key) per dates-are-dynamic rule, but it is a literal default (not from a data array). Port MUST feed the calendar header from date state, not an i18n key. Same PMCalendar/PMUpcoming default params (pm.upcomingTitle 'แผนที่จะถึง') ARE keyed because they are real UI copy; only the month/year is a date."
+    }
+  ],
+  "notes": "Verified all 215 keys byte-for-byte against pototype/pm.jsx (dashboard+assets), pm2.jsx (contracts+schedule), pm3.jsx (work orders). CRITICAL FIXES over raw extractions: (1) KEY-NAME COLLISIONS resolved — extractors independently minted pm.pageTitle (4 different strings across dash/contracts/schedule/wo), pm.subtitle (4 different strings), pm.toastCreated (contracts 'สร้างสัญญา {no} แล้ว' vs wo 'สร้างใบงาน {no} แล้ว'), and pm.toastWoCreated (assets 'สร้างใบงาน PM สำหรับ {id} แล้ว' vs wo). Since all pm.* share ONE global dict, these would silently clobber. Renamed to pm.dashPageTitle/contractsPageTitle/schedulePageTitle/woPageTitle, pm.dashSubtitle/scheduleSubtitle/woSubtitle (assets already used pm.assetsSubtitle/contractsSubtitle stayed), pm.toastContractCreated, pm.toastAssetWoCreated (wo keeps pm.toastWoCreated). (2) CROSS-SCREEN DEDUP — 'PM · บำรุงรักษา' had 3 proposed names (breadcrumbPm/breadcrumbSection/breadcrumbRoot) → unified pm.breadcrumbRoot (5 screens); 'ใบงาน PM' dashboard nav-button merged into pm.breadcrumbWo; 'ล้านบาท' → pm.unitMillion (dash+contracts); 'สร้างใบงาน' schedule tooltip merged into pm.createBtn; PM cycle options shared assets+contracts. (3) OVER-PLACEHOLDER CORRECTED — pm.kpiComplianceSub: source 'เป้าหมาย ≥ 90%' has a HARDCODED literal 90 (not interpolated); removed the extractor's defensive {n}, transcribed verbatim. (4) DROPPED skeleton-only noise: pm.slaInline (contracts inline SLA in a fully-dynamic line). JUDGMENT CALLS documented inline: kept pm.colType (contracts project-type) vs pm.type (wo work-order-type), and pm.legendOverdue vs pm.tabOverdue separate despite byte-identical bytes — different domain concepts/UI roles ported by independent tasks; safer than one key controlling two unrelated screens. Shared PMCalendar/PMUpcoming components render on BOTH schedule and dashboard, so their keys (calDow*, calHint, legend*, upcoming*, toastGenWoAsset) are listed for both screens. Shared openPMExport helper keys (exportModalTitle/Excel/Pdf/Csv/toastDownloading) apply to dash/assets/contracts/wo. Glyph fidelity confirmed against raw lines: middot U+00B7, em-dash U+2014, ≥ U+2265, ✓ U+2713, ฿ U+0E3F, curly quotes U+201C/U+201D (toastProjectCreated, emptyContracts, emptyChecklistHint), leading-space ' (วิดีโอ)' and ' ✓'. ASCII ellipsis '...' (NOT U+2026) confirmed in all SelectOther/search placeholders.",
+  "keys": [
+    {
+      "key": "pm.breadcrumbRoot",
+      "th": "PM · บำรุงรักษา",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.assets",
+        "pm.contracts",
+        "pm.schedule",
+        "pm.wo"
+      ],
+      "role": "module breadcrumb root",
+      "lang": "th",
+      "source_line": "pm.jsx:104 / pm2.jsx:30,527 / pm3.jsx:65,153",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.breadcrumbDashboard",
+      "th": "PM Dashboard",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "breadcrumb (dashboard)",
+      "lang": "en",
+      "source_line": "pm.jsx:104",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.breadcrumbContracts",
+      "th": "สัญญาบำรุงรักษา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "breadcrumb + openPMExport arg",
+      "lang": "th",
+      "source_line": "pm2.jsx:30,33",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.breadcrumbSchedule",
+      "th": "แผน PM",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "breadcrumb (schedule)",
+      "lang": "th",
+      "source_line": "pm2.jsx:527",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.breadcrumbWo",
+      "th": "ใบงาน PM",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.wo"
+      ],
+      "role": "breadcrumb + dashboard nav button + openPMExport arg",
+      "lang": "th",
+      "source_line": "pm3.jsx:65,153,68 / pm.jsx:107",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.assetsTitle",
+      "th": "ทะเบียนอุปกรณ์",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "breadcrumb + openPMExport arg",
+      "lang": "th",
+      "source_line": "pm.jsx:176,179",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.dashPageTitle",
+      "th": "PM Dashboard · บำรุงรักษาเชิงป้องกัน",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "page title",
+      "lang": "th",
+      "source_line": "pm.jsx:105",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.assetsTitleFull",
+      "th": "ทะเบียนอุปกรณ์ · Asset Registry",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "page title (inline before TypeBadge)",
+      "lang": "th",
+      "source_line": "pm.jsx:177",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.contractsPageTitle",
+      "th": "สัญญาบำรุงรักษา · PM Contracts",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "page title",
+      "lang": "th",
+      "source_line": "pm2.jsx:31",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.schedulePageTitle",
+      "th": "แผน PM · PM Schedule",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "page title",
+      "lang": "th",
+      "source_line": "pm2.jsx:528",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.woPageTitle",
+      "th": "ใบงาน PM · Work Orders",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "page title",
+      "lang": "th",
+      "source_line": "pm3.jsx:66",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.dashSubtitle",
+      "th": "ภาพรวมงานบำรุงรักษาตามแผน (Preventive Maintenance) ตามมาตรฐาน CMMS — ติดตาม compliance, งานเกินกำหนด และค่าใช้จ่าย",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "page subtitle",
+      "lang": "th",
+      "source_line": "pm.jsx:106",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.assetsSubtitle",
+      "th": "อุปกรณ์ที่อยู่ในแผนบำรุงรักษาเชิงป้องกัน — รอบ PM, กำหนดครั้งถัดไป, สถานะ และสัญญาที่เกี่ยวข้อง",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "page subtitle",
+      "lang": "th",
+      "source_line": "pm.jsx:178",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.contractsSubtitle",
+      "th": "สัญญาบริการบำรุงรักษาตามรอบ — ขอบเขต, SLA เวลาตอบสนอง, มูลค่า/ปี และสถานะอายุสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "page subtitle",
+      "lang": "th",
+      "source_line": "pm2.jsx:32",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.scheduleSubtitle",
+      "th": "ตารางแผนบำรุงรักษาตามรอบ — รายเดือน / ไตรมาส / ปี และสร้างใบงาน PM อัตโนมัติจากแผน",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "page subtitle",
+      "lang": "th",
+      "source_line": "pm2.jsx:529",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.woSubtitle",
+      "th": "ใบสั่งงานบำรุงรักษา — check-in หน้างาน, checklist ตรวจเช็ค, บันทึกผล และปิดงานพร้อมลายเซ็นลูกค้า",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "page subtitle",
+      "lang": "th",
+      "source_line": "pm3.jsx:67",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.exportBtn",
+      "th": "Export",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.assets",
+        "pm.contracts",
+        "pm.wo"
+      ],
+      "role": "export button label (English literal; NOT common.export=ส่งออก)",
+      "lang": "en",
+      "source_line": "pm.jsx:107,179 / pm2.jsx:33 / pm3.jsx:68",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.exportModalTitle",
+      "th": "ส่งออกข้อมูล",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.assets",
+        "pm.contracts",
+        "pm.wo"
+      ],
+      "role": "export modal title (shared openPMExport)",
+      "lang": "th",
+      "source_line": "pm.jsx:281",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.exportExcel",
+      "th": "Excel (.xlsx)",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.assets",
+        "pm.contracts",
+        "pm.wo"
+      ],
+      "role": "export format option",
+      "lang": "en",
+      "source_line": "pm.jsx:284",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.exportPdf",
+      "th": "PDF",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.assets",
+        "pm.contracts",
+        "pm.wo"
+      ],
+      "role": "export format option",
+      "lang": "en",
+      "source_line": "pm.jsx:284",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.exportCsv",
+      "th": "CSV",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.assets",
+        "pm.contracts",
+        "pm.wo"
+      ],
+      "role": "export format option",
+      "lang": "en",
+      "source_line": "pm.jsx:284",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastDownloading",
+      "th": "กำลังดาวน์โหลด {name} · {fmt}",
+      "placeholders": [
+        "{name}",
+        "{fmt}"
+      ],
+      "screens": [
+        "pm.dashboard",
+        "pm.assets",
+        "pm.contracts",
+        "pm.wo"
+      ],
+      "role": "export download toast",
+      "lang": "th",
+      "source_line": "pm.jsx:286",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.exportReportTitle",
+      "th": "รายงาน PM",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "openPMExport report-title arg",
+      "lang": "th",
+      "source_line": "pm.jsx:107",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiJobsThisMonth",
+      "th": "งาน PM เดือนนี้",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm.jsx:110",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.unitJobs",
+      "th": "งาน",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI unit",
+      "lang": "th",
+      "source_line": "pm.jsx:110",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiJobsThisMonthSub",
+      "th": "ทำแล้ว {n} · เหลือ {count}",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI sub",
+      "lang": "th",
+      "source_line": "pm.jsx:110",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiCompliance",
+      "th": "ทำตามแผน (Compliance)",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm.jsx:111",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiComplianceSub",
+      "th": "เป้าหมาย ≥ 90%",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI sub — CORRECTED: '90' is a hardcoded literal in prototype, transcribed verbatim (extractor's defensive {n} placeholder removed); ≥ U+2265",
+      "lang": "th",
+      "source_line": "pm.jsx:111",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiOverdue",
+      "th": "เกินกำหนด (Overdue)",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm.jsx:112",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.unitItems",
+      "th": "รายการ",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI unit",
+      "lang": "th",
+      "source_line": "pm.jsx:112",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiOverdueSub",
+      "th": "ต้องดำเนินการด่วน",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI sub",
+      "lang": "th",
+      "source_line": "pm.jsx:112",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiQuotePending",
+      "th": "ใบเสนอราคารออนุมัติ",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm.jsx:113",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.unitDocs",
+      "th": "ใบ",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI unit",
+      "lang": "th",
+      "source_line": "pm.jsx:113",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiQuoteSub",
+      "th": "งานซ่อมเพิ่มเติม",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI sub",
+      "lang": "th",
+      "source_line": "pm.jsx:113",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiCostYtd",
+      "th": "ค่าใช้จ่าย PM (YTD)",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm.jsx:114",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.unitMillion",
+      "th": "ล้านบาท",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard",
+        "pm.contracts"
+      ],
+      "role": "KPI unit (million baht) — DEDUP of dashboard unitMillionBaht + contracts kpiUnitMillion",
+      "lang": "th",
+      "source_line": "pm.jsx:114 / pm2.jsx:38",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.dueOverduePanelTitle",
+      "th": "PM ใกล้ถึง / เกินกำหนด",
+      "placeholders": [],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "panel header",
+      "lang": "th",
+      "source_line": "pm.jsx:123",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.overdueCount",
+      "th": "{n} เกินกำหนด",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "panel count badge",
+      "lang": "th",
+      "source_line": "pm.jsx:124",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.assetDueLine",
+      "th": "· ครบกำหนด {date}",
+      "placeholders": [
+        "{date}"
+      ],
+      "screens": [
+        "pm.dashboard"
+      ],
+      "role": "list secondary line — only static skeleton kept; {a.id} renders in its own num span (dropped as data)",
+      "lang": "th",
+      "source_line": "pm.jsx:136",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.searchPh",
+      "th": "ค้นหา รหัส/ชื่อ/ที่ตั้ง...",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "search placeholder (ASCII ellipsis; NOT common.search)",
+      "lang": "th",
+      "source_line": "pm.jsx:185",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colKind",
+      "th": "ชนิด",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "filter hint + table col + form field + detail-row label",
+      "lang": "th",
+      "source_line": "pm.jsx:187,194,244,268",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.countUnit",
+      "th": "{n} รายการ",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "result count label",
+      "lang": "th",
+      "source_line": "pm.jsx:188",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colCode",
+      "th": "รหัส",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "table col (asset code)",
+      "lang": "th",
+      "source_line": "pm.jsx:193",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colName",
+      "th": "ชื่อ / รุ่น",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "table col + form field",
+      "lang": "th",
+      "source_line": "pm.jsx:193,241",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colSite",
+      "th": "ที่ตั้ง / Site",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "table col + form field",
+      "lang": "th",
+      "source_line": "pm.jsx:194,248",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colCycle",
+      "th": "รอบ PM",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "table col + form field + detail-row",
+      "lang": "th",
+      "source_line": "pm.jsx:195,245,268",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colLastPm",
+      "th": "PM ล่าสุด",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "table col + detail-row",
+      "lang": "th",
+      "source_line": "pm.jsx:195,268",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colNextPm",
+      "th": "ครั้งถัดไป",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "table col + detail-row",
+      "lang": "th",
+      "source_line": "pm.jsx:196,268",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colContract",
+      "th": "สัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "table col + detail-row (distinct from field 'สัญญา (ถ้ามี)')",
+      "lang": "th",
+      "source_line": "pm.jsx:196,268",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.modalAddTitle",
+      "th": "เพิ่มอุปกรณ์เข้าทะเบียน PM",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "add-asset modal title",
+      "lang": "th",
+      "source_line": "pm.jsx:169",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.modalAddSubtitle",
+      "th": "บันทึกอุปกรณ์ที่ต้องบำรุงรักษาตามรอบ",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "add-asset modal subtitle",
+      "lang": "th",
+      "source_line": "pm.jsx:169",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastAdded",
+      "th": "เพิ่มอุปกรณ์ {id} เข้าทะเบียนแล้ว",
+      "placeholders": [
+        "{id}"
+      ],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "toast on save",
+      "lang": "th",
+      "source_line": "pm.jsx:171",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.addAssetBtn",
+      "th": "เพิ่มอุปกรณ์",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "header action + form submit",
+      "lang": "th",
+      "source_line": "pm.jsx:179,253",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldCode",
+      "th": "รหัสอุปกรณ์",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "form field label",
+      "lang": "th",
+      "source_line": "pm.jsx:240",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phCode",
+      "th": "LIFT-A03",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "form input placeholder (sample code)",
+      "lang": "en",
+      "source_line": "pm.jsx:240",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phName",
+      "th": "เช่น ลิฟต์โดยสาร MAXTECH MX-1000",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "form input placeholder",
+      "lang": "th",
+      "source_line": "pm.jsx:241",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phKindOther",
+      "th": "ระบุชนิดอุปกรณ์อื่น...",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "SelectOther placeholder (ASCII ellipsis)",
+      "lang": "th",
+      "source_line": "pm.jsx:244",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.cycleMonthly",
+      "th": "รายเดือน",
+      "placeholders": [],
+      "screens": [
+        "pm.assets",
+        "pm.contracts"
+      ],
+      "role": "PM cycle select option",
+      "lang": "th",
+      "source_line": "pm.jsx:245 / pm2.jsx:441",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.cycle3Month",
+      "th": "ราย 3 เดือน",
+      "placeholders": [],
+      "screens": [
+        "pm.assets",
+        "pm.contracts"
+      ],
+      "role": "PM cycle select option",
+      "lang": "th",
+      "source_line": "pm.jsx:245 / pm2.jsx:441",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.cycle6Month",
+      "th": "ราย 6 เดือน",
+      "placeholders": [],
+      "screens": [
+        "pm.assets",
+        "pm.contracts"
+      ],
+      "role": "PM cycle select option",
+      "lang": "th",
+      "source_line": "pm.jsx:245 / pm2.jsx:441",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.cycleYearly",
+      "th": "รายปี",
+      "placeholders": [],
+      "screens": [
+        "pm.assets",
+        "pm.contracts"
+      ],
+      "role": "PM cycle select option",
+      "lang": "th",
+      "source_line": "pm.jsx:245 / pm2.jsx:441",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.cycleByHours",
+      "th": "ตามชั่วโมงใช้งาน",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "PM cycle select option (assets only)",
+      "lang": "th",
+      "source_line": "pm.jsx:245",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phSite",
+      "th": "อาคาร A · ชั้น 1",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "form input placeholder (middot)",
+      "lang": "th",
+      "source_line": "pm.jsx:248",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldContract",
+      "th": "สัญญา (ถ้ามี)",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "form field label",
+      "lang": "th",
+      "source_line": "pm.jsx:249",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phContract",
+      "th": "MT-2569-018",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "form input placeholder (sample contract no)",
+      "lang": "en",
+      "source_line": "pm.jsx:249",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.detailViewPlanBtn",
+      "th": "ดูแผน PM",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "asset-detail modal button",
+      "lang": "th",
+      "source_line": "pm.jsx:270",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.detailCreateWoBtn",
+      "th": "สร้างใบงาน PM",
+      "placeholders": [],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "asset-detail modal primary button",
+      "lang": "th",
+      "source_line": "pm.jsx:271",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastAssetWoCreated",
+      "th": "สร้างใบงาน PM สำหรับ {id} แล้ว",
+      "placeholders": [
+        "{id}"
+      ],
+      "screens": [
+        "pm.assets"
+      ],
+      "role": "toast on create-WO from asset detail — RENAMED from colliding pm.toastWoCreated; note trailing 'แล้ว' distinguishes from schedule pm.toastGenWoAsset",
+      "lang": "th",
+      "source_line": "pm.jsx:271",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.addProjectBtn",
+      "th": "เพิ่มโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "primary button + add-project modal title",
+      "lang": "th",
+      "source_line": "pm2.jsx:33,112",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.addProjectSubtitle",
+      "th": "เลือกโครงการเพื่อจัดการสัญญาบำรุงรักษา แล้วเพิ่มสัญญาภายในโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "add-project modal subtitle",
+      "lang": "th",
+      "source_line": "pm2.jsx:112",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiActive",
+      "th": "สัญญาที่ใช้งาน",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm2.jsx:36",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiUnitContract",
+      "th": "สัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "KPI unit",
+      "lang": "th",
+      "source_line": "pm2.jsx:36,37",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiActiveSub",
+      "th": "ทั้งหมด {n}",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "KPI sub",
+      "lang": "th",
+      "source_line": "pm2.jsx:36",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiExpiring",
+      "th": "ใกล้หมดอายุ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm2.jsx:37",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiExpiringSub",
+      "th": "ภายใน 60 วัน",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "KPI sub",
+      "lang": "th",
+      "source_line": "pm2.jsx:37",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiValue",
+      "th": "มูลค่าสัญญารวม/ปี",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "KPI label",
+      "lang": "th",
+      "source_line": "pm2.jsx:38",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.kpiValueSub",
+      "th": "ทุกสัญญา PM",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "KPI sub",
+      "lang": "th",
+      "source_line": "pm2.jsx:38",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.tableTitle",
+      "th": "โครงการที่มีสัญญาบำรุงรักษา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "table header title",
+      "lang": "th",
+      "source_line": "pm2.jsx:43",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.tableMeta",
+      "th": "{n} โครงการ · {count} สัญญา · กดเข้าโครงการเพื่อดูสัญญาภายใน",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "table meta/help line (middot)",
+      "lang": "th",
+      "source_line": "pm2.jsx:44",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colProject",
+      "th": "โครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "table col + detail-row label",
+      "lang": "th",
+      "source_line": "pm2.jsx:48,242",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colType",
+      "th": "ประเภท",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "table col (project type) — kept separate from wo pm.type (WO type): different domain concept despite identical bytes",
+      "lang": "th",
+      "source_line": "pm2.jsx:49",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colContractCount",
+      "th": "จำนวนสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "table col",
+      "lang": "th",
+      "source_line": "pm2.jsx:50",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colTotalValue",
+      "th": "มูลค่ารวม/ปี (฿)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "table col (฿ U+0E3F)",
+      "lang": "th",
+      "source_line": "pm2.jsx:52",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.projContractCount",
+      "th": "{n} สัญญาบำรุงรักษา",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "row subtitle count",
+      "lang": "th",
+      "source_line": "pm2.jsx:68",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.badgeExpiring",
+      "th": "ใกล้หมดอายุ {n}",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "status badge count",
+      "lang": "th",
+      "source_line": "pm2.jsx:76",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.statusNormal",
+      "th": "ปกติ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "status badge",
+      "lang": "th",
+      "source_line": "pm2.jsx:77",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.addContractBtn",
+      "th": "เพิ่มสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "row button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:81",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.footProjects",
+      "th": "{n} โครงการ",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "table footer count",
+      "lang": "th",
+      "source_line": "pm2.jsx:89",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.titleEditContract",
+      "th": "แก้ไขสัญญา {no}",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal title (edit)",
+      "lang": "th",
+      "source_line": "pm2.jsx:13",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.titleRenewContract",
+      "th": "ต่ออายุสัญญา {no}",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal title (renew)",
+      "lang": "th",
+      "source_line": "pm2.jsx:13",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.titleAddContractProj",
+      "th": "เพิ่มสัญญา · {name}",
+      "placeholders": [
+        "{name}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal title (add within project, middot)",
+      "lang": "th",
+      "source_line": "pm2.jsx:13",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.titleCreateContract",
+      "th": "สร้างสัญญาบำรุงรักษา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal title (create)",
+      "lang": "th",
+      "source_line": "pm2.jsx:13",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.subtitleEdit",
+      "th": "แก้ไขรายละเอียดสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal subtitle (edit)",
+      "lang": "th",
+      "source_line": "pm2.jsx:14",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.subtitleRenew",
+      "th": "กำหนดงวดใหม่และมูลค่า",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal subtitle (renew)",
+      "lang": "th",
+      "source_line": "pm2.jsx:14",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.subtitleAddProj",
+      "th": "หนึ่งโครงการมีได้หลายสัญญา — เพิ่มสัญญาใหม่ให้โครงการนี้",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal subtitle (add, em-dash)",
+      "lang": "th",
+      "source_line": "pm2.jsx:14",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.subtitleCreate",
+      "th": "เลือกโครงการ แล้วกรอกรายละเอียดสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "modal subtitle (create)",
+      "lang": "th",
+      "source_line": "pm2.jsx:14",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastEditSaved",
+      "th": "บันทึกการแก้ไขสัญญา {no} แล้ว",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "toast (edit saved)",
+      "lang": "th",
+      "source_line": "pm2.jsx:18",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastRenewed",
+      "th": "ต่ออายุสัญญา {no} แล้ว",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "toast (renewed)",
+      "lang": "th",
+      "source_line": "pm2.jsx:18",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastContractCreated",
+      "th": "สร้างสัญญา {no} แล้ว",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "toast (contract created) — RENAMED from colliding pm.toastCreated (wo owns that name)",
+      "lang": "th",
+      "source_line": "pm2.jsx:18",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldProjectName",
+      "th": "ชื่อโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label (shared AddProjectPicker + Wizard)",
+      "lang": "th",
+      "source_line": "pm2.jsx:133,306",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phProjectName",
+      "th": "เช่น อาคารสำนักงานลูกค้า XYZ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder",
+      "lang": "th",
+      "source_line": "pm2.jsx:134,307",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.errProjectName",
+      "th": "กรุณาระบุชื่อโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "validation error",
+      "lang": "th",
+      "source_line": "pm2.jsx:135,308",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastProjectCreated",
+      "th": "สร้างโครงการ “{name}” แล้ว · พร้อมใช้ในระบบ",
+      "placeholders": [
+        "{name}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "toast (project created) — curly quotes U+201C/D + middot",
+      "lang": "th",
+      "source_line": "pm2.jsx:128,295",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldProjectType",
+      "th": "ประเภทโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:138,310",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnPickFromList",
+      "th": "เลือกจากรายการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:143,315",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnNext",
+      "th": "ถัดไป",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:144,316",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.badgeHasContract",
+      "th": "· มีสัญญาแล้ว",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "inline badge (leading middot)",
+      "lang": "th",
+      "source_line": "pm2.jsx:160",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnCreateManual",
+      "th": "สร้างโครงการแบบ Manual",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:168,346",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.projContractsSubtitle",
+      "th": "{n} สัญญาบำรุงรักษาในโครงการนี้",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "drill-down modal subtitle",
+      "lang": "th",
+      "source_line": "pm2.jsx:179",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.totalPerYearLabel",
+      "th": "มูลค่ารวม/ปี",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "summary label",
+      "lang": "th",
+      "source_line": "pm2.jsx:187",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.emptyContracts",
+      "th": "ยังไม่มีสัญญาในโครงการนี้ — กด “เพิ่มสัญญาในโครงการนี้” ด้านล่างเพื่อเริ่ม",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "empty state (em-dash + curly quotes)",
+      "lang": "th",
+      "source_line": "pm2.jsx:194",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.unitBahtPerYear",
+      "th": "฿/ปี",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "unit label (฿ U+0E3F)",
+      "lang": "th",
+      "source_line": "pm2.jsx:211",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnClose",
+      "th": "ปิด",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label (not in common.*)",
+      "lang": "th",
+      "source_line": "pm2.jsx:219",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnAddContractInProject",
+      "th": "เพิ่มสัญญาในโครงการนี้",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:220",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.detailTitle",
+      "th": "สัญญา {no}",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "contract-detail modal title",
+      "lang": "th",
+      "source_line": "pm2.jsx:231",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowCustomer",
+      "th": "ลูกค้า / นิติบุคคล",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row + field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:243,425",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowSite",
+      "th": "ไซต์ / สถานที่",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row + field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:244,435",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowScope",
+      "th": "ขอบเขต / อุปกรณ์",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row label (distinct from field 'ขอบเขต / อุปกรณ์ที่ครอบคลุม')",
+      "lang": "th",
+      "source_line": "pm2.jsx:245",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowContractType",
+      "th": "รูปแบบสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row label",
+      "lang": "th",
+      "source_line": "pm2.jsx:246",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.valScheduled",
+      "th": "รายครั้งตามกำหนด · {n} ครั้ง/ปี",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row value (middot)",
+      "lang": "th",
+      "source_line": "pm2.jsx:246",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.valOtherCond",
+      "th": "เงื่อนไขเฉพาะ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row value fallback",
+      "lang": "th",
+      "source_line": "pm2.jsx:246",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.svcMaLabel",
+      "th": "MA ตามเงื่อนไข (SLA)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row value + radio option label",
+      "lang": "th",
+      "source_line": "pm2.jsx:246,389",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowCycle",
+      "th": "รอบบริการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row + field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:247,441",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowSlaResponse",
+      "th": "SLA ตอบสนอง",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row label (distinct from field 'SLA เวลาตอบสนอง')",
+      "lang": "th",
+      "source_line": "pm2.jsx:248",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowStart",
+      "th": "เริ่มสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row + field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:249,481",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowEnd",
+      "th": "สิ้นสุด",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row + field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:250,482",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.rowValue",
+      "th": "มูลค่า/ปี",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "detail-row label (distinct from field 'มูลค่า/ปี (฿)')",
+      "lang": "th",
+      "source_line": "pm2.jsx:251",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnDownloadPdf",
+      "th": "ดาวน์โหลด PDF",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:254",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastDownloadPdf",
+      "th": "ดาวน์โหลดสัญญา {no} (PDF)",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "toast",
+      "lang": "th",
+      "source_line": "pm2.jsx:254",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnBillAp",
+      "th": "ตั้งหนี้ AP",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:255",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.confirmBillTitle",
+      "th": "ตั้งหนี้ค่าบริการ PM เข้า AP",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "confirm dialog title",
+      "lang": "th",
+      "source_line": "pm2.jsx:255",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.confirmBillMessage",
+      "th": "ตั้งหนี้ค่าบริการบำรุงรักษาตามสัญญา {no} เข้าระบบเจ้าหนี้ (AP) — สร้างใบตั้งหนี้มูลค่า {value} ฿",
+      "placeholders": [
+        "{no}",
+        "{value}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "confirm dialog message (em-dash, ฿)",
+      "lang": "th",
+      "source_line": "pm2.jsx:255",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.confirmBillLabel",
+      "th": "ตั้งหนี้ + ไปหน้า AP",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "confirm button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:255",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastBillAp",
+      "th": "ตั้งหนี้ AP จากสัญญา {no} แล้ว",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "toast",
+      "lang": "th",
+      "source_line": "pm2.jsx:255",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnEditContract",
+      "th": "แก้ไขสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label (bare; distinct from title pm.titleEditContract)",
+      "lang": "th",
+      "source_line": "pm2.jsx:256",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnRenewContract",
+      "th": "ต่ออายุสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "button label + form submit",
+      "lang": "th",
+      "source_line": "pm2.jsx:257,488",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.wizardManualTitle",
+      "th": "สร้างโครงการใหม่ (Manual)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "wizard step header",
+      "lang": "th",
+      "source_line": "pm2.jsx:302",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.wizardManualHint",
+      "th": "· สำหรับโครงการนอกเหนือการตั้งค่า",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "wizard step hint (leading middot)",
+      "lang": "th",
+      "source_line": "pm2.jsx:303",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.wizardSelectTitle",
+      "th": "เลือกโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "wizard step header",
+      "lang": "th",
+      "source_line": "pm2.jsx:327",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.wizardSelectHint",
+      "th": "· ข้อมูลลูกค้า/ไซต์/อุปกรณ์จะกรองตามโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "wizard step hint (leading middot)",
+      "lang": "th",
+      "source_line": "pm2.jsx:328",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.selectOtherOption",
+      "th": "อื่นๆ (ระบุเอง)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "SelectOther dropdown option (distinct from svcOtherLabel 'อื่นๆ (ระบุเงื่อนไข)')",
+      "lang": "th",
+      "source_line": "pm2.jsx:365",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phSpecifyOwn",
+      "th": "ระบุเอง...",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "SelectOther default placeholder (ASCII ellipsis)",
+      "lang": "th",
+      "source_line": "pm2.jsx:357",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnChangeProject",
+      "th": "เปลี่ยนโครงการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "link/button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:420",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldContractNo",
+      "th": "เลขสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:424",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phCustomerSelect",
+      "th": "เลือกจากทะเบียน หรือพิมพ์เอง",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder",
+      "lang": "th",
+      "source_line": "pm2.jsx:428",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phCustomerDropdown",
+      "th": "เลือกลูกค้า",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "dropdown placeholder",
+      "lang": "th",
+      "source_line": "pm2.jsx:429",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phCustomerExample",
+      "th": "เช่น นิติบุคคล juneflow ราชพฤกษ์",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder",
+      "lang": "th",
+      "source_line": "pm2.jsx:431",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldScope",
+      "th": "ขอบเขต / อุปกรณ์ที่ครอบคลุม",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:436",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phScopeOther",
+      "th": "ระบุอุปกรณ์/ขอบเขตอื่น...",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder (ASCII ellipsis)",
+      "lang": "th",
+      "source_line": "pm2.jsx:437",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phScopeExample",
+      "th": "เช่น ลิฟต์โดยสาร 2 ชุด",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder",
+      "lang": "th",
+      "source_line": "pm2.jsx:437",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phCycleOther",
+      "th": "ระบุรอบบริการอื่น...",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder (ASCII ellipsis)",
+      "lang": "th",
+      "source_line": "pm2.jsx:441",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldSlaResponse",
+      "th": "SLA เวลาตอบสนอง",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:442",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.sla4h",
+      "th": "4 ชม. (เหตุฉุกเฉิน)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "SLA select option",
+      "lang": "th",
+      "source_line": "pm2.jsx:442",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.sla8h",
+      "th": "8 ชม.",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "SLA select option",
+      "lang": "th",
+      "source_line": "pm2.jsx:442",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.sla12h",
+      "th": "12 ชม.",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "SLA select option",
+      "lang": "th",
+      "source_line": "pm2.jsx:442",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.sla24h",
+      "th": "24 ชม.",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "SLA select option",
+      "lang": "th",
+      "source_line": "pm2.jsx:442",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.sla48h",
+      "th": "48 ชม.",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "SLA select option",
+      "lang": "th",
+      "source_line": "pm2.jsx:442",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phSlaOther",
+      "th": "ระบุ SLA อื่น...",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder (ASCII ellipsis)",
+      "lang": "th",
+      "source_line": "pm2.jsx:442",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldContractType",
+      "th": "รูปแบบสัญญา / เงื่อนไขบริการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:445",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.svcMaDesc",
+      "th": "บำรุงรักษาตามรอบ + เข้าแก้ตาม SLA เมื่อมีเหตุ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "radio option description",
+      "lang": "th",
+      "source_line": "pm2.jsx:389",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.svcScheduledLabel",
+      "th": "รายครั้งตามกำหนด (Support)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "radio option label",
+      "lang": "th",
+      "source_line": "pm2.jsx:390",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.svcScheduledDesc",
+      "th": "เข้าบริการตามจำนวนครั้งที่ตกลง — สร้างงานลงปฏิทินอัตโนมัติ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "radio option description (em-dash)",
+      "lang": "th",
+      "source_line": "pm2.jsx:390",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.svcOtherLabel",
+      "th": "อื่นๆ (ระบุเงื่อนไข)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "radio option label",
+      "lang": "th",
+      "source_line": "pm2.jsx:391",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.svcOtherDesc",
+      "th": "เงื่อนไขเฉพาะ — ระบุเอง",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "radio option description (em-dash)",
+      "lang": "th",
+      "source_line": "pm2.jsx:391",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldVisitsPerYear",
+      "th": "จำนวนครั้ง/ปี",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:463",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.scheduledInfo",
+      "th": "ระบบจะเฉลี่ย {n} ครั้งตลอดปี และสร้างงานเข้าบริการลงปฏิทิน PM อัตโนมัติ (~ทุก {count} เดือน)",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "help/info line (tilde literal)",
+      "lang": "th",
+      "source_line": "pm2.jsx:468",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldOtherCond",
+      "th": "ระบุเงื่อนไขบริการ",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label",
+      "lang": "th",
+      "source_line": "pm2.jsx:474",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phOtherCond",
+      "th": "เช่น เข้าตรวจเมื่อมีการแจ้งเตือนจากระบบ Monitoring",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "input placeholder",
+      "lang": "th",
+      "source_line": "pm2.jsx:475",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldValuePerYear",
+      "th": "มูลค่า/ปี (฿)",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "field label (฿ U+0E3F)",
+      "lang": "th",
+      "source_line": "pm2.jsx:483",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnSaveEdit",
+      "th": "บันทึกการแก้ไข",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "submit button label",
+      "lang": "th",
+      "source_line": "pm2.jsx:488",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.btnCreateContract",
+      "th": "สร้างสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "submit button label (bare; distinct from toast)",
+      "lang": "th",
+      "source_line": "pm2.jsx:488",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastScheduledJobs",
+      "th": "สร้างงานเข้า Support {n} ครั้งลงปฏิทินแล้ว",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.contracts"
+      ],
+      "role": "toast (scheduled jobs)",
+      "lang": "th",
+      "source_line": "pm2.jsx:411",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.genWoModalTitle",
+      "th": "สร้างใบงานจากแผน PM",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "genWO modal title",
+      "lang": "th",
+      "source_line": "pm2.jsx:504",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.genWoModalSubtitle",
+      "th": "ระบบจะสร้างใบงาน PM อัตโนมัติตามรอบที่ถึงกำหนด",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "genWO modal subtitle",
+      "lang": "th",
+      "source_line": "pm2.jsx:504",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.genWoInfoLine",
+      "th": "รายการแผนที่ถึงกำหนดในช่วง 14 วันข้างหน้า — เลือกสร้างใบงาน:",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "genWO info line (em-dash; literal 14 verbatim)",
+      "lang": "th",
+      "source_line": "pm2.jsx:508",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.genWoConfirmBtn",
+      "th": "สร้างใบงาน 3 ใบ",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "genWO confirm button (literal 3 hardcoded, verbatim not placeholder)",
+      "lang": "th",
+      "source_line": "pm2.jsx:519",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastGenWo",
+      "th": "สร้างใบงาน PM 3 ใบจากแผนแล้ว",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "toast (literal 3 verbatim)",
+      "lang": "th",
+      "source_line": "pm2.jsx:519",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.viewMonth",
+      "th": "เดือน",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "view-toggle label",
+      "lang": "th",
+      "source_line": "pm2.jsx:530",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.viewQuarter",
+      "th": "ไตรมาส",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "view-toggle label",
+      "lang": "th",
+      "source_line": "pm2.jsx:530",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.viewYear",
+      "th": "ปี",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "view-toggle label",
+      "lang": "th",
+      "source_line": "pm2.jsx:530",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.genWoBtn",
+      "th": "สร้างใบงานจากแผน",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule"
+      ],
+      "role": "primary action button (distinct from wo pm.createBtn 'สร้างใบงาน')",
+      "lang": "th",
+      "source_line": "pm2.jsx:530",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calDowMon",
+      "th": "จ",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar weekday (Mon) — PMCalendar shared by schedule + dashboard",
+      "lang": "th",
+      "source_line": "pm2.jsx:553",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calDowTue",
+      "th": "อ",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar weekday (Tue)",
+      "lang": "th",
+      "source_line": "pm2.jsx:553",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calDowWed",
+      "th": "พ",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar weekday (Wed)",
+      "lang": "th",
+      "source_line": "pm2.jsx:553",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calDowThu",
+      "th": "พฤ",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar weekday (Thu)",
+      "lang": "th",
+      "source_line": "pm2.jsx:553",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calDowFri",
+      "th": "ศ",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar weekday (Fri)",
+      "lang": "th",
+      "source_line": "pm2.jsx:553",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calDowSat",
+      "th": "ส",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar weekday (Sat)",
+      "lang": "th",
+      "source_line": "pm2.jsx:553",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calDowSun",
+      "th": "อา",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar weekday (Sun)",
+      "lang": "th",
+      "source_line": "pm2.jsx:553",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.calHint",
+      "th": "คลิกวันเพื่อดูงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar header hint",
+      "lang": "th",
+      "source_line": "pm2.jsx:559",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.legendOverdue",
+      "th": "เกินกำหนด",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar legend (overdue) — kept separate from wo pm.tabOverdue (different UI role: legend vs list filter)",
+      "lang": "th",
+      "source_line": "pm2.jsx:583",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.legendDue",
+      "th": "ถึงกำหนด",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar legend (due)",
+      "lang": "th",
+      "source_line": "pm2.jsx:584",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.legendPlan",
+      "th": "ตามแผน",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "calendar legend (planned)",
+      "lang": "th",
+      "source_line": "pm2.jsx:585",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.upcomingTitle",
+      "th": "แผนที่จะถึง",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "upcoming panel card header (default title param; PMUpcoming shared)",
+      "lang": "th",
+      "source_line": "pm2.jsx:592",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.upcomingSelDay",
+      "th": "วันที่ {n}",
+      "placeholders": [
+        "{n}"
+      ],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "upcoming panel selected-day badge",
+      "lang": "th",
+      "source_line": "pm2.jsx:598",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.upcomingEmpty",
+      "th": "ไม่มีแผน PM ในวันนี้",
+      "placeholders": [],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "upcoming panel empty state",
+      "lang": "th",
+      "source_line": "pm2.jsx:601",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastGenWoAsset",
+      "th": "สร้างใบงาน PM สำหรับ {name}",
+      "placeholders": [
+        "{name}"
+      ],
+      "screens": [
+        "pm.schedule",
+        "pm.dashboard"
+      ],
+      "role": "toast per-item create-WO (NO trailing 'แล้ว' — distinct from assets pm.toastAssetWoCreated)",
+      "lang": "th",
+      "source_line": "pm2.jsx:614",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.createBtn",
+      "th": "สร้างใบงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo",
+        "pm.schedule"
+      ],
+      "role": "WO create button + form submit + schedule per-item tooltip (title attr) — DEDUP; NOT common.create=สร้างใหม่",
+      "lang": "th",
+      "source_line": "pm3.jsx:68,313 / pm2.jsx:614",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.checklistSettingsBtn",
+      "th": "ตั้งค่ารายการตรวจเช็ค",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "page action button",
+      "lang": "th",
+      "source_line": "pm3.jsx:68",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.tabOpen",
+      "th": "รอดำเนินการ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "tab (open) — static tab; PMWO_STATUS.open.l duplicate is dynamic status-enum (dropped)",
+      "lang": "th",
+      "source_line": "pm3.jsx:72",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.tabInprogress",
+      "th": "กำลังดำเนินการ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "tab (in-progress) + time-total fallback value when not closed",
+      "lang": "th",
+      "source_line": "pm3.jsx:72,245",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.tabOverdue",
+      "th": "เกินกำหนด",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "tab (overdue)",
+      "lang": "th",
+      "source_line": "pm3.jsx:72",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.tabDone",
+      "th": "เสร็จสิ้น",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "tab (done)",
+      "lang": "th",
+      "source_line": "pm3.jsx:72",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colWoNo",
+      "th": "เลขที่งาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "table col (WO number)",
+      "lang": "th",
+      "source_line": "pm3.jsx:81",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.type",
+      "th": "ประเภท",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "table col + info field (WO type) — kept separate from contracts pm.colType",
+      "lang": "th",
+      "source_line": "pm3.jsx:81,236",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.colAssetSite",
+      "th": "อุปกรณ์ / Site",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "table col (asset / Site)",
+      "lang": "th",
+      "source_line": "pm3.jsx:82",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.tech",
+      "th": "ช่างผู้รับผิดชอบ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "table col + info field + form field",
+      "lang": "th",
+      "source_line": "pm3.jsx:82,236,304",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.due",
+      "th": "กำหนด",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "table col + info field (distinct from field 'กำหนดวันเข้างาน')",
+      "lang": "th",
+      "source_line": "pm3.jsx:83,236",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.sla",
+      "th": "SLA",
+      "placeholders": [],
+      "screens": [
+        "pm.wo",
+        "pm.contracts"
+      ],
+      "role": "table col + info field label; contracts L207 inline 'SLA' in dynamic line may reuse this",
+      "lang": "en",
+      "source_line": "pm3.jsx:83,236",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.createModalTitle",
+      "th": "สร้างใบงาน PM ใหม่",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "create modal title",
+      "lang": "th",
+      "source_line": "pm3.jsx:52",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.createModalSubtitle",
+      "th": "เลือกอุปกรณ์ ประเภทงาน และช่างผู้รับผิดชอบ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "create modal subtitle",
+      "lang": "th",
+      "source_line": "pm3.jsx:53",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastWoCreated",
+      "th": "สร้างใบงาน {no} แล้ว",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "toast (WO created) — owns pm.toastWoCreated after collision resolution",
+      "lang": "th",
+      "source_line": "pm3.jsx:59",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.closeModalTitle",
+      "th": "ปิดงาน + ลายเซ็นลูกค้า",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "close-WO modal title",
+      "lang": "th",
+      "source_line": "pm3.jsx:129",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.readyToClose",
+      "th": "ตรวจครบ {count} รายการ · พร้อมปิดงาน",
+      "placeholders": [
+        "{count}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "close modal banner (all done, middot)",
+      "lang": "th",
+      "source_line": "pm3.jsx:133",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.confirmIncomplete",
+      "th": "ตรวจแล้ว {n}/{count} — ยืนยันปิดงานทั้งที่ยังไม่ครบ?",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "close modal banner (incomplete, em-dash)",
+      "lang": "th",
+      "source_line": "pm3.jsx:133",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.signatureLabel",
+      "th": "ลายเซ็นลูกค้า / ผู้ดูแลอาคาร",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "signature field label",
+      "lang": "th",
+      "source_line": "pm3.jsx:136",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.signHere",
+      "th": "ลงนาม ✓",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "signature pad placeholder (✓ U+2713, leading space)",
+      "lang": "th",
+      "source_line": "pm3.jsx:138",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.confirmCloseBtn",
+      "th": "ยืนยันปิดงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "confirm-close button",
+      "lang": "th",
+      "source_line": "pm3.jsx:143",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastClosed",
+      "th": "ปิดงาน {no} เรียบร้อย · ส่งรายงานให้ลูกค้าแล้ว",
+      "placeholders": [
+        "{no}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "toast (WO closed, middot)",
+      "lang": "th",
+      "source_line": "pm3.jsx:143",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.backToList",
+      "th": "กลับรายการ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "back-to-list button (detail)",
+      "lang": "th",
+      "source_line": "pm3.jsx:156",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.closeWoBtn",
+      "th": "ปิดงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "close-WO button (detail header; distinct from pm.closeWithSignBtn)",
+      "lang": "th",
+      "source_line": "pm3.jsx:156",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.detailSubtitle",
+      "th": "{type} · {assetName} · อ้างอิงสัญญา {contract}",
+      "placeholders": [
+        "{type}",
+        "{assetName}",
+        "{contract}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "detail page subtitle skeleton (middot separators; static word อ้างอิงสัญญา = pm.contractRef)",
+      "lang": "th",
+      "source_line": "pm3.jsx:155",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.checkinTitle",
+      "th": "Check-in จุดบริการ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "check-in card title",
+      "lang": "th",
+      "source_line": "pm3.jsx:164",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.checkedInAt",
+      "th": "Check-in แล้ว · {time}",
+      "placeholders": [
+        "{time}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "checked-in status line (middot)",
+      "lang": "th",
+      "source_line": "pm3.jsx:176",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.checkinBtn",
+      "th": "Check-in หน้างาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "check-in action button",
+      "lang": "th",
+      "source_line": "pm3.jsx:178",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.toastCheckedIn",
+      "th": "Check-in หน้างานสำเร็จ · {time}",
+      "placeholders": [
+        "{time}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "toast (checked in, middot)",
+      "lang": "th",
+      "source_line": "pm3.jsx:178",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.checklistTitle",
+      "th": "Checklist ตรวจเช็ค",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "checklist card title",
+      "lang": "th",
+      "source_line": "pm3.jsx:187",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.pickChecklistBtn",
+      "th": "เลือกรายการตรวจเช็ค",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "pick-checklist button (header + empty state)",
+      "lang": "th",
+      "source_line": "pm3.jsx:189,199",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.checkProgress",
+      "th": "{n}/{count} รายการ",
+      "placeholders": [
+        "{n}",
+        "{count}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "checklist progress counter",
+      "lang": "th",
+      "source_line": "pm3.jsx:190",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.emptyChecklist",
+      "th": "ยังไม่มีรายการตรวจเช็ค",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "empty-state title",
+      "lang": "th",
+      "source_line": "pm3.jsx:197",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.emptyChecklistHint",
+      "th": "กด “เลือกรายการตรวจเช็ค” เพื่อเลือกชุดรายการจากเทมเพลต",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "empty-state hint (curly quotes U+201C/D)",
+      "lang": "th",
+      "source_line": "pm3.jsx:198",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.resultNone",
+      "th": "ยังไม่ตรวจ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "checklist result chip (RESULT_OPTS fixed UI enum)",
+      "lang": "th",
+      "source_line": "pm3.jsx:29",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.resultNormal",
+      "th": "ปกติ (Normal)",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "checklist result chip",
+      "lang": "th",
+      "source_line": "pm3.jsx:30",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.resultAdjust",
+      "th": "ปรับตั้ง (Service & Adjust)",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "checklist result chip (& preserved)",
+      "lang": "th",
+      "source_line": "pm3.jsx:31",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.resultRepair",
+      "th": "เปลี่ยน/ซ่อม (Change-Repair)",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "checklist result chip",
+      "lang": "th",
+      "source_line": "pm3.jsx:32",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.photoPrefix",
+      "th": "รูป",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "PhotoChip prefix (rendered รูป+label)",
+      "lang": "th",
+      "source_line": "pm3.jsx:264",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.before",
+      "th": "ก่อน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "photo chip label (before)",
+      "lang": "th",
+      "source_line": "pm3.jsx:212",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.after",
+      "th": "หลัง",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "photo chip label (after)",
+      "lang": "th",
+      "source_line": "pm3.jsx:213",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.videoTag",
+      "th": " (วิดีโอ)",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "photo chip video suffix (leading space verbatim)",
+      "lang": "th",
+      "source_line": "pm3.jsx:264",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.maintLogTitle",
+      "th": "บันทึกการบำรุงรักษา",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "maintenance-log card title",
+      "lang": "th",
+      "source_line": "pm3.jsx:223",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldCause",
+      "th": "สาเหตุการเสีย / ความผิดปกติ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "note field label (cause)",
+      "lang": "th",
+      "source_line": "pm3.jsx:225",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phCause",
+      "th": "อธิบายอาการ/สาเหตุที่พบ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "textarea placeholder (cause)",
+      "lang": "th",
+      "source_line": "pm3.jsx:225",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldFix",
+      "th": "การแก้ไข / งานที่ทำ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "note field label (fix)",
+      "lang": "th",
+      "source_line": "pm3.jsx:226",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phFix",
+      "th": "อธิบายการแก้ไขและอะไหล่ที่เปลี่ยน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "textarea placeholder (fix)",
+      "lang": "th",
+      "source_line": "pm3.jsx:226",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldAdvice",
+      "th": "ข้อเสนอแนะ / งานที่ควรทำเพิ่ม",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "note field label (advice)",
+      "lang": "th",
+      "source_line": "pm3.jsx:227",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.phAdvice",
+      "th": "เช่น แนะนำเปลี่ยนสลิงในรอบหน้า",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "textarea placeholder (advice)",
+      "lang": "th",
+      "source_line": "pm3.jsx:227",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.woInfoTitle",
+      "th": "ข้อมูลใบงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "WO-info card title",
+      "lang": "th",
+      "source_line": "pm3.jsx:235",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.contractRef",
+      "th": "อ้างอิงสัญญา",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "info field label; also inline in pm.detailSubtitle + pm.formContractInfo",
+      "lang": "th",
+      "source_line": "pm3.jsx:236",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.site",
+      "th": "Site",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "info field label (standalone); also inline in pm.formContractInfo",
+      "lang": "en",
+      "source_line": "pm3.jsx:236",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.serviceZone",
+      "th": "เขตบริการ",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "info field label (service zone)",
+      "lang": "th",
+      "source_line": "pm3.jsx:236",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.timeSummaryTitle",
+      "th": "สรุปเวลาทำงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "time-summary card title",
+      "lang": "th",
+      "source_line": "pm3.jsx:244",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.timeStart",
+      "th": "เริ่มงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "time-summary label (start)",
+      "lang": "th",
+      "source_line": "pm3.jsx:245",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.timeEnd",
+      "th": "เสร็จงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "time-summary label (end)",
+      "lang": "th",
+      "source_line": "pm3.jsx:245",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.timeTotal",
+      "th": "รวมเวลา",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "time-summary label (total)",
+      "lang": "th",
+      "source_line": "pm3.jsx:245",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.closeWithSignBtn",
+      "th": "ปิดงาน + ลายเซ็น",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "close+sign button (sidebar; distinct from pm.closeWoBtn)",
+      "lang": "th",
+      "source_line": "pm3.jsx:251",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.closedNote",
+      "th": "ปิดงานแล้ว · ลูกค้าลงนามรับงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "closed-state status note (middot)",
+      "lang": "th",
+      "source_line": "pm3.jsx:252",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldAsset",
+      "th": "อุปกรณ์",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "form field label (asset)",
+      "lang": "th",
+      "source_line": "pm3.jsx:297",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldWorkType",
+      "th": "ประเภทงาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "form field label (work type; distinct from pm.type)",
+      "lang": "th",
+      "source_line": "pm3.jsx:301",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.optPlanned",
+      "th": "PM ตามแผน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "work-type select option + default",
+      "lang": "th",
+      "source_line": "pm3.jsx:282,301",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.optCorrective",
+      "th": "แจ้งซ่อม (CM)",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "work-type select option",
+      "lang": "th",
+      "source_line": "pm3.jsx:301",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.fieldScheduledDate",
+      "th": "กำหนดวันเข้างาน",
+      "placeholders": [],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "form field label (scheduled date)",
+      "lang": "th",
+      "source_line": "pm3.jsx:302",
+      "verified_glyph": true
+    },
+    {
+      "key": "pm.formContractInfo",
+      "th": "อ้างอิงสัญญา {contract} · Site {site}",
+      "placeholders": [
+        "{contract}",
+        "{site}"
+      ],
+      "screens": [
+        "pm.wo"
+      ],
+      "role": "form info line (middot; static words อ้างอิงสัญญา + Site)",
+      "lang": "th",
+      "source_line": "pm3.jsx:308",
+      "verified_glyph": true
+    }
+  ]
+}
