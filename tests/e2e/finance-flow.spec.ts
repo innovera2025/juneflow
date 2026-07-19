@@ -175,8 +175,14 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
   });
 
   test("PV net is server-authoritative and the approval ladder enforces the amount tiers", async () => {
-    const vendorId = await firstVendorId(finMgr);
-    const billing = await makeBilling(finMgr, vendorId, 800_000);
+    // B-094-3 (SoD, Wei ruling 17 ก.ค.): a PV cannot be approved by its creator.
+    // The approver under test here is the Finance Manager, so the PV must be
+    // drafted by a DIFFERENT user (md) — otherwise the tier-ladder proof below is
+    // masked by a separation-of-duties 403. This keeps every rejection pure: the
+    // under-tier (accountant) and perm-gate (proc) denials are about authority,
+    // not about self-approval.
+    const vendorId = await firstVendorId(md);
+    const billing = await makeBilling(md, vendorId, 800_000);
     const billingId = String(billing.id);
 
     // Gross in the tier-2 band (>500K, ≤2M) so the ladder proof is meaningful.
@@ -186,7 +192,7 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
 
     await test.step("create PV — server computes net, ignoring a tampered client net", async () => {
       const pv = await okJson(
-        await finMgr.post("/api/v1/ap/pv", {
+        await md.post("/api/v1/ap/pv", {
           data: {
             billing_ids: [billingId],
             amount: gross,
@@ -247,12 +253,17 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
   });
 
   test("PV above 2,000,000 escalates past the Finance Manager to MD", async () => {
-    const vendorId = await firstVendorId(md);
-    const billing = await makeBilling(md, vendorId, 2_500_000);
+    // B-094-3 (SoD, Wei ruling): the approver under test is MD, so the PV must be
+    // drafted by a different user (accountant) — else MD's approval is blocked by
+    // separation-of-duties rather than proving the >2M tier escalation. The
+    // accountant holds finance.create; the Finance Manager's under-tier denial
+    // below stays a pure tier rejection (finMgr ≠ creator).
+    const vendorId = await firstVendorId(accountant);
+    const billing = await makeBilling(accountant, vendorId, 2_500_000);
 
     const gross = 2_500_000;
     const pv = await okJson(
-      await md.post("/api/v1/ap/pv", {
+      await accountant.post("/api/v1/ap/pv", {
         data: {
           billing_ids: [String(billing.id)],
           amount: gross,
