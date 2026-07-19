@@ -19,10 +19,12 @@
 
 ## คิวรอ promote
 
-> **QUEUE EMPTY (2026-07-19 · group-C PROGRAM PROMOTED → main `e416f17` · 0-drift)** — all 10 group-C rows (P2-BE-31..37 + P2-WEB-16/17/18) promoted, moved to history below. New rows accumulate when work merges to `dev` for the next batch. The `>` records below are the durable promote history.
+> **PHASE-4 W0 QUEUED (2026-07-19 · orch-A)** — P2-BE-38/39 on dev await Wei promote. Prior: **QUEUE EMPTY (2026-07-19 · group-C PROGRAM PROMOTED → main `e416f17` · 0-drift)** — all 10 group-C rows (P2-BE-31..37 + P2-WEB-16/17/18) promoted, moved to history below. New rows accumulate when work merges to `dev` for the next batch. The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-38 | subcon.ts (Phase-4 W0) | ba09747 feature/backend | — (backend · G3 680 api · live state-machine C3 + tenant-door + gated→404 · gate 4.5) | 2026-07-19 |
+| P2-BE-39 | pm.ts (Phase-4 W0) | ba09747 feature/backend | — (backend · G3 680 api · live CRUD + items-snapshot + gated→404 · gate 4.5) | 2026-07-19 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
