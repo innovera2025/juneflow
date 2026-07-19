@@ -136,14 +136,14 @@ describe("GET /api/v1/analytics/portfolio — auth (fail closed)", () => {
 // portfolio — per-project rollup + totals + type-mix (all live, no mock roll)
 // ===========================================================================
 describe("GET /api/v1/analytics/portfolio", () => {
-  // p1 realestate: 10M budget / 2M used → health ดี; 1 phase, 2 units (1 sold).
-  // p2 solar: 5M budget / 4.8M used → 4.8M > 4.5M (0.9) → health เฝ้าระวัง; no nodes.
+  // p1 realestate: 10M budget / 2M used; curated health ดี; 1 phase, 2 units (1 sold).
+  // p2 solar: 5M budget / 4.8M used; curated health เฝ้าระวัง (B-102: stored, not derived).
   const db = (captured: Captured[] = []) =>
     stubJoinDb(
       [
         [projects, [
-          { id: "p1", companyId: COMPANY, typeId: "t-re", name: "ราชพฤกษ์", currencyCode: "THB", createdAt: D },
-          { id: "p2", companyId: COMPANY, typeId: "t-slr", name: "โซลาร์", currencyCode: "THB", createdAt: D },
+          { id: "p1", companyId: COMPANY, typeId: "t-re", name: "ราชพฤกษ์", currencyCode: "THB", health: "ดี", createdAt: D },
+          { id: "p2", companyId: COMPANY, typeId: "t-slr", name: "โซลาร์", currencyCode: "THB", health: "เฝ้าระวัง", createdAt: D },
         ]],
         [projectTypes, [
           { id: "t-re", key: "realestate", name: "อสังหาฯ" },
@@ -207,19 +207,27 @@ describe("GET /api/v1/analytics/portfolio", () => {
     expect(captured.find((c) => c.table === salesUnits)?.joins.length).toBe(0);
   });
 
-  // --- (e) health flips at the 0.9 utilisation threshold (exec-audit.jsx:89) ---
-  it("health = ดี when actual == budget×0.9 exactly (strict >), เฝ้าระวัง just above", async () => {
+  // --- (e) health = STORED curated label, surfaced verbatim (B-102 Wei = ก) ---
+  // The mock's own data disproves any budget formula: slr is over-utilised yet
+  // "ดี"; rama is under-utilised yet "เฝ้าระวัง" (exec-audit.jsx:14-20). These
+  // two stubs reproduce exactly those disproof rows — a derivation would flip
+  // them; verbatim surfacing must NOT.
+  it("health surfaces the stored curated label verbatim — never derived from spend", async () => {
     const res = await get(
       "/api/v1/analytics/portfolio",
       stubJoinDb([
         [projects, [
-          { id: "pa", companyId: COMPANY, typeId: "t", name: "AtThreshold", currencyCode: "THB", createdAt: D },
-          { id: "pb", companyId: COMPANY, typeId: "t", name: "OverThreshold", currencyCode: "THB", createdAt: D },
+          // over-utilised (232/248 > 0.9×) yet curated ดี — the slr disproof.
+          { id: "pa", companyId: COMPANY, typeId: "t", name: "OverButGood", currencyCode: "THB", health: "ดี", createdAt: D },
+          // under-utilised (248/312 < 0.9×) yet curated เฝ้าระวัง — the rama disproof.
+          { id: "pb", companyId: COMPANY, typeId: "t", name: "UnderButWatch", currencyCode: "THB", health: "เฝ้าระวัง", createdAt: D },
+          // no curated label → honest null, NOT counted at-risk (mock r() defaults ดี).
+          { id: "pc", companyId: COMPANY, typeId: "t", name: "Uncurated", currencyCode: "THB", health: null, createdAt: D },
         ]],
         [projectTypes, [{ id: "t", key: "civil", name: "โยธา" }]],
         [cbsBudgets, [
-          { groupId: "ga", budget: "1000000.00", used: "900000.00", committed: "0" }, // exactly 0.9 → ดี
-          { groupId: "gb", budget: "1000000.00", used: "900001.00", committed: "0" }, // just over → เฝ้าระวัง
+          { groupId: "ga", budget: "248000000.00", used: "232000000.00", committed: "0" },
+          { groupId: "gb", budget: "312000000.00", used: "248000000.00", committed: "0" },
         ]],
         [boqGroups, [{ id: "ga", boqId: "da" }, { id: "gb", boqId: "db" }]],
         [boqDocs, [{ id: "da", projectId: "pa" }, { id: "db", projectId: "pb" }]],
@@ -231,9 +239,10 @@ describe("GET /api/v1/analytics/portfolio", () => {
     const byId = Object.fromEntries(
       b.projects.map((p: { project_id: string }) => [p.project_id, p]),
     );
-    expect(byId.pa.health).toBe("ดี"); // 900000 > 900000 is false
-    expect(byId.pb.health).toBe("เฝ้าระวัง"); // 900001 > 900000 is true
-    expect(b.totals.at_risk_count).toBe(1);
+    expect(byId.pa.health).toBe("ดี"); // stored wins over the (wrong) 0.9 rule
+    expect(byId.pb.health).toBe("เฝ้าระวัง"); // stored wins in the other direction
+    expect(byId.pc.health).toBe(null); // honest null, no fabrication
+    expect(b.totals.at_risk_count).toBe(1); // only pb (≠ ดี); null is not at risk
   });
 
   // --- (f) honest-empty / honest-null behaviours ---

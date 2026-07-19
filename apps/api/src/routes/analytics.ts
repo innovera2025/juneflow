@@ -8,13 +8,16 @@
 // exactly like dashboard.ts / counts.ts.
 //
 // C10 DISCIPLINE (critical): every number derives from a live query over the
-// seed — the mock's per-project `roll` literals (budget/actual/progress/health/
+// seed — the mock's per-project `roll` NUMBER literals (budget/actual/progress/
 // sold) are FORBIDDEN and NONE are reproduced. budget/actual come from
 // cbs_budget (mirroring dashboard.ts summary/alerts), progress from the phase-
-// progress built% source, health from the exec mock's own utilisation threshold
-// (exec-audit.jsx:89 `over = actual > budget * 0.9`), sold% from sales_unit.
-// Where source data is genuinely absent (a project with no sales units), the
-// handler returns an HONEST null rather than fabricating a number.
+// progress built% source, sold% from sales_unit. health is DIFFERENT (B-102,
+// Wei = ก): it is a curated EDITORIAL label stored on project.health (seeded
+// verbatim from exec-audit.jsx:14-20) and surfaced as-stored — NOT derived
+// (exec-audit.jsx:89's 0.9 threshold only colors the spend cell; the mock's own
+// data disproves it as a health rule on 3/7 rows). Where source data is
+// genuinely absent (no sales units / no curated label), the handler returns an
+// HONEST null rather than fabricating a value.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   boqDocs,
@@ -35,9 +38,9 @@ const SOLD_STAGES = new Set(["sold", "soldBuilt"]);
 /** Sale stages that count a unit as physically BUILT (distinct real metric). */
 const BUILT_STAGES = new Set(["built", "soldBuilt"]);
 
-// Health labels — the exec mock's exact Thai values (exec-audit.jsx:14-20).
+// The "good" health label (exec-audit.jsx:14-20) — the at-risk rule is the
+// mock's own `atRisk = filter(health !== "ดี")` (exec-audit.jsx:26).
 const HEALTH_OK = "ดี";
-const HEALTH_WATCH = "เฝ้าระวัง";
 
 /** Coerce a drizzle numeric (string) / number / null to a finite number, else 0. */
 function num(value: unknown): number {
@@ -70,12 +73,14 @@ function unauthenticated(reply: FastifyReply): FastifyReply {
 // Per project: budget = Σ cbs.budget, actual = Σ cbs.used (the real "ใช้จริง",
 // matching dashboard summary.actual_total); progress_pct = avg over the project's
 // phase nodes of built% (the physical-progress source dashboard phaseProgress
-// derives — #built units / #total units per phase); health = the exec mock's own
-// utilisation rule (actual > budget × 0.9 → "เฝ้าระวัง" else "ดี",
-// exec-audit.jsx:89, values verbatim); sold_pct = round(100 × sold units / total
-// units) or HONEST null when the project has no sales units. at_risk_count = #
-// projects with health "เฝ้าระวัง". type_mix = Σ budget grouped by project_type.key
-// (zero-sum types dropped, mirroring the mock's `if (!sum) return null`).
+// derives — #built units / #total units per phase); health = the STORED curated
+// label project.health surfaced verbatim (B-102 Wei = ก — editorial, no formula;
+// null when uncurated); sold_pct = round(100 × sold units / total units) or
+// HONEST null when the project has no sales units. at_risk_count = # projects
+// whose stored health ≠ "ดี" (the mock's own atRisk rule, exec-audit.jsx:26;
+// null-health projects are not at risk — the mock's r() fallback defaults ดี).
+// type_mix = Σ budget grouped by project_type.key (zero-sum types dropped,
+// mirroring the mock's `if (!sum) return null`).
 async function portfolio(db: TenantDb): Promise<Result> {
   const [projectRows, types, cbs, groups, docs, nodes, sales] =
     await Promise.all([
@@ -155,8 +160,10 @@ async function portfolio(db: TenantDb): Promise<Result> {
   const projectViews = projectRows.map((p) => {
     const budget = round2(budgetByProject.get(p.id) ?? 0);
     const actual = round2(actualByProject.get(p.id) ?? 0);
-    // Utilisation health — the exec mock's own rule (exec-audit.jsx:89).
-    const health = actual > budget * 0.9 ? HEALTH_WATCH : HEALTH_OK;
+    // B-102 (Wei = ก): health = the stored curated label, surfaced VERBATIM.
+    // No derivation — exec-audit.jsx:89's 0.9 threshold only colors the spend
+    // cell (L101); the สุขภาพ column renders stored d.health (L109/L14-20).
+    const health = p.health ?? null;
 
     // progress_pct = avg over the project's phase nodes of built% (physical).
     const projNodes = nodesByProject.get(p.id) ?? [];
@@ -219,8 +226,10 @@ async function portfolio(db: TenantDb): Promise<Result> {
             projectViews.length,
         )
       : 0;
+  // atRisk = health ≠ "ดี" (exec-audit.jsx:26 verbatim); an uncurated (null)
+  // health is not at risk — the mock's r() fallback defaults missing to ดี.
   const atRiskCount = projectViews.filter(
-    (v) => v.health === HEALTH_WATCH,
+    (v) => v.health != null && v.health !== HEALTH_OK,
   ).length;
   // Cross-project total — the tenant's first project currency (seed is all THB);
   // mixed-currency portfolios are out of scope for this MVP rollup.
