@@ -19,10 +19,13 @@
 
 ## คิวรอ promote
 
-> **QUEUE EMPTY (2026-07-18 · orch-B C-117 hygiene)** — cleared 28 stale-promoted rows (all batch-7/8/9 tasks, already on `main`; verified board 0 review/doing/ready + each task status=done). New rows accumulate below when work merges to `dev` for the next batch (batch-12). The `>` records below are the durable promote history.
+> **BATCH-12 QUEUED (2026-07-19 · orch-A)** — P2-BE-27/28/29 merged to `dev` (hardening close-out) await Wei promote. Prior: — cleared 28 stale-promoted rows (all batch-7/8/9 tasks, already on `main`; verified board 0 review/doing/ready + each task status=done). New rows accumulate below when work merges to `dev` for the next batch (batch-12). The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-27 | boq/bank authz (B-084 residual) | 2ae9679 feature/backend | — (backend · G3 565 api · boq revise 403 + bank match 403 exploit-regression · gate 4.5) | 2026-07-19 |
+| P2-BE-28 | auth (B-099 rate-limit) | 2ae9679 feature/backend | — (backend · G3 565 api · 3 throttle regression tests · gate 4.5) | 2026-07-19 |
+| P2-BE-29 | migration 0030 FK-index | 2ae9679 feature/backend | — (schema · G1 live migrate 0000→0030 + seed PG16 · 5 indexes · gate 4.5) | 2026-07-19 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.

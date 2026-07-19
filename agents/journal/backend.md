@@ -505,3 +505,11 @@
 - CORRECTION: B-070 'no migration' wrong for po/wo — schema lacked status/approval_step/no/retention_pct; orch-A authorized additive 0015 (precedent 0012-0014)
 - tiered approval PO/WO 1M/5M (differs from PR); variation-order; retention=value×pct; PO/WO tenant-anchored via pr_id (POST requires approved PR of tenant)
 - live-PG not run (no stack) — flag for batch-6 audit
+
+## 2026-07-19 · orch-A · batch-12 hardening close-out (P2-BE-27/28/29 · commit 2ae9679)
+- B-084 GAP-1 (boq revise): POST /boq/:id/revise gated on callerApprovalLevel >= BOQ_APPROVAL_MIN_LEVEL (MD) — mirrors /approve (re-opening an approved BOQ is terminal authority). Inserted AFTER the status!=approved 409 (so the not-approved test is unaffected). Broke the revise-success unit test (seeded users but no roles → loadCaller null → 403) → seeded roleRow(4).
+- B-084 GAP-2 (bank match): POST /bank/lines/:id/match gated on finance.create (loadCaller + permAllowed) — mirrors /bank/statements/import. Broke 7 existing match tests (no caller seeded → now 403) → prepend ...financeCaller to each; +1 new 403 regression.
+- B-084 reject residual: verified ALREADY closed (pr/po/wo B-084-reject present since P2-BE-21) — no re-impl; C-121 item 4 was a no-op. B-084 now fully closed.
+- B-099: login throttle restructured — parse email BEFORE throttle; per-USER window (primary, LOGIN_MAX_PER_USER=10, keyed normalized email) OR-short-circuit with coarse per-IP window (LOGIN_MAX_PER_IP=50). loginRateLimited() now takes a `max` param. Fixes office-NAT over-block; the existing same-email throttle test still trips (via per-user). 3 regression tests in app.test.ts.
+- migration 0030 (finance FK-index): added 5 index() decls to finance.ts schema → drizzle-kit generate (clean; only 5 CREATE INDEX, no drift) → 0030_bored_unus.sql. G1 proof: throwaway PG16, migrate 0000→0030 exit 0 + seed exit 0 + all 5 indexes present. 0031 stays reserved for evm_snapshot (group-C).
+- gates: G3 565 api (+4) · typecheck clean · G1 live migrate+seed on PG16. Zone-clean (apps/api + packages/db only; no sacred, no tests/ QA-zone). orch-B to live-verify full E2E before Wei promote.
