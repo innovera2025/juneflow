@@ -924,6 +924,19 @@ export function registerBoqRoute(app: FastifyInstance): void {
       });
     }
 
+    // B-084 (authz-reaudit GAP-1): revise RE-OPENS an approved BOQ for a new
+    // editable version — the same MD authority that LOCKED it (the /approve gate
+    // above) must authorize un-locking it. Without this any in-tenant member
+    // could silently un-approve a BOQ, bypassing the terminal approval. Mirrors
+    // /approve. Fail-closed: a sub-MD or unattributable caller is denied 403.
+    const reviseLevel = await callerApprovalLevel(request);
+    if (reviseLevel == null || reviseLevel < BOQ_APPROVAL_MIN_LEVEL) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `Revising an approved BOQ requires MD authority (approval level ${BOQ_APPROVAL_MIN_LEVEL})`,
+      });
+    }
+
     // Resolve the revising user (mirrors /approve) so the version-history row is
     // attributed to a real actor; a system/unresolvable caller stamps `by` null.
     const reviser = request.authUser

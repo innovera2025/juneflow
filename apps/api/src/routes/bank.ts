@@ -1041,6 +1041,17 @@ export function registerBankRoute(app: FastifyInstance): void {
   app.post("/bank/lines/:id/match", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
+    // B-084 (authz-reaudit GAP-2): matching a bank statement line to a document
+    // is finance-staff bookkeeping — gate on the finance `create` perm (mirrors
+    // /bank/statements/import). Fail-closed: an unattributable caller, or one
+    // lacking the perm, is denied 403 before the ledger link is written.
+    const caller = await loadCaller(request);
+    if (!caller || !permAllowed(caller.perms, FINANCE_MODULE, "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "bank line match requires the finance create permission",
+      });
+    }
     const { id } = request.params as { id: string };
     return matchLine(db, id, (request.body ?? {}) as Record<string, unknown>, reply);
   });
