@@ -51,6 +51,20 @@ BN=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "${API}/boq/reports/boq
 PF=$(curl -s "${AUTH[@]}" "${API}/analytics/portfolio")
 NP=$(echo "$PF" | jqp 'p=d.get("projects",[]);print(len(p))')
 python3 -c "import sys; sys.exit(0 if int('${NP:-0}')>0 else 1)" 2>/dev/null && ok "portfolio ${NP} projects (real rollup)" || bad "portfolio projects=${NP}: $(echo "$PF"|head -c150)"
+# B-102 (Wei=ก): health = curated verbatim, NOT actual>budget*0.9. Mock (exec-audit.jsx:14-20)
+# = 5×'ดี' + 2×'เฝ้าระวัง' (rama/rdb watch), atRisk=2. The old formula gave a DIFFERENT
+# distribution (it flagged slr, missed rama/rdb) — this check fails pre-fix, passes post-fix.
+python3 - "$PF" <<'PY' && ok "portfolio health = curated mock distribution (5 ดี / 2 เฝ้าระวัง · atRisk=2 · B-102=ก)" || bad "portfolio health distribution != mock (B-102 fix pending/wrong)"
+import sys,json
+d=json.loads(sys.argv[1]); ps=d.get("projects",[])
+from collections import Counter
+c=Counter((p.get("health") or "") for p in ps)
+watch=sum(v for k,v in c.items() if k and k!="ดี")
+assert c.get("ดี")==5, f"good={c.get('ดี')} (want 5)"
+assert watch==2, f"watch={watch} (want 2)"
+at=d.get("totals",{}).get("at_risk_count", d.get("at_risk_count"))
+assert at in (2,None) , f"at_risk={at} (want 2)"
+PY
 
 echo "== 5. W3 BUILD-ONCE proof: budget-actual S-curve lit by evm_snapshot =="
 BA=$(curl -s "${AUTH[@]}" "${API}/dashboard/budget-actual?project_id=${PID}")
