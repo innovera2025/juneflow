@@ -24,6 +24,33 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+
+> **QUEUE CLEARED 2026-07-18 (orch-B · C-117 hygiene)** — 0 stale rows removed: all were batch-7/8/9 tasks already promoted to `main` (verified: board 0 review/doing/ready · each task status=done). The `>` promote record below is the durable history; new rows accumulate here for the next batch.
+> **batch-10+11 PROMOTED → main `eb88544` (2026-07-17 · 0-drift)** — B-096 bank hygiene + B-097 TenantDb transaction door (atomic, scope-safe · live-rollback proven) + B-098 atomic generate-PR + orch-B audits/finance-E2E · gate-4.5 PASS.
+> ตาม PLAN.md §10 Review flow: `feature → dev (auto เมื่อ CI เขียว) → main (Wei promote คนเดียว)`
+> Wei ตรวจเป็น batch: อ่านคิวนี้ + `BLOCKERS.md` → คลิกเล่นบน dev เทียบ gallery → ผ่าน = promote / ไม่ผ่าน = rework task
+
+## วิธีใช้
+
+**ฝั่ง agent:**
+
+1. task ผ่าน gates ครบ (ตามคอลัมน์ gates ใน `TASKS.md`) และ auto-merge เข้า `dev` แล้ว → เพิ่มหนึ่งแถวในตารางด้านล่าง
+2. เปลี่ยนสถานะ task ใน `TASKS.md` เป็น `review` + เขียน journal ประจำรอบ
+3. คอลัมน์ **diff** = ลิงก์/ref ของ commit หรือ PR ที่ merge เข้า dev · คอลัมน์ **ภาพเทียบ gallery** = path screenshot จอที่สร้าง คู่กับ path ภาพอ้างอิงใน `tests/visual/reference/` (งานที่ไม่มีจอ เช่น schema/script → ระบุ "—" พร้อมหลักฐาน gate ที่ใช้แทน)
+
+**ฝั่ง Wei:**
+
+1. ไล่ตรวจจากแถวเก่าสุด → คลิกเล่นบน dev เทียบ gallery
+2. **ผ่าน** = promote เข้า `main` → เปลี่ยนสถานะ task ใน `TASKS.md` เป็น `done` → ลบแถวออกจากคิวนี้
+3. **ไม่ผ่าน** = สร้าง rework task ใน `TASKS.md` (สถานะ `ready` ระบุสิ่งที่ต้องแก้) → ลบแถวออกจากคิวนี้
+
+## คิวรอ promote
+
+
+
+
+| task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
+|---|---|---|---|---|
 | P2-BE-21 | backend · MVP-B close-out hardening (batch-9 · B-094/B-084) | merge 2228600 feature/backend → dev — **B-094-1** gl.jv reject post→locked accounting_period (409 · pre-write) · **B-094-2** bank match reverse-uniqueness (doc matched≤1 line · 409 pre-check + **migration 0028** partial-UNIQUE pv_id/cheque_id/rv_id WHERE not-null · additive · seed-clean) · **B-084-reject** pr/po/wo reject gated on approve-authority (403 · reuse requiredApprovalLevel · fail-closed) · **bank PV-suggest net-vs-gross** (key on pv.net cash-out) | — · api typecheck clean · drizzle check clean · **api 547/547** (+8 · proof-per-fix) · gate-4.5 inline orch-A · skeptic-verify next · **flag: (1) B-094-3 PV self-approve SoD SKIPPED — pv ไม่มี created_by col · audit_log entity=route-template ไม่มี pv id → ไม่มี creator source → ต้อง schema pv.created_by + create-time capture + seed = Wei ruling (2) migration 0028 real-DB migrate+seed check = orch-B batch-9 verify (3) B-093 import/reconcile handlers ยังไม่ gate → orch-B b084-reconcile-fix-spec (fold)** | 2026-07-17 |
 | B-095 | backend/devops · prod-boot dist fix (batch-8 blocker · orch-B caught) | commit d3b616b dev — tax-engine + bank-file + notifications: conditional exports (development→src · types→dist.d.ts · default→dist.js · ทุก subpath) + build script + tsconfig.build.json (mirror @juneflow/db) · apps/api/Dockerfile +3 build ก่อน api build · **boot gate: `docker compose up --build --wait api` = api HEALTHY** (was exit 1 ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) | — · 3-pkg build dist-emit ครบ · api build clean · **api 527/527** (dev→src unchanged) · gate-4.5 diff-reviewer · **not sacred** (packages/*+Dockerfile) · orch-B live-G5+E2E via compose on fixed-SHA next | 2026-07-17 |
 | P2-WEB-15 | web · bank.recon+cheque+export port (Wave-2 · last web) | merge b9456cd feature/web → dev — BankReconciliation (g2/15 · **real per-line F-BANK1 suggest + POST match confirm**) + BankCheque (g2/14) + BankExport (g2/16 · real batch file modal) · recon/cheque/export-rows +37 unit | — · typecheck clean · **web 485/485** (+37) · build 332 · Thai-free (B-073) · gate-4.5 inline orch-A · **G5 structural PASS g2/14+15+16** · live-pixel PENDING · **flag: (1) 66 i18n keys MISSING → B-091 round (2) import + close-reconcile buttons = honest stubs (POST /bank/statements/import + /bank/reconcile in contract แต่ handler ไม่ impl → B-093) (3) book_balance/diff honest-null (no ledger cash source) · bank_balance=signed period-sum ≠ closing (4) export lock-note not persisted (build+return)** | 2026-07-17 |
