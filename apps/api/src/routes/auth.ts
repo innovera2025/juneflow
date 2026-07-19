@@ -33,23 +33,26 @@ const INVALID_CREDENTIALS = {
   message: "Invalid email or password",
 } as const;
 
-// F4 (B-082) + B-099: the public login endpoint had NO throttle — credential
-// brute-force / password-spraying was unbounded. A minimal fixed-window limiter
-// caps attempts without a new dependency.
+// F4 (B-082) + B-099 + B-100: the public login endpoint had NO throttle —
+// credential brute-force / password-spraying was unbounded. A minimal
+// fixed-window limiter caps attempts without a new dependency.
 //
-// B-099: the PRIMARY guard is per-USER (keyed by the submitted email). A real
-// office shares one NAT egress IP but each account logs in rarely, so a tight
-// per-IP cap over-blocked a legitimate multi-approver office (orch-B finance-E2E
-// tripped 429 at ~5 distinct logins from one IP). Keying the tight cap on the
-// ACCOUNT stops credential-stuffing against a single login without penalizing a
-// busy shared IP; a much LOOSER per-IP cap still cuts off a broad spray from one
-// source. State is per route-registration (per app instance), so it resets
-// between tests and never leaks across processes.
+// B-099 made the tight cap per-account; B-100 hardens that against an
+// account-lockout DoS (orch-B skeptic finding). Three rules:
+//   (ก) only FAILED attempts count — a correct login never advances a window;
+//   (ข) a correct credential bypasses the account counter — a valid user is
+//       never throttled, even mid-spray, and their window is cleared on success;
+//   (ค) the account window is keyed on account+IP, so an attacker spraying a
+//       victim's (unauthenticated, attacker-supplied) email from their own IP
+//       fills only (victim, attackerIP) and can never lock out the real victim.
+// A coarse per-IP window still backstops a broad spray from one source. State is
+// per route-registration (per app instance), so it resets between tests and
+// never leaks across processes.
 const LOGIN_WINDOW_MS = 60_000;
-// Per-account cap (the primary guard) — a real user logs in a handful of times.
+// Per-(account+IP) FAILED-attempt cap (the primary guard).
 const LOGIN_MAX_PER_USER = 10;
-// Per-IP cap (coarse spray backstop) — set well above a whole office's legitimate
-// burst so a shared NAT IP is never the limiting factor; only a broad spray trips it.
+// Coarse per-IP FAILED-attempt cap (broad-spray backstop) — well above a whole
+// office's legitimate burst so a shared NAT IP is never the limiting factor.
 const LOGIN_MAX_PER_IP = 50;
 
 interface AttemptWindow {
@@ -58,27 +61,42 @@ interface AttemptWindow {
 }
 
 /**
- * Fixed-window counter keyed by an arbitrary identity (account email or client
- * IP); true once that key exceeds `max` attempts inside the window.
+ * Read-only: has `key` already reached `max` failed attempts in the current
+ * window? An expired or absent window is not over the limit.
  */
-function loginRateLimited(
+function overFailureLimit(
   windows: Map<string, AttemptWindow>,
   key: string,
   now: number,
   max: number,
 ): boolean {
   const current = windows.get(key);
+  if (!current || now >= current.resetAt) return false;
+  return current.count >= max;
+}
+
+/**
+ * Record ONE failed attempt for `key`, opening or rolling its fixed window, and
+ * return the window's new count. Only failures are ever counted (B-100), so a
+ * successful login never advances a throttle.
+ */
+function registerFailure(
+  windows: Map<string, AttemptWindow>,
+  key: string,
+  now: number,
+): number {
+  const current = windows.get(key);
   if (!current || now >= current.resetAt) {
-    // Opportunistically drop expired windows so the map stays bounded even
-    // under spraying (many distinct keys).
+    // Opportunistically drop expired windows so the map stays bounded even under
+    // a wide spray of distinct account+IP keys (B-100 MED: userWindows growth).
     if (windows.size > 10_000) {
       for (const [k, w] of windows) if (now >= w.resetAt) windows.delete(k);
     }
     windows.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
-    return false;
+    return 1;
   }
   current.count += 1;
-  return current.count > max;
+  return current.count;
 }
 
 /** Register POST /auth/login on the given (already /api/v1-prefixed) scope. */
@@ -86,8 +104,9 @@ export async function registerAuthRoutes(
   app: FastifyInstance,
   options: AuthRouteOptions,
 ): Promise<void> {
-  // Per-app login attempt windows (B-099): a per-account window (keyed by email)
-  // is the primary guard; a coarse per-IP window still bounds a broad spray.
+  // Per-app login FAILED-attempt windows (B-099/B-100): the primary window is
+  // keyed on account+IP; a coarse per-IP window backstops a broad spray. Both
+  // count only failures and reset per app instance.
   const userWindows = new Map<string, AttemptWindow>();
   const ipWindows = new Map<string, AttemptWindow>();
 
@@ -99,34 +118,54 @@ export async function registerAuthRoutes(
     const email = typeof body?.email === "string" ? body.email : "";
     const password = typeof body?.password === "string" ? body.password : "";
 
-    // F4 + B-099: throttle brute-force before touching the credential seam. The
-    // per-account window (keyed by the normalized email) is the tight primary
-    // guard; the per-IP window is a looser spray backstop. A blank email cannot
-    // target an account, so only the per-IP cap applies in that case. The `||`
-    // short-circuits: once the account cap trips, the IP window isn't advanced.
+    // Contract declares 200/401 only — missing/invalid input is a failed login.
+    // Malformed input never touches the throttle (it cannot guess a password).
+    if (!email || !password) {
+      return reply.code(401).send(INVALID_CREDENTIALS);
+    }
+
     const ip = request.ip || "unknown";
     const now = Date.now();
     const accountKey = email.trim().toLowerCase();
-    const throttled =
-      (accountKey !== "" &&
-        loginRateLimited(userWindows, accountKey, now, LOGIN_MAX_PER_USER)) ||
-      loginRateLimited(ipWindows, ip, now, LOGIN_MAX_PER_IP);
-    if (throttled) {
-      return reply
+    // B-100 (ค): the per-account failure window is keyed on account+IP. B-099
+    // keyed it on the (attacker-supplied, unauthenticated) email alone and counted
+    // EVERY attempt, so ~11 requests against a victim's email tripped the window
+    // and locked the real victim out (an account-lockout DoS). Scoping the key to
+    // the source IP means an attacker's spray fills only (victim, attackerIP) —
+    // the real victim, from their own IP, keeps an untouched window.
+    const pairKey = `${accountKey}|${ip}`;
+    const rateLimited = () =>
+      reply
         .code(429)
         .header("retry-after", String(Math.ceil(LOGIN_WINDOW_MS / 1000)))
         .send({
           code: "RATE_LIMITED",
           message: "Too many login attempts, please try again later",
         });
-    }
-    // Contract declares 200/401 only — missing/invalid input is a failed login.
-    if (!email || !password) {
-      return reply.code(401).send(INVALID_CREDENTIALS);
+
+    // Coarse per-IP backstop (B-099): a broad spray from one source is malicious
+    // regardless of which account it targets — pre-block it before the credential
+    // seam. Read-only + NOT account-keyed, so it can never lock out one victim.
+    if (overFailureLimit(ipWindows, ip, now, LOGIN_MAX_PER_IP)) {
+      return rateLimited();
     }
 
     const signedIn = await options.signIn(email, password);
-    if (!signedIn) return reply.code(401).send(INVALID_CREDENTIALS);
+    if (!signedIn) {
+      // B-100 (ก): only FAILED attempts count. Record the failure against the
+      // account+IP window and the coarse IP window; once this account+IP is over
+      // the cap, throttle the (still-failing) attacker — otherwise a plain 401.
+      registerFailure(ipWindows, ip, now);
+      if (registerFailure(userWindows, pairKey, now) > LOGIN_MAX_PER_USER) {
+        return rateLimited();
+      }
+      return reply.code(401).send(INVALID_CREDENTIALS);
+    }
+
+    // B-100 (ข): a CORRECT credential bypasses the account counter entirely — a
+    // valid login is never throttled — and clears the account+IP failure window,
+    // so a burst of typos before the right password does not leave it throttled.
+    userWindows.delete(pairKey);
 
     // A credentialed auth_user without a tenant binding cannot access any
     // tenant-scoped resource — fail closed (misprovisioned account).
