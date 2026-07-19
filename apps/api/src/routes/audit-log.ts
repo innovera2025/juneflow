@@ -32,6 +32,9 @@ function qs(raw: unknown): string | null {
   return s.length > 0 ? s : null;
 }
 
+/** Shape-check for the ?user= uuid filter (guards the PG uuid cast). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface AuditRow {
   id: string;
   userId: string | null;
@@ -57,6 +60,12 @@ export function registerAuditLogRoute(app: FastifyInstance): void {
     const entity = qs(q.entity);
     if (entity) conds.push(eq(auditLogs.entity, entity));
     const user = qs(q.user);
+    // ?user= filters on the acting user_id (uuid column). A non-uuid value would
+    // blow up in the PG cast (500) — an honest filter that can match nothing
+    // answers an empty list instead (gate-4.5 hardening note).
+    if (user && !UUID_RE.test(user)) {
+      return reply.code(200).send(listEnvelope([]));
+    }
     if (user) conds.push(eq(auditLogs.userId, user));
     const action = qs(q.action);
     if (action) conds.push(eq(auditLogs.action, action));

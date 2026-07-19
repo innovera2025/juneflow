@@ -207,6 +207,17 @@ describe("GET /api/v1/audit-log", () => {
     expect(params).toContain("sync"); // action
   });
 
+  it("?user=<non-uuid> answers an honest empty list, never a PG cast 500", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[users, [userRow]], [auditLogs, [audit("a0", 1)]]]),
+      })
+    ).inject({ url: "/api/v1/audit-log?user=not-a-uuid" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(0); // filter that can match nothing → empty
+  });
+
   it("blank filter params filter nothing (honest full feed)", async () => {
     const res = await (
       await buildTestApp({
