@@ -19,10 +19,13 @@
 
 ## คิวรอ promote
 
-> **QUEUE EMPTY (2026-07-19 · batch-12 + B-100 PROMOTED → main `a1421bf` · 0-drift)** — the 5 rows (P2-BE-27/28/29/30 + QA-B094-fix) promoted, moved to history below. New rows accumulate when work merges to `dev` for the next batch (group-C Wave-1). The `>` records below are the durable promote history.
+> **group-C WAVE-1 QUEUED (2026-07-19 · orch-A)** — P2-BE-31/32/33 on dev await Wei promote. Prior: **QUEUE EMPTY (2026-07-19 · batch-12 + B-100 PROMOTED → main `a1421bf` · 0-drift)** — the 5 rows (P2-BE-27/28/29/30 + QA-B094-fix) promoted, moved to history below. New rows accumulate when work merges to `dev` for the next batch (group-C Wave-1). The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-31 | seed (group-C W1 due_date/audit-at) | 453969b feature/backend | — (data · G3 573 api · live PG16 proof: alert+cashflow trip clock-relative) | 2026-07-19 |
+| P2-BE-32 | audit-log (group-C W1 activity feed) | 453969b feature/backend | — (backend · G2 contract-op reuse · G3 +6 unit · live-curl 13 rows+filters) | 2026-07-19 |
+| P2-BE-33 | dashboard verify (group-C W1) | 453969b feature/backend | — (verify-only · 7/7 live-curl PASS · budget-actual honest-empty as-spec) | 2026-07-19 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.

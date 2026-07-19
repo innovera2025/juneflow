@@ -785,6 +785,20 @@ const LAND_PLOTS = [
   { deed: "นส.3ก 451", rai: 95, ngan: 2, wa: 0, gps: "14.7588, 100.7301", pricePerRai: 880000, stage: "source", tenure: "lease", proj: "slr" },
 ];
 
+// group-C Wave-1 (C-SEED-DUEDATE): ONE UTC-floored "seed today" anchor. Every
+// relative date below derives from it so the dashboard's overdue-payable alert
+// (due < today) and 7-day cashflow window (due in [today, today+7d]) light up on
+// ANY seed date — never hardcode calendar literals (they rot as the clock moves).
+const SEED_NOW = new Date();
+const SEED_TODAY = new Date(SEED_NOW);
+SEED_TODAY.setUTCHours(0, 0, 0, 0);
+/** ISO calendar date (YYYY-MM-DD) exactly n days from the UTC-floored seed today. */
+function isoDaysFromToday(n: number): string {
+  const d = new Date(SEED_TODAY);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 // ap.jsx:3 AP_BILL (5) / :160 PV_LIST (4) / ar.jsx:7 AR_INV (6) / accounting-extra2 ARCN_SEED (3)
 // B-089 (F-AP1, migration 0026): `wht` (all rows) + `retention` (WO row only)
 // transcribed from ap.jsx:4-8. Row AP-2026-0180's ref is "WO-2026-0117 งวด 3" (a
@@ -807,6 +821,13 @@ const AP_BILL: {
 // PO-0287 po:4 closed); otherwise `progress` (PO-0290 po:1, nothing paid yet).
 // So deposit = Σ(kind=deposit) and paid = Σ(all) are both real, non-equal sums.
 const AP_KIND = ["deposit", "progress", "deposit", "final", "final"] as const;
+// group-C Wave-1 (C-SEED-DUEDATE): ap_billing.due_date offsets in DAYS relative
+// to SEED_TODAY, index-aligned to AP_BILL. ap.jsx lists no due column, so the
+// spread is chosen (Wei ruling 2026-07-19: payables-only negative net accepted)
+// to exercise both dashboard legs on any seed date: i0 PAST + approved (never
+// paid/settled) → OVERDUE_PAYABLE alert; i1/i4 inside [today, today+7d] →
+// cashflow payables; i2/i3 beyond the window (realistic tail, proves the bound).
+const AP_DUE_DAYS = [-10, 3, 14, 30, 5] as const;
 // B-089 (F-AP1, migration 0026): gross `amount`, `retention`, `method`, and cheque
 // details transcribed from ap.jsx:161-164. method codes are the mock's own English
 // keys (PVCreateForm:252-257: "เช็ค"->cheque, "โอน"->transfer). cheque_no/cheque_bank
@@ -1321,7 +1342,10 @@ async function seed(): Promise<void> {
           grId: a.wo == null ? det(`gr:${i}`) : null,
           woId: a.wo == null ? null : det(`wo:${a.wo}`),
           invoiceNo: a.inv,
-          dueDate: null, amount: m(a.amount), vat: m(a.vat),
+          // C-SEED-DUEDATE: clock-relative due date (AP_DUE_DAYS) — was null
+          // (the dashboard GAP: alerts/cashflow stayed empty on seed).
+          dueDate: isoDaysFromToday(at(AP_DUE_DAYS, i)),
+          amount: m(a.amount), vat: m(a.vat),
           // B-089 (F-AP1): withholding-tax amount (all rows) + retention (WO row).
           wht: m(a.wht),
           retention: a.retention == null ? null : m(a.retention),
@@ -1619,6 +1643,11 @@ async function seed(): Promise<void> {
         AUDIT_ENTRIES.map((a, i) => ({
           id: det(`audit:${i}`), companyId: CO1, userId: det(`user:${i % 12}`),
           action: a.act, entity: a.obj, before: null, after: { detail: a.detail }, ip: null,
+          // group-C Wave-1: spread `at` into a real time series (defaultNow
+          // collapsed all 13 rows to one instant → the activity feed's time-ago
+          // was useless). i=0 newest, stepping 4h back per row (~2 days of
+          // history), relative to the seed instant — clock-relative, no literals.
+          at: new Date(SEED_NOW.getTime() - i * 4 * 60 * 60 * 1000),
         })),
       );
 
