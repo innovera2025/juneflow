@@ -218,6 +218,13 @@
       "when": 1784443206074,
       "tag": "0030_bored_unus",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784456337483,
+      "tag": "0031_friendly_exodus",
+      "breakpoints": true
     }
   ]
 }

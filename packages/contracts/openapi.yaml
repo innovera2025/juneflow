@@ -1162,6 +1162,117 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /boq/reports/cost-type:
+    get:
+      tags: [boq]
+      summary: RPT-003 cost-type breakdown (Material/Subcon/Labor by work category)
+      operationId: getBoqReportCostType
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: boq_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /boq/reports/boq-vs-nonboq:
+    get:
+      tags: [boq]
+      summary: RPT-001 BOQ vs Non-BOQ cost summary (Non-BOQ = pr_item without boq_item_id, B-101 D1)
+      operationId: getBoqReportBoqVsNonboq
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: boq_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /boq/reports/variance:
+    get:
+      tags: [boq]
+      summary: RPT-004 plan-vs-actual variance by period (served from evm_snapshot, B-101 D3)
+      operationId: getBoqReportVariance
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: boq_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /boq/reports/evm:
+    get:
+      tags: [boq]
+      summary: RPT-005 EVM S-curve (PV/EV/AC + SPI/CPI — the only screen rendering the indices)
+      operationId: getBoqReportEvm
+      parameters:
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: boq_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /ai-qto/upload:
     post:
       tags: [boq]
@@ -3275,6 +3386,17 @@ paths:
           $ref: "#/components/responses/Unauthorized"
 
   # ===== FLOW-A procurement actions (B-070) =====
+  /analytics/portfolio:
+    get:
+      tags: [boq]
+      summary: Executive portfolio rollup (per-project budget/actual/progress/health/sold + totals + type-mix)
+      operationId: getAnalyticsPortfolio
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /po/{id}/submit:
     parameters:
       - $ref: "#/components/parameters/IdPath"

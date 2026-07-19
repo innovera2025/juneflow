@@ -830,6 +830,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/boq/reports/cost-type": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** RPT-003 cost-type breakdown (Material/Subcon/Labor by work category) */
+        get: operations["getBoqReportCostType"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/boq/reports/boq-vs-nonboq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** RPT-001 BOQ vs Non-BOQ cost summary (Non-BOQ = pr_item without boq_item_id, B-101 D1) */
+        get: operations["getBoqReportBoqVsNonboq"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/boq/reports/variance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** RPT-004 plan-vs-actual variance by period (served from evm_snapshot, B-101 D3) */
+        get: operations["getBoqReportVariance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/boq/reports/evm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** RPT-005 EVM S-curve (PV/EV/AC + SPI/CPI — the only screen rendering the indices) */
+        get: operations["getBoqReportEvm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai-qto/upload": {
         parameters: {
             query?: never;
@@ -2436,6 +2504,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Executive portfolio rollup (per-project budget/actual/progress/health/sold + totals + type-mix) */
+        get: operations["getAnalyticsPortfolio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/po/{id}/submit": {
         parameters: {
             query?: never;
@@ -4029,6 +4114,73 @@ export interface operations {
             201: components["responses"]["EntityCreated"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getBoqReportCostType: {
+        parameters: {
+            query?: {
+                project_id?: string;
+                boq_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getBoqReportBoqVsNonboq: {
+        parameters: {
+            query?: {
+                project_id?: string;
+                boq_id?: string;
+                from?: string;
+                to?: string;
+                category?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getBoqReportVariance: {
+        parameters: {
+            query?: {
+                project_id?: string;
+                boq_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getBoqReportEvm: {
+        parameters: {
+            query?: {
+                project_id?: string;
+                boq_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     uploadAiQto: {
@@ -6210,6 +6362,19 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getAnalyticsPortfolio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
             401: components["responses"]["Unauthorized"];
         };
     };
