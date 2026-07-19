@@ -40,6 +40,7 @@ import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
 import { POList } from "./screens/po-wo/po-list";
 import { WOList } from "./screens/po-wo/wo-list";
+import { SubconContracts } from "./screens/subcon/subcon-contracts";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
 import { MasterCompany } from "./screens/master/master-company";
@@ -79,6 +80,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "pr.list": PRList,
   "po.list": POList,
   "wo.list": WOList,
+  "subcon.contracts": SubconContracts,
   "master.cc": MasterCC,
   "master.docnum": MasterDocNum,
   "master.company": MasterCompany,
