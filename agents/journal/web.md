@@ -329,3 +329,8 @@
 - gitignore *-results/ (transient diff PNGs not committed)
 - finding 1: live-G5 harness gaps documented (worktree-install · storageState-auth · per-screen-viewport for g5 924x540 · lossy-jpg threshold · manifest self-check drift) → harness-notes.md
 - finding 2: P2-BE-20 adds 2 ungated mutations (import + reconcile/period-lock) → b084 matrix updated (reconcile = finance-mgr gate candidate)
+
+## 2026-07-20 — Phase-4 Wave-1 web ports (P2-WEB-19/20) verified + merged (orch-B)
+- subcon.contracts (feature/web-subcon aa9a586) + pm.assets (feature/web-pm cdc6cb6) — chat-3 ported, orch-B merged --no-ff (CLAIM main-checkout) → dev 7c3383c
+- gate-4.5 PASS ×2 (2 diff-reviewers) · orch-B verify: i18n 2677 unchanged md5-identical · sacred CLEAN · zero hardcoded Thai (฿-in-comment fixed) · router 2 entries · typecheck 0 · web 560/560 · both consume generated client (frozen openapi) · honest em-dash all wire gaps
+- non-block follow-ups: pm-asset-form onError ctx.notify (silent POST-fail · convention) · B-110 pm_asset name/code gap · contract-cell tone nit
