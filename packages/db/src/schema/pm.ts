@@ -116,6 +116,11 @@ export const pmAssets = pgTable("pm_asset", {
   contractId: uuid("contract_id")
     .notNull()
     .references(() => pmContracts.id, { onDelete: "cascade" }),
+  // B-110(ก) / migration 0034 (Wave-2) — the asset's display name + code (the
+  // pm.jsx asset card's primary fields; the frozen schema originally omitted
+  // them so Wave-0 dropped them honestly). Nullable additive.
+  name: text("name"),
+  code: text("code"),
   kind: text("kind").notNull(),
   site: text("site"),
   cycle: text("cycle"),
@@ -141,6 +146,9 @@ export const checklistTemplates = pgTable("checklist_template", {
   companyId: uuid("company_id")
     .notNull()
     .references(() => companies.id, { onDelete: "cascade" }),
+  // B-110(ก) / migration 0034 (Wave-2) — the template's display name (the
+  // checklist picker shows a name, not just the kind). Nullable additive.
+  name: text("name"),
   kind: text("kind").notNull(),
   items: jsonb("items").$type<PmChecklistRow[]>().notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
