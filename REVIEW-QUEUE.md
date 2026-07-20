@@ -23,8 +23,8 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-| P2-BE-44 | AR+eTax handlers (P3 W0) | 89d34c7 feature/backend | — (backend · G3 790 api · live invoice-money-authority+rv-409+etax · gate 4.5) | 2026-07-21 |
-| P2-BE-45 | GL trial/close + FA (P3 W0) | 89d34c7 feature/backend | — (backend · G3 790 api · live Dr=Cr+close-lock+fa · gate 4.5) | 2026-07-21 |
+| P2-BE-44 | AR+eTax handlers (P3 W0) | 89d34c7 feature/backend | **orch-B ✅ GO** — gate-4.5 PASS ×2 · server-money LIVE (bogus 99999999→250000 · vat 17500) · RV over-alloc 409 · api 790 · live 15/0 | 2026-07-21 |
+| P2-BE-45 | GL trial/close + FA (P3 W0) | 89d34c7 feature/backend | **orch-B ✅ GO** — trial real-Σ · close CE-strict (BE→400 · lock · re-close 409 · locked-JV 409) · etax C4 · fa raw-cols C10 · live 15/0 | 2026-07-21 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
