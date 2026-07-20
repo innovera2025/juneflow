@@ -1,0 +1,26 @@
+ทั้งหมด → common.all
+ยกเลิก → common.cancel (also tax-invoice tab + CX badge — noun usage 'cancelled'; en translation of common.cancel is verb 'Cancel', flag to Wei if en render looks wrong)
+รวม → common.total
+สถานะ → common.status
+อนุมัติ → common.approve
+พิมพ์ → common.print
+รีเซ็ต → docnum.thReset
+ใช้ตัวกรอง → boq.arcApplyFilter
+งวด → subcon.colPeriod
+โครงการ → subcon.fieldProject
+ทุกโครงการ → subcon.kpiAllProjects
+มูลค่า (฿) → subcon.colValueBaht
+มูลค่า → subcon.colValue
+ประเภท → subcon.colType
+เหตุผล → subcon.colReason
+เลขที่ → subcon.colNo
+วันที่ → subcon.colDate
+฿ → subcon.unitBaht
+M ฿ → subcon.unitMBaht (covers gl.trial KPI unit prop ×4 AND ar.invoice KPI unit — gl.trial.kpiUnit mint cancelled, dict-hit)
+Export Excel → subcon.exportExcelBtn
+ส่งคำสั่งพิมพ์รายงาน → subcon.printToast
+รหัส → cc.thCode
+รายการ → accept.unitItems
+ล้านบาท → pm.unitMillion
+เกินกำหนด → pm.tabOverdue
+Export → vendor.btnExport
