@@ -52,6 +52,11 @@ function authed(): boolean {
   return getAuthToken() != null;
 }
 
+/** Read a string field off an opaque row; "" when absent (mirrors toWoRaw's str). */
+function str(v: unknown): string {
+  return typeof v === "string" ? v : v == null ? "" : String(v);
+}
+
 /** GET /pm/assets — the tenant PM assets for the table (B-014 envelope `data`). */
 export function usePmAssetList() {
   return useQuery<Row[]>({
@@ -156,18 +161,25 @@ export function useCheckinWorkorder(): UseMutationResult<unknown, unknown, Check
   });
 }
 
-/** Update-checklist args — the WO id plus the FULL positional item list (result per
- *  line; the server preserves the snapshot labels by position, pm.ts mergeChecklistRow). */
+/** Update-checklist args — the WO id plus the FULL positional item list. Each line
+ *  carries its result; `label` is OPTIONAL and only sent when a NEW item is appended
+ *  (the checklist-template picker, B-117): the server's positional merge preserves the
+ *  captured label for existing rows (pm.ts mergeChecklistRow uses `existing?.label`),
+ *  but a freshly appended row has no snapshot to fall back on, so its label must ride
+ *  the body. The generated PUT body types items as {result?,before?,after?}; the extra
+ *  `label` is carried through by assignability (the WO detail sends a typed variable,
+ *  not a fresh literal) and read server-side by mergeChecklistRow. */
 export interface UpdateChecklistArgs {
   id: string;
-  items: { result: string }[];
+  items: { result: string; label?: string }[];
 }
 
 /**
  * PUT /pm/workorders/{id}/checklist {items} — autosave the checklist results
- * (DEFAULT 3: no explicit Save button; each tap persists). The body carries the full
- * item list positionally (result "" for an unfilled line -> the server omits it,
- * preserving the captured label). Invalidates the WO list on success.
+ * (DEFAULT 3: no explicit Save button; each tap persists) AND append picked template
+ * items (B-117: new rows carry a label). The body carries the full item list
+ * positionally (result "" for an unfilled line -> the server omits it, preserving the
+ * captured label). Invalidates the WO list on success.
  */
 export function useUpdateChecklist(): UseMutationResult<unknown, unknown, UpdateChecklistArgs> {
   const qc = useQueryClient();
@@ -222,6 +234,54 @@ export function usePmContractList() {
   return useQuery<Row[]>({
     queryKey: PM_CONTRACTS_KEY,
     queryFn: async () => (await unwrap(apiClient.GET("/pm/contracts"))).data ?? [],
+    enabled: authed(),
+    staleTime: 60_000,
+  });
+}
+
+/** Shared cache key for the PM checklist-template list (read-only). */
+const PM_CHECKLIST_TEMPLATES_KEY = ["pm", "checklist-templates"] as const;
+
+/** One checklist item inside a template — only its `label` is consumed (the template
+ *  rows carry no result yet; pm.ts templateWire.items = PmChecklistRow[]). */
+export interface ChecklistTemplateItem {
+  label: string;
+}
+
+/** A reusable checklist template as the picker consumes it (GET /pm/checklist-templates
+ *  row, narrowed from the opaque Entity wire: pm.ts templateWire = { id, name, kind,
+ *  items:[{label}] } — `name` gained a real column in migration 0034, B-110). */
+export interface ChecklistTemplate {
+  id: string;
+  name: string;
+  kind: string;
+  items: ChecklistTemplateItem[];
+}
+
+/** Narrow an opaque /pm/checklist-templates Entity row to a ChecklistTemplate. Accepts
+ *  the server's snake/camel shapes for robustness (mirrors toWoRaw); a non-array
+ *  `items` yields []; missing fields default to "". */
+export function toChecklistTemplate(e: Record<string, unknown>): ChecklistTemplate {
+  const raw = Array.isArray(e.items) ? e.items : [];
+  const items: ChecklistTemplateItem[] = raw.map((it) => {
+    const o = (it ?? {}) as Record<string, unknown>;
+    return { label: str(o.label) };
+  });
+  return { id: str(e.id), name: str(e.name), kind: str(e.kind), items };
+}
+
+/**
+ * GET /pm/checklist-templates — the tenant's reusable checklist template sets
+ * (pm-checklist.jsx ChecklistPicker source; B-117). Opaque Entity rows narrowed by the
+ * consumer via toChecklistTemplate; read-only (no mutation wired — template CRUD is the
+ * deferred manager, B-065/066). checklist_template carries company_id directly, so the
+ * server uses the plain company-scoped door.
+ */
+export function useChecklistTemplateList() {
+  return useQuery<Row[]>({
+    queryKey: PM_CHECKLIST_TEMPLATES_KEY,
+    queryFn: async () =>
+      (await unwrap(apiClient.GET("/pm/checklist-templates"))).data ?? [],
     enabled: authed(),
     staleTime: 60_000,
   });

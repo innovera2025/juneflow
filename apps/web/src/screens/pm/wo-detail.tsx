@@ -34,8 +34,11 @@
  *     only cause/fix/advice — customer_sign is NEVER fabricated. Because "done" is
  *     derived from customer_sign, a UI close records the maintenance log + toasts but
  *     does not flip the WO to "done" (that needs a real signature-capture, unbuilt).
- *   - CHECKLIST PICKER (FLAG): the "pick checklist" button opens the template picker
- *     from the un-ported pototype/pm-checklist.jsx (no dict keys yet) -> presentational.
+ *   - CHECKLIST PICKER (B-117): the "pick checklist" button opens the FUNCTIONAL
+ *     template picker (checklist-picker.tsx) over the live GET /pm/checklist-templates.
+ *     Picked item labels are appended to the local checklist AND persisted via PUT
+ *     /pm/workorders/{id}/checklist (new rows carry a label so the server snapshots
+ *     them). The picker's "template settings" is a modal-defer stub (no manager built).
  *
  * i18n (rule 2): every visible string is a pm.* / common.* dict key (t). No Thai
  * literal in source; tokens back every colour (rule 6). "GPS" is a prototype-verbatim
@@ -72,6 +75,7 @@ import {
   useUpdateChecklist,
   useCloseWorkorder,
 } from "./use-pm";
+import { ChecklistPicker } from "./checklist-picker";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
 const DASH = "—";
@@ -317,11 +321,51 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
     }
   };
 
-  // DEFAULT 3: each result tap autosaves the FULL positional item list (PUT).
+  // DEFAULT 3: each result tap autosaves the FULL positional item list (PUT). The
+  // server preserves the captured labels positionally, so only the result is sent.
   const setResult = (i: number) => {
     const next = checks.map((c, idx) => (idx === i ? { ...c, result: cycleResult(c.result) } : c));
     setChecks(next);
     updateChecklist.mutate({ id: wo.id, items: next.map((c) => ({ result: c.result })) });
+  };
+
+  /**
+   * B-117: append the picked template item labels onto the checklist and persist. The
+   * new rows seed with an unfilled result (""), matching the prototype (pm3.jsx appends
+   * `{ label, result: "none" }`). The FULL positional item list is PUT with a `label`
+   * per row so the server snapshots the newly-appended rows (mergeChecklistRow uses the
+   * sent label; existing rows keep their captured label either way). Optimistic like
+   * setResult: the local list updates + the modal closes immediately, then the mutation
+   * reports success/failure (an error toast + the WO refetch correct an unpersisted add).
+   */
+  const addPickedItems = (labels: string[], close: () => void) => {
+    if (labels.length === 0) return;
+    const added: ChecklistItem[] = labels.map((label) => ({ label, result: "" }));
+    const next = [...checks, ...added];
+    setChecks(next);
+    close();
+    updateChecklist.mutate(
+      { id: wo.id, items: next.map((c) => ({ result: c.result, label: c.label })) },
+      {
+        onSuccess: () =>
+          ctx.notify(t("pm.toastChecklistAdded").replace("{count}", String(labels.length))),
+        onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
+      },
+    );
+  };
+
+  /** Open the checklist-template picker (pm3.jsx openChecklistPicker; B-117). */
+  const openChecklistPicker = () => {
+    ctx.openModal({
+      title: t("pm.pickChecklistBtn"),
+      subtitle: t("pm.pickChecklistSubtitle"),
+      icon: "check",
+      iconTone: "var(--brand)",
+      size: "lg",
+      body: ({ close }: { close: () => void }) => (
+        <ChecklistPicker onClose={close} onInsert={(labels) => addPickedItems(labels, close)} />
+      ),
+    });
   };
 
   // DEFAULT 2: capture a REAL GPS fix; never fabricate a coordinate.
@@ -555,9 +599,9 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
             >
               <span style={{ fontSize: 13.5, fontWeight: 700 }}>{t("pm.checklistTitle")}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {/* pick-checklist opens the un-ported template picker -> presentational (FLAG). */}
+                {/* pick-checklist opens the FUNCTIONAL template picker (B-117). */}
                 {!closed && (
-                  <Btn kind="soft" size="sm" icon="plus">
+                  <Btn kind="soft" size="sm" icon="plus" onClick={openChecklistPicker}>
                     {t("pm.pickChecklistBtn")}
                   </Btn>
                 )}
@@ -577,9 +621,9 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
                   <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3, marginBottom: 14 }}>
                     {t("pm.emptyChecklistHint")}
                   </div>
-                  {/* presentational (template picker un-ported, FLAG). */}
+                  {/* opens the FUNCTIONAL template picker (B-117). */}
                   {!closed && (
-                    <Btn kind="primary" size="md" icon="plus">
+                    <Btn kind="primary" size="md" icon="plus" onClick={openChecklistPicker}>
                       {t("pm.pickChecklistBtn")}
                     </Btn>
                   )}
