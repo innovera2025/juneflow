@@ -12,15 +12,18 @@
 //   listSubconContractPeriods GET /subcon-contracts/{id}/periods → EntityList (404)
 //   deliverPeriod         POST /periods/{id}/deliver            → ActionOk
 //   inspectPeriod         POST /periods/{id}/inspect            → ActionOk
+//   approvePeriodPayment  POST /periods/{id}/approve-payment    → ActionOk (Wave-2)
 //   fixDefect             POST /defects/{id}/fix                → ActionOk
 //   recheckDefect         POST /defects/{id}/recheck            → ActionOk
 //   listAcceptanceCenter  GET  /acceptance-center               → EntityList
 //
-// GATED (NOT implemented / left unregistered): approvePeriodPayment (POST
-// /periods/{id}/approve-payment) is Wave-2 (B-107 server-computed money +
-// retention → AP, MATRIX "อนุมัติจ่ายงวด"); createSubconContract does NOT
-// autosplit periods from a distance/unit basis (subcon-accept.jsx
-// SubcContractForm "→ ระบบจะแบ่งเป็น N งวด") — that too is Wave-2.
+// approvePeriodPayment (Wave-2, B-107a/c) — the payment approval of an inspected-
+// PASS period: the money is SERVER-COMPUTED (no client amount is read), gross by
+// basis, retention held back, AP billing + retention-ledger HELD row + the period
+// → `paid` flip written in ONE transaction (MATRIX "อนุมัติจ่ายงวด"). Still GATED
+// (Wave-2, left as a follow-up): createSubconContract does NOT autosplit periods
+// from a distance/unit basis (subcon-accept.jsx SubcContractForm "→ ระบบจะแบ่งเป็น
+// N งวด").
 //
 // State machines (decision C3 — packages/db/src/schema/subcon.ts enum comments +
 // flows.html FLOW-B):
@@ -30,7 +33,8 @@
 //                delivered|inspecting → passed (result=pass) | rejected (result=reject)
 //     `paid` is Wave-2 (approve-payment). `inspecting` is accepted as an inspect
 //     source (a foreman mid-inspection — counts.ts:98-106 queues it) but Wave-0
-//     never auto-produces it; deliver goes straight to `delivered`.
+//     never auto-produces it; deliver goes straight to `delivered`. `paid` is
+//     reached by approvePeriodPayment (Wave-2) — only from `passed`.
 //   defect.status: open → fixing → recheck → closed (data-dictionary)
 //     · fix     (flows.html L47 "ผู้รับเหมาแก้ไข (กำหนดเวลา)"): open|recheck → fixing
 //               (store {photo_after} → after_photo)
@@ -61,14 +65,18 @@ import {
   defects,
   projects,
   vendors,
+  apBillings,
+  retentionLedgers,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 
 type SubconContractRow = typeof subconContracts.$inferSelect;
 type WorkPeriodRow = typeof workPeriods.$inferSelect;
 type AcceptanceRow = typeof acceptances.$inferSelect;
 type DefectRow = typeof defects.$inferSelect;
+type ApBillingRow = typeof apBillings.$inferSelect;
 
 /** work_period_basis enum (schema C2): percent | distance(m) | milestone | unit. */
 const PERIOD_BASES = new Set(["percent", "distance", "milestone", "unit"]);
@@ -87,6 +95,16 @@ const ACCEPT_QUEUE_STATUSES = ["delivered", "inspecting", "rejected"] as const;
  * defect; anything else re-opens it for another fix cycle.
  */
 const RECHECK_PASS_LIKE = new Set(["pass", "passed", "closed", "ok", "true"]);
+
+/**
+ * The single stable %-gate advisory code (Wei B-107c). It is a machine-readable
+ * FLAG, never rendered UI copy — the FE maps it to the prototype's Thai banner /
+ * modal (subcon-accept2.jsx) from its own i18n, so no UI string is invented on
+ * the server (Design-Fidelity §0 — every UI word is an i18n key). It NEVER
+ * changes a status code: a pass / approve always proceeds (B-107c "warn, never
+ * block"). See progressWarning() for the honest, period-derived semantics.
+ */
+const PROGRESS_AHEAD_WARNING = "accepted_ahead_of_progress";
 
 // Scope hop chains anchoring each parent-FK-scoped subcon table on the
 // company_id-scoped project root (the final hop's parent MUST be `projects`).
@@ -132,6 +150,78 @@ function toNum(value: unknown): number | null {
 /** A string[] from an opaque field (non-string entries dropped), else []. */
 function strArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** A computed 2-dp money magnitude as the numeric-column string ("430000.00"). */
+function moneyStr(n: number): string {
+  return round2(n).toFixed(2);
+}
+
+/**
+ * Server-computed GROSS payment for a PASSED work period (B-107a — the money
+ * authority is the SERVER; no client-supplied amount is ever read). By basis
+ * (schema C2), all numeric columns arrive as strings → coerced via toNum:
+ *   percent   → (pct / 100) × contract.value
+ *   distance  → perPeriodQty × ratePerUnit   (migration 0033 cols)
+ *   unit      → perPeriodQty × ratePerUnit
+ *   milestone → the period's stored fixed `amount`
+ * Rounded to 2 dp (the currency minor unit).
+ */
+function computeGross(period: WorkPeriodRow, contract: SubconContractRow): number {
+  switch (period.basis) {
+    case "percent":
+      return round2(((toNum(period.pct) ?? 0) / 100) * (toNum(contract.value) ?? 0));
+    case "distance":
+    case "unit":
+      return round2((toNum(period.perPeriodQty) ?? 0) * (toNum(period.ratePerUnit) ?? 0));
+    case "milestone":
+      return round2(toNum(period.amount) ?? 0);
+    default:
+      return 0;
+  }
+}
+
+/**
+ * The %-gate ADVISORY (Wei B-107c; subcon-accept2.jsx openAccept L23-26 + the
+ * AcceptForm banner L171-174). The prototype's HARD gate compares each period's
+ * cumulative target (cumMap, L17-18) against an EXTERNAL real project-progress
+ * feed (PROJECT_PROGRESS, L14-15 — "รออัปเดต % งานจากหน้างาน/Timeline") and BLOCKS
+ * the click in the FE (openModal, L24-26). That external progress feed is NOT a
+ * server column (C10 — never fabricated) and the gate is purely PRESENTATIONAL,
+ * so the server keeps only an HONEST advisory, derived STRICTLY from the
+ * contract's own period rows, that NEVER changes the status code.
+ *
+ * Honest real-progress proxy = the periods actually recorded done (passed/paid),
+ * with the period being accepted NOW counted as realized:
+ *   - percent basis (cumMap): cumTarget = Σ pct of periods with seq ≤ this seq;
+ *     realized = Σ pct of the passed/paid periods (this one counted). A warning
+ *     fires when cumTarget > realized — an EARLIER period (lower seq) is still not
+ *     accepted, so this acceptance runs AHEAD of the recorded progress.
+ *   - distance | unit | milestone: the same out-of-sequence signal by COUNT —
+ *     targetPos = #periods with seq ≤ this seq; realizedCount = #passed/paid
+ *     periods (this one counted); warning when targetPos > realizedCount.
+ * Returns null (honestly not computable) when there is no sibling to compare
+ * (a single period), or — percent basis — when no period carries a pct target.
+ */
+function progressWarning(target: WorkPeriodRow, siblings: WorkPeriodRow[]): string | null {
+  if (siblings.length <= 1) return null; // nothing to compare against
+  const realized = (p: WorkPeriodRow): boolean =>
+    p.id === target.id || p.status === "passed" || p.status === "paid";
+  if (target.basis === "percent") {
+    const totalPct = siblings.reduce((s, p) => s + (toNum(p.pct) ?? 0), 0);
+    if (totalPct <= 0) return null; // no percent target data → not honestly computable
+    const cumTarget = siblings
+      .filter((p) => p.seq <= target.seq)
+      .reduce((s, p) => s + (toNum(p.pct) ?? 0), 0);
+    const realizedPct = siblings
+      .filter(realized)
+      .reduce((s, p) => s + (toNum(p.pct) ?? 0), 0);
+    return cumTarget > realizedPct ? PROGRESS_AHEAD_WARNING : null;
+  }
+  // distance | unit | milestone — the out-of-sequence signal by COUNT.
+  const targetPos = siblings.filter((p) => p.seq <= target.seq).length;
+  const realizedCount = siblings.filter(realized).length;
+  return targetPos > realizedCount ? PROGRESS_AHEAD_WARNING : null;
 }
 
 /**
@@ -467,14 +557,22 @@ export function registerSubconRoute(app: FastifyInstance): void {
 
     // PASS → passed (single scoped status flip; the payment approval that follows
     // in the prototype — "อนุมัติจ่ายงวด → AP" — is the Wave-2 approve-payment op).
+    // The %-gate ADVISORY (B-107c) rides the response as an honest, never-blocking
+    // flag derived from the contract's own periods (the hard gate is FE-only).
     if (result === "pass") {
+      const siblings = await db.selectThrough(
+        workPeriods,
+        PERIOD_HOPS,
+        eq(workPeriods.contractId, resolved.contract.id),
+      );
+      const warning = progressWarning(resolved.period, siblings);
       const [period] = await db.updateThroughChain(
         workPeriods,
         PERIOD_HOPS,
         { status: "passed" },
         eq(workPeriods.id, id),
       );
-      return reply.code(200).send(periodWire(period!));
+      return reply.code(200).send({ ...periodWire(period!), warning });
     }
 
     // REJECT → rejected + a Defect List (flows.html L47 "ตีกลับ + Defect List
@@ -524,9 +622,115 @@ export function registerSubconRoute(app: FastifyInstance): void {
       return { period: period!, createdDefects };
     });
 
+    // A reject is not an acceptance, so the out-of-sequence advisory does not
+    // apply — warning is honestly null (the reject always proceeds regardless).
     return reply.code(200).send({
       ...periodWire(period),
       defects: createdDefects.map(defectWire),
+      warning: null,
+    });
+  });
+
+  // POST /periods/:id/approve-payment — approve the payment of an inspected-PASS
+  // period (subcon-accept2.jsx AcceptForm "รับงาน − ประกัน = จ่าย" → AP; MATRIX
+  // "อนุมัติจ่ายงวด"). B-107a — the money authority is the SERVER: the request body
+  // carries NO amount; the gross is computed from the stored period + contract
+  // columns by basis (computeGross), the retention is held back, and the AP
+  // billing + the retention-ledger HELD row + the period → `paid` flip are written
+  // in ONE transaction (B-097 door — all-or-nothing).
+  app.post("/periods/:id/approve-payment", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+
+    const { id } = request.params as { id: string };
+    const resolved = await resolvePeriod(db, id);
+    if (!resolved) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: `work period ${id} not found` });
+    }
+    const { period, contract } = resolved;
+    // C3 guard (fail-closed): only an inspected-PASS period is payable. pending /
+    // delivered / inspecting / rejected / already-`paid` all 409 INVALID_STATE.
+    if (period.status !== "passed") {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a passed (inspected) work period can be approved for payment",
+      });
+    }
+
+    // B-107a — the SERVER computes the money (a client-supplied amount is never
+    // read). gross by basis; retention held back at the contract's retention_pct.
+    const gross = computeGross(period, contract);
+    const retentionAmount = round2((gross * (toNum(contract.retentionPct) ?? 0)) / 100);
+
+    // %-gate ADVISORY (B-107c) — honest, never blocks. Computed from the real
+    // period rows only; the hard gate is presentational (subcon-accept2.jsx).
+    const siblings = await db.selectThrough(
+      workPeriods,
+      PERIOD_HOPS,
+      eq(workPeriods.contractId, contract.id),
+    );
+    const warning = progressWarning(period, siblings);
+
+    // ALL THREE writes are ONE unit (B-097 tx door): the AP billing (gross with
+    // the retention hold-back recorded), the retention ledger HELD row, and the
+    // period → `paid` flip. A throw anywhere rolls back every write — a period can
+    // never be `paid` without its AP billing + retention record. ap_billing and
+    // retention_ledger carry company_id → plain scoped tx.insert (force-set);
+    // the period status flips through the scoped chain door (never a bare update).
+    const { billing } = await db.transaction(async (tx) => {
+      const [billing] = (await tx
+        .insert(apBillings, {
+          vendorId: contract.vendorId,
+          poId: null,
+          grId: null,
+          woId: null,
+          invoiceNo: null,
+          dueDate: null,
+          amount: moneyStr(gross),
+          retention: moneyStr(retentionAmount),
+          currencyCode: contract.currencyCode,
+          status: "draft",
+        })
+        .returning()) as ApBillingRow[];
+      await tx
+        .insert(retentionLedgers, {
+          contractId: contract.id,
+          vendorId: contract.vendorId,
+          woId: null,
+          rate: contract.retentionPct,
+          withheld: moneyStr(retentionAmount),
+          returned: "0",
+          status: "held",
+          currencyCode: contract.currencyCode,
+          scope: `งวด ${period.seq}`,
+        })
+        .returning();
+      await tx.updateThroughChain(
+        workPeriods,
+        PERIOD_HOPS,
+        { status: "paid" },
+        eq(workPeriods.id, id),
+      );
+      return { billing: billing! };
+    });
+
+    // Frozen op (ActionOk) — an informative ok-shaped body. The 50/50 retention
+    // release (handover + 12-mo warranty, B-107d) is a LATER accounting lane;
+    // here the retention is only recorded HELD.
+    return reply.code(200).send({
+      ok: true,
+      status: "paid",
+      basis: period.basis,
+      gross,
+      retention: retentionAmount,
+      net: round2(gross - retentionAmount),
+      ap_billing_id: billing.id,
+      currency_code: contract.currencyCode,
+      warning,
     });
   });
 
