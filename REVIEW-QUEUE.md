@@ -19,10 +19,11 @@
 
 ## คิวรอ promote
 
-> **QUEUE EMPTY (2026-07-20 · PHASE-4 Wave-2 backend PROMOTED → main `b35059d` · 0-drift · pin 90dc065)** — P2-BE-40/41 promoted, moved to history. New rows accumulate for the next batch (Wave-2 web / Wave-3). The `>` records below are the durable promote history.
+> **PHASE-4 W3 QUEUED (2026-07-20 · orch-A)** — P2-BE-42 on dev await Wei promote. Prior: **QUEUE EMPTY (2026-07-20 · PHASE-4 Wave-2 backend PROMOTED → main `b35059d` · 0-drift · pin 90dc065)** — P2-BE-40/41 promoted, moved to history. New rows accumulate for the next batch (Wave-2 web / Wave-3). The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-42 | acceptance-center fan-in (W3) | c681f2a feature/backend (+675d566 sacred pm-enum) | — (backend · G3 736 api · live 4 slices period3/pm6/house4/gr4 · gate 4.5) | 2026-07-20 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
