@@ -109,6 +109,105 @@ export function useWorkOrderList() {
   });
 }
 
+/** The POST /pm/workorders body (opaque Entity, index-signed). `asset_id` is
+ *  required by the handler; `tech` is the one other real stored column the create
+ *  form collects (type/date have no column — dropped, not fabricated). */
+export interface CreateWorkorderBody {
+  [key: string]: unknown;
+  asset_id: string;
+  tech?: string;
+}
+
+/**
+ * POST /pm/workorders — open a work order on an asset (pm3.jsx PMWOForm). The server
+ * owns the id; with no template the checklist snapshot starts empty (honest — the
+ * mock's `open` WO also starts empty). Invalidates the WO list on success.
+ */
+export function useCreateWorkorder(): UseMutationResult<
+  Entity,
+  unknown,
+  CreateWorkorderBody
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateWorkorderBody) =>
+      unwrap(apiClient.POST("/pm/workorders", { body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: PM_WORKORDERS_KEY }),
+  });
+}
+
+/** Check-in args — the WO id plus a REAL captured GPS fix ("lat,lng"). */
+export interface CheckinArgs {
+  id: string;
+  gps: string;
+}
+
+/**
+ * POST /pm/workorders/{id}/checkin {gps} — the tech records their on-site GPS fix
+ * (pm3.jsx check-in action). The gps is captured live from the browser (DEFAULT 2,
+ * never fabricated). Invalidates the WO list so the checked-in state appears.
+ */
+export function useCheckinWorkorder(): UseMutationResult<unknown, unknown, CheckinArgs> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, gps }: CheckinArgs) =>
+      unwrap(apiClient.POST("/pm/workorders/{id}/checkin", { params: { path: { id } }, body: { gps } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: PM_WORKORDERS_KEY }),
+  });
+}
+
+/** Update-checklist args — the WO id plus the FULL positional item list (result per
+ *  line; the server preserves the snapshot labels by position, pm.ts mergeChecklistRow). */
+export interface UpdateChecklistArgs {
+  id: string;
+  items: { result: string }[];
+}
+
+/**
+ * PUT /pm/workorders/{id}/checklist {items} — autosave the checklist results
+ * (DEFAULT 3: no explicit Save button; each tap persists). The body carries the full
+ * item list positionally (result "" for an unfilled line -> the server omits it,
+ * preserving the captured label). Invalidates the WO list on success.
+ */
+export function useUpdateChecklist(): UseMutationResult<unknown, unknown, UpdateChecklistArgs> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, items }: UpdateChecklistArgs) =>
+      unwrap(apiClient.PUT("/pm/workorders/{id}/checklist", { params: { path: { id } }, body: { items } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: PM_WORKORDERS_KEY }),
+  });
+}
+
+/** Close args — the WO id plus the REAL maintenance-log columns (cause/fix/advice).
+ *  No `signature` is sent: the prototype's pad is decorative and captures nothing, so
+ *  customer_sign is never fabricated (DEFAULT 5, FLAG — close records the log only). */
+export interface CloseWorkorderArgs {
+  id: string;
+  cause: string;
+  fix: string;
+  advice: string;
+}
+
+/**
+ * POST /pm/workorders/{id}/close — close a work order, persisting the real cause/fix/
+ * advice maintenance log (pm3.jsx closeWO). The customer signature is NOT sent (the
+ * pad is decorative — sending a fabricated signature would violate PLAN.md §0). The
+ * server's LINE cert-push is a no-op stub (B-108b). Invalidates the WO list on success.
+ */
+export function useCloseWorkorder(): UseMutationResult<unknown, unknown, CloseWorkorderArgs> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, cause, fix, advice }: CloseWorkorderArgs) =>
+      unwrap(
+        apiClient.POST("/pm/workorders/{id}/close", {
+          params: { path: { id } },
+          body: { cause, fix, advice },
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: PM_WORKORDERS_KEY }),
+  });
+}
+
 /** Shared cache key for the PM contract list (read-only). */
 const PM_CONTRACTS_KEY = ["pm", "contracts"] as const;
 
