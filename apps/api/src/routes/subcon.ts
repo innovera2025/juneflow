@@ -86,6 +86,7 @@ type DefectRow = typeof defects.$inferSelect;
 type ApBillingRow = typeof apBillings.$inferSelect;
 type GrRow = typeof grs.$inferSelect;
 type PmWorkOrderRow = typeof pmWorkOrders.$inferSelect;
+type PmAssetRow = typeof pmAssets.$inferSelect;
 
 /** work_period_basis enum (schema C2): percent | distance(m) | milestone | unit. */
 const PERIOD_BASES = new Set(["percent", "distance", "milestone", "unit"]);
@@ -154,6 +155,30 @@ const GR_WO_HOPS = [
   { fk: wos.prId, parent: prs },
   { fk: prs.projectId, parent: projects },
 ];
+
+// META-1 (P2-BE-43) display-enrichment scope chains. Each acceptance-center row
+// carries only its own FK ids; the prototype (company-accept.jsx ACCEPT_ITEMS)
+// also shows the owning project name + a composed title, so we resolve those
+// THROUGH tenant-scoped joins that anchor on the company_id project root — never
+// a bare cross-tenant lookup. A hop that does not resolve yields an HONEST null
+// (C10 — no fabricated value).
+//   pm_asset    → pm_contract → project   (pm slice: project_name + title source)
+//   pm_contract → project                 (pm slice: contract → project id)
+//   po → pr → project | wo → pr → project | pr → project   (gr slice: project_name)
+const PM_ASSET_HOPS = [
+  { fk: pmAssets.contractId, parent: pmContracts },
+  { fk: pmContracts.projectId, parent: projects },
+];
+const PM_CONTRACT_HOPS = [{ fk: pmContracts.projectId, parent: projects }];
+const PO_PR_HOPS = [
+  { fk: pos.prId, parent: prs },
+  { fk: prs.projectId, parent: projects },
+];
+const WO_PR_HOPS = [
+  { fk: wos.prId, parent: prs },
+  { fk: prs.projectId, parent: projects },
+];
+const PR_HOPS = [{ fk: prs.projectId, parent: projects }];
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -381,6 +406,164 @@ async function findAcceptance(db: TenantDb, periodId: string): Promise<Acceptanc
   return acc ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// META-1 (P2-BE-43) display-enrichment loaders — every read is tenant-scoped
+// (db.select on projects, which carries company_id; db.selectThrough for the
+// parent-FK-scoped tables). Each returns a plain id→value Map the pure enrich*
+// composers below spread onto a wire. A row absent from a map resolves to an
+// HONEST null (C10 — never fabricated).
+// ---------------------------------------------------------------------------
+
+/** project id → display name. projects carries company_id → plain scoped read. */
+async function loadProjectNames(db: TenantDb): Promise<Map<string, string>> {
+  const rows = await db.select(projects);
+  return new Map(rows.map((p) => [p.id, p.name]));
+}
+
+/** subcon contract id → the row (source of `no` + `project_id` for period/house). */
+async function loadContractsById(db: TenantDb): Promise<Map<string, SubconContractRow>> {
+  const rows = await db.selectThrough(subconContracts, CONTRACT_HOPS);
+  return new Map(rows.map((c) => [c.id, c]));
+}
+
+/**
+ * period id → the defect item strings recorded on that period's acceptance. Two
+ * scoped reads: acceptances (period link) then defects (item text), joined in
+ * JS via acceptance_id → period_id. Only periods that actually carry a defect
+ * appear; every other period resolves to an HONEST null at the call site.
+ */
+async function loadDefectsByPeriod(db: TenantDb): Promise<Map<string, string[]>> {
+  const accs = await db.selectThrough(acceptances, ACCEPTANCE_HOPS);
+  const periodByAcceptance = new Map(accs.map((a) => [a.id, a.periodId]));
+  const defs = await db.selectThrough(defects, DEFECT_HOPS);
+  const byPeriod = new Map<string, string[]>();
+  for (const d of defs) {
+    const periodId = periodByAcceptance.get(d.acceptanceId);
+    if (!periodId) continue; // acceptance not in this tenant's set → skip honestly
+    const list = byPeriod.get(periodId) ?? [];
+    list.push(d.item);
+    byPeriod.set(periodId, list);
+  }
+  return byPeriod;
+}
+
+/** pm_asset id → the row (source of name/kind for title + contract_id for project). */
+async function loadPmAssetsById(db: TenantDb): Promise<Map<string, PmAssetRow>> {
+  const rows = await db.selectThrough(pmAssets, PM_ASSET_HOPS);
+  return new Map(rows.map((a) => [a.id, a]));
+}
+
+/** pm_contract id → its project id (the pm slice's project_name anchor). */
+async function loadPmContractProjects(db: TenantDb): Promise<Map<string, string>> {
+  const rows = await db.selectThrough(pmContracts, PM_CONTRACT_HOPS);
+  return new Map(rows.map((c) => [c.id, c.projectId]));
+}
+
+/** po id → its pr id (nullable pr link dropped honestly). */
+async function loadPoPr(db: TenantDb): Promise<Map<string, string>> {
+  const rows = await db.selectThrough(pos, PO_PR_HOPS);
+  const m = new Map<string, string>();
+  for (const p of rows) if (p.prId) m.set(p.id, p.prId);
+  return m;
+}
+
+/** wo id → its pr id (nullable pr link dropped honestly). */
+async function loadWoPr(db: TenantDb): Promise<Map<string, string>> {
+  const rows = await db.selectThrough(wos, WO_PR_HOPS);
+  const m = new Map<string, string>();
+  for (const w of rows) if (w.prId) m.set(w.id, w.prId);
+  return m;
+}
+
+/** pr id → its project id (the gr slice's project_name anchor). */
+async function loadPrProjects(db: TenantDb): Promise<Map<string, string>> {
+  const rows = await db.selectThrough(prs, PR_HOPS);
+  return new Map(rows.map((r) => [r.id, r.projectId]));
+}
+
+/**
+ * Enrich a period wire (period slice + periods list) with the prototype display
+ * columns that have a REAL source: project_name (contract → project), a composed
+ * title (`${contract.no} · งวดที่ ${seq}`), and the rejected-period defect items.
+ * owner is honest-null — a work period has no owner column. overdue/wait_days/
+ * due_text are intentionally ABSENT (no honest server source — Wei · C10). A hop
+ * that does not resolve yields null; the wire never crashes on a missing parent.
+ */
+function enrichPeriodRow(
+  p: WorkPeriodRow,
+  contract: SubconContractRow | undefined,
+  projName: Map<string, string>,
+  defectsByPeriod: Map<string, string[]>,
+): Record<string, unknown> {
+  return {
+    ...periodWire(p),
+    project_name: contract ? projName.get(contract.projectId) ?? null : null,
+    // title = the contract's DOC NUMBER only (data, like the gr slice) — NOT a
+    // composed UI string. The prototype shows "<no> · งวดที่ <seq>", but "งวดที่"
+    // is UI copy with no i18n key, so it is NOT invented on the server (§0 rule 2 /
+    // B-116). The wire already carries `seq`, so the FE composes the localized
+    // ordinal ("งวดที่ {n}") client-side around this doc number.
+    title: contract?.no ?? null,
+    owner: null,
+    defect: defectsByPeriod.get(p.id) ?? null,
+  };
+}
+
+/** Enrich a handover (house) wire — the same period sources as enrichPeriodRow
+ *  minus defect (a handover carries no defect column), keeping the type tag. */
+function enrichHouseRow(
+  p: WorkPeriodRow,
+  contract: SubconContractRow | undefined,
+  projName: Map<string, string>,
+): Record<string, unknown> {
+  return {
+    ...periodWire(p),
+    type: "house",
+    project_name: contract ? projName.get(contract.projectId) ?? null : null,
+    // Doc-number only (data) — the "งวดที่" ordinal has no i18n key, composed FE-side
+    // from the wire's `seq` (§0 rule 2 / B-116). Same rule as enrichPeriodRow.
+    title: contract?.no ?? null,
+    owner: null,
+  };
+}
+
+/** Enrich a pm work-order wire: project_name (asset → contract → project), a
+ *  composed title (`${asset.name ?? asset.kind} · ${asset.kind}`), and owner =
+ *  the REAL pm_workorder.tech. */
+function enrichPmRow(
+  w: PmWorkOrderRow,
+  asset: PmAssetRow | undefined,
+  pmContractProjects: Map<string, string>,
+  projName: Map<string, string>,
+): Record<string, unknown> {
+  const projectId = asset ? pmContractProjects.get(asset.contractId) : undefined;
+  return {
+    ...pmAcceptWire(w),
+    project_name: projectId ? projName.get(projectId) ?? null : null,
+    title: asset ? `${asset.name ?? asset.kind} · ${asset.kind}` : null,
+    owner: w.tech,
+  };
+}
+
+/** Enrich a gr wire: project_name via whichever of po/wo resolves to a pr →
+ *  project, title = the real gr `no` (null when unset), owner honest-null. */
+function enrichGrRow(
+  g: GrRow,
+  poPr: Map<string, string>,
+  woPr: Map<string, string>,
+  prProjects: Map<string, string>,
+  projName: Map<string, string>,
+): Record<string, unknown> {
+  const prId = (g.poId ? poPr.get(g.poId) : undefined) ?? (g.woId ? woPr.get(g.woId) : undefined);
+  const projectId = prId ? prProjects.get(prId) : undefined;
+  return {
+    ...grAcceptWire(g),
+    project_name: projectId ? projName.get(projectId) ?? null : null,
+    title: g.no,
+    owner: null,
+  };
+}
+
 /** Register the subcon routes on the given (already /api/v1-prefixed) scope. */
 export function registerSubconRoute(app: FastifyInstance): void {
   // GET /subcon-contracts — the tenant's subcon contracts (subcon-accept.jsx
@@ -526,7 +709,16 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .send({ code: "NOT_FOUND", message: `subcon contract ${id} not found` });
     }
     const rows = await db.selectThrough(workPeriods, PERIOD_HOPS, eq(workPeriods.contractId, id));
-    return reply.code(200).send(listEnvelope([...rows].sort((a, b) => a.seq - b.seq).map(periodWire)));
+    const sorted = [...rows].sort((a, b) => a.seq - b.seq);
+    // META-1 enrichment: project_name (this contract → project) + composed title +
+    // the rejected-period defect items. The defect reads run only when a period is
+    // actually rejected (otherwise there is nothing honest to surface).
+    const projName = await loadProjectNames(db);
+    const defectsByPeriod = sorted.some((p) => p.status === "rejected")
+      ? await loadDefectsByPeriod(db)
+      : new Map<string, string[]>();
+    const enriched = sorted.map((p) => enrichPeriodRow(p, contract, projName, defectsByPeriod));
+    return reply.code(200).send(listEnvelope(enriched));
   });
 
   // POST /periods/:id/deliver — the contractor delivers a period + its docs/photos
@@ -904,7 +1096,20 @@ export function registerSubconRoute(app: FastifyInstance): void {
         PM_WO_HOPS,
         isNull(pmWorkOrders.customerSign),
       );
-      return reply.code(200).send(listEnvelope(rows.map(pmAcceptWire)));
+      // META-1 enrichment: project_name (asset → contract → project), a composed
+      // title (asset name/kind), owner = the REAL tech. Every read is scoped.
+      const [assetById, pmContractProjects, projName] = await Promise.all([
+        loadPmAssetsById(db),
+        loadPmContractProjects(db),
+        loadProjectNames(db),
+      ]);
+      return reply
+        .code(200)
+        .send(
+          listEnvelope(
+            rows.map((w) => enrichPmRow(w, assetById.get(w.assetId), pmContractProjects, projName)),
+          ),
+        );
     }
 
     // HOUSE slice — the handover queue. Wei C-150e: "house = handover = งวดสุดท้าย",
@@ -920,9 +1125,14 @@ export function registerSubconRoute(app: FastifyInstance): void {
         const current = finalByContract.get(p.contractId);
         if (!current || p.seq > current.seq) finalByContract.set(p.contractId, p);
       }
-      const handovers = [...finalByContract.values()]
-        .filter((p) => p.status !== "paid")
-        .map((p) => ({ ...periodWire(p), type: "house" }));
+      const awaiting = [...finalByContract.values()].filter((p) => p.status !== "paid");
+      // META-1 enrichment: project_name (contract → project) + composed title.
+      // A handover carries no owner/defect column → owner honest-null, no defect key.
+      const [contractById, projName] = await Promise.all([
+        loadContractsById(db),
+        loadProjectNames(db),
+      ]);
+      const handovers = awaiting.map((p) => enrichHouseRow(p, contractById.get(p.contractId), projName));
       return reply.code(200).send(listEnvelope(handovers));
     }
 
@@ -943,7 +1153,17 @@ export function registerSubconRoute(app: FastifyInstance): void {
       const byId = new Map<string, GrRow>();
       for (const g of [...poGrs, ...woGrs]) byId.set(g.id, g);
       const rejects = [...byId.values()].filter((g) => Number(g.rejected) > 0);
-      return reply.code(200).send(listEnvelope(rejects.map(grAcceptWire)));
+      // META-1 enrichment: project_name via whichever of po/wo resolves to a pr →
+      // project, title = the real gr `no`. Every resolve read is tenant-scoped.
+      const [poPr, woPr, prProjects, projName] = await Promise.all([
+        loadPoPr(db),
+        loadWoPr(db),
+        loadPrProjects(db),
+        loadProjectNames(db),
+      ]);
+      return reply
+        .code(200)
+        .send(listEnvelope(rejects.map((g) => enrichGrRow(g, poPr, woPr, prProjects, projName))));
     }
 
     // PERIOD slice (default; an unknown type also lands here — matching the
@@ -962,6 +1182,18 @@ export function registerSubconRoute(app: FastifyInstance): void {
       PERIOD_HOPS,
       inArray(workPeriods.status, statuses),
     );
-    return reply.code(200).send(listEnvelope(rows.map(periodWire)));
+    // META-1 enrichment: project_name (contract → project) + composed title +
+    // the rejected-period defect items (defect reads only when a period rejects).
+    const [contractById, projName] = await Promise.all([
+      loadContractsById(db),
+      loadProjectNames(db),
+    ]);
+    const defectsByPeriod = rows.some((p) => p.status === "rejected")
+      ? await loadDefectsByPeriod(db)
+      : new Map<string, string[]>();
+    const enriched = rows.map((p) =>
+      enrichPeriodRow(p, contractById.get(p.contractId), projName, defectsByPeriod),
+    );
+    return reply.code(200).send(listEnvelope(enriched));
   });
 }

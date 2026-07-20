@@ -1,0 +1,6 @@
+{
+  "_note": "Phase-4 i18n R3 — pm.dashboard green-port round. glyph-verified vs raw prototype by orch-B. Apply BOTH dicts byte-identical via SACRED_OVERRIDE (Wei-approved B-115). en-dash U+2013 in kpiCostYtdSub.",
+  "pm.kpiCostYtdSub": "ม.ค.–มิ.ย. 69",
+  "pm.statusDue": "ใกล้ถึงกำหนด",
+  "pm.calMonthTitle": "มิถุนายน 2569"
+}
