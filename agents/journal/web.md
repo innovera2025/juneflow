@@ -334,3 +334,9 @@
 - subcon.contracts (feature/web-subcon aa9a586) + pm.assets (feature/web-pm cdc6cb6) — chat-3 ported, orch-B merged --no-ff (CLAIM main-checkout) → dev 7c3383c
 - gate-4.5 PASS ×2 (2 diff-reviewers) · orch-B verify: i18n 2677 unchanged md5-identical · sacred CLEAN · zero hardcoded Thai (฿-in-comment fixed) · router 2 entries · typecheck 0 · web 560/560 · both consume generated client (frozen openapi) · honest em-dash all wire gaps
 - non-block follow-ups: pm-asset-form onError ctx.notify (silent POST-fail · convention) · B-110 pm_asset name/code gap · contract-cell tone nit
+
+
+## Phase-4 Wave-2/3 web (2026-07-20 · orch-B merged)
+- subcon.accept (feature/web-subcon-accept 502f402) + pm.dashboard/schedule/wo + pm.assets touch-up (feature/web-pm-wave2 62497d0) — chat-3 ported (after C-161 sync-miss reconcile), orch-B merged --no-ff → dev 480d269.
+- gate-4.5: pm-wave2 PASS clean · subcon-accept 1 blocker (B-118 marker §0 rule-4) → Wei=ก ratify slate → merged. consume-only (zero sacred · dict 1619 · B-106 dropped) · zero hardcoded Thai · B-115/B-117 consumed · generated client · C10 honest-empty · typecheck 0 · web 647.
+- flags (non-block · Wei): POST /pm/assets name/code gap (B-110) · subcon.accept reinspect no-wire (Wave-3?) · pm.wo close needs signature UI · 14-day due-window self-flagged.
