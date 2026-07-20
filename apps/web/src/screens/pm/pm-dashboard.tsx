@@ -29,7 +29,8 @@
  *     value + em-dash "done/remaining" sub.
  *   - DEFAULT 3 "pending quotes" (B-108d names only workorders+assets; derivable from
  *     GET /pm/quotes only if Wei admits that source) -> em-dash value.
- *   - DEFAULT 4 "cost YTD" (no cost/spend column on any wire) -> em-dash, no sub.
+ *   - DEFAULT 4 "cost YTD" (no cost/spend column on any wire) -> em-dash VALUE; its
+ *     period sub-caption is now the keyed pm.kpiCostYtdSub (B-115, static period label).
  *   Calendar month = the FIXED prototype grid (Wei 2026-07-20): the title is the
  *   verbatim pm.calMonthTitle ("June 2569") and 30 day cells (1..30) draw straight
  *   into the 7-column grid with no weekday offset; marks derive only from June-2026
@@ -37,8 +38,8 @@
  *   calendar is now the prototype's fixed month verbatim, so no divergence flag remains.
  *
  * i18n (rule 2): every visible string is a pm.* / common.* dict key (t). The near/
- * overdue panel's due badge uses pm.statusDueSoon — the prototype's exact due-soon
- * wording (PM_STATUS.due.l, pm.jsx L34, "near due"), a verbatim sacred key (dict=1611).
+ * overdue panel's due badge uses pm.statusDue — the canonical near-due key (B-115)
+ * whose value is the prototype's PM_STATUS.due.l "near due" wording (pm.jsx L34).
  * The overdue badge uses pm.legendOverdue, whose value already matches. The calendar
  * legend keeps pm.legendOverdue / pm.legendDue / pm.legendPlan (the swatch labels). The
  * "%" unit is a literal symbol
@@ -321,11 +322,11 @@ export function PMDashboard() {
     { tone: "plan", label: t("pm.legendPlan") },
   ];
   // The near/overdue panel badge: overdue -> pm.legendOverdue (value already matches);
-  // due -> pm.statusDueSoon, the prototype's verbatim PM_STATUS.due.l "near due" wording
-  // (pm.jsx L34), now a sacred dict key (dict=1611). The calendar legend keeps
-  // pm.legendDue for its own "due" swatch.
+  // due -> pm.statusDue, the canonical near-due key (B-115) whose value is the
+  // prototype's PM_STATUS.due.l "near due" wording (pm.jsx L34). The calendar legend
+  // keeps pm.legendDue for its own "due" swatch.
   const badgeLabel = (tone: "overdue" | "due"): string =>
-    tone === "overdue" ? t("pm.legendOverdue") : t("pm.statusDueSoon");
+    tone === "overdue" ? t("pm.legendOverdue") : t("pm.statusDue");
 
   // Export modal (pm.jsx openPMExport, mirrors pm-assets.tsx) — presentational.
   const openExport = () => {
@@ -434,8 +435,15 @@ export function PMDashboard() {
           accent="var(--warn)"
           icon="doc"
         />
-        {/* DEFAULT 4: no cost/spend column on any wire -> em-dash, no sub. */}
-        <PMKpi label={t("pm.kpiCostYtd")} value={DASH} accent={COST_ACCENT} icon="cash" />
+        {/* DEFAULT 4: no cost/spend column on any wire -> em-dash VALUE; the period
+            sub-caption is the keyed pm.kpiCostYtdSub (B-115, static period label). */}
+        <PMKpi
+          label={t("pm.kpiCostYtd")}
+          value={DASH}
+          sub={t("pm.kpiCostYtdSub")}
+          accent={COST_ACCENT}
+          icon="cash"
+        />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
