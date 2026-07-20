@@ -1,22 +1,29 @@
 /*
- * Data hooks for PMAssets (pm.assets) — the tenant's PM asset registry.
+ * Data hooks for the PM module — the tenant's PM asset registry (pm.assets) + the
+ * read-only PM work-order list (pm.dashboard, B-108d).
  *
  * Every read/write goes through the generated typed client (api-client.ts) +
  * TanStack Query via unwrap() — no hand-written models/fetch (PLAN.md section 5,
  * apps/web/CLAUDE.md). The prototype held its data in the local PM_ASSETS_BY_TYPE
  * arrays (pm.jsx L7-37); here the server is the system of record:
- *   GET  /pm/assets  -> the tenant PM assets (B-014 paginated envelope `.data`).
- *   POST /pm/assets  -> register a new asset under a PM contract.
- * The mutation invalidates the assets list so the new state appears.
+ *   GET  /pm/assets      -> the tenant PM assets (B-014 paginated envelope `.data`).
+ *   POST /pm/assets      -> register a new asset under a PM contract.
+ *   GET  /pm/workorders  -> the tenant PM work orders (read-only; the dashboard's
+ *                           checklist-compliance derivation, B-108d).
+ * The create mutation invalidates the assets list so the new state appears.
  *
- * CREATE PATH — partially Wave-2-blocked (reported honestly). POST /pm/assets
- * REQUIRES `contract_id` (400 otherwise) and resolves it THROUGH the tenant scope
- * (a foreign/absent id -> 404, apps/api/src/routes/pm.ts). The contract picker
- * source, GET /pm/contracts, is Wave-2 GATED (unregistered / 404), so this screen
- * cannot offer a contract picker — the create form collects a contract identifier
- * as raw text (no browse). `kind` is also required; `site` / `cycle` / `next_due`
- * are optional. The wire has NO `id` (server-generated) and NO `name` column
- * (backend gap) — those are not sent. See pm-asset-form.tsx for the flagged form.
+ * WIRE STATE (updated — the pre-0034 gaps are now closed on dev): assetWire carries
+ * { id, contract_id, code, name, kind, site, cycle, next_due } — `code` + `name`
+ * gained real columns in migration 0034 (B-110), so they now ride the wire (the
+ * pm.assets list/detail still render an em-dash for them pending its re-port; the
+ * pm.dashboard consumes them live). GET /pm/contracts is now REGISTERED (Wave-2,
+ * B-108) — a real contract picker is therefore possible; the current create form
+ * (pm-asset-form.tsx) still collects the contract id as raw text pending a re-port.
+ *
+ * CREATE PATH. POST /pm/assets REQUIRES `contract_id` (400 otherwise) and resolves
+ * it THROUGH the tenant scope (a foreign/absent id -> 404, apps/api/src/routes/pm.ts).
+ * `kind` is also required; `site` / `cycle` / `next_due` are optional. The server
+ * owns `id`; `name`/`code` are not sent by the current form (its re-port is pending).
  */
 import {
   useMutation,
@@ -77,5 +84,23 @@ export function useCreatePmAsset(): UseMutationResult<
     mutationFn: (body: CreatePmAssetBody) =>
       unwrap(apiClient.POST("/pm/assets", { body })),
     onSuccess: () => qc.invalidateQueries({ queryKey: PM_ASSETS_KEY }),
+  });
+}
+
+/** Shared cache key for the PM work-order list (read-only). */
+const PM_WORKORDERS_KEY = ["pm", "workorders"] as const;
+
+/**
+ * GET /pm/workorders — the tenant PM work orders, READ-ONLY for the dashboard's
+ * checklist-compliance derivation (B-108d; B-014 envelope `data`). Mirrors
+ * usePmAssetList: opaque Entity rows (the contract types /pm/workorders rows as
+ * Entity), narrowed in pm-dashboard-rows.ts. No mutation is wired here (read-only).
+ */
+export function useWorkOrderList() {
+  return useQuery<Row[]>({
+    queryKey: PM_WORKORDERS_KEY,
+    queryFn: async () => (await unwrap(apiClient.GET("/pm/workorders"))).data ?? [],
+    enabled: authed(),
+    staleTime: 60_000,
   });
 }
