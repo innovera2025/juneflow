@@ -1,0 +1,10 @@
+{
+  "_note": "Phase-4 i18n R4 — pm.wo checklist PICKER (META-2 · 7 keys). glyph-verified vs pm-checklist.jsx by orch-B. curly “” in pickHint. {count} = web .replace() contract. Apply BOTH dicts via SACRED_OVERRIDE=wei-approved:B-117. REUSE pm.pickChecklistBtn (modal title) + common.cancel — do NOT re-mint.",
+  "pm.pickChecklistSubtitle": "เลือกชุดรายการตรวจเช็คจากเทมเพลตเพื่อเพิ่มลงในใบงาน",
+  "pm.toastChecklistAdded": "เพิ่มรายการตรวจเช็ค {count} ข้อแล้ว",
+  "pm.templateSettingsBtn": "ตั้งค่าเทมเพลต",
+  "pm.useWholeSet": "ใช้ทั้งชุด",
+  "pm.pickedCount": "เลือกไว้ {count} รายการ",
+  "pm.pickHint": "เลือกทีละรายการ หรือกด “ใช้ทั้งชุด”",
+  "pm.addSelectedBtn": "เพิ่มที่เลือก ({count})"
+}
