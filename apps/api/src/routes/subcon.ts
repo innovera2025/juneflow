@@ -57,7 +57,7 @@
 // then updates only the resolved ids — a foreign id resolves to nothing → 404 and
 // is never written). Without a resolved tenant, request.db is absent → 401.
 import type { FastifyInstance } from "fastify";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, isNull } from "drizzle-orm";
 import {
   subconContracts,
   workPeriods,
@@ -67,6 +67,13 @@ import {
   vendors,
   apBillings,
   retentionLedgers,
+  grs,
+  pmWorkOrders,
+  pmAssets,
+  pmContracts,
+  pos,
+  wos,
+  prs,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
@@ -77,6 +84,8 @@ type WorkPeriodRow = typeof workPeriods.$inferSelect;
 type AcceptanceRow = typeof acceptances.$inferSelect;
 type DefectRow = typeof defects.$inferSelect;
 type ApBillingRow = typeof apBillings.$inferSelect;
+type GrRow = typeof grs.$inferSelect;
+type PmWorkOrderRow = typeof pmWorkOrders.$inferSelect;
 
 /** work_period_basis enum (schema C2): percent | distance(m) | milestone | unit. */
 const PERIOD_BASES = new Set(["percent", "distance", "milestone", "unit"]);
@@ -123,6 +132,27 @@ const DEFECT_HOPS = [
   { fk: acceptances.periodId, parent: workPeriods },
   { fk: workPeriods.contractId, parent: subconContracts },
   { fk: subconContracts.projectId, parent: projects },
+];
+
+// Wave-3 acceptance-center fan-in scope chains (B-107e). The pm / gr feeds live
+// in sibling groups that carry NO company_id of their own, so each anchors on
+// the company_id-scoped project root exactly like the subcon chains above.
+//   pm_workorder → pm_asset → pm_contract → project   (mirror counts.ts countPmOpen)
+//   gr → po → pr → project    |    gr → wo → pr → project   (mirror gr.ts dual path)
+const PM_WO_HOPS = [
+  { fk: pmWorkOrders.assetId, parent: pmAssets },
+  { fk: pmAssets.contractId, parent: pmContracts },
+  { fk: pmContracts.projectId, parent: projects },
+];
+const GR_PO_HOPS = [
+  { fk: grs.poId, parent: pos },
+  { fk: pos.prId, parent: prs },
+  { fk: prs.projectId, parent: projects },
+];
+const GR_WO_HOPS = [
+  { fk: grs.woId, parent: wos },
+  { fk: wos.prId, parent: prs },
+  { fk: prs.projectId, parent: projects },
 ];
 
 function str(value: unknown): string {
@@ -285,6 +315,40 @@ function defectWire(d: DefectRow): Record<string, unknown> {
     after_photo: d.afterPhoto,
     due: d.due,
     status: d.status,
+  };
+}
+
+/**
+ * The acceptance-center wire for a PM work order awaiting close (Wave-3 pm slice
+ * — company-accept.jsx ACCEPT_TYPES.pm "ใบงาน PM"). Real pm_workorder columns
+ * only (C10 — nothing fabricated); `type` tags the feed the fan-in came from.
+ */
+function pmAcceptWire(w: PmWorkOrderRow): Record<string, unknown> {
+  return {
+    id: w.id,
+    type: "pm",
+    asset_id: w.assetId,
+    tech: w.tech,
+    template_id: w.templateId,
+    checkin_gps: w.checkinGps,
+  };
+}
+
+/**
+ * The acceptance-center wire for a goods receipt in the return/defect queue
+ * (Wave-3 gr slice — company-accept.jsx ACCEPT_TYPES.gr "รับของเข้าคลัง (GR)").
+ * Real gr columns only; received/rejected are the receipt totals (gr.ts GAP-1).
+ */
+function grAcceptWire(g: GrRow): Record<string, unknown> {
+  return {
+    id: g.id,
+    type: "gr",
+    no: g.no,
+    po_id: g.poId,
+    wo_id: g.woId,
+    received: Number(g.received),
+    rejected: Number(g.rejected),
+    status: g.status,
   };
 }
 
@@ -805,11 +869,20 @@ export function registerSubconRoute(app: FastifyInstance): void {
     return reply.code(200).send(defectWire(updated!));
   });
 
-  // GET /acceptance-center — the acceptance center (ศูนย์ตรวจรับ). Wave-0 serves
-  // the PERIOD slice only (?type=period, the default): the C3 queue reused from
-  // counts.ts (delivered | inspecting | rejected), optionally narrowed by ?status.
-  // ?type=gr and ?type=house are the Wave-3 fan-in (GR rejects · house handover,
-  // FLOW-E) — honestly EMPTY here, never fabricated.
+  // GET /acceptance-center — the acceptance center (ศูนย์ตรวจรับ; company-accept.jsx
+  // AcceptanceCenter, the 4 feeds ACCEPT_TYPES subcon/gr/pm/handover). The ?type
+  // selects the feed → the tenant-scoped slice; every slice returns the B-014
+  // list envelope and is honest-empty when its feed has no rows (C10 — never
+  // fabricated). Wave-3 (B-107e) adds the pm / house / gr slices to the Wave-0
+  // period queue:
+  //   period (default) — the C3 work_period queue reused from counts.ts
+  //                      (delivered | inspecting | rejected), narrowed by ?status.
+  //   pm               — pm_workorder awaiting close (customer_sign IS NULL),
+  //                      mirroring counts.ts countPmOpen.
+  //   house            — the HANDOVER slice: the FINAL (max-seq) work period of
+  //                      each contract, still awaiting (status != paid).
+  //   gr               — goods receipts that need a return/defect decision
+  //                      (rejected > 0). An unknown type falls through to period.
   app.get("/acceptance-center", async (request, reply) => {
     const db = request.db;
     if (!db) {
@@ -820,11 +893,61 @@ export function registerSubconRoute(app: FastifyInstance): void {
 
     const query = (request.query ?? {}) as Record<string, unknown>;
     const type = str(pick(query, "type")).trim() || "period";
-    if (type === "gr" || type === "house") {
-      // Wave-3 fan-in (GR tab / house-acceptance tab) — not sourced in Wave-0.
-      return reply.code(200).send(listEnvelope([]));
+
+    // PM slice — pm_workorder awaiting close = unsigned (customer_sign IS NULL),
+    // scoped pm_workorder → pm_asset → pm_contract → project (identical hops +
+    // predicate as counts.ts countPmOpen, so this list and the badge never
+    // drift). honest-empty when every PM work order is already signed/closed.
+    if (type === "pm") {
+      const rows = await db.selectThrough(
+        pmWorkOrders,
+        PM_WO_HOPS,
+        isNull(pmWorkOrders.customerSign),
+      );
+      return reply.code(200).send(listEnvelope(rows.map(pmAcceptWire)));
     }
 
+    // HOUSE slice — the handover queue. Wei C-150e: "house = handover = งวดสุดท้าย",
+    // so a handover is the FINAL work period of a contract = the highest-`seq`
+    // period per contract. Read the tenant's periods scoped through the period
+    // hop chain, group by contract in JS, keep each contract's max-seq row, and
+    // surface only those still AWAITING (status != paid — a handed-over-and-paid
+    // period is done). honest-empty when no contract has an awaiting final period.
+    if (type === "house") {
+      const all = await db.selectThrough(workPeriods, PERIOD_HOPS);
+      const finalByContract = new Map<string, WorkPeriodRow>();
+      for (const p of all) {
+        const current = finalByContract.get(p.contractId);
+        if (!current || p.seq > current.seq) finalByContract.set(p.contractId, p);
+      }
+      const handovers = [...finalByContract.values()]
+        .filter((p) => p.status !== "paid")
+        .map((p) => ({ ...periodWire(p), type: "house" }));
+      return reply.code(200).send(listEnvelope(handovers));
+    }
+
+    // GR slice — the goods-receipt acceptance queue. GR inspection happens AT
+    // RECEIPT (qty_ok / qty_rejected are recorded on create — gr.ts), so there
+    // is NO "pending-inspection" gr status; the honest "needs an acceptance /
+    // return decision" slice = receipts carrying a rejected quantity (rejected >
+    // 0 = a return/defect situation, the prototype's rejected gr items
+    // "ของเสียหายเกินเกณฑ์"). A gr anchors on EITHER a po or a wo, so the two
+    // scoped chains (gr.ts GR_PO_HOPS / GR_WO_HOPS) are UNIONed and deduped by id.
+    // The "awaiting" semantics collapse to rejected>0 here — flagged for Wei
+    // confirm in B-113. honest-empty when no receipt carries a rejected quantity.
+    if (type === "gr") {
+      const [poGrs, woGrs] = await Promise.all([
+        db.selectThrough(grs, GR_PO_HOPS),
+        db.selectThrough(grs, GR_WO_HOPS),
+      ]);
+      const byId = new Map<string, GrRow>();
+      for (const g of [...poGrs, ...woGrs]) byId.set(g.id, g);
+      const rejects = [...byId.values()].filter((g) => Number(g.rejected) > 0);
+      return reply.code(200).send(listEnvelope(rejects.map(grAcceptWire)));
+    }
+
+    // PERIOD slice (default; an unknown type also lands here — matching the
+    // Wave-0 handler shape).
     const statusFilter = str(pick(query, "status")).trim();
     // Narrow to a single queue status when asked; a status outside the queue has
     // no acceptance-center rows (honest empty), never a bare all-tenant scan.
