@@ -40,10 +40,20 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 import { listGlPostingDocs } from "./gl-posting.js";
+import { loadCaller, permAllowed } from "./authz.js";
 
 type JvRow = typeof jvs.$inferSelect;
 type JvLineRow = typeof jvLines.$inferSelect;
 type GlAccountRow = typeof glAccounts.$inferSelect;
+type AccountingPeriodRow = typeof accountingPeriods.$inferSelect;
+
+/**
+ * The perms-matrix module (seed MODULE_IDS) that governs finance actions — the
+ * same `finance` module ap.ts / bank.ts gate PV-approve + reconcile on. The GL
+ * period close reuses it: closing (locking) a period is a priority `approve`
+ * action, so it enforces the EXISTING 11×5 perms matrix (it invents no policy).
+ */
+const FINANCE_MODULE = "finance";
 
 /** Flat 401 (fail closed) when no tenant was resolved onto the request. */
 function unauthenticated(reply: FastifyReply): FastifyReply {
@@ -373,6 +383,151 @@ async function postingInbox(db: TenantDb): Promise<Record<string, unknown>[]> {
   return docs as unknown as Record<string, unknown>[];
 }
 
+// ---------------------------------------------------------------------------
+// GET /gl/reports/trial-balance — trial balance (gl.jsx GLTrialBalance)
+// ---------------------------------------------------------------------------
+// Real source: jv_line (aggregated) grouped by account. jv_line carries NO
+// company_id — it is read THROUGH its jv (jv_id → jv.company_id) via
+// selectThrough (a bare jv_line read would escape tenant scope). Σ dr and Σ cr
+// are accumulated per account_id, then gl_account (company-scoped) supplies the
+// code + name. The response is the opaque EntityOk:
+//   { rows: [{account_code, account_name, debit, credit}],
+//     totals: {total_debit, total_credit}, currency_code }
+// C10 (honest): the rows are the REAL per-account sums of the seeded balanced
+// JVs, and total_debit / total_credit are the true Σ dr / Σ cr across every leg —
+// so the Dr=Cr footer is equal exactly when every JV is balanced (the C9
+// invariant POST /gl/jv enforces), surfaced from real data, never fabricated.
+// Accounts with no jv_line activity do not appear (the aggregation is over the
+// real posted legs). Ordered by account code ascending (mirrors the mock's
+// code-grouped table + getCoa).
+async function trialBalance(
+  db: TenantDb,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const [lineRows, accountRows] = await Promise.all([
+    // jv_line scopes THROUGH jv (no company_id of its own) — the scoped root read.
+    db.selectThrough(jvLines, [
+      { fk: jvLines.jvId, parent: jvs },
+    ]) as Promise<JvLineRow[]>,
+    db.select(glAccounts) as Promise<GlAccountRow[]>,
+  ]);
+
+  const accounts = new Map(accountRows.map((a) => [a.id, a]));
+  const byAccount = new Map<string, { dr: number; cr: number }>();
+  let currency: string | null = null;
+  let totalDr = 0;
+  let totalCr = 0;
+  for (const ln of lineRows) {
+    if (currency == null) currency = ln.currencyCode ?? null;
+    const dr = num(ln.dr);
+    const cr = num(ln.cr);
+    totalDr += dr;
+    totalCr += cr;
+    const agg = byAccount.get(ln.accountId) ?? { dr: 0, cr: 0 };
+    agg.dr += dr;
+    agg.cr += cr;
+    byAccount.set(ln.accountId, agg);
+  }
+
+  const rows = [...byAccount.entries()]
+    .map(([accountId, agg]) => {
+      const account = accounts.get(accountId);
+      return {
+        account_code: account?.code ?? null,
+        account_name: account?.name ?? null,
+        debit: round2(agg.dr),
+        credit: round2(agg.cr),
+      };
+    })
+    .sort((a, b) => {
+      const ac = a.account_code ?? "";
+      const bc = b.account_code ?? "";
+      return ac < bc ? -1 : ac > bc ? 1 : 0;
+    });
+
+  return reply.code(200).send({
+    rows,
+    totals: { total_debit: round2(totalDr), total_credit: round2(totalCr) },
+    currency_code: currency ?? "THB",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// POST /gl/close-period — lock an accounting period (gl.jsx GLPeriodClose)
+// ---------------------------------------------------------------------------
+// Body: { period } — a CE 'YYYY-MM' key (STRICT). Closing a period sets
+// accounting_period.locked = true (the data-dictionary "ปิดงวดล็อก" invariant),
+// so POST /gl/jv back-posting into it is rejected (409). Wei C-176 ruling =
+// LOCK-ONLY: NO closing / retained-earnings entries are posted here — that is
+// deferred (C-176 #6). Enforced (the route gates authz first), then here:
+//   - period is a STRICT CE 'YYYY-MM' (400 else). A Buddhist-Era-looking year
+//     (e.g. 2569 = พ.ศ.) is rejected — a real CE year sits in ~20xx. The bank
+//     seed carries BE-labelled period rows ('2569-05'), so the EXACT CE param is
+//     matched (company-scoped), never a naive/loose match against a BE row.
+//   - resolve THIS company's accounting_period where period === <param>. If it
+//     exists and is already locked → 409 INVALID_STATE. Else lock it (update),
+//     or create it locked when absent.
+// Returns ActionOk { period, locked: true, created, id }.
+
+/** A STRICT CE 'YYYY-MM' key — 4-digit CE year (2000–2100) + month 01–12. A
+ *  Buddhist-Era year (25xx/26xx) falls outside the CE window and is rejected,
+ *  so the BE-labelled bank seed period ('2569-05') can never be closed by it. */
+function isValidCePeriod(period: string): boolean {
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  return year >= 2000 && year <= 2100 && month >= 1 && month <= 12;
+}
+
+async function closeGlPeriod(
+  db: TenantDb,
+  body: Record<string, unknown>,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const period = str(body.period).trim();
+  if (!isValidCePeriod(period)) {
+    return badRequest(
+      reply,
+      "period must be a CE 'YYYY-MM' key (e.g. 2026-05); a Buddhist-Era year is not accepted",
+    );
+  }
+
+  // Match THIS company's period by the EXACT CE param (company-scoped select —
+  // a foreign or BE-labelled '2569-05' row is never naively matched).
+  const [existing] = (await db.select(
+    accountingPeriods,
+    eq(accountingPeriods.period, period),
+  )) as AccountingPeriodRow[];
+
+  if (existing) {
+    if (existing.locked) {
+      return conflict(reply, `period ${period} is already closed (locked)`);
+    }
+    // Lock-only (Wei C-176 #6): flip locked; closing entries are deferred.
+    const [updated] = (await db
+      .update(accountingPeriods, { locked: true }, eq(accountingPeriods.id, existing.id))
+      .returning()) as AccountingPeriodRow[];
+    return reply.code(200).send({
+      period,
+      locked: true,
+      created: false,
+      id: updated?.id ?? existing.id,
+    });
+  }
+
+  // No period row yet → create it already locked (lock-only; no closing entries).
+  const [created] = (await db
+    .insert(accountingPeriods, { period, locked: true })
+    .returning()) as AccountingPeriodRow[];
+  return reply.code(200).send({
+    period,
+    locked: true,
+    created: true,
+    id: created?.id ?? null,
+  });
+}
+
 /** Register the GL routes on the given (already /api/v1-prefixed) scope. */
 export function registerGlRoute(app: FastifyInstance): void {
   const withTenant =
@@ -387,10 +542,39 @@ export function registerGlRoute(app: FastifyInstance): void {
   app.get("/gl/jv", withTenant(listJv));
   app.get("/gl/posting-inbox", withTenant(postingInbox));
 
+  // Trial balance is the opaque EntityOk (a single report object, not a list) —
+  // it is NOT wrapped in the list envelope. Fail-closed 401 without a tenant.
+  app.get("/gl/reports/trial-balance", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return trialBalance(db, reply);
+  });
+
   app.post("/gl/jv", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
     const body = (request.body ?? {}) as Record<string, unknown>;
     return createJv(db, body, reply);
+  });
+
+  app.post("/gl/close-period", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    // A period close LOCKS the books (priority action) — require finance
+    // `approve` (mirrors bank.ts reconcile). Fail-closed: an unattributable
+    // caller, or one lacking the perm, is denied 403 before any period is locked.
+    const caller = await loadCaller(request);
+    if (!caller) {
+      return reply
+        .code(403)
+        .send({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    }
+    if (!permAllowed(caller.perms, FINANCE_MODULE, "approve")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "period close requires the finance approve permission",
+      });
+    }
+    return closeGlPeriod(db, (request.body ?? {}) as Record<string, unknown>, reply);
   });
 }
