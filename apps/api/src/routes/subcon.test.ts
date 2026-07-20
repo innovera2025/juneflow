@@ -24,6 +24,11 @@ import {
   retentionLedgers,
   grs,
   pmWorkOrders,
+  pmAssets,
+  pmContracts,
+  pos,
+  wos,
+  prs,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import type { AuditRecord } from "../plugins/audit-log.js";
@@ -262,6 +267,24 @@ const gr = (
   createdAt: D,
   updatedAt: D,
 });
+
+// META-1 (P2-BE-43) enrichment stub rows — only the columns the enrichment reads
+// (id + the join FK + the display source). project_name resolves through these to
+// `project.name` ("juneflow ราชพฤกษ์"), the tenant-scoped root.
+const PM_CONTRACT = "c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1";
+const PO = "90909090-9090-9090-9090-909090909090";
+const PR = "70707070-7070-7070-7070-707070707070";
+
+/** pm_asset — name is nullable (pre-migration-0034 rows); kind is the fallback. */
+const pmAsset = (name: string | null = "ปั๊มดับเพลิง A") => ({
+  id: ASSET,
+  contractId: PM_CONTRACT,
+  name,
+  kind: "ปั๊ม",
+});
+const pmContract = { id: PM_CONTRACT, projectId: PROJECT };
+const po = { id: PO, prId: PR };
+const pr = { id: PR, projectId: PROJECT };
 
 // ---------------------------------------------------------------------------
 // GET /subcon-contracts — list envelope + tenant scope
@@ -1375,5 +1398,271 @@ describe("GET /api/v1/acceptance-center — Wave-3 fan-in (pm/house/gr)", () => 
     ).inject({ url: "/api/v1/acceptance-center?type=gr" });
     expect(res.statusCode).toBe(200);
     expect(res.json().total).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// META-1 (P2-BE-43) display enrichment — the acceptance-center rows + the
+// periods list gain the prototype (company-accept.jsx ACCEPT_ITEMS) display
+// columns that have a REAL source: project_name (resolved THROUGH the scoped
+// join to project.name), a composed title, owner (pm.tech only), and the
+// rejected-period defect items. The sourceless cols (overdue / wait_days /
+// due_text / docs_count) are honest-empty = ABSENT (Wei · C10 — never
+// fabricated). Every enrichment join is asserted tenant-scoped (COMPANY bound,
+// no OTHER_COMPANY leak). Rows come from the stub — no value is hand-computed.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1 acceptance-center + periods — META-1 display enrichment", () => {
+  // The display cols with NO honest server source must never appear on any wire.
+  const ABSENT = ["overdue", "wait_days", "due_text", "docs_count"];
+  const expectAbsent = (row: Record<string, unknown>): void => {
+    for (const k of ABSENT) expect(row).not.toHaveProperty(k);
+  };
+  const rowsOf = (res: { json(): unknown }): Array<Record<string, unknown>> =>
+    (res.json() as { data: Array<Record<string, unknown>> }).data;
+  const boundOn = (captured: Captured[], tables: unknown[]): void => {
+    for (const table of tables) {
+      const read = captured.find((c) => c.table === table);
+      expect(read).toBeTruthy();
+      expect(paramsOf(read!.where)).toContain(COMPANY);
+      expect(paramsOf(read!.where)).not.toContain(OTHER_COMPANY);
+    }
+  };
+
+  // --- period slice (default) ------------------------------------------------
+
+  it("period slice: project_name + composed title + owner null + defect text; new joins company-scoped", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [period("p1", "delivered", "percent", 1), period("p2", "rejected", "percent", 2)]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            [projects, [project]],
+            [acceptances, [acceptance(ACCEPTANCE, "p2")]], // p2's acceptance carries the defect
+            [defects, [defect(DEFECT, "open")]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center" });
+    expect(res.statusCode).toBe(200);
+    const data = rowsOf(res);
+    expect(data).toHaveLength(2);
+    const p1 = data.find((r) => r.id === "p1")!;
+    const p2 = data.find((r) => r.id === "p2")!;
+    // project_name resolved contract → project (real project.name)
+    expect(p1.project_name).toBe("juneflow ราชพฤกษ์");
+    expect(p2.project_name).toBe("juneflow ราชพฤกษ์");
+    // title composed from the REAL contract.no + seq (exact strings)
+    expect(p1.title).toBe("WO-1 · งวดที่ 1");
+    expect(p2.title).toBe("WO-1 · งวดที่ 2");
+    // a work period has no owner column → honest null on every period row
+    expect(p1.owner).toBeNull();
+    expect(p2.owner).toBeNull();
+    // the rejected period surfaces its defect item; a non-rejected period is null
+    expect(p2.defect).toEqual(["ฉาบผนัง B-06 เป็นคลื่น"]);
+    expect(p1.defect).toBeNull();
+    // the sourceless display cols are ABSENT (honest-empty regression)
+    expectAbsent(p1);
+    expectAbsent(p2);
+    // every new enrichment join binds this tenant, never the other company
+    boundOn(captured, [projects, subconContracts, acceptances, defects]);
+  });
+
+  it("defect is null on a rejected period with no recorded defects (honest, not fabricated)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [period("p2", "rejected", "percent", 2)]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            [projects, [project]],
+            [acceptances, []],
+            [defects, []],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center" });
+    expect(res.statusCode).toBe(200);
+    expect(rowsOf(res)[0]!.defect).toBeNull();
+  });
+
+  it("project_name + title are null (never a crash) when the contract hop does not resolve", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [period("p1", "delivered", "percent", 1)]],
+            [subconContracts, []], // contract not in this tenant's set → unresolved hop
+            [projects, [project]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center" });
+    expect(res.statusCode).toBe(200);
+    const r = rowsOf(res)[0]!;
+    expect(r.project_name).toBeNull();
+    expect(r.title).toBeNull();
+  });
+
+  // --- pm slice --------------------------------------------------------------
+
+  it("pm slice: project_name (asset→contract→project) + composed title + owner=tech; joins company-scoped", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pmWorkOrders, [pmWorkOrder("w1", null)]],
+            [pmAssets, [pmAsset()]],
+            [pmContracts, [pmContract]],
+            [projects, [project]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=pm" });
+    expect(res.statusCode).toBe(200);
+    const w = rowsOf(res)[0]!;
+    expect(w.project_name).toBe("juneflow ราชพฤกษ์");
+    expect(w.title).toBe("ปั๊มดับเพลิง A · ปั๊ม");
+    expect(w.owner).toBe("ช่างวิรัตน์ ส."); // the REAL pm_workorder.tech
+    expectAbsent(w);
+    boundOn(captured, [pmAssets, pmContracts, projects]);
+  });
+
+  it("pm slice: title falls back to kind when the asset name is null (no fabrication)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pmWorkOrders, [pmWorkOrder("w1", null)]],
+            [pmAssets, [pmAsset(null)]], // pre-0034 asset with no name
+            [pmContracts, [pmContract]],
+            [projects, [project]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=pm" });
+    expect(rowsOf(res)[0]!.title).toBe("ปั๊ม · ปั๊ม");
+  });
+
+  // --- house slice -----------------------------------------------------------
+
+  it("house slice: project_name + composed title on the final period; owner null, no defect key", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [period("p1", "delivered", "percent", 1), period("p3", "rejected", "percent", 3)]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            [projects, [project]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=house" });
+    expect(res.statusCode).toBe(200);
+    const h = rowsOf(res)[0]!;
+    expect(h.seq).toBe(3); // the max-seq final period
+    expect(h.type).toBe("house");
+    expect(h.project_name).toBe("juneflow ราชพฤกษ์");
+    expect(h.title).toBe("WO-1 · งวดที่ 3");
+    expect(h.owner).toBeNull();
+    expect(h).not.toHaveProperty("defect"); // a handover carries no defect column
+    expectAbsent(h);
+    boundOn(captured, [subconContracts, projects]);
+  });
+
+  // --- gr slice --------------------------------------------------------------
+
+  it("gr slice: project_name (po→pr→project) + title=gr.no + owner null; po/wo/pr joins company-scoped", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [grs, [gr("g1", 8, { poId: PO })]],
+            [pos, [po]],
+            [wos, []],
+            [prs, [pr]],
+            [projects, [project]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=gr" });
+    expect(res.statusCode).toBe(200);
+    const g = rowsOf(res)[0]!;
+    expect(g.project_name).toBe("juneflow ราชพฤกษ์");
+    expect(g.title).toBe("GR-2569-0448"); // the REAL gr.no
+    expect(g.owner).toBeNull();
+    expect(g).not.toHaveProperty("defect");
+    expectAbsent(g);
+    boundOn(captured, [pos, wos, prs, projects]);
+  });
+
+  it("gr slice: project_name null when neither po nor wo resolves; title still the real gr.no", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [grs, [gr("g1", 8, { poId: PO })]],
+            [pos, []], // po unresolved → no pr → no project
+            [wos, []],
+            [prs, []],
+            [projects, [project]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=gr" });
+    const g = rowsOf(res)[0]!;
+    expect(g.project_name).toBeNull();
+    expect(g.title).toBe("GR-2569-0448");
+  });
+
+  // --- periods list (GET /subcon-contracts/:id/periods) ----------------------
+
+  it("periods list: each period gains project_name + title + defect; new joins company-scoped", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            [workPeriods, [period("p1", "delivered", "percent", 1), period("p2", "rejected", "percent", 2)]],
+            [projects, [project]],
+            [acceptances, [acceptance(ACCEPTANCE, "p2")]],
+            [defects, [defect(DEFECT, "open")]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: `/api/v1/subcon-contracts/${CONTRACT}/periods` });
+    expect(res.statusCode).toBe(200);
+    const data = rowsOf(res); // sorted by seq
+    const r1 = data[0]!;
+    const r2 = data[1]!;
+    expect(r1.project_name).toBe("juneflow ราชพฤกษ์");
+    expect(r1.title).toBe("WO-1 · งวดที่ 1");
+    expect(r1.owner).toBeNull();
+    expect(r1.defect).toBeNull();
+    expect(r2.title).toBe("WO-1 · งวดที่ 2");
+    expect(r2.defect).toEqual(["ฉาบผนัง B-06 เป็นคลื่น"]);
+    expectAbsent(r1);
+    expectAbsent(r2);
+    boundOn(captured, [projects, acceptances, defects]);
   });
 });
