@@ -498,7 +498,12 @@ function enrichPeriodRow(
   return {
     ...periodWire(p),
     project_name: contract ? projName.get(contract.projectId) ?? null : null,
-    title: contract ? `${contract.no} · งวดที่ ${p.seq}` : null,
+    // title = the contract's DOC NUMBER only (data, like the gr slice) — NOT a
+    // composed UI string. The prototype shows "<no> · งวดที่ <seq>", but "งวดที่"
+    // is UI copy with no i18n key, so it is NOT invented on the server (§0 rule 2 /
+    // B-116). The wire already carries `seq`, so the FE composes the localized
+    // ordinal ("งวดที่ {n}") client-side around this doc number.
+    title: contract?.no ?? null,
     owner: null,
     defect: defectsByPeriod.get(p.id) ?? null,
   };
@@ -515,7 +520,9 @@ function enrichHouseRow(
     ...periodWire(p),
     type: "house",
     project_name: contract ? projName.get(contract.projectId) ?? null : null,
-    title: contract ? `${contract.no} · งวดที่ ${p.seq}` : null,
+    // Doc-number only (data) — the "งวดที่" ordinal has no i18n key, composed FE-side
+    // from the wire's `seq` (§0 rule 2 / B-116). Same rule as enrichPeriodRow.
+    title: contract?.no ?? null,
     owner: null,
   };
 }

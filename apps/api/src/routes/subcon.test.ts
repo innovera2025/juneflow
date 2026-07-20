@@ -1457,8 +1457,8 @@ describe("GET /api/v1 acceptance-center + periods — META-1 display enrichment"
     expect(p1.project_name).toBe("juneflow ราชพฤกษ์");
     expect(p2.project_name).toBe("juneflow ราชพฤกษ์");
     // title composed from the REAL contract.no + seq (exact strings)
-    expect(p1.title).toBe("WO-1 · งวดที่ 1");
-    expect(p2.title).toBe("WO-1 · งวดที่ 2");
+    expect(p1.title).toBe("WO-1");
+    expect(p2.title).toBe("WO-1");
     // a work period has no owner column → honest null on every period row
     expect(p1.owner).toBeNull();
     expect(p2.owner).toBeNull();
@@ -1576,7 +1576,7 @@ describe("GET /api/v1 acceptance-center + periods — META-1 display enrichment"
     expect(h.seq).toBe(3); // the max-seq final period
     expect(h.type).toBe("house");
     expect(h.project_name).toBe("juneflow ราชพฤกษ์");
-    expect(h.title).toBe("WO-1 · งวดที่ 3");
+    expect(h.title).toBe("WO-1");
     expect(h.owner).toBeNull();
     expect(h).not.toHaveProperty("defect"); // a handover carries no defect column
     expectAbsent(h);
@@ -1656,10 +1656,10 @@ describe("GET /api/v1 acceptance-center + periods — META-1 display enrichment"
     const r1 = data[0]!;
     const r2 = data[1]!;
     expect(r1.project_name).toBe("juneflow ราชพฤกษ์");
-    expect(r1.title).toBe("WO-1 · งวดที่ 1");
+    expect(r1.title).toBe("WO-1");
     expect(r1.owner).toBeNull();
     expect(r1.defect).toBeNull();
-    expect(r2.title).toBe("WO-1 · งวดที่ 2");
+    expect(r2.title).toBe("WO-1");
     expect(r2.defect).toEqual(["ฉาบผนัง B-06 เป็นคลื่น"]);
     expectAbsent(r1);
     expectAbsent(r2);
