@@ -50,6 +50,7 @@ import { MasterProjectType } from "./screens/master/master-project-type";
 import { MasterVendor } from "./screens/master/master-vendor";
 import { UsersPermissions } from "./screens/master/users-permissions";
 import { PMDashboard } from "./screens/pm/pm-dashboard";
+import { PMSchedule } from "./screens/pm/pm-schedule";
 import { PMAssets } from "./screens/pm/pm-assets";
 import { GLChartOfAccounts } from "./screens/gl/gl-coa";
 import { GLJournalVoucher } from "./screens/gl/gl-jv";
@@ -91,6 +92,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "master.ptype": MasterProjectType,
   "master.vendor": MasterVendor,
   "pm.dashboard": PMDashboard,
+  "pm.schedule": PMSchedule,
   "pm.assets": PMAssets,
   users: UsersPermissions,
   "gl.coa": GLChartOfAccounts,
