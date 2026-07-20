@@ -23,7 +23,7 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-| P2-BE-43 | acceptance-center enrich (META-1) | 76ff60d feature/backend | — (backend · G3 745 api · opaque Entity no-sacred · live project_name+title+owner+defect · overdue/docs absent · gate 4.5) | 2026-07-20 |
+| P2-BE-43 | acceptance-center enrich (META-1) | 76ff60d feature/backend | **orch-B ✅ GO** — sacred untouched (opaque Entity · openapi md5 same · i18n 1612 B-115 intact · no mig) · §0 title data-only VERIFIED (งวดที่ in comments only · live title='WO-2026-0042') · tenant-door scoped (db.select(projects) auto-scope · foreign→404 no leak) · honest-empty overdue/wait/due ABSENT (C10) · live 13/0 project_name populated · api 745 | 2026-07-20 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
