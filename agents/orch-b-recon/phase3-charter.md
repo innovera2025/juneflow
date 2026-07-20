@@ -26,3 +26,10 @@ Contract A (AR surface · dual-serves tax.etax filters — declare ONCE) · B (/
 
 ## Cross-lane risks (verify lane will skeptic these)
 Money authority: CN VAT client-calc · RV paid-flip Σ-rule · FA depreciation — ALL server-owned at build. Posting-route consistency (FA run + CN approve + /gl/post → same mechanism). Period BE/CE canon. Doc-number display = never client-fabricate. ~510-key glyph discipline.
+
+## CORRECTIONS (2026-07-20 · from orch-A/orch-C prep reports · orch-B verified vs NAV-ROUTES)
+- **Web source list:** gl.* screens = **pototype/gl.jsx** (NAV-ROUTES L60+) · tax.vat/wht = **pototype/tax.jsx** · finance.jsx = NOT ROUTED (dead code · §0-forbidden as source) — supersedes the accounting-extra-only list. NAV-ROUTES stays authoritative; re-read the .jsx at port time (§0).
+- **Depreciation formula:** orch-A prep assumed cost/(life×12) — WRONG per B-123: server = **(cost−salvage)/life** (L491 = mock bug). Corrected in C-176.
+- **RV over-allocation:** REJECT 409 (server money authority · no silent clamp) — orch-B default recorded C-176; RV posting rides posting-inbox (consistency: rv:/fa:/cn: all inbox).
+- **close-period:** lock-only in Phase-3 (no closing entries — accounting policy defer).
+- **Retention 50/50 release:** NOT covered by B-121..124 → filed B-125 (Wei async · Wave-P3-2).
