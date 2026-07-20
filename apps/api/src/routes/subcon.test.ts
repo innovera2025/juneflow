@@ -22,6 +22,8 @@ import {
   vendors,
   apBillings,
   retentionLedgers,
+  grs,
+  pmWorkOrders,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import type { AuditRecord } from "../plugins/audit-log.js";
@@ -131,6 +133,13 @@ function paramsOf(where: SQL | undefined): unknown[] {
   return new PgDialect().sqlToQuery(where).params;
 }
 
+/** The lowercased SQL text of a where clause — for asserting param-less
+ * predicates (e.g. `... is null`) that never surface in paramsOf(). */
+function sqlOf(where: SQL | undefined): string {
+  if (!where) return "";
+  return new PgDialect().sqlToQuery(where).sql.toLowerCase();
+}
+
 let app: FastifyInstance;
 afterEach(async () => {
   await app?.close();
@@ -214,6 +223,42 @@ const defect = (
   afterPhoto: null as string | null,
   due: null as string | null,
   status,
+  createdAt: D,
+  updatedAt: D,
+});
+
+// Wave-3 fan-in stub rows (pm work order · goods receipt) — real columns only.
+const ASSET = "a5a5a5a5-a5a5-a5a5-a5a5-a5a5a5a5a5a5";
+const TEMPLATE = "7e7e7e7e-7e7e-7e7e-7e7e-7e7e7e7e7e7e";
+
+const pmWorkOrder = (id: string, customerSign: string | null) => ({
+  id,
+  assetId: ASSET,
+  templateId: TEMPLATE,
+  tech: "ช่างวิรัตน์ ส.",
+  checkinGps: "13.7,100.5",
+  items: [] as unknown[],
+  cause: null as string | null,
+  fix: null as string | null,
+  advice: null as string | null,
+  customerSign,
+  createdAt: D,
+  updatedAt: D,
+});
+
+const gr = (
+  id: string,
+  rejected: number,
+  opts: { poId?: string | null; woId?: string | null; no?: string } = {},
+) => ({
+  id,
+  poId: opts.poId ?? "88888888-8888-8888-8888-888888888888",
+  woId: opts.woId ?? null,
+  no: opts.no ?? "GR-2569-0448",
+  received: "100",
+  rejected: String(rejected),
+  photos: [] as string[],
+  status: "received",
   createdAt: D,
   updatedAt: D,
 });
@@ -1129,16 +1174,206 @@ describe("GET /api/v1/acceptance-center", () => {
     expect(captured.find((c) => c.table === workPeriods)).toBeFalsy(); // no query ran
   });
 
-  it("?type=gr and ?type=house are the Wave-3 fan-in — honest empty", async () => {
-    for (const type of ["gr", "house"]) {
-      const res = await (
-        await buildTestApp({
-          resolveTenant: async () => SESSION,
-          db: stubDb({ rows: [[workPeriods, [period("p1", "delivered")]]] }),
-        })
-      ).inject({ url: `/api/v1/acceptance-center?type=${type}` });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().total).toBe(0);
+  it("an unknown ?type falls through to the period queue (Wave-0 shape)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[workPeriods, [period("p1", "delivered")]]] }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=bogus" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(1); // the delivered period is still queued
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /acceptance-center — Wave-3 fan-in (B-107e): the pm / house / gr slices.
+// Each is tenant-scoped through the project.company_id root (subcon/pm/gr rows
+// carry NO company_id — a bare read would be a tenant hole), returns the B-014
+// envelope, and is honest-empty when its feed has no matching rows (C10 — never
+// fabricated). Rows come from the stub; no value is hand-computed.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/acceptance-center — Wave-3 fan-in (pm/house/gr)", () => {
+  it("401s flat for every slice type without a session (fail closed)", async () => {
+    for (const type of ["pm", "house", "gr"]) {
+      const res = await (await buildTestApp()).inject({
+        url: `/api/v1/acceptance-center?type=${type}`,
+      });
+      expect(res.statusCode).toBe(401);
     }
+  });
+
+  // --- pm slice: pm_workorder awaiting close (customer_sign IS NULL) ---------
+
+  it("?type=pm returns unsigned work orders (company_id bound on the 3-hop read)", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, [pmWorkOrder("w1", null)]]], captured }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=pm" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1);
+    const w = body.data[0];
+    expect(w.type).toBe("pm");
+    expect(w.asset_id).toBe(ASSET);
+    expect(w.template_id).toBe(TEMPLATE);
+    expect(w.tech).toBe("ช่างวิรัตน์ ส.");
+    expect(w.checkin_gps).toBe("13.7,100.5");
+    // the pm_workorder → pm_asset → pm_contract → project read anchors company_id.
+    const read = captured.find((c) => c.table === pmWorkOrders);
+    expect(read).toBeTruthy();
+    expect(paramsOf(read!.where)).toContain(COMPANY);
+    expect(paramsOf(read!.where)).not.toContain(OTHER_COMPANY);
+  });
+
+  it("?type=pm filters to customer_sign IS NULL (a signed WO can never enter the queue)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, [pmWorkOrder("w1", null)]]], captured }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=pm" });
+    const read = captured.find((c) => c.table === pmWorkOrders);
+    const sql = sqlOf(read!.where);
+    expect(sql).toContain("customer_sign");
+    expect(sql).toContain("is null");
+  });
+
+  it("?type=pm honest-empty when every work order is already signed/closed", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, []]] }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=pm" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(0);
+  });
+
+  // --- house slice: the FINAL (max-seq) work period per contract, unpaid ------
+
+  it("?type=house returns only the max-seq period of a contract (tagged type=house), company bound", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            // deliberately out of order — the max-seq (3), not the last element, wins.
+            [workPeriods, [
+              period("p2", "delivered", "percent", 2),
+              period("p3", "rejected", "percent", 3),
+              period("p1", "delivered", "percent", 1),
+            ]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=house" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1); // one contract → its single final period
+    expect(body.data[0].seq).toBe(3);
+    expect(body.data[0].type).toBe("house");
+    const read = captured.find((c) => c.table === workPeriods);
+    expect(paramsOf(read!.where)).toContain(COMPANY);
+    expect(paramsOf(read!.where)).not.toContain(OTHER_COMPANY);
+  });
+
+  it("?type=house groups per contract — each contract's final awaiting period comes back", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [
+              { ...period("a1", "delivered", "percent", 1), contractId: "c-a" },
+              { ...period("a2", "delivered", "percent", 2), contractId: "c-a" },
+              { ...period("b1", "rejected", "percent", 5), contractId: "c-b" },
+            ]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=house" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(2); // c-a final (seq 2) + c-b final (seq 5)
+    expect(body.data.map((r: { seq: number }) => r.seq).sort()).toEqual([2, 5]);
+  });
+
+  it("?type=house excludes a contract whose final period is already paid (handed-over-and-done)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [
+              period("p1", "paid", "percent", 1),
+              period("p2", "paid", "percent", 2),
+              period("p3", "paid", "percent", 3), // final = paid → excluded
+            ]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=house" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(0);
+  });
+
+  it("?type=house honest-empty when there are no periods", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[workPeriods, []]] }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=house" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(0);
+  });
+
+  // --- gr slice: goods receipts with a rejected quantity (rejected > 0) -------
+
+  it("?type=gr returns only receipts with rejected>0 (tagged type=gr), company bound on BOTH chains", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[grs, [gr("g1", 8), gr("g2", 0)]]],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=gr" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1); // g1 (rejected 8) queued; g2 (rejected 0) excluded
+    const g = body.data[0];
+    expect(g.id).toBe("g1");
+    expect(g.type).toBe("gr");
+    expect(g.rejected).toBe(8);
+    expect(g.no).toBe("GR-2569-0448");
+    // a gr anchors on EITHER a po or a wo → the two chains each bind company_id.
+    const grReads = captured.filter((c) => c.table === grs);
+    expect(grReads).toHaveLength(2); // po chain + wo chain
+    for (const read of grReads) {
+      expect(paramsOf(read.where)).toContain(COMPANY);
+      expect(paramsOf(read.where)).not.toContain(OTHER_COMPANY);
+    }
+  });
+
+  it("?type=gr honest-empty when no receipt carries a rejected quantity", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[grs, [gr("g1", 0)]]] }),
+      })
+    ).inject({ url: "/api/v1/acceptance-center?type=gr" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().total).toBe(0);
   });
 });
