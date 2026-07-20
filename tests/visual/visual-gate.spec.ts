@@ -286,12 +286,17 @@ test.describe("visual gate · content-area crop (B-048 · P0-QA-08)", () => {
   });
 
   test("the app-shell manifest row parses and its masks resolve", async () => {
+    // B-120(ข) 2026-07-20: the row moved off the scaffold-era shape this test
+    // originally pinned (gallery ref + sidebar-logo/content-area masks). The
+    // dashboard body IS ported now — the B-048 note itself said content-area
+    // drops "once the body screen lands" — and Wei's re-baseline ruling points
+    // refs at app-baseline/ with the two live-time masks instead.
     const manifest = loadManifest();
     const shell = manifest.find((m) => m.screen === "app-shell");
     expect(shell, "app-shell row present in screens.manifest.json").toBeDefined();
     expect(shell!.route).toBe("dashboard");
-    expect(shell!.ref).toBe("gallery/g1/01-s.jpg");
-    expect(shell!.masks).toEqual(["sidebar-logo-b044", "content-area-b048"]);
+    expect(shell!.ref).toBe("app-baseline/dashboard.png");
+    expect(shell!.masks).toEqual(["header-update-time-b120", "header-date-chip-b120"]);
     // Every listed mask key must be a real registry entry (throws otherwise).
     expect(() => resolveMasks(shell!.masks)).not.toThrow();
     expect(resolveMasks(shell!.masks)).toHaveLength(2);
