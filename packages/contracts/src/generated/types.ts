@@ -4708,7 +4708,7 @@ export interface operations {
     listAcceptanceCenter: {
         parameters: {
             query?: {
-                type?: "gr" | "period" | "house";
+                type?: "gr" | "period" | "house" | "pm";
                 status?: string;
             };
             header?: never;
