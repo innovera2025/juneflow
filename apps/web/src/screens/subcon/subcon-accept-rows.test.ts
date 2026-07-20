@@ -31,6 +31,7 @@ const period = (over: Partial<PeriodRow> = {}): PeriodRow => ({
   amount: 0,
   currencyCode: "THB",
   status: "pending",
+  defect: null,
   ...over,
 });
 
@@ -58,7 +59,20 @@ describe("toPeriodRow", () => {
       amount: 537500,
       currencyCode: "THB",
       status: "delivered",
+      defect: null,
     });
+  });
+
+  it("narrows the enriched `defect` items (string[]) to one joined line, else null", () => {
+    expect(
+      toPeriodRow({ id: "wp5", status: "rejected", defect: ["crack at C3", "uneven floor"] }).defect,
+    ).toBe("crack at C3, uneven floor");
+    expect(toPeriodRow({ id: "wp6", defect: ["only one"] }).defect).toBe("only one");
+    expect(toPeriodRow({ id: "wp7", defect: [] }).defect).toBeNull();
+    expect(toPeriodRow({ id: "wp8" }).defect).toBeNull();
+    // defensive: a plain string / blank entries collapse honestly
+    expect(toPeriodRow({ id: "wp10", defect: "single" }).defect).toBe("single");
+    expect(toPeriodRow({ id: "wp11", defect: ["  ", "real"] }).defect).toBe("real");
   });
 
   it("accepts camelCase aliases and defaults missing fields", () => {

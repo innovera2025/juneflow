@@ -10,12 +10,15 @@
  * use-subcon.ts) whose opaque Entity wire is EXACTLY (apps/api/src/routes/subcon.ts
  * periodWire):
  *   { id, contract_id, seq, basis, target, pct, amount, currency_code, status }
- * status vocab = pending | delivered | inspecting | passed | rejected | paid.
+ * status vocab = pending | delivered | inspecting | passed | rejected | paid. The
+ * periods-list handler additionally enriches each row (enrichPeriodRow) with a real
+ * `defect` (the rejected period's defect items) — narrowed + rendered here (META-1).
  *
  * WIRE GAPS (reported, never fabricated — see the SubconAccept view header for the
- * full list). The period wire carries NO label, NO GR doc, NO defect text, NO unit
- * label, and there is no contract-level `basis` (the method chip is DERIVED from the
- * periods' basis). This module never invents values for those; the view em-dashes.
+ * full list). The period wire carries NO label, NO GR doc, NO unit label, and there
+ * is no contract-level `basis` (the method chip is DERIVED from the periods' basis).
+ * This module never invents values for those; the view em-dashes. The rejected-period
+ * DEFECT text is now REAL (periods-list enrichment `defect`, META-1) — not a gap.
  *
  * Money helpers (formatMoney / millionsValue) are re-exported from ./subcon-rows so
  * the SubconAccept view + AcceptForm read every money format from this module (the
@@ -42,6 +45,12 @@ export interface PeriodRow {
   currencyCode: string;
   /** Lifecycle status (pending|delivered|inspecting|passed|rejected|paid). */
   status: string;
+  /**
+   * Rejected-period defect text (periods-list enrichment, subcon.ts enrichPeriodRow
+   * `defect`): the period's defect items joined to one line, or null when there are
+   * none. REAL via META-1 (P2-BE-43); the view shows it only for a rejected period.
+   */
+  defect: string | null;
 }
 
 /** Read a string field off an opaque row ({ [k]: unknown }); "" when absent. */
@@ -60,9 +69,26 @@ function num(v: unknown): number {
 }
 
 /**
+ * Narrow the enriched `defect` field to a single display string. enrichPeriodRow
+ * (subcon.ts) sets `defect` to the rejected period's defect items as a string[] (one
+ * entry per defect row), or null. The view shows them on one line, so present string
+ * items are joined; an empty/absent value (or a plain string, defensively) collapses
+ * to null so the view em-dashes rather than rendering an empty label.
+ */
+function defectText(v: unknown): string | null {
+  if (Array.isArray(v)) {
+    const items = v.filter((x): x is string => typeof x === "string" && x.trim() !== "");
+    return items.length ? items.join(", ") : null;
+  }
+  if (typeof v === "string" && v.trim() !== "") return v;
+  return null;
+}
+
+/**
  * Narrow an opaque /subcon-contracts/{id}/periods Entity row to a PeriodRow.
  * Multi-word fields accept snake_case (server convention) or camelCase for
- * robustness (mirrors subcon-rows toContractRow). Missing fields default (0 / "").
+ * robustness (mirrors subcon-rows toContractRow). Missing fields default (0 / "" /
+ * null). `defect` is the enriched rejected-period defect items (defectText).
  */
 export function toPeriodRow(e: Record<string, unknown>): PeriodRow {
   return {
@@ -75,6 +101,7 @@ export function toPeriodRow(e: Record<string, unknown>): PeriodRow {
     amount: num(e.amount),
     currencyCode: str(e.currency_code ?? e.currencyCode),
     status: str(e.status),
+    defect: defectText(e.defect),
   };
 }
 

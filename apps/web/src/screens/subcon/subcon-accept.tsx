@@ -26,12 +26,13 @@
  * is never blocked; the server `warning` flag drives the non-blocking advisory banner
  * below the header. Progress % is NEVER fabricated.
  *
- * WIRE GAPS (reported honestly, never fabricated) — the periodWire is only
- * { id, contract_id, seq, basis, target, pct, amount, currency_code, status }
- * (apps/api/src/routes/subcon.ts), and the contractWire carries NO scope/po:
+ * WIRE GAPS (reported honestly, never fabricated) — periodWire is only
+ * { id, contract_id, seq, basis, target, pct, amount, currency_code, status }; the
+ * periods-list handler enriches each row with a real `defect` (META-1, P2-BE-43),
+ * while the contractWire still carries NO scope/po:
  *   - subtitle scope + the WO/PO PO sub-line: no wire -> em-dash.
- *   - period detail (label), doc (GR), defect text, distance/unit `unit`
- *     label: none on the wire -> em-dash.
+ *   - period detail (label), doc (GR), distance/unit `unit` label: none on the wire
+ *     -> em-dash. The rejected-period DEFECT text is now REAL (row.defect).
  *   - percent tracker: the cumulative-% markers are REAL (periods[].pct), but the
  *     project's actual-progress feed is not on the wire -> no bar fill, em-dash legend.
  *   - distance/unit tracker: accSurvey/doneQty/totalQty/ratePerUnit are not on the wire
@@ -538,8 +539,17 @@ export function SubconAccept() {
                       <td style={{ ...td, fontWeight: 700 }} className="num">
                         {p.seq}
                       </td>
-                      {/* detail: no label on the wire -> em-dash */}
-                      <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
+                      {/* detail: the period label is a wire gap (em-dash); the
+                          rejected-period DEFECT text is REAL (row.defect, META-1) and
+                          renders below as the prototype's red sub-line (L88). */}
+                      <td style={{ ...td, color: "var(--text-3)" }}>
+                        {DASH}
+                        {p.status === "rejected" && p.defect && (
+                          <div style={{ fontSize: 10.5, color: "var(--danger)", marginTop: 2 }}>
+                            {t("subcon.defectLabel").replace("{value}", p.defect)}
+                          </div>
+                        )}
+                      </td>
                       {/* qty / % / milestone marker per basis */}
                       <td style={{ ...td, textAlign: "right" }} className="num">
                         {p.basis === "distance" || p.basis === "unit"
