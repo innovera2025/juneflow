@@ -19,10 +19,12 @@
 
 ## คิวรอ promote
 
-> **QUEUE EMPTY (2026-07-20 · PHASE-4 Wave-0+1 PROMOTED → main `7741e1b` · 0-drift)** — P2-BE-38/39 + P2-WEB-19/20 promoted, moved to history. New rows accumulate for the next batch (Phase-4 Wave-2). The `>` records below are the durable promote history.
+> **PHASE-4 W2 QUEUED (2026-07-20 · orch-A)** — P2-BE-40/41 on dev await Wei promote. Prior: **QUEUE EMPTY (2026-07-20 · PHASE-4 Wave-0+1 PROMOTED → main `7741e1b` · 0-drift)** — P2-BE-38/39 + P2-WEB-19/20 promoted, moved to history. New rows accumulate for the next batch (Phase-4 Wave-2). The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-40 | subcon approve-payment (W2) | 3aa7cfe feature/backend (+901f6a0 mig 0033) | — (backend · G3 726 api · G1 migrate 0033 · live money reconcile+retention+409/404 · gate 4.5) | 2026-07-20 |
+| P2-BE-41 | pm contracts/quotes/close (W2) | 00d252e feature/backend (+901f6a0 mig 0034) | — (backend · G3 726 api · G1 migrate 0034 · live per_visit+quote+close+name/code · gate 4.5) | 2026-07-20 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
