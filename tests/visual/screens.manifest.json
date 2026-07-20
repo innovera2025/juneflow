@@ -1,13 +1,67 @@
 {
-  "note": "Real-capture list for the visual gate (P0-QA-04). Each entry: {screen, route, ref, masks?} where ref is relative to tests/visual/reference/ and masks is an OPT-IN list of Wei-approved mask keys from lib/masks.ts MASK_REGISTRY (P0-QA-07) — shell-bearing screens list \"sidebar-logo-b044\" (B-044: reference logo lockup is an older locale render); screens without the sidebar lockup (e.g. login, P1-WEB-01) must omit masks. A route whose body screen is not ported yet (only shell chrome delivered) also lists \"content-area-b048\" (B-048/P0-QA-08: shell-only G5 — compare chrome only, x>=244,y>=56 excluded), and drops it once the body screen lands so full-page G5 returns. Populate a row when the matching apps/web screen exists and is reachable at VISUAL_BASE_URL. route→ref mapping is authoritative in tests/visual/reference-index.md (P0-QA-01). The harness self-verifies its engine meanwhile.",
+  "note": "Real-capture list for the visual gate (P0-QA-04). Each entry: {screen, route, ref, masks?} where ref is relative to tests/visual/reference/ and masks is an OPT-IN list of Wei-approved mask keys from lib/masks.ts MASK_REGISTRY (P0-QA-07) — shell-bearing screens list \"sidebar-logo-b044\" (B-044: reference logo lockup is an older locale render); screens without the sidebar lockup (e.g. login, P1-WEB-01) must omit masks. A route whose body screen is not ported yet (only shell chrome delivered) also lists \"content-area-b048\" (B-048/P0-QA-08: shell-only G5 — compare chrome only, x>=244,y>=56 excluded), and drops it once the body screen lands so full-page G5 returns. Populate a row when the matching apps/web screen exists and is reachable at VISUAL_BASE_URL. route→ref mapping is authoritative in tests/visual/reference-index.md (P0-QA-01). The harness self-verifies its engine meanwhile. B-119 bring-up (2026-07-20 · orch-B): registered the 6 ported Phase-4 routes that HAVE references (subcon.contracts/pm.assets/pm.dashboard/pm.schedule/pm.wo per reference-index.md). subcon.accept has NO reference (not in the prototype gallery) — pending a Wei-approved NEW-REF capture; register it when the ref lands. B-120=ข (2026-07-20 · Wei): refs switched to app-baseline/ — captures of the Wei-APPROVED app (a99031d content, same rendering environment) → strict-0 = a real REGRESSION gate. The prototype gallery pack stays untouched as the §0 design ground-truth used at PORT time (human/agent comparison). Masks dropped (same-env). Re-baseline only after a Wei-approved visual change, never to silence a diff. B-120=ข (2026-07-20 · Wei): refs switched to app-baseline/ — captures of the Wei-APPROVED app (a99031d content, same rendering environment) → strict-0 = a real REGRESSION gate. The prototype gallery pack stays untouched as the §0 design ground-truth used at PORT time (human/agent comparison). Masks dropped (same-env). Re-baseline only after a Wei-approved visual change, never to silence a diff. B-120=ข (2026-07-20 · Wei): refs switched to app-baseline/ — captures of the Wei-APPROVED app (a99031d content, same rendering environment) → strict-0 = a real REGRESSION gate. The prototype gallery pack stays untouched as the §0 design ground-truth used at PORT time (human/agent comparison). Masks dropped (same-env). Re-baseline only after a Wei-approved visual change, never to silence a diff.",
   "screens": [
     {
       "screen": "app-shell",
       "route": "dashboard",
-      "ref": "gallery/g1/01-s.jpg",
+      "ref": "app-baseline/dashboard.png",
       "masks": [
-        "sidebar-logo-b044",
-        "content-area-b048"
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "subcon-contracts",
+      "route": "subcon.contracts",
+      "ref": "app-baseline/subcon-contracts.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "subcon-accept",
+      "route": "subcon.accept",
+      "ref": "app-baseline/subcon-accept.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "pm-assets",
+      "route": "pm.assets",
+      "ref": "app-baseline/pm-assets.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "pm-dashboard",
+      "route": "pm.dashboard",
+      "ref": "app-baseline/pm-dashboard.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "pm-schedule",
+      "route": "pm.schedule",
+      "ref": "app-baseline/pm-schedule.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "pm-wo",
+      "route": "pm.wo",
+      "ref": "app-baseline/pm-wo.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
       ]
     }
   ]

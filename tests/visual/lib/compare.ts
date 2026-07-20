@@ -89,9 +89,14 @@ function resolveOptions(opts: CompareOptions): Required<CompareOptions> {
   const channelThreshold =
     opts.channelThreshold ??
     Number(process.env.VISUAL_CHANNEL_THRESHOLD ?? "0");
+  // B-120 tail (Wei ruling 2026-07-20): default epsilon 0.0001 (= 0.01%, ~160px
+  // of a 1600x1000 frame) — absorbs sub-pixel font-AA paint jitter between
+  // same-environment captures (measured worst case 46px on topbar switcher
+  // chips), while any REAL regression (a text/color/layout change = hundreds
+  // to thousands of px) still FAILs. Strict-0 remains available via the env.
   const maxDiffPixelRatio =
     opts.maxDiffPixelRatio ??
-    Number(process.env.VISUAL_MAX_DIFF_PIXEL_RATIO ?? "0");
+    Number(process.env.VISUAL_MAX_DIFF_PIXEL_RATIO ?? "0.0001");
   return { channelThreshold, maxDiffPixelRatio, maskRegions: validateMaskRegions(opts.maskRegions ?? []) };
 }
 
