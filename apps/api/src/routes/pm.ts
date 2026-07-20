@@ -14,18 +14,27 @@
 //   createPmWorkorder (POST /pm/workorders)              → 201 EntityCreated
 //   checkinPmWorkorder (POST /pm/workorders/{id}/checkin {gps})    → ActionOk
 //   updatePmWorkorderChecklist (PUT /pm/workorders/{id}/checklist) → EntityOk
-// GATED to Wave-2 (B-108) and intentionally left UNREGISTERED here:
-//   /pm/contracts (POST autogen), /pm/workorders/{id}/close, /pm/quotes*.
+// Wave-2 (B-108, this file) now registers the remaining PM ops:
+//   listPmContracts  (GET  /pm/contracts)                → EntityList
+//   createPmContract (POST /pm/contracts)                → 201 EntityCreated
+//                     mode=per_visit AUTOGENS work orders (B-108a); mode=MA does not
+//   listPmQuotes     (GET  /pm/quotes)                   → EntityList (B-108c gap)
+//   createPmQuote    (POST /pm/quotes)                   → 201 EntityCreated
+//   decidePmQuote    (POST /pm/quotes/{id}/decide)       → ActionOk (+ LINE stub)
+//   closePmWorkorder (POST /pm/workorders/{id}/close)    → ActionOk (+ LINE stub)
 //
-// C10 (PLAN.md §0 rule 4): the wire carries REAL DB columns only. The schema is
-// deliberately minimal vs the mock — PMAsset models only {kind,site,cycle,
-// next_due} (data-dictionary), so the mock's presentational asset code/name/
-// last-PM/status are NOT columns and are not fabricated. ChecklistTemplate models
-// only {kind,items[]} — the mock's template `name` has no backing column, so it is
-// dropped (flagged, not invented). PMWorkOrder models {asset_id,template_id,tech,
-// checkin_gps,items,cause,fix,advice,customer_sign} — the mock's type/site/zone/
-// date/sla are derived/presentational and not stored. None of these tables carry
-// money, so no currency_code rides the wire.
+// C10 (PLAN.md §0 rule 4): the wire carries REAL DB columns only. PMAsset now
+// carries {name,code,kind,site,cycle,next_due} — the mock's asset name/code got
+// real columns in migration 0034 (B-110), so they now ride the wire (Wave-0
+// dropped them honestly while they had no backing column). The mock's last-PM/
+// status are still NOT columns and are not fabricated. ChecklistTemplate now
+// carries {name,kind,items[]} — its `name` also gained a column in 0034 (B-110).
+// PMWorkOrder models {asset_id,template_id,tech,checkin_gps,items,cause,fix,advice,
+// customer_sign} — the mock's type/site/zone/date/sla are derived/presentational
+// and not stored; closing a WO writes the real close columns (cause/fix/advice/
+// customer_sign) and there is NO cert/status column, so closePmWorkorder never
+// invents one (B-108b). PMContract carries money (value) → currency_code rides its
+// wire; PMQuote's parts carry money → currency_code rides the quote wire.
 //
 // Tenant scope (CRITICAL): three of the four tables have NO company_id column and
 // are PARENT-FK-scoped through project_id → project.company_id (like boq_doc):
@@ -49,15 +58,18 @@ import {
   checklistTemplates,
   pmAssets,
   pmContracts,
+  pmQuotes,
   pmWorkOrders,
   projects,
 } from "@juneflow/db/schema";
-import type { PmChecklistRow } from "@juneflow/db/schema";
+import type { PmChecklistRow, PmQuotePartRow } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
 
 type PmAssetRow = typeof pmAssets.$inferSelect;
 type ChecklistTemplateRow = typeof checklistTemplates.$inferSelect;
 type PmWorkOrderRow = typeof pmWorkOrders.$inferSelect;
+type PmContractRow = typeof pmContracts.$inferSelect;
+type PmQuoteRow = typeof pmQuotes.$inferSelect;
 
 /** PmChecklistRow.result enum (schema pm.ts): the three real filled states.
  * The mock's "none" is the not-yet-checked UI state (pm3.jsx RESULT_OPTS) — it is
@@ -76,6 +88,14 @@ const ASSET_HOPS = [
   { fk: pmContracts.projectId, parent: projects },
 ];
 const WO_HOPS = [
+  { fk: pmWorkOrders.assetId, parent: pmAssets },
+  { fk: pmAssets.contractId, parent: pmContracts },
+  { fk: pmContracts.projectId, parent: projects },
+];
+// pm_quote carries neither a company_id nor a project_id — it scopes 4 hops
+// (quote → work order → asset → contract → project root), the deepest PM chain.
+const QUOTE_HOPS = [
+  { fk: pmQuotes.workOrderId, parent: pmWorkOrders },
   { fk: pmWorkOrders.assetId, parent: pmAssets },
   { fk: pmAssets.contractId, parent: pmContracts },
   { fk: pmContracts.projectId, parent: projects },
@@ -121,6 +141,85 @@ function normalizeTemplateItems(raw: unknown): PmChecklistRow[] {
 }
 
 /**
+ * Normalize the opaque contract `mode` onto the pm_contract_mode DB enum
+ * ("MA" | "per_visit"). The DB is the source of truth for stored values
+ * (schema pm.ts pmContractMode + data-dictionary "mode: MA เงื่อนไข | per-visit
+ * หารครั้งลงปฏิทิน"), while the OpenAPI request declares a looser [ma, visits]
+ * alias — so both spellings map to the same stored enum (mock svcType
+ * "ma"→MA on-call, "scheduled"/per-visit→per_visit calendar spread; pm2.jsx
+ * SVC). An unrecognized value returns null (→ 400, never a bad enum write).
+ */
+function normalizeMode(raw: unknown): "MA" | "per_visit" | null {
+  const v = str(raw).trim().toLowerCase();
+  if (v === "ma") return "MA";
+  if (v === "per_visit" || v === "per-visit" || v === "pervisit" || v === "visits") {
+    return "per_visit";
+  }
+  return null;
+}
+
+/** Coerce an opaque integer-ish value to a whole number, else null (nullable col). */
+function intOrNull(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.trunc(raw);
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const n = Number(raw.trim());
+    if (Number.isFinite(n)) return Math.trunc(n);
+  }
+  return null;
+}
+
+/** Coerce an opaque money-ish value to a numeric string, else undefined (use default). */
+function numStr(raw: unknown): string | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const n = Number(raw.trim());
+    if (Number.isFinite(n)) return String(n);
+  }
+  return undefined;
+}
+
+/**
+ * Normalize opaque quote parts into stored PmQuotePartRow[] (erd "parts[]";
+ * data-dictionary "ใบเสนอราคาอะไหล่"). Each part is a labeled spare with an
+ * optional qty + price (price is money and rides the quote's currency_code, not
+ * a per-line one). Blank-label parts are dropped (never a nameless line).
+ */
+function normalizeQuoteParts(raw: unknown): PmQuotePartRow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PmQuotePartRow[] = [];
+  for (const entry of raw) {
+    const it = (entry ?? {}) as Record<string, unknown>;
+    const label = str(pick(it, "label")).trim();
+    if (!label) continue;
+    const part: PmQuotePartRow = { label };
+    const qty = intOrNull(pick(it, "qty"));
+    if (qty !== null) part.qty = qty;
+    const priceRaw = pick(it, "price");
+    if (typeof priceRaw === "number" && Number.isFinite(priceRaw)) {
+      part.price = priceRaw;
+    } else if (typeof priceRaw === "string" && priceRaw.trim() !== "") {
+      const n = Number(priceRaw.trim());
+      if (Number.isFinite(n)) part.price = n;
+    }
+    out.push(part);
+  }
+  return out;
+}
+
+/**
+ * LINE notify — OUT OF SCOPE for the backend (B-108b/B-108c). The prototype ends
+ * the close + quote-decide flows by pushing to the customer's LINE (pm3.jsx
+ * closeWO "ส่งรายงานให้ลูกค้าแล้ว"; data-dictionary "ปิดงาน → ใบรับรอง → LINE" and
+ * "ใบเสนอราคาอะไหล่ → ลูกค้าอนุมัติ (LINE)"). There is no LINE integration — nor a
+ * certificate-PDF renderer — in this system, so this is a deliberate NO-OP stub
+ * that names the intent WITHOUT performing any external side effect (never a
+ * fabricated call). When a real LINE channel lands, this is its single seam.
+ */
+function lineNotifyStub(_event: string, _ref: string): void {
+  // no-op: external LINE push / cert-PDF is not implemented (B-108b/B-108c).
+}
+
+/**
  * Merge one filled checklist line from the PUT body onto its snapshot row (by
  * position) — the mock fills `result` + before/after photos against the labels
  * captured at create time (pm3.jsx: labels are fixed, the tech cycles result and
@@ -144,11 +243,15 @@ function mergeChecklistRow(
   return row;
 }
 
-/** The opaque Entity wire shape for one PM asset (real pm_asset columns only). */
+/** The opaque Entity wire shape for one PM asset (real pm_asset columns only).
+ *  name/code gained real columns in migration 0034 (B-110) — the web asset card
+ *  reads them, so they now ride the wire (Wave-0 dropped them while column-less). */
 function assetWire(a: PmAssetRow): Record<string, unknown> {
   return {
     id: a.id,
     contract_id: a.contractId,
+    name: a.name,
+    code: a.code,
     kind: a.kind,
     site: a.site,
     cycle: a.cycle,
@@ -156,12 +259,43 @@ function assetWire(a: PmAssetRow): Record<string, unknown> {
   };
 }
 
-/** The opaque Entity wire shape for one checklist template (real columns only). */
+/** The opaque Entity wire shape for one checklist template (real columns only).
+ *  `name` gained a real column in migration 0034 (B-110) — the checklist picker
+ *  shows a name, so it now rides the wire. */
 function templateWire(t: ChecklistTemplateRow): Record<string, unknown> {
   return {
     id: t.id,
+    name: t.name,
     kind: t.kind,
     items: t.items,
+  };
+}
+
+/** The opaque Entity wire shape for one PM contract (real columns; value is money
+ *  → currency_code rides the row). */
+function contractWire(c: PmContractRow): Record<string, unknown> {
+  return {
+    id: c.id,
+    project_id: c.projectId,
+    customer_id: c.customerId,
+    mode: c.mode,
+    visits_per_year: c.visitsPerYear,
+    sla: c.sla,
+    value: c.value,
+    currency_code: c.currencyCode,
+    end: c.end,
+  };
+}
+
+/** The opaque Entity wire shape for one PM quote (real columns; parts carry money
+ *  → currency_code rides the row). */
+function quoteWire(q: PmQuoteRow): Record<string, unknown> {
+  return {
+    id: q.id,
+    wo_id: q.workOrderId,
+    parts: q.parts,
+    decision: q.decision,
+    currency_code: q.currencyCode,
   };
 }
 
@@ -183,6 +317,141 @@ function workOrderWire(w: PmWorkOrderRow): Record<string, unknown> {
 
 /** Register the PM routes on the given (already /api/v1-prefixed) scope. */
 export function registerPmRoute(app: FastifyInstance): void {
+  // GET /pm/contracts — the tenant's PM contracts (pm2.jsx PMContracts). pm_contract
+  // has no company_id → scope it 1 hop to the project root.
+  app.get("/pm/contracts", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+    const rows = await db.selectThrough(pmContracts, CONTRACT_HOPS);
+    return reply.code(200).send(listEnvelope(rows.map(contractWire)));
+  });
+
+  // POST /pm/contracts — create a PM contract for a tenant-owned project
+  // (pm2.jsx PMContractWizard/PMContractForm). Body: project_id (required),
+  // customer_id?, mode (MA|per_visit), visits_per_year?, sla?, value?, end?.
+  //
+  // AUTOGEN (Wei B-108a; pm2.jsx PMContractForm.save L400-411): the "scheduled"
+  // service type — DB mode `per_visit` ("รายครั้งตามกำหนด … สร้างงานลงปฏิทิน
+  // อัตโนมัติ") — spreads `visits_per_year` service visits across the year and
+  // auto-creates ONE work order per visit. The mock generates exactly nVisits
+  // calendar jobs for the whole contract (`for i in 0..nVisits`), so we mirror
+  // that COUNT: nVisits WO shells, round-robin across the contract's assets
+  // (pm_workorder requires a real asset_id — the mock's contract-level plan item
+  // does not, so we bind each visit to an asset). Each shell snapshots the
+  // checklist template matched by the asset's kind (pm3.jsx picks the checklist by
+  // asset kind). Per B-108a there is NO new table/column and NO scheduled-date
+  // column, so the visit DATES are not stored — they derive at read time from
+  // pm_asset.next_due/cycle exactly as the mock derives them. A freshly created
+  // contract has no assets yet (assets are registered afterwards under the
+  // contract), so in production autogen honestly creates 0 WOs; the count grows
+  // only once assets exist. mode=MA is on-call (SLA) and NEVER autogens.
+  //
+  // The contract insert + any autogen WOs run in ONE transaction (all-or-nothing):
+  // a failed WO insert rolls back the contract, so a per_visit contract never
+  // half-exists with a partial schedule.
+  app.post("/pm/contracts", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const projectId = str(pick(body, "project_id", "projectId")).trim();
+    const mode = normalizeMode(pick(body, "mode"));
+    if (!projectId) {
+      return reply
+        .code(400)
+        .send({ code: "VALIDATION", message: "project_id is required" });
+    }
+    if (!mode) {
+      return reply
+        .code(400)
+        .send({ code: "VALIDATION", message: "mode must be MA or per_visit" });
+    }
+
+    const customerId = has(body, "customer_id", "customerId")
+      ? str(pick(body, "customer_id", "customerId")).trim() || null
+      : null;
+    const visitsPerYear = has(body, "visits_per_year", "visitsPerYear")
+      ? intOrNull(pick(body, "visits_per_year", "visitsPerYear"))
+      : null;
+    const sla = has(body, "sla") ? str(pick(body, "sla")).trim() || null : null;
+    const value = has(body, "value") ? numStr(pick(body, "value")) : undefined;
+    const end = has(body, "end") ? str(pick(body, "end")).trim() || null : null;
+    const currencyCode = has(body, "currency_code", "currencyCode")
+      ? str(pick(body, "currency_code", "currencyCode")).trim() || undefined
+      : undefined;
+
+    // Resolve the parent project THROUGH the scoped door (a foreign/absent project
+    // resolves to nothing → 404). This DECIDES whether we write, so it stays
+    // OUTSIDE the transaction (TenantDb.transaction guidance). insertThrough below
+    // re-verifies ownership inside the tx (fail-closed).
+    const [project] = await db.select(projects, eq(projects.id, projectId));
+    if (!project) {
+      return reply
+        .code(404)
+        .send({ code: "NOT_FOUND", message: `project ${projectId} not found` });
+    }
+
+    const contractRow: typeof pmContracts.$inferInsert = {
+      projectId,
+      customerId,
+      mode,
+      visitsPerYear,
+      sla,
+      end,
+      ...(value !== undefined ? { value } : {}),
+      ...(currencyCode !== undefined ? { currencyCode } : {}),
+    };
+
+    const contract = await db.transaction(async (tx) => {
+      const [created] = await tx.insertThrough(pmContracts, projects, projectId, [
+        contractRow,
+      ]);
+
+      // per_visit → spread visits_per_year WO shells across the contract's assets.
+      if (mode === "per_visit" && (visitsPerYear ?? 0) > 0) {
+        const assets = await tx.selectThrough(
+          pmAssets,
+          ASSET_HOPS,
+          eq(pmAssets.contractId, created!.id),
+        );
+        // A brand-new contract has no assets yet → 0 WOs, honestly (see header).
+        if (assets.length > 0) {
+          // Match a checklist template per asset KIND (pm3.jsx checklist-by-kind).
+          const templates = await tx.select(checklistTemplates);
+          const byKind = new Map<string, ChecklistTemplateRow>();
+          for (const t of templates) if (!byKind.has(t.kind)) byKind.set(t.kind, t);
+
+          const woRows: (typeof pmWorkOrders.$inferInsert)[] = [];
+          for (let i = 0; i < (visitsPerYear ?? 0); i++) {
+            const asset = assets[i % assets.length]!;
+            const template = byKind.get(asset.kind);
+            // Snapshot the template's items (copy each row — independent of the
+            // reusable template, exactly like createPmWorkorder's snapshot).
+            const items = (template?.items ?? []).map((r) => ({ ...r }));
+            woRows.push({
+              assetId: asset.id,
+              templateId: template?.id ?? null,
+              items,
+            });
+          }
+          await tx.insertThrough(pmWorkOrders, projects, created!.projectId, woRows);
+        }
+      }
+
+      return created!;
+    });
+
+    return reply.code(201).send(contractWire(contract));
+  });
+
   // GET /pm/assets — the tenant's maintained assets (pm.jsx PMAssets). pm_asset
   // has no company_id → scope it through pm_contract → project.
   app.get("/pm/assets", async (request, reply) => {
@@ -474,5 +743,200 @@ export function registerPmRoute(app: FastifyInstance): void {
     );
     // updated is present: the same scoped `where` just resolved `wo` above.
     return reply.code(200).send(workOrderWire(updated!));
+  });
+
+  // POST /pm/workorders/:id/close — close a work order (pm3.jsx closeWO: capture
+  // cause/fix/advice + the customer's signature, then "ปิดงาน … ส่งรายงานให้ลูกค้า
+  // แล้ว"). Resolves the WO through its 3-hop chain (404 for a foreign id), writes
+  // the REAL close columns present in the body (cause/fix/advice + signature →
+  // customer_sign), and fires the LINE cert notify STUB (B-108b: external LINE +
+  // cert-PDF are out of scope — there is NO cert/status column, so close never
+  // invents one). With no close fields the WO still resolves and the notify stub
+  // fires (a pure close). Returns the (updated) WO as ActionOk.
+  app.post("/pm/workorders/:id/close", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+
+    // Resolve the WO through its hop chain first (404 for a foreign id) so a pure
+    // notify-only close (no body fields) still fails closed for a foreign WO.
+    const [wo] = await db.selectThrough(
+      pmWorkOrders,
+      WO_HOPS,
+      eq(pmWorkOrders.id, id),
+    );
+    if (!wo) {
+      return reply
+        .code(404)
+        .send({ code: "NOT_FOUND", message: `PM work order ${id} not found` });
+    }
+
+    // Only the REAL existing close columns — never a fabricated status/cert column.
+    const set: Partial<typeof pmWorkOrders.$inferInsert> = {};
+    if (has(body, "cause")) set.cause = str(pick(body, "cause")).trim() || null;
+    if (has(body, "fix")) set.fix = str(pick(body, "fix")).trim() || null;
+    if (has(body, "advice")) set.advice = str(pick(body, "advice")).trim() || null;
+    if (has(body, "signature", "customer_sign", "customerSign")) {
+      set.customerSign =
+        str(pick(body, "signature", "customer_sign", "customerSign")).trim() || null;
+    }
+
+    let closed = wo;
+    if (Object.keys(set).length > 0) {
+      const [updated] = await db.updateThroughChain(
+        pmWorkOrders,
+        WO_HOPS,
+        set,
+        eq(pmWorkOrders.id, id),
+      );
+      // updated is present: the same scoped `where` just resolved `wo` above.
+      closed = updated!;
+    }
+
+    // B-108b: push a completion certificate to the customer's LINE — a NO-OP stub.
+    lineNotifyStub("pm.workorder.close", id);
+
+    return reply.code(200).send(workOrderWire(closed));
+  });
+
+  // GET /pm/quotes — the tenant's spare-parts quotes (B-108c). pm_quote carries
+  // no company_id → scope it 4 hops (quote → wo → asset → contract → project).
+  app.get("/pm/quotes", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+    const rows = await db.selectThrough(pmQuotes, QUOTE_HOPS);
+    return reply.code(200).send(listEnvelope(rows.map(quoteWire)));
+  });
+
+  // POST /pm/quotes — raise a spare-parts quote off a work order (erd pmq; data-
+  // dictionary "ใบเสนอราคาอะไหล่"). Body: wo_id (required), parts[{label,qty,price}],
+  // currency_code?. Resolves the WO through its hop chain (404 for a foreign id),
+  // then anchors the quote's insert on the WO's project root (fail-closed).
+  app.post("/pm/quotes", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const woId = str(pick(body, "wo_id", "woId", "work_order_id")).trim();
+    if (!woId) {
+      return reply
+        .code(400)
+        .send({ code: "VALIDATION", message: "wo_id is required" });
+    }
+    const parts = normalizeQuoteParts(pick(body, "parts"));
+    const currencyCode = has(body, "currency_code", "currencyCode")
+      ? str(pick(body, "currency_code", "currencyCode")).trim() || undefined
+      : undefined;
+
+    // Resolve the WO THROUGH its hop chain (404 for a foreign id).
+    const [wo] = await db.selectThrough(
+      pmWorkOrders,
+      WO_HOPS,
+      eq(pmWorkOrders.id, woId),
+    );
+    if (!wo) {
+      return reply
+        .code(404)
+        .send({ code: "NOT_FOUND", message: `PM work order ${woId} not found` });
+    }
+    // Walk the WO → asset → contract to reach the project root the quote anchors on
+    // (each read is scoped; a foreign hop resolves to nothing → 404).
+    const [asset] = await db.selectThrough(
+      pmAssets,
+      ASSET_HOPS,
+      eq(pmAssets.id, wo.assetId),
+    );
+    if (!asset) {
+      return reply
+        .code(404)
+        .send({ code: "NOT_FOUND", message: `PM asset ${wo.assetId} not found` });
+    }
+    const [contract] = await db.selectThrough(
+      pmContracts,
+      CONTRACT_HOPS,
+      eq(pmContracts.id, asset.contractId),
+    );
+    if (!contract) {
+      return reply.code(404).send({
+        code: "NOT_FOUND",
+        message: `PM contract ${asset.contractId} not found`,
+      });
+    }
+
+    // insertThrough re-verifies tenant ownership of the anchoring project before
+    // writing (fail-closed) — the quote can never land under a foreign project.
+    const [created] = await db.insertThrough(pmQuotes, projects, contract.projectId, [
+      {
+        workOrderId: woId,
+        parts,
+        ...(currencyCode !== undefined ? { currencyCode } : {}),
+      },
+    ]);
+    return reply.code(201).send(quoteWire(created!));
+  });
+
+  // POST /pm/quotes/:id/decide — record the customer's decision on a quote (erd
+  // pmq.decision; data-dictionary "ลูกค้าอนุมัติ (LINE)"). Body: decision (free
+  // text) or approve (boolean → approve/reject). Resolves the quote through its
+  // 4-hop chain (404 for a foreign id), records the decision, and fires the LINE
+  // notify STUB (B-108c: the customer is notified over LINE — a NO-OP here).
+  // Returns the updated quote as ActionOk.
+  app.post("/pm/quotes/:id/decide", async (request, reply) => {
+    const db = request.db;
+    if (!db) {
+      return reply
+        .code(401)
+        .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+
+    // Accept an explicit free-text decision, or the contract's boolean `approve`.
+    let decision: string;
+    const rawDecision = pick(body, "decision");
+    if (typeof rawDecision === "string" && rawDecision.trim()) {
+      decision = rawDecision.trim();
+    } else if (has(body, "approve")) {
+      decision = pick(body, "approve") ? "approve" : "reject";
+    } else {
+      return reply
+        .code(400)
+        .send({ code: "VALIDATION", message: "decision (or approve) is required" });
+    }
+
+    // updateThroughChain resolves the quote's ownership THROUGH the 4-hop chain
+    // (company_id anchored on the project root) and updates strictly the resolved
+    // id — a foreign id resolves to nothing → 404 (never written).
+    const [updated] = await db.updateThroughChain(
+      pmQuotes,
+      QUOTE_HOPS,
+      { decision },
+      eq(pmQuotes.id, id),
+    );
+    if (!updated) {
+      return reply
+        .code(404)
+        .send({ code: "NOT_FOUND", message: `PM quote ${id} not found` });
+    }
+
+    // B-108c: notify the customer of the decision over LINE — a NO-OP stub.
+    lineNotifyStub("pm.quote.decide", id);
+
+    return reply.code(200).send(quoteWire(updated));
   });
 }

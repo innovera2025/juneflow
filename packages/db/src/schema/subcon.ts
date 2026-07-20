@@ -127,6 +127,15 @@ export const workPeriods = pgTable("work_period", {
   pct: numeric("pct", { precision: 6, scale: 3 }).notNull().default("0"),
   amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
+  // B-107(b) / migration 0033 (Wave-2) — per-basis autosplit + server-computed
+  // payment inputs. distance/unit basis: amount = perPeriodQty × ratePerUnit;
+  // totalQty is the contract-level quantity the periods split across; unit is the
+  // label (m / หลัง). Nullable — percent basis uses pct×contract.value and
+  // milestone uses the fixed `amount`, so they leave these null.
+  totalQty: numeric("total_qty", { precision: 18, scale: 4 }),
+  perPeriodQty: numeric("per_period_qty", { precision: 18, scale: 4 }),
+  ratePerUnit: numeric("rate_per_unit", { precision: 16, scale: 2 }),
+  unit: text("unit"),
   status: workPeriodStatus("status").notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()

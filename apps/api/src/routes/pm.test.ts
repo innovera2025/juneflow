@@ -16,6 +16,7 @@ import {
   checklistTemplates,
   pmAssets,
   pmContracts,
+  pmQuotes,
   pmWorkOrders,
   projects,
 } from "@juneflow/db";
@@ -32,6 +33,7 @@ const CONTRACT = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const ASSET = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const TEMPLATE = "dddddddd-dddd-dddd-dddd-dddddddddddd";
 const WO = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+const QUOTE = "ffffffff-ffff-ffff-ffff-ffffffffffff";
 const D = new Date(1_700_000_000_000);
 
 const SESSION = {
@@ -91,7 +93,7 @@ function stubDb(opts: StubOpts): Db {
     return builder;
   };
   let seq = 0;
-  return {
+  const handle: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
       values: (values: unknown) => ({
@@ -114,7 +116,14 @@ function stubDb(opts: StubOpts): Db {
         }),
       }),
     }),
-  } as unknown as Db;
+  };
+  // TenantDb.transaction() runs `this.#db.transaction((tx) => fn(new TenantDb(tx)))`.
+  // The stub executes the callback synchronously against the SAME handle, so every
+  // door inside the block captures into the same arrays (mirrors a single scoped
+  // connection). Returns the callback's resolved value, like drizzle's tx.
+  handle.transaction = (fn: (tx: unknown) => Promise<unknown>) =>
+    Promise.resolve(fn(handle));
+  return handle as unknown as Db;
 }
 
 function paramsOf(where: SQL | undefined): unknown[] {
@@ -165,6 +174,9 @@ const contractRow = {
 const assetRow = (over: Record<string, unknown> = {}) => ({
   id: ASSET,
   contractId: CONTRACT,
+  // B-110 / migration 0034 — the asset's real display name + code columns.
+  name: "ลิฟต์โดยสาร MAXTECH MX-1000",
+  code: "LIFT-A01",
   kind: "ลิฟต์",
   site: "อาคาร A · โถงกลาง",
   cycle: "รายเดือน",
@@ -183,6 +195,8 @@ const templateItems = [
 const templateRow = {
   id: TEMPLATE,
   companyId: COMPANY,
+  // B-110 / migration 0034 — the template's real display name column.
+  name: "เช็คลิสต์ลิฟต์โดยสาร",
   kind: "ลิฟต์",
   items: templateItems,
   createdAt: D,
@@ -200,6 +214,22 @@ const woRow = (over: Record<string, unknown> = {}) => ({
   fix: null,
   advice: null,
   customerSign: null,
+  createdAt: D,
+  updatedAt: D,
+  ...over,
+});
+
+// pm_quote.parts are spare-part lines (erd "parts[]"); price rides currency_code.
+const quoteParts = [
+  { label: "เซนเซอร์ขอบประตู (Safety Edge)", qty: 2, price: 4500 },
+  { label: "สลิงลวด 12mm", qty: 1, price: 8200 },
+];
+const quoteRow = (over: Record<string, unknown> = {}) => ({
+  id: QUOTE,
+  workOrderId: WO,
+  parts: quoteParts,
+  decision: null,
+  currencyCode: "THB",
   createdAt: D,
   updatedAt: D,
   ...over,
@@ -229,6 +259,8 @@ describe("GET /api/v1/pm/assets", () => {
         {
           id: ASSET,
           contract_id: CONTRACT,
+          name: "ลิฟต์โดยสาร MAXTECH MX-1000",
+          code: "LIFT-A01",
           kind: "ลิฟต์",
           site: "อาคาร A · โถงกลาง",
           cycle: "รายเดือน",
@@ -400,7 +432,9 @@ describe("GET /api/v1/pm/checklist-templates", () => {
     ).inject({ url: "/api/v1/pm/checklist-templates" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      data: [{ id: TEMPLATE, kind: "ลิฟต์", items: templateItems }],
+      data: [
+        { id: TEMPLATE, name: "เช็คลิสต์ลิฟต์โดยสาร", kind: "ลิฟต์", items: templateItems },
+      ],
       page: 1,
       page_size: 50,
       total: 1,
@@ -832,6 +866,535 @@ describe("PUT /api/v1/pm/workorders/:id/checklist", () => {
 });
 
 // ===========================================================================
+// GET /pm/contracts
+// ===========================================================================
+
+describe("GET /api/v1/pm/contracts", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/pm/contracts" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("wraps contracts in the B-014 envelope with the real-column wire shape", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmContracts, [contractRow]]] }),
+      })
+    ).inject({ url: "/api/v1/pm/contracts" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1);
+    expect(body.data[0]).toEqual({
+      id: CONTRACT,
+      project_id: PROJECT,
+      customer_id: null,
+      mode: "MA",
+      visits_per_year: 12,
+      sla: "4 ชม.",
+      value: "144000.00",
+      currency_code: "THB",
+      end: "2026-12-31",
+    });
+  });
+
+  it("reads pm_contract THROUGH project, bound to company_id (no leak)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmContracts, [contractRow]]], captured }),
+      })
+    ).inject({ url: "/api/v1/pm/contracts" });
+    const read = captured.find((c) => c.table === pmContracts)!;
+    expect(read.joins).toEqual([projects]); // 1-hop chain to the root
+    expect(paramsOf(read.where)).toContain(COMPANY);
+    expect(paramsOf(read.where)).not.toContain(OTHER_COMPANY);
+  });
+});
+
+// ===========================================================================
+// POST /pm/contracts — mode=per_visit AUTOGENS work orders (B-108a)
+// ===========================================================================
+
+describe("POST /api/v1/pm/contracts", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "MA" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("400s on a missing project_id", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [] }) })
+    ).inject({ method: "POST", url: "/api/v1/pm/contracts", payload: { mode: "MA" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("project_id");
+  });
+
+  it("400s on an unrecognized mode", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [] }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "weekly" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("mode");
+  });
+
+  it("404s + writes nothing for a foreign project_id (scoped read finds nothing)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "MA" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("NOT_FOUND");
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("anchors the contract insert on the tenant-owned project (company bound)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[projects, [projectRow]]], captured }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "MA" },
+    });
+    // the project was resolved scoped, and insertThrough re-verified it — both bound.
+    const projectReads = captured.filter(
+      (c) => c.table === projects && paramsOf(c.where).includes(PROJECT),
+    );
+    expect(projectReads.length).toBeGreaterThan(0);
+    for (const call of projectReads) expect(paramsOf(call.where)).toContain(COMPANY);
+  });
+
+  it("mode=per_visit AUTOGENS one WO per visit, snapshotting the kind-matched template", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [projects, [projectRow]],
+            [pmAssets, [assetRow()]],
+            [checklistTemplates, [templateRow]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "per_visit", visits_per_year: 2 },
+    });
+    expect(res.statusCode).toBe(201);
+    // the contract was stored with the normalized enum value.
+    const contractWrite = inserted.find((w) => w.table === pmContracts)!;
+    expect((contractWrite.rows[0] as { mode: string }).mode).toBe("per_visit");
+    // per_visit → visits_per_year (=2) WO shells, each bound to an asset with the
+    // kind-matched template's items snapshotted in.
+    const woWrite = inserted.find((w) => w.table === pmWorkOrders)!;
+    expect(woWrite.rows).toHaveLength(2);
+    for (const raw of woWrite.rows as Array<Record<string, unknown>>) {
+      expect(raw.assetId).toBe(ASSET);
+      expect(raw.templateId).toBe(TEMPLATE);
+      expect(raw.items).toEqual(templateItems); // snapshot of the template
+    }
+  });
+
+  it("maps the OpenAPI 'visits' alias to the per_visit enum (autogens)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [projects, [projectRow]],
+            [pmAssets, [assetRow()]],
+            [checklistTemplates, [templateRow]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "visits", visits_per_year: 1 },
+    });
+    expect(res.statusCode).toBe(201);
+    const contractWrite = inserted.find((w) => w.table === pmContracts)!;
+    expect((contractWrite.rows[0] as { mode: string }).mode).toBe("per_visit");
+    expect(inserted.filter((w) => w.table === pmWorkOrders)).toHaveLength(1);
+  });
+
+  it("mode=MA does NOT autogen work orders (on-call SLA)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [projects, [projectRow]],
+            [pmAssets, [assetRow()]],
+            [checklistTemplates, [templateRow]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "MA", visits_per_year: 12 },
+    });
+    expect(res.statusCode).toBe(201);
+    // MA is on-call: the contract is written, but NOT a single work order.
+    expect(inserted.filter((w) => w.table === pmWorkOrders)).toHaveLength(0);
+    const contractWrite = inserted.find((w) => w.table === pmContracts)!;
+    expect((contractWrite.rows[0] as { mode: string }).mode).toBe("MA");
+  });
+
+  it("per_visit with no assets yet honestly creates 0 WOs (assets come later)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[projects, [projectRow]]], inserted }), // no pm_asset yet
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "per_visit", visits_per_year: 4 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.filter((w) => w.table === pmWorkOrders)).toHaveLength(0);
+    expect(inserted.filter((w) => w.table === pmContracts)).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// POST /pm/workorders/:id/close — writes real close columns + LINE cert stub
+// ===========================================================================
+
+describe("POST /api/v1/pm/workorders/:id/close", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: `/api/v1/pm/workorders/${WO}/close`,
+      payload: { fix: "x" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("closes the WO — writes only cause/fix/advice/customer_sign (no status column)", async () => {
+    const updated: Updated[] = [];
+    const woBase = woRow();
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, [woBase]]], updated, updateBase: woBase }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/workorders/${WO}/close`,
+      payload: {
+        cause: "ประตูชั้น 3 ปิดไม่สนิท",
+        fix: "เปลี่ยนเซนเซอร์ขอบประตู",
+        advice: "แนะนำเปลี่ยนสลิงรอบหน้า",
+        signature: "ลงนาม-abc",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const write = updated.find((u) => u.table === pmWorkOrders)!;
+    // ONLY the real existing close columns — signature maps to customer_sign.
+    expect(write.set).toEqual({
+      cause: "ประตูชั้น 3 ปิดไม่สนิท",
+      fix: "เปลี่ยนเซนเซอร์ขอบประตู",
+      advice: "แนะนำเปลี่ยนสลิงรอบหน้า",
+      customerSign: "ลงนาม-abc",
+    });
+    // …and never a fabricated status/cert column (there is no such column).
+    expect(Object.keys(write.set)).not.toContain("status");
+    expect(Object.keys(write.set)).not.toContain("cert");
+  });
+
+  it("a body-less close still resolves the WO and returns ActionOk (pure notify)", async () => {
+    const updated: Updated[] = [];
+    const woBase = woRow();
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, [woBase]]], updated, updateBase: woBase }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/pm/workorders/${WO}/close`, payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(updated).toHaveLength(0); // nothing to set → no fabricated write
+    expect(res.json().id).toBe(WO);
+  });
+
+  it("resolves the WO THROUGH its 3-hop chain, bound to company_id", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, [woRow()]]], captured, updateBase: woRow() }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/workorders/${WO}/close`,
+      payload: { fix: "x" },
+    });
+    const read = captured.find((c) => c.table === pmWorkOrders)!;
+    expect(read.joins).toEqual([pmAssets, pmContracts, projects]);
+    expect(paramsOf(read.where)).toContain(COMPANY);
+  });
+
+  it("404s + updates nothing for a foreign WO", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, []]], updated }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/pm/workorders/${WO}/close`, payload: { fix: "x" } });
+    expect(res.statusCode).toBe(404);
+    expect(updated).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// GET /pm/quotes
+// ===========================================================================
+
+describe("GET /api/v1/pm/quotes", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/pm/quotes" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("wraps quotes in the B-014 envelope with the real-column wire shape", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]] }),
+      })
+    ).inject({ url: "/api/v1/pm/quotes" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1);
+    expect(body.data[0]).toEqual({
+      id: QUOTE,
+      wo_id: WO,
+      parts: quoteParts,
+      decision: null,
+      currency_code: "THB",
+    });
+  });
+
+  it("reads pm_quote THROUGH wo→asset→contract→project, bound to company_id", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]], captured }),
+      })
+    ).inject({ url: "/api/v1/pm/quotes" });
+    const read = captured.find((c) => c.table === pmQuotes)!;
+    expect(read.joins).toEqual([pmWorkOrders, pmAssets, pmContracts, projects]); // 4-hop
+    expect(paramsOf(read.where)).toContain(COMPANY);
+    expect(paramsOf(read.where)).not.toContain(OTHER_COMPANY);
+  });
+});
+
+// ===========================================================================
+// POST /pm/quotes
+// ===========================================================================
+
+describe("POST /api/v1/pm/quotes", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/pm/quotes",
+      payload: { wo_id: WO, parts: [] },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("400s on a missing wo_id", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [] }) })
+    ).inject({ method: "POST", url: "/api/v1/pm/quotes", payload: { parts: [] } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("wo_id");
+  });
+
+  it("creates a quote (201), scoping THROUGH the WO hops and inserting parts", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pmWorkOrders, [woRow()]],
+            [pmAssets, [assetRow()]],
+            [pmContracts, [contractRow]],
+            [projects, [projectRow]],
+          ],
+          captured,
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/quotes",
+      payload: {
+        wo_id: WO,
+        parts: [
+          { label: "เซนเซอร์ขอบประตู", qty: 2, price: 4500 },
+          { label: "   ", qty: 1 }, // blank label → dropped
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const write = inserted.find((w) => w.table === pmQuotes)!;
+    expect(write.rows[0]).toMatchObject({
+      workOrderId: WO,
+      parts: [{ label: "เซนเซอร์ขอบประตู", qty: 2, price: 4500 }],
+    });
+    // the WO was resolved THROUGH its 3-hop chain, company bound.
+    const woRead = captured.find((c) => c.table === pmWorkOrders)!;
+    expect(woRead.joins).toEqual([pmAssets, pmContracts, projects]);
+    expect(paramsOf(woRead.where)).toContain(COMPANY);
+  });
+
+  it("404s + writes nothing for a foreign wo_id (scoped read finds nothing)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/quotes",
+      payload: { wo_id: WO, parts: [{ label: "x" }] },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(inserted).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// POST /pm/quotes/:id/decide — records decision + fires the LINE notify stub
+// ===========================================================================
+
+describe("POST /api/v1/pm/quotes/:id/decide", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { decision: "approve" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("records the decision and returns ActionOk (no crash on the LINE stub)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]], updated, updateBase: quoteRow() }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { decision: "approve" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().decision).toBe("approve");
+    const write = updated.find((u) => u.table === pmQuotes)!;
+    expect(write.set).toEqual({ decision: "approve" });
+  });
+
+  it("maps the contract boolean approve=false to a reject decision", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]], updated, updateBase: quoteRow() }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { approve: false },
+    });
+    expect(res.statusCode).toBe(200);
+    const write = updated.find((u) => u.table === pmQuotes)!;
+    expect(write.set).toEqual({ decision: "reject" });
+  });
+
+  it("400s when neither decision nor approve is given", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]] }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/pm/quotes/${QUOTE}/decide`, payload: {} });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("decision");
+  });
+
+  it("resolves the quote THROUGH its 4-hop chain, bound to company_id", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]], captured, updateBase: quoteRow() }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { decision: "approve" },
+    });
+    const read = captured.find((c) => c.table === pmQuotes)!;
+    expect(read.joins).toEqual([pmWorkOrders, pmAssets, pmContracts, projects]);
+    expect(paramsOf(read.where)).toContain(COMPANY);
+  });
+
+  it("404s + updates nothing for a foreign quote", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, []]], updated }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { decision: "approve" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(updated).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
 // AuditLog — fires on a successful mutation, NOT on a failed guard
 // ===========================================================================
 
@@ -914,5 +1477,81 @@ describe("AuditLog middleware (PLAN.md §5 — every mutation logged)", () => {
     });
     expect(miss.statusCode).toBe(404);
     expect(missRecords).toHaveLength(0);
+  });
+
+  it("records a row on a successful POST /pm/contracts (201) but not on its 404", async () => {
+    const okRecords: AuditRecord[] = [];
+    const ok = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[projects, [projectRow]]] }),
+        auditSink: (r) => {
+          okRecords.push(r);
+        },
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "MA" },
+    });
+    expect(ok.statusCode).toBe(201);
+    expect(okRecords).toHaveLength(1);
+    expect(okRecords[0]!.companyId).toBe(COMPANY);
+    await app.close();
+
+    const missRecords: AuditRecord[] = [];
+    const miss = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [] }), // project invisible → 404
+        auditSink: (r) => {
+          missRecords.push(r);
+        },
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/pm/contracts",
+      payload: { project_id: PROJECT, mode: "MA" },
+    });
+    expect(miss.statusCode).toBe(404);
+    expect(missRecords).toHaveLength(0);
+  });
+
+  it("records a row on a quote decide + a WO close (both action mutations)", async () => {
+    const decideRecords: AuditRecord[] = [];
+    const decide = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]], updateBase: quoteRow() }),
+        auditSink: (r) => {
+          decideRecords.push(r);
+        },
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { decision: "approve" },
+    });
+    expect(decide.statusCode).toBe(200);
+    expect(decideRecords).toHaveLength(1);
+    await app.close();
+
+    const closeRecords: AuditRecord[] = [];
+    const woBase = woRow();
+    const close = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmWorkOrders, [woBase]]], updateBase: woBase }),
+        auditSink: (r) => {
+          closeRecords.push(r);
+        },
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/workorders/${WO}/close`,
+      payload: { fix: "เปลี่ยนเซนเซอร์" },
+    });
+    expect(close.statusCode).toBe(200);
+    expect(closeRecords).toHaveLength(1);
   });
 });

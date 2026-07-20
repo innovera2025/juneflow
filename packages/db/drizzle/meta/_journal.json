@@ -232,6 +232,20 @@
       "when": 1784462568184,
       "tag": "0032_tired_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1784521287560,
+      "tag": "0033_gigantic_slayback",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1784521348471,
+      "tag": "0034_mean_kylun",
+      "breakpoints": true
     }
   ]
 }

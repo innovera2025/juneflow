@@ -1286,10 +1286,26 @@ async function seed(): Promise<void> {
       // 16 work periods: 4/4/3/5 per contract (subcon-accept.jsx). C3 state map applied.
       const wpRows: (typeof schema.workPeriods.$inferInsert)[] = [];
       SUBC_CONTRACTS.forEach((c, ci) => {
+        // B-107(b) / migration 0033: qty-basis money inputs. distance/unit periods
+        // carry perPeriodQty (= target) × ratePerUnit (= amount/target) so the
+        // server-computed approve-payment reconciles to the seeded amount; totalQty
+        // = the contract's summed quantity. percent (pct×value) + milestone (fixed
+        // amount) bases leave these null.
+        const qtyBasis = c.basis === "distance" || c.basis === "unit";
+        const totalQty = qtyBasis ? c.periods.reduce((s, p) => s + p.target, 0) : null;
+        const unitLabel = c.basis === "distance" ? "m" : c.basis === "unit" ? "หลัง" : null;
         c.periods.forEach((p, si) => {
           wpRows.push({
             id: det(`wp:${ci}:${si}`), contractId: det(`subc:${ci}`), seq: si + 1,
             basis: c.basis, target: m(p.target), pct: m(p.pct), amount: m(p.amount), status: p.status,
+            ...(qtyBasis
+              ? {
+                  totalQty: String(totalQty),
+                  perPeriodQty: String(p.target),
+                  ratePerUnit: m(p.target > 0 ? p.amount / p.target : 0),
+                  unit: unitLabel,
+                }
+              : {}),
           });
         });
       });
@@ -1326,17 +1342,29 @@ async function seed(): Promise<void> {
 
       await tx.insert(schema.checklistTemplates).values(
         CHECKLIST_TEMPLATES.map((c, i) => ({
-          id: det(`cktpl:${i}`), companyId: CO1, kind: c.kind,
+          // B-110(ก) / migration 0034: the template name (already in the constant;
+          // the column was added Wave-2). 5 defaults = B-108(e).
+          id: det(`cktpl:${i}`), companyId: CO1, name: c.name, kind: c.kind,
           items: c.items.map((label) => ({ label })),
         })),
       );
 
       const ASSET_KINDS = ["lift", "inverter", "crane", "hvac"];
+      // B-110(ก) / migration 0034: honest display name + code per (synthetic) asset,
+      // derived from its REAL kind — the pm.jsx asset card's primary fields. The
+      // seed's 16 assets are generated (not the prototype catalog), so the name is a
+      // systematic kind-label + index, not a fabricated model number.
+      const ASSET_KIND_NAME: Record<string, string> = { lift: "ลิฟต์โดยสาร", inverter: "อินเวอร์เตอร์", crane: "เครน", hvac: "เครื่องปรับอากาศ" };
+      const ASSET_KIND_CODE: Record<string, string> = { lift: "LIFT", inverter: "INV", crane: "CRN", hvac: "HVAC" };
       await tx.insert(schema.pmAssets).values(
-        Array.from({ length: 16 }, (_, i) => ({
-          id: det(`pmasset:${i}`), contractId: det(`pmc:${i % 5}`),
-          kind: at(ASSET_KINDS, i), site: `ไซต์ ${i + 1}`, cycle: "รายเดือน", nextDue: "2026-08-01",
-        })),
+        Array.from({ length: 16 }, (_, i) => {
+          const k = at(ASSET_KINDS, i);
+          return {
+            id: det(`pmasset:${i}`), contractId: det(`pmc:${i % 5}`),
+            name: `${ASSET_KIND_NAME[k]} #${i + 1}`, code: `${ASSET_KIND_CODE[k]}-${String(i + 1).padStart(2, "0")}`,
+            kind: k, site: `ไซต์ ${i + 1}`, cycle: "รายเดือน", nextDue: "2026-08-01",
+          };
+        }),
       );
 
       await tx.insert(schema.pmWorkOrders).values(

@@ -2023,6 +2023,18 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
   /pm/quotes:
+    get:
+      tags: [pm]
+      summary: List PM quotes
+      operationId: listPmQuotes
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [pm]
       summary: Create PM quote ({wo_id,parts[]})
