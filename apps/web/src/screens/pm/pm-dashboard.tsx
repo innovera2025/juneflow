@@ -30,15 +30,18 @@
  *   - DEFAULT 3 "pending quotes" (B-108d names only workorders+assets; derivable from
  *     GET /pm/quotes only if Wei admits that source) -> em-dash value.
  *   - DEFAULT 4 "cost YTD" (no cost/spend column on any wire) -> em-dash, no sub.
- *   - DEFAULT 5 calendar month title = CURRENT month via Intl th-TH (the prototype
- *     hardcoded "June 2569") — a flagged fidelity divergence (see pm-dashboard-rows).
+ *   Calendar month = the FIXED prototype grid (Wei 2026-07-20): the title is the
+ *   verbatim pm.calMonthTitle ("June 2569") and 30 day cells (1..30) draw straight
+ *   into the 7-column grid with no weekday offset; marks derive only from June-2026
+ *   assets (calendarMarks). This replaces the earlier dynamic-month divergence — the
+ *   calendar is now the prototype's fixed month verbatim, so no divergence flag remains.
  *
- * i18n (rule 2): every visible string is a pm.* / common.* dict key (t). The due
- * badge uses pm.legendDue ("due") — the prototype's exact due-soon wording
- * (PM_STATUS.due.l, pm.jsx L34) has NO dict key; the same-state legend key is the
- * closest existing value (FLAG: a verbatim key would restore exact fidelity). The
- * overdue badge uses pm.legendOverdue, whose value already matches. The "%" unit is
- * a literal symbol
+ * i18n (rule 2): every visible string is a pm.* / common.* dict key (t). The near/
+ * overdue panel's due badge uses pm.statusDueSoon — the prototype's exact due-soon
+ * wording (PM_STATUS.due.l, pm.jsx L34, "near due"), a verbatim sacred key (dict=1611).
+ * The overdue badge uses pm.legendOverdue, whose value already matches. The calendar
+ * legend keeps pm.legendOverdue / pm.legendDue / pm.legendPlan (the swatch labels). The
+ * "%" unit is a literal symbol
  * (precedent: dashboard.tsx / exec.tsx). No Thai literal lives in source (rule 2);
  * tokens back every colour (rule 6); "#B45309" is the prototype-verbatim cost accent
  * (B-037(a) prototype-verbatim-hex precedent).
@@ -59,8 +62,7 @@ import {
   duePanelRows,
   upcomingRows,
   calendarMarks,
-  daysInMonth,
-  monthTitle,
+  PM_CALENDAR_DAYS,
   formatUpcomingDate,
   todayISO,
   type DueTone,
@@ -154,9 +156,11 @@ function ToneBadge({ tone, label }: { tone: "overdue" | "due"; label: string }) 
 }
 
 /**
- * PMCalendar (pm2.jsx L552-590) — the current-month grid. DEFAULT 5: the month title
- * is TODAY's month (Intl th-TH), the day count is today's month length, and the day
- * marks derive from asset next_due (not the mock's fixed June marks). Clicking a day
+ * PMCalendar (pm2.jsx L552-591) — the FIXED prototype grid (Wei 2026-07-20). The title
+ * is the verbatim pm.calMonthTitle ("June 2569"); the grid draws a static weekday
+ * header then 30 day cells (1..30) straight into the 7-column grid with NO weekday
+ * offset (exactly as the prototype draws it, not a real month's first-weekday). Day
+ * marks derive only from June-2026 asset next_due (calendarMarks). Clicking a day
  * toggles the selectedDay that filters the upcoming list.
  */
 function PMCalendar({
@@ -291,8 +295,10 @@ export function PMDashboard() {
   const panelRows = useMemo(() => duePanelRows(assets, today), [assets, today]);
   const upcoming = useMemo(() => upcomingRows(assets, today), [assets, today]);
   const marks = useMemo(() => calendarMarks(assets, today), [assets, today]);
-  const dayCount = useMemo(() => daysInMonth(today), [today]);
-  const calTitle = useMemo(() => monthTitle(today), [today]);
+  // FIXED prototype grid (Wei 2026-07-20): the title is the verbatim June-2569 key and
+  // the grid is always 30 cells (1..30) — neither is computed from `today`.
+  const dayCount = PM_CALENDAR_DAYS;
+  const calTitle = t("pm.calMonthTitle");
 
   // The upcoming list filters to the selected calendar day (pm2.jsx PMUpcoming).
   const upcomingShown = useMemo<UpcomingRow[]>(
@@ -314,11 +320,12 @@ export function PMDashboard() {
     { tone: "due", label: t("pm.legendDue") },
     { tone: "plan", label: t("pm.legendPlan") },
   ];
-  // FLAG: prototype due-badge label (PM_STATUS.due.l, pm.jsx L34) has no dict key —
-  // the same-state legend labels are the closest existing values (legendOverdue /
-  // legendDue).
+  // The near/overdue panel badge: overdue -> pm.legendOverdue (value already matches);
+  // due -> pm.statusDueSoon, the prototype's verbatim PM_STATUS.due.l "near due" wording
+  // (pm.jsx L34), now a sacred dict key (dict=1611). The calendar legend keeps
+  // pm.legendDue for its own "due" swatch.
   const badgeLabel = (tone: "overdue" | "due"): string =>
-    tone === "overdue" ? t("pm.legendOverdue") : t("pm.legendDue");
+    tone === "overdue" ? t("pm.legendOverdue") : t("pm.statusDueSoon");
 
   // Export modal (pm.jsx openPMExport, mirrors pm-assets.tsx) — presentational.
   const openExport = () => {

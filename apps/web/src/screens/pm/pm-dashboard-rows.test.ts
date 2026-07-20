@@ -3,9 +3,9 @@
  * helpers that back PMDashboard. Covers the opaque-row narrowing (asset / work
  * order), the tri-state next_due tone, the REAL overdue count, the checklist
  * compliance (DEFAULT 1 pass = 'normal', empty -> null), the due/overdue panel
- * (overdue-first, cap 6), the upcoming sort, the current-month calendar marks, the
- * date parsers, AND the empty-seed reality (DEFAULT 6: all next_due in a future
- * month -> zero overdue + empty panel + empty calendar, honestly).
+ * (overdue-first, cap 6), the upcoming sort, the FIXED June-2026 calendar marks (Wei
+ * 2026-07-20), the date parsers, AND the empty-seed reality (DEFAULT 6: all next_due in
+ * a non-anchor month -> zero overdue + empty panel + empty calendar, honestly).
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -17,10 +17,10 @@ import {
   duePanelRows,
   upcomingRows,
   calendarMarks,
+  PM_CALENDAR_YM,
+  PM_CALENDAR_DAYS,
   dayOfMonth,
-  daysInMonth,
   todayISO,
-  monthTitle,
   formatUpcomingDate,
   type DashAsset,
   type DashWo,
@@ -216,28 +216,44 @@ describe("upcomingRows", () => {
   });
 });
 
-describe("calendarMarks", () => {
-  it("marks current-month days by tone; future months excluded", () => {
+describe("calendarMarks (FIXED June-2026 anchor, Wei 2026-07-20)", () => {
+  it("marks only anchor-month (June 2026) days; other months excluded", () => {
     const rows = [
-      asset({ nextDue: "2026-07-10" }), // overdue -> day 10
-      asset({ nextDue: "2026-07-25" }), // due -> day 25
-      asset({ nextDue: "2026-08-01" }), // plan (August) -> excluded
+      asset({ nextDue: "2026-06-10" }), // June -> day 10 (past vs July today -> overdue)
+      asset({ nextDue: "2026-06-25" }), // June -> day 25
+      asset({ nextDue: "2026-07-25" }), // July (not the anchor) -> excluded
+      asset({ nextDue: "2026-08-01" }), // August -> excluded
     ];
     const marks = calendarMarks(rows, TODAY);
     expect(marks.get(10)).toBe("overdue");
-    expect(marks.get(25)).toBe("due");
-    expect(marks.has(1)).toBe(false);
+    expect(marks.get(25)).toBe("overdue");
+    expect(marks.has(25) && marks.size).toBe(2);
+  });
+
+  it("tone stays relative to today (today INSIDE June proves tri-state due/plan)", () => {
+    const inJune = "2026-06-15";
+    const rows = [
+      asset({ nextDue: "2026-06-10" }), // before today-in-June -> overdue
+      asset({ nextDue: "2026-06-20" }), // this month, today-or-later -> due
+    ];
+    const marks = calendarMarks(rows, inJune);
+    expect(marks.get(10)).toBe("overdue");
+    expect(marks.get(20)).toBe("due");
   });
 
   it("stronger tone wins when two assets share a day", () => {
-    const rows = [asset({ nextDue: "2026-07-25" }), asset({ nextDue: "2026-07-25" })];
-    // both due -> due
-    expect(calendarMarks(rows, TODAY).get(25)).toBe("due");
+    const rows = [asset({ nextDue: "2026-06-25" }), asset({ nextDue: "2026-06-25" })];
+    expect(calendarMarks(rows, TODAY).get(25)).toBe("overdue");
   });
 
-  it("DEFAULT 6 empty-seed: all August -> empty marks on a July calendar", () => {
+  it("DEFAULT 6 empty-seed: all August -> empty marks on the fixed June calendar", () => {
     const rows = [asset({ nextDue: "2026-08-01" }), asset({ nextDue: "2026-08-01" })];
     expect(calendarMarks(rows, TODAY).size).toBe(0);
+  });
+
+  it("exposes the fixed anchor month + 30-cell grid constants", () => {
+    expect(PM_CALENDAR_YM).toBe("2026-06");
+    expect(PM_CALENDAR_DAYS).toBe(30);
   });
 });
 
@@ -249,27 +265,12 @@ describe("date helpers", () => {
     expect(dayOfMonth("2026-13-01")).toBeNull();
   });
 
-  it("daysInMonth for the displayed (current) month", () => {
-    expect(daysInMonth("2026-07-20")).toBe(31); // July
-    expect(daysInMonth("2026-06-01")).toBe(30); // June
-    expect(daysInMonth("2026-02-15")).toBe(28); // Feb (non-leap)
-    expect(daysInMonth("2024-02-15")).toBe(29); // Feb (leap)
-    expect(daysInMonth("bad")).toBe(31); // safe fallback
-  });
-
   it("todayISO yields a YYYY-MM-DD slice", () => {
     expect(todayISO(new Date("2026-07-20T09:30:00Z"))).toBe("2026-07-20");
   });
 });
 
-describe("th-TH Intl formatters (DEFAULT 5, dynamic — no re-translated source)", () => {
-  it("monthTitle returns a non-empty string for a valid date, '' for junk", () => {
-    expect(monthTitle("2026-07-20").length).toBeGreaterThan(0);
-    // th-TH numeric year renders the Buddhist era (2026 -> 2569).
-    expect(monthTitle("2026-07-20")).toContain("2569");
-    expect(monthTitle("bad")).toBe("");
-  });
-
+describe("th-TH Intl formatters (dynamic locale format — no re-translated source)", () => {
   it("formatUpcomingDate splits day + short month, '' for junk", () => {
     const f = formatUpcomingDate("2026-08-01");
     expect(f.day).toBe("1");

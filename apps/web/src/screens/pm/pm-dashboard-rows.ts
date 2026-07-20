@@ -22,7 +22,9 @@
  *     result set), 1 decimal (REAL; null when no item has a result yet).
  *   - due/overdue panel = [...overdue, ...dueSoon] by next_due tone, capped at 6.
  *   - upcoming list = every dated asset sorted by next_due ascending.
- *   - calendar marks = current-month assets keyed by day-of-month, tri-state tone.
+ *   - calendar marks = FIXED-anchor (June 2026) assets keyed by day-of-month, tri-
+ *     state tone (Wei 2026-07-20: the calendar is the prototype's verbatim June grid,
+ *     NOT the live month — see PM_CALENDAR_YM / calendarMarks).
  * The unbacked KPIs (this-month WO count, pending quotes, cost YTD) need no
  * derivation here — the view renders them as an em-dash (DEFAULTS 2/3/4).
  *
@@ -213,21 +215,32 @@ function rank(t: DueTone): number {
 }
 
 /**
- * Calendar day marks for the CURRENT month: assets whose next_due lands in today's
- * month, keyed by day-of-month -> tone (overdue for a past day, due for today or
- * later). Future-month assets are not shown (the grid is a single month). When two
- * assets share a day, the stronger tone wins.
+ * The FIXED calendar-grid anchor (Wei 2026-07-20): the PMCalendar renders the
+ * prototype's verbatim June-2569 (June-2026 CE) month, NOT the live current month, and
+ * always draws 30 day cells (1..30) straight into the 7-column grid (no weekday
+ * offset). Day marks are derived ONLY from assets whose next_due lands in this anchor
+ * month (pototype/pm2.jsx PMCalendar L552-591).
+ */
+export const PM_CALENDAR_YM = "2026-06";
+export const PM_CALENDAR_DAYS = 30;
+
+/**
+ * Calendar day marks for the FIXED anchor month (PM_CALENDAR_YM = June 2026): assets
+ * whose next_due lands in that month, keyed by day-of-month (1..30) -> tone (relative
+ * to today via dueTone). Assets in any other month are not shown (the grid is the one
+ * fixed month). When two assets share a day, the stronger tone wins. With a seed whose
+ * next_due sits outside June 2026 the map is empty and the grid renders clean of marks
+ * (honest, not a bug).
  */
 export function calendarMarks(
   assets: readonly DashAsset[],
   today: string,
 ): Map<number, DueTone> {
   const marks = new Map<number, DueTone>();
-  const ym = today.slice(0, 7);
   for (const a of assets) {
-    if (a.nextDue === "" || a.nextDue.slice(0, 7) !== ym) continue;
+    if (a.nextDue === "" || a.nextDue.slice(0, 7) !== PM_CALENDAR_YM) continue;
     const day = dayOfMonth(a.nextDue);
-    if (day == null) continue;
+    if (day == null || day < 1 || day > PM_CALENDAR_DAYS) continue;
     const tone = dueTone(a.nextDue, today);
     if (!tone) continue;
     const prev = marks.get(day);
@@ -253,46 +266,17 @@ export function dayOfMonth(iso: string): number | null {
   return p ? p[2] : null;
 }
 
-/** Number of days in today's calendar month (28-31); 31 as a safe fallback. */
-export function daysInMonth(today: string): number {
-  const p = parseISO(today);
-  if (!p) return 31;
-  const [y, mo] = p;
-  // Day 0 of month (mo) is the last day of month (mo-1) — UTC to avoid tz drift.
-  return new Date(Date.UTC(y, mo, 0)).getUTCDate();
-}
-
 /** Today as an ISO date "YYYY-MM-DD" (Wei B-108d: new Date().toISOString().slice). */
 export function todayISO(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
 /**
- * Current-month calendar title, th-TH long-month + Buddhist year (DEFAULT 5). The
- * prototype hardcoded "June 2569" (a mock artifact); we render TODAY's month
- * dynamically via Intl instead of re-translating a fixed Thai string. FLAGGED
- * divergence: the calendar always shows the current month, so a fixed-June visual
- * reference will differ (orch-B may need to re-capture the pm.dashboard reference).
- * Returns "" for a malformed today. th-TH numeric year yields the Buddhist era
- * (e.g. "2569" for 2026), matching the prototype's convention.
- */
-export function monthTitle(today: string): string {
-  const p = parseISO(today);
-  if (!p) return "";
-  const [y, mo, d] = p;
-  return new Intl.DateTimeFormat("th-TH", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(y, mo - 1, d)));
-}
-
-/**
  * Split an ISO date into the stacked { day, month-short } the upcoming list renders
  * (pm2.jsx `p.date.split(" ")`). Month uses th-TH short ("Aug." -> Thai abbrev) via
- * Intl (dynamic locale format, not a re-translated source string — same posture as
- * monthTitle); the day is the raw day-of-month. A malformed date yields
- * { day: "", month: "" } so the view can show an em-dash.
+ * Intl (a dynamic locale format, not a re-translated source string); the day is the
+ * raw day-of-month. A malformed date yields { day: "", month: "" } so the view can
+ * show an em-dash.
  */
 export function formatUpcomingDate(iso: string): { day: string; month: string } {
   const p = parseISO(iso);
