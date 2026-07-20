@@ -7,29 +7,37 @@
  * (pm.jsx L7-37) whose rows carried denormalised display strings (code/name/last/
  * status/contract-code). PLAN.md section 0 rule 3: that mock is dropped as data —
  * the list is the real server catalogue (GET /pm/assets, use-pm.ts) whose opaque
- * Entity wire is only:
- *   { id, contract_id, kind, site, cycle, next_due }   (apps/api/src/routes/pm.ts
- *   assetWire — pm_asset models only kind/site/cycle/next_due, data-dictionary).
+ * Entity wire is:
+ *   { id, contract_id, name, code, kind, site, cycle, next_due }   (apps/api/src/
+ *   routes/pm.ts assetWire — `name`/`code` gained real columns in migration 0034,
+ *   B-110, so they now ride the wire alongside kind/site/cycle/next_due).
  *
  * WIRE GAPS (reported, never fabricated — see pm-assets.tsx header for the full
- * list). The wire carries NO `name` (asset name/model — a real backend gap worth
- * reporting: pm_asset has no name column), NO `last` (last-PM date), NO `status`
- * column, and the `contract_id` uuid resolves to a contract CODE only through
- * /pm/contracts which is Wave-2 GATED (404). So the view renders an em-dash for
- * name / last / status / contract; this module never invents values for them and
- * (deliberately) never resolves a status — there is no wire signal to derive one.
+ * list). `name` + `code` are now REAL columns (migration 0034). The wire still
+ * carries NO `last` (last-PM date) and NO `status` column; the `contract_id` uuid
+ * resolves to a contract via /pm/contracts (now live), but the contract wire has NO
+ * human code/no column (only id/sla/mode/value/...), so the contract CODE still
+ * cannot be shown. So the view renders an em-dash for last / status / contract; this
+ * module never invents values for them and (deliberately) never resolves a status —
+ * there is no wire signal to derive one.
  *
- * `search` in the view runs over only the fields that actually exist on the wire
- * (id / kind / site — `name` is an em-dash so it can never match); `distinctKinds`
- * feeds the kind filter with the kinds actually present in the loaded rows; the
- * "{n}" count is the filtered length. All ASCII (B-073) — no Thai lives here.
+ * `search` in the view runs over the human-facing wire fields (code / name / kind /
+ * site — `code`+`name` are real since 0034, matching the pm.searchPh "code/name/site"
+ * placeholder); `distinctKinds` feeds the kind filter with the kinds actually present
+ * in the loaded rows; the "{n}" count is the filtered length. All ASCII (B-073) — no
+ * Thai lives here.
  */
 
 /** A PM asset as the table consumes it (GET /pm/assets row, narrowed from wire). */
 export interface AssetRow {
   id: string;
-  /** Owning PM contract id (uuid). Resolves to a contract CODE only via /pm/contracts
-   *  (Wave-2 GATED) — the view therefore renders an em-dash, never this raw uuid. */
+  /** Human asset code (e.g. LIFT-A01) — a real column since migration 0034 (B-110). */
+  code: string;
+  /** Asset name / model — a real column since migration 0034 (B-110). */
+  name: string;
+  /** Owning PM contract id (uuid). Resolves to a contract via /pm/contracts (now live),
+   *  but the contract wire has no human code column — the view em-dashes it, never
+   *  this raw uuid. */
   contractId: string;
   /** Equipment kind (e.g. lift / pump) — shown in a Tag + drives the kind filter. */
   kind: string;
@@ -54,6 +62,8 @@ function str(v: unknown): string {
 export function toAssetRow(e: Record<string, unknown>): AssetRow {
   return {
     id: str(e.id),
+    code: str(e.code),
+    name: str(e.name),
     contractId: str(e.contract_id ?? e.contractId),
     kind: str(e.kind),
     site: str(e.site),
@@ -81,11 +91,12 @@ export function distinctKinds(rows: readonly AssetRow[]): string[] {
 }
 
 /**
- * Client-side filter (pm.jsx L162-166). `q` matches over id + kind + site only —
- * the prototype also matched `name`, but name is a wire gap (em-dash) so it can
- * never contribute a match here. `kind` (when non-empty) restricts to that exact
- * kind. Both filters are case-insensitive on the query; an empty query/kind is a
- * no-op. Never mutates the input.
+ * Client-side filter (pm.jsx L162-166). `q` matches over the human-facing fields
+ * code + name + kind + site (the prototype matched code/name; both are real columns
+ * since migration 0034, matching the pm.searchPh "code/name/site" placeholder). The
+ * raw uuid `id` is never searched (not user-facing). `kind` (when non-empty) restricts
+ * to that exact kind. Both filters are case-insensitive on the query; an empty
+ * query/kind is a no-op. Never mutates the input.
  */
 export function filterAssets(
   rows: readonly AssetRow[],
@@ -94,7 +105,7 @@ export function filterAssets(
 ): AssetRow[] {
   const query = q.trim().toLowerCase();
   return rows.filter((r) => {
-    if (query && !(r.id + r.kind + r.site).toLowerCase().includes(query)) {
+    if (query && !(r.code + r.name + r.kind + r.site).toLowerCase().includes(query)) {
       return false;
     }
     if (kind && r.kind !== kind) {

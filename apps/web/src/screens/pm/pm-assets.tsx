@@ -15,33 +15,36 @@
  *
  * Data (rule 3): GET /pm/assets (use-pm.ts) via the generated client — the
  * prototype's local PM_ASSETS_BY_TYPE mock becomes the server catalogue. Each row
- * is the opaque Entity { id, contract_id, kind, site, cycle, next_due }
- * (apps/api/src/routes/pm.ts assetWire). Pure narrowing/filter logic (toAssetRow /
- * distinctKinds / filterAssets) lives in pm-rows.ts (unit-tested, G3). The search
- * box + kind filter operate client-side over the loaded rows; the "{n}" count is
- * the filtered length.
+ * is the opaque Entity { id, contract_id, name, code, kind, site, cycle, next_due }
+ * (apps/api/src/routes/pm.ts assetWire — name/code gained real columns in migration
+ * 0034, B-110). Pure narrowing/filter logic (toAssetRow / distinctKinds /
+ * filterAssets) lives in pm-rows.ts (unit-tested, G3). The search box + kind filter
+ * operate client-side over the loaded rows; the "{n}" count is the filtered length.
  *
- * WIRE GAPS (reported honestly, never fabricated) — the assetWire is only
- * { id, contract_id, kind, site, cycle, next_due }:
- *   - name (colName "asset name / model"): NO such column on pm_asset. This is a
- *     real BACKEND GAP worth reporting (the mock's asset name is the single most
- *     prominent list field) — the list name cell + the detail title's name half
- *     render an em-dash; the code (id) alone identifies the row.
+ * WIRE GAPS (reported honestly, never fabricated) — the assetWire is
+ * { id, contract_id, name, code, kind, site, cycle, next_due }:
+ *   - name (colName "asset name / model") + code (colCode): REAL columns since
+ *     migration 0034 (B-110) — the list name cell shows the real name and the code
+ *     cell shows the real human code (no longer the raw uuid id).
  *   - last (colLastPm): NO last-service column — em-dash (list + detail).
  *   - status (common.status badge): NO status column. NO status is derived or
  *     guessed (that would violate rule 4) — the list status cell renders an em-dash
  *     and the detail's top status badge is omitted. There is no KPI strip on this
  *     screen, so only the status cell/badge are affected.
- *   - contract (colContract): the wire gives contract_id (a uuid), but /pm/contracts
- *     is Wave-2 GATED (404, pm.ts) so the contract CODE cannot be resolved — the
+ *   - contract (colContract): the wire gives contract_id (a uuid); /pm/contracts is
+ *     now LIVE (B-108), but the contract wire has NO human code/no column (only
+ *     id/sla/mode/value/...), so the contract CODE still cannot be resolved — the
  *     cell renders an em-dash and NEVER leaks the raw uuid.
  *   - next-PM (colNextPm) IS the real next_due column (em-dash only when blank).
  *   - The loading skeleton + the icon-only empty state are additions for the real
  *     data path (the mock always had rows, so rendered neither) — no invented text.
  *
- * Create path (partially Wave-2-blocked): POST /pm/assets requires contract_id +
- * kind; /pm/contracts is gated so there is no contract picker — the add-asset form
- * (pm-asset-form.tsx) collects the contract id as raw text and flags the block.
+ * Create path (BACKEND GAP, flagged): POST /pm/assets requires contract_id + kind
+ * and still accepts only { contract_id, kind, site, cycle, next_due } — it does NOT
+ * accept name/code even though migration 0034 added the columns (a backend gap for a
+ * later wave), so the add-asset form cannot set them. /pm/contracts is now LIVE, but
+ * the form still collects the contract id as raw text (a contract PICKER is not built
+ * yet — a follow-up), not because the endpoint is gated.
  *
  * i18n (rule 2): every visible string is a pm.* / common.* dict key (t). No Thai
  * literal lives in source (rule 2); tokens back every colour (rule 6).
@@ -268,9 +271,9 @@ export function PMAssets() {
       </div>
     );
     ctx.openModal({
-      // The mock title was `${id} · ${name}`; name is a wire gap, so the code alone
-      // identifies the asset (never a fabricated name).
-      title: a.id || DASH,
+      // The mock title was `${code} · ${name}`; both are real columns since migration
+      // 0034 (B-110), so the port shows them (an em-dash for a blank one, never the uuid).
+      title: `${a.code || DASH} · ${a.name || DASH}`,
       subtitle: a.site || DASH,
       icon: "wrench",
       iconTone: "var(--brand)",
@@ -300,7 +303,8 @@ export function PMAssets() {
               icon="wrench"
               onClick={() => {
                 close();
-                ctx.notify(t("pm.toastAssetWoCreated").replace("{id}", a.id));
+                // the prototype used the asset CODE as the toast identifier (real since 0034).
+                ctx.notify(t("pm.toastAssetWoCreated").replace("{id}", a.code || DASH));
                 ctx.navigate("pm.wo");
               }}
             >
@@ -430,11 +434,12 @@ export function PMAssets() {
                       style={{ borderTop: "1px solid var(--border)", cursor: "pointer" }}
                       onClick={() => openDetail(a)}
                     >
+                      {/* code: real human code column (migration 0034) — not the raw uuid id */}
                       <td style={{ ...td, fontWeight: 700, color: "var(--brand)" }} className="num">
-                        {a.id || DASH}
+                        {a.code || DASH}
                       </td>
-                      {/* name: no wire column (backend gap) — em-dash */}
-                      <td style={{ ...td, fontWeight: 600, color: "var(--text-3)" }}>{DASH}</td>
+                      {/* name: real column (migration 0034) */}
+                      <td style={{ ...td, fontWeight: 600 }}>{a.name || DASH}</td>
                       <td style={td}>{a.kind ? <Tag tone="var(--text-2)">{a.kind}</Tag> : DASH}</td>
                       <td style={{ ...td, color: "var(--text-2)" }}>{a.site || DASH}</td>
                       <td style={{ ...td, color: "var(--text-2)" }}>{a.cycle || DASH}</td>
@@ -444,7 +449,8 @@ export function PMAssets() {
                       <td style={{ ...td, fontWeight: 600 }} className="num">{a.nextDue || DASH}</td>
                       {/* status: no wire column — em-dash (no derived status) */}
                       <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
-                      {/* contract: contract_id uuid unresolvable (/pm/contracts gated) — em-dash */}
+                      {/* contract: /pm/contracts is live, but the contract wire has no human
+                          code column, so the code is still unresolvable — em-dash (never the uuid) */}
                       <td style={{ ...td, color: "var(--text-3)" }} className="num">{DASH}</td>
                     </tr>
                   ))
