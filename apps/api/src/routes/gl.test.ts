@@ -18,7 +18,9 @@ import {
   jvs,
   payrolls,
   pvs,
+  roles,
   rvs,
+  users,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
@@ -41,15 +43,22 @@ interface Inserted {
   table: unknown;
   values: Record<string, unknown>[];
 }
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL;
+}
 interface StubOpts {
   rows: Array<[unknown, unknown[]]>;
   captured?: Captured[];
   inserted?: Inserted[];
+  updated?: Updated[];
+  updateBase?: Record<string, unknown>;
 }
 
-/** Db stub: canned rows per table (reads, incl. selectThrough joins) + insert capture. */
+/** Db stub: canned rows per table (reads, incl. selectThrough joins) + write capture. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [] } = opts;
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
@@ -85,6 +94,16 @@ function stubDb(opts: StubOpts): Db {
             arr.map((v, i) => ({ id: v.id ?? `new-${seq++}-${i}`, createdAt: D, ...v })),
           );
         },
+      }),
+    }),
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            updated.push({ table, set, where });
+            return Promise.resolve([{ ...updateBase, ...set }]);
+          },
+        }),
       }),
     }),
   };
@@ -135,13 +154,48 @@ const glAcc = (id: string, code: string, name: string, parentId: string | null) 
   updatedAt: D,
 });
 
-// An accounting_period row (B-094-1 locked-period guard).
+// An accounting_period row (B-094-1 locked-period guard). `period` defaults to
+// the BE-labelled seed shape ('2569-05') used by the B-094-1 JV tests; the
+// close-period tests pass an explicit CE period ('2026-05').
 const PERIOD = "per00000-0000-0000-0000-0000000000p1";
-const periodRow = (id: string, locked: boolean) => ({
+const periodRow = (id: string, locked: boolean, period = "2569-05") => ({
   id,
   companyId: COMPANY,
-  period: "2569-05",
+  period,
   locked,
+  createdAt: D,
+  updatedAt: D,
+});
+
+// loadCaller resolves the caller via email → dictionary user (u-0) → role; the
+// SESSION email must match userRow.email so the finance-authz gate can read the
+// caller's perms (close-period requires finance.approve).
+const userRow = {
+  id: "u-0",
+  companyId: COMPANY,
+  email: SESSION.user.email,
+  name: SESSION.user.name,
+  roleId: "role-0",
+  status: "active",
+};
+/** A role carrying the finance perms the close-period gate reads. */
+const roleRow = (financeApprove = true) => ({
+  id: "role-0",
+  companyId: COMPANY,
+  name: "Finance Manager",
+  approvalLimits: {},
+  perms: {
+    finance: {
+      view: true,
+      create: true,
+      edit: true,
+      approve: financeApprove,
+      cancel: false,
+    },
+  },
+  approvalLevel: 3,
+  approvalLimit: null,
+  currencyCode: "THB",
   createdAt: D,
   updatedAt: D,
 });
@@ -595,5 +649,257 @@ describe("GET /api/v1/gl/posting-inbox", () => {
     const pvRead = captured.find((c) => c.table === pvs);
     expect(pvRead).toBeTruthy();
     expect(paramsOf(pvRead!.where)).toContain(COMPANY);
+  });
+});
+
+// ===========================================================================
+// GET /gl/reports/trial-balance — trial balance (Dr/Cr per account + footer)
+// ===========================================================================
+describe("GET /api/v1/gl/reports/trial-balance", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      url: "/api/v1/gl/reports/trial-balance",
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+  });
+
+  it("aggregates Σ dr / Σ cr per account with a balanced Dr=Cr footer", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [
+              glAccounts,
+              [
+                glAcc(ACC_CASH, "1020", "เงินฝากธนาคาร", null),
+                glAcc(ACC_AR, "1030", "ลูกหนี้การค้า", null),
+                glAcc(ACC_COST, "5020", "ต้นทุนวัสดุก่อสร้าง", null),
+              ],
+            ],
+            [
+              jvLines,
+              [
+                // JV_A: cost 8040 dr, AR 8040 cr (balanced)
+                jvLine(JV_A, ACC_COST, 8040, 0),
+                jvLine(JV_A, ACC_AR, 0, 8040),
+                // JV_B: cash 2,148,000 dr, AR 2,148,000 cr (balanced)
+                jvLine(JV_B, ACC_CASH, 2_148_000, 0),
+                jvLine(JV_B, ACC_AR, 0, 2_148_000),
+              ],
+            ],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/reports/trial-balance" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    // code-ordered ascending, only accounts with real jv_line activity
+    expect(body.rows.map((r: { account_code: string }) => r.account_code)).toEqual([
+      "1020",
+      "1030",
+      "5020",
+    ]);
+    const cash = body.rows.find((r: { account_code: string }) => r.account_code === "1020");
+    expect(cash.account_name).toBe("เงินฝากธนาคาร");
+    expect(cash.debit).toBe(2_148_000);
+    expect(cash.credit).toBe(0);
+    const ar = body.rows.find((r: { account_code: string }) => r.account_code === "1030");
+    expect(ar.debit).toBe(0);
+    expect(ar.credit).toBe(2_156_040); // 8040 + 2,148,000
+    const cost = body.rows.find((r: { account_code: string }) => r.account_code === "5020");
+    expect(cost.debit).toBe(8040);
+    expect(cost.credit).toBe(0);
+    // Dr=Cr footer — the true Σ across every leg (balanced seed JVs).
+    expect(body.totals.total_debit).toBe(2_156_040);
+    expect(body.totals.total_credit).toBe(2_156_040);
+    expect(body.totals.total_debit).toBe(body.totals.total_credit);
+    expect(body.currency_code).toBe("THB");
+  });
+
+  it("reads jv_line scoped THROUGH jv (never a bare jv_line select) — company param bound", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [jvLines, [jvLine(JV_A, ACC_COST, 1, 0)]],
+            [glAccounts, [glAcc(ACC_COST, "5020", "x", null)]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/reports/trial-balance" });
+    const lineRead = captured.find((c) => c.table === jvLines);
+    expect(lineRead).toBeTruthy();
+    // scoped THROUGH jv (the selectThrough join hop) + company_id bound on the root
+    expect(lineRead!.joins).toContain(jvs);
+    expect(paramsOf(lineRead!.where)).toContain(COMPANY);
+  });
+});
+
+// ===========================================================================
+// POST /gl/close-period — CE-strict lock-only period close (Wei C-176)
+// ===========================================================================
+describe("POST /api/v1/gl/close-period", () => {
+  const authzDb = (
+    periodRows: unknown[],
+    financeApprove: boolean,
+    extra: Partial<StubOpts> = {},
+  ) =>
+    stubDb({
+      rows: [
+        [users, [userRow]],
+        [roles, [roleRow(financeApprove)]],
+        [accountingPeriods, periodRows],
+      ],
+      ...extra,
+    });
+
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2026-05" },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+
+  it("403s a caller lacking the finance-approve perm (fail closed)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: authzDb([], /* financeApprove */ false),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2026-05" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toMatch(/finance approve permission/);
+  });
+
+  it("400s a Buddhist-Era-looking period (2569-05) — CE-strict", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: authzDb([], true),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2569-05" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toMatch(/CE 'YYYY-MM'/);
+  });
+
+  it("400s a malformed period (bad month / shape)", async () => {
+    const appx = await buildTestApp({
+      resolveTenant: async () => SESSION,
+      db: authzDb([], true),
+    });
+    const badMonth = await appx.inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2026-13" },
+    });
+    expect(badMonth.statusCode).toBe(400);
+    const badShape = await appx.inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "202605" },
+    });
+    expect(badShape.statusCode).toBe(400);
+  });
+
+  it("409s a period that is already closed (locked)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: authzDb([periodRow(PERIOD, /* locked */ true, "2026-05")], true),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2026-05" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/already closed/);
+  });
+
+  it("locks a fresh CE period (ActionOk) — creates the row locked, company_id force-set", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: authzDb([], true, { inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2026-05" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.period).toBe("2026-05");
+    expect(body.locked).toBe(true);
+    expect(body.created).toBe(true);
+    const ins = inserted.find((i) => i.table === accountingPeriods);
+    expect(ins).toBeTruthy();
+    expect(ins!.values[0]!.companyId).toBe(COMPANY);
+    expect(ins!.values[0]!.period).toBe("2026-05");
+    expect(ins!.values[0]!.locked).toBe(true);
+  });
+
+  it("locks an existing OPEN CE period via update (ActionOk) — created=false", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: authzDb([periodRow(PERIOD, /* locked */ false, "2026-05")], true, {
+          updated,
+          updateBase: periodRow(PERIOD, false, "2026-05"),
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2026-05" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().created).toBe(false);
+    expect(res.json().locked).toBe(true);
+    const upd = updated.find((u) => u.table === accountingPeriods);
+    expect(upd).toBeTruthy();
+    expect(upd!.set.locked).toBe(true);
+  });
+
+  it("binds the EXACT CE period param on the accounting_period read (BE seed row not naively matched)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: authzDb([], true, { captured }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/close-period",
+      payload: { period: "2026-05" },
+    });
+    const read = captured.find((c) => c.table === accountingPeriods);
+    expect(read).toBeTruthy();
+    // the query filters by BOTH the tenant and the EXACT CE param — never a loose
+    // match that could pull a BE-labelled '2569-05' seed row.
+    const params = paramsOf(read!.where);
+    expect(params).toContain(COMPANY);
+    expect(params).toContain("2026-05");
   });
 });

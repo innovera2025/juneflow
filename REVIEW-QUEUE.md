@@ -19,10 +19,12 @@
 
 ## คิวรอ promote
 
-> **QUEUE EMPTY (2026-07-20 · PHASE-4 WEB batch PROMOTED → main `a99031d` · 0-drift · pin a32d618)** — P2-WEB-21..24 promoted, moved to history. 🏁 Phase-4 backend+web COMPLETE on main. The `>` records below are the durable promote history.
+> **PHASE-3 W0 QUEUED (2026-07-21 · orch-A)** — P2-BE-44/45 on feature/backend await orch-B verify+merge. Prior: **QUEUE EMPTY (2026-07-20 · PHASE-4 WEB batch PROMOTED → main `a99031d` · 0-drift · pin a32d618)** — P2-WEB-21..24 promoted, moved to history. 🏁 Phase-4 backend+web COMPLETE on main. The `>` records below are the durable promote history.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-44 | AR+eTax handlers (P3 W0) | 89d34c7 feature/backend | — (backend · G3 790 api · live invoice-money-authority+rv-409+etax · gate 4.5) | 2026-07-21 |
+| P2-BE-45 | GL trial/close + FA (P3 W0) | 89d34c7 feature/backend | — (backend · G3 790 api · live Dr=Cr+close-lock+fa · gate 4.5) | 2026-07-21 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.

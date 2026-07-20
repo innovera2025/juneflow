@@ -57,6 +57,9 @@ import { registerAuditLogRoute } from "./routes/audit-log.js";
 import { registerBoqReportsRoute } from "./routes/boq-reports.js";
 import { registerAnalyticsRoute } from "./routes/analytics.js";
 import { registerGlRoute } from "./routes/gl.js";
+import { registerArRoute } from "./routes/ar.js";
+import { registerEtaxRoute } from "./routes/etax.js";
+import { registerFaRoute } from "./routes/fa.js";
 import { registerApRoute } from "./routes/ap.js";
 import { registerBankRoute } from "./routes/bank.js";
 import type { SignIn } from "./auth.js";
@@ -184,6 +187,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerBoqReportsRoute(v1);
       registerAnalyticsRoute(v1);
       registerGlRoute(v1);
+      registerArRoute(v1);
+      registerEtaxRoute(v1);
+      registerFaRoute(v1);
       registerApRoute(v1);
       registerBankRoute(v1);
       await registerFilesRoute(v1, {
