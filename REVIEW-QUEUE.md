@@ -23,6 +23,8 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-WEB-21 | subcon.accept (W2) | 502f402 feature/web-subcon-accept | **orch-B ✅ merged** — gate-4.5 PASS (B-118=ก slate ratified · consume-only · zero Thai · META-1 project_name/defect · C3/B-107/B-116) · dev 480d269 | 2026-07-20 |
+| P2-WEB-22/23/24 | pm.dashboard/schedule/wo (W2/3) | 62497d0 feature/web-pm-wave2 | **orch-B ✅ merged** — gate-4.5 PASS (consume-only · B-115/B-117 keys · FIXED calendar · defer-stub picker · C10 honest-empty) · dev 078feed | 2026-07-20 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
