@@ -361,7 +361,13 @@ test.describe("visual gate · capture mode (real screens vs reference)", () => {
       // which equals the fixed-size reference (the Fiori shell is 100vh — the
       // content pane scrolls internally, not the page).
       await page.setViewportSize(entry.viewport ?? { width: 1600, height: 1000 });
-      await page.goto(`${baseURL}/#/${entry.route}`);
+      // B-120 (regression gate): wait for the DATA to settle before shooting.
+      // Default goto resolves at `load` — TanStack Query fetches are still in
+      // flight then, so the shot captures skeleton/loading frames and the gate
+      // flakes 13-16% against a settled baseline. networkidle + a fixed settle
+      // makes capture-vs-baseline deterministic (both sides settled).
+      await page.goto(`${baseURL}/#/${entry.route}`, { waitUntil: "networkidle" });
+      await page.waitForTimeout(1500);
       const shot = await page.screenshot({ fullPage: false });
       const candidate =
         "data:image/png;base64," + shot.toString("base64");

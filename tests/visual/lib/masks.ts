@@ -11,6 +11,31 @@ import type { MaskRegion } from "./compare";
 // "sidebar-logo-b044".
 
 export const MASK_REGISTRY: Record<string, MaskRegion> = {
+  // B-120(ข) — Wei ruling 2026-07-20 (G5 re-baseline as regression gate; the
+  // ruling pre-noted "clock-relative … may need masks"): the page-header carries
+  // LIVE-TIME widgets that legitimately differ between a baseline capture and a
+  // gate capture — (1) the "(อัปเดต HH:MM น.)" last-updated text (dashboard /
+  // subcon.contracts), (2) the date chip "20 ก.ค. 69" (TODAY — changes daily)
+  // next to the period tabs. Measured from the app-baseline diffs
+  // (agents/orch-b-recon/g5-bringup-results): red-px bboxes x[646-1562] y[109-139]
+  // (update-time) and x[1166-1562] y[109-110] (chip/tabs edge AA).
+  "header-update-time-b120": {
+    x: 560,
+    y: 92,
+    width: 240,
+    height: 60,
+    reason:
+      "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures",
+  },
+  "header-date-chip-b120": {
+    x: 1120,
+    y: 92,
+    width: 470,
+    height: 62,
+    reason:
+      "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures",
+  },
+
   // B-044(ก) — Wei ruling 2026-07-13: the port's t("app.name") th =
   // "ระบบงานก่อสร้าง" is CORRECT; all ~128 reference images carry an older
   // logo lockup (lowercase "juneflow" wordmark + English "Construction ERP"
