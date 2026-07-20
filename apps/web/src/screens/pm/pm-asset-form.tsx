@@ -19,15 +19,16 @@
  * WIRE GAPS / DIVERGENCE (reported honestly) — POST /pm/assets (apps/api/src/routes/
  * pm.ts) accepts only { contract_id, kind, site, cycle, next_due } and REQUIRES
  * contract_id + kind:
- *   - CREATE IS PARTIALLY WAVE-2-BLOCKED: the contract picker source /pm/contracts
- *     is Wave-2 GATED (404), so this form CANNOT offer a contract browser — the
- *     contract id is entered as raw text (pm.phContract) and a foreign/absent id
- *     resolves to 404. contract_id is NEVER fabricated. Because the wire requires
- *     it, the submit guards contract_id + kind (red border when blank) on top of
- *     the prototype's code/name guard.
- *   - code (pm.fieldCode) + name (pm.colName): pm_asset has NO id-code column (id is
- *     server-generated) and NO name column (backend gap). They are shown with the
- *     prototype's required asterisks for fidelity but are NOT sent / do NOT persist.
+ *   - NO CONTRACT PICKER YET: /pm/contracts is now LIVE (B-108), so a contract browser
+ *     is possible, but one is not built here yet — the contract id is entered as raw
+ *     text (pm.phContract) and a foreign/absent id resolves to 404. contract_id is
+ *     NEVER fabricated. Because the wire requires it, the submit guards contract_id +
+ *     kind (red border when blank) on top of the prototype's code/name guard.
+ *   - code (pm.fieldCode) + name (pm.colName): pm_asset now HAS code/name columns
+ *     (migration 0034, B-110), BUT POST /pm/assets still does NOT accept them (a
+ *     backend gap for a later wave). They are shown with the prototype's required
+ *     asterisks for fidelity but are NOT sent / do NOT persist until the POST body
+ *     accepts them.
  *   - next_due is not collected (the prototype has no such field) — omitted.
  */
 import { useState } from "react";
