@@ -20,6 +20,8 @@ import {
   defects,
   projects,
   vendors,
+  apBillings,
+  retentionLedgers,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import type { AuditRecord } from "../plugins/audit-log.js";
@@ -63,6 +65,8 @@ interface StubOpts {
   updated?: Updated[];
   /** Base row merged with the update SET to synthesize the RETURNING row. */
   updateBase?: Record<string, unknown>;
+  /** Counts transaction() invocations — proves multi-write atomicity (one tx). */
+  tx?: { count: number };
 }
 
 /** Base Db stub: canned rows per table for reads; capture of write ops. */
@@ -113,8 +117,12 @@ function stubDb(opts: StubOpts): Db {
     }),
   };
   // The transaction door runs its callback against this SAME stub, so writes
-  // inside a tx still capture into inserted/updated/captured (no real BEGIN).
-  raw.transaction = (cb: (tx: unknown) => unknown) => cb(raw);
+  // inside a tx still capture into inserted/updated/captured (no real BEGIN). The
+  // optional tx spy counts invocations so a test can prove one-transaction atomicity.
+  raw.transaction = (cb: (tx: unknown) => unknown) => {
+    if (opts.tx) opts.tx.count += 1;
+    return cb(raw);
+  };
   return raw as unknown as Db;
 }
 
@@ -589,6 +597,41 @@ describe("POST /api/v1/periods/:id/inspect", () => {
     expect(records).toHaveLength(1);
   });
 
+  it("pass: carries a `warning` advisory field (null-or-string, never a 403); null when nothing lags", async () => {
+    const P = period(PERIOD, "delivered", "percent");
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[workPeriods, [P]], [subconContracts, [contract(CONTRACT, "WO-1")]], [projects, [project]]],
+          updateBase: P,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/periods/${PERIOD}/inspect`, payload: { result: "pass" } });
+    expect(res.statusCode).toBe(200); // advisory NEVER changes the status code
+    const body = res.json();
+    expect(body).toHaveProperty("warning");
+    expect(body.warning).toBeNull(); // a single period has nothing to lag behind
+  });
+
+  it("pass: flags `accepted_ahead_of_progress` when an earlier percent period is not yet passed — still 200", async () => {
+    // target = seq 2 (pct 30%) accepted while seq 1 (pct 20%) is still pending: the
+    // cumulative target (50%) overshoots the recorded progress (30%) → advisory.
+    const target = { ...period(PERIOD, "delivered", "percent", 2), pct: "30.000" };
+    const earlier = { ...period("p-earlier", "pending", "percent", 1), pct: "20.000" };
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[workPeriods, [target, earlier]], [subconContracts, [contract(CONTRACT, "WO-1")]], [projects, [project]]],
+          updateBase: target,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/periods/${PERIOD}/inspect`, payload: { result: "pass" } });
+    expect(res.statusCode).toBe(200); // an advisory NEVER blocks the pass
+    expect(res.json().warning).toBe("accepted_ahead_of_progress");
+  });
+
   it("reject: delivered → rejected + inserts defect rows (item/severity/before_photo)", async () => {
     const P = period(PERIOD, "delivered");
     const inserted: Inserted[] = [];
@@ -691,6 +734,225 @@ describe("POST /api/v1/periods/:id/inspect", () => {
       })
     ).inject({ method: "POST", url: `/api/v1/periods/${PERIOD}/inspect`, payload: { result: "pass" } });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /periods/:id/approve-payment — Wave-2: SERVER-computed money + retention
+// (B-107a) → AP billing + retention-ledger HELD + period → paid (one tx). The
+// %-gate is an honest, never-blocking advisory (B-107c). All money is asserted
+// against the SERVER formula, never a client-supplied amount.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/periods/:id/approve-payment", () => {
+  const url = `/api/v1/periods/${PERIOD}/approve-payment`;
+  // A passed period per basis (the new migration-0033 money cols spread on top of
+  // the Wave-0 factory). contract = value 2,150,000 · retention 10%.
+  const passedPercent = { ...period(PERIOD, "passed", "percent"), pct: "20.000" };
+  const passedDistance = {
+    ...period(PERIOD, "passed", "distance"),
+    perPeriodQty: "100.0000",
+    ratePerUnit: "1000.00",
+    amount: "555555.00", // a DECOY stored amount — the server must use qty × rate.
+  };
+  const passedUnit = {
+    ...period(PERIOD, "passed", "unit"),
+    perPeriodQty: "2.0000",
+    ratePerUnit: "250000.00",
+    amount: "9.00", // decoy — server uses qty × rate.
+  };
+  const passedMilestone = { ...period(PERIOD, "passed", "milestone"), amount: "375000.00" };
+
+  const withPeriod = (
+    p: Record<string, unknown>,
+    extra: Partial<StubOpts> = {},
+  ): StubOpts => ({
+    rows: [[workPeriods, [p]], [subconContracts, [contract(CONTRACT, "WO-1")]]],
+    updateBase: p,
+    ...extra,
+  });
+
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("404s for a period outside the tenant (no writes, binds company_id)", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[workPeriods, []]], inserted, captured }),
+      })
+    ).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(404);
+    expect(inserted).toHaveLength(0);
+    const read = captured.find((c) => c.table === workPeriods);
+    expect(paramsOf(read!.where)).toContain(COMPANY);
+    expect(paramsOf(read!.where)).not.toContain(OTHER_COMPANY);
+  });
+
+  it("409s (INVALID_STATE) unless the period is `passed` — pending/delivered/... write nothing", async () => {
+    for (const status of ["pending", "delivered", "inspecting", "rejected", "paid"] as const) {
+      const inserted: Inserted[] = [];
+      const updated: Updated[] = [];
+      const tx = { count: 0 };
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb(withPeriod(period(PERIOD, status), { inserted, updated, tx })),
+        })
+      ).inject({ method: "POST", url, payload: {} });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("INVALID_STATE");
+      expect(inserted).toHaveLength(0); // no ap_billing / retention_ledger write
+      expect(updated).toHaveLength(0); // no status flip
+      expect(tx.count).toBe(0); // never entered the transaction
+    }
+  });
+
+  it("percent basis: gross = (pct/100)×contract.value, SERVER-computed — a client `amount` is IGNORED", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedPercent, { inserted })),
+      })
+    ).inject({ method: "POST", url, payload: { amount: 99_999_999 } }); // bogus client amount
+    expect(res.statusCode).toBe(200);
+    // 20% of 2,150,000 = 430,000 — the bogus client amount is never read.
+    expect((inserted.find((w) => w.table === apBillings)!.rows[0] as { amount: string }).amount).toBe("430000.00");
+    expect(res.json().gross).toBe(430000);
+    expect(res.json().basis).toBe("percent");
+  });
+
+  it("distance basis: gross = perPeriodQty × ratePerUnit (not the stored amount)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedDistance, { inserted })),
+      })
+    ).inject({ method: "POST", url, payload: { amount: 1 } });
+    expect(res.statusCode).toBe(200);
+    // 100 × 1,000 = 100,000 — NOT the decoy stored amount 555,555.
+    expect((inserted.find((w) => w.table === apBillings)!.rows[0] as { amount: string }).amount).toBe("100000.00");
+    expect(res.json().gross).toBe(100000);
+  });
+
+  it("unit basis: gross = perPeriodQty × ratePerUnit (not the stored amount)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedUnit, { inserted })),
+      })
+    ).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(200);
+    // 2 × 250,000 = 500,000 — NOT the decoy stored amount 9.
+    expect((inserted.find((w) => w.table === apBillings)!.rows[0] as { amount: string }).amount).toBe("500000.00");
+    expect(res.json().gross).toBe(500000);
+  });
+
+  it("milestone basis: gross = the period's stored fixed `amount`", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedMilestone, { inserted })),
+      })
+    ).inject({ method: "POST", url, payload: { amount: 0 } });
+    expect(res.statusCode).toBe(200);
+    expect((inserted.find((w) => w.table === apBillings)!.rows[0] as { amount: string }).amount).toBe("375000.00");
+    expect(res.json().gross).toBe(375000);
+  });
+
+  it("splits retention: ap_billing.retention == gross×retention_pct/100 AND a HELD retention_ledger row is written", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedPercent, { inserted })),
+      })
+    ).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(200);
+    const bill = inserted.find((w) => w.table === apBillings)!.rows[0] as { amount: string; retention: string; status: string };
+    expect(bill.amount).toBe("430000.00");
+    expect(bill.retention).toBe("43000.00"); // 10% of 430,000
+    expect(bill.status).toBe("draft");
+    const led = inserted.find((w) => w.table === retentionLedgers)!.rows[0] as {
+      withheld: string; returned: string; status: string; contractId: string; rate: string;
+    };
+    expect(led.withheld).toBe("43000.00");
+    expect(led.returned).toBe("0");
+    expect(led.status).toBe("held");
+    expect(led.contractId).toBe(CONTRACT);
+    expect(led.rate).toBe("10.000");
+    const body = res.json();
+    expect(body.retention).toBe(43000);
+    expect(body.net).toBe(387000); // gross − retention
+    expect(body.currency_code).toBe("THB");
+    expect(body.ap_billing_id).toBeTruthy();
+  });
+
+  it("flips the period status → `paid` (scoped chain update)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedMilestone, { updated })),
+      })
+    ).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("paid");
+    expect(updated.find((u) => u.table === workPeriods)!.set.status).toBe("paid");
+  });
+
+  it("writes the AP billing + retention ledger + status flip in ONE transaction (atomic)", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const tx = { count: 0 };
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedPercent, { inserted, updated, tx })),
+      })
+    ).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(tx.count).toBe(1); // exactly one transaction wraps all three writes
+    expect(inserted.find((w) => w.table === apBillings)).toBeTruthy();
+    expect(inserted.find((w) => w.table === retentionLedgers)).toBeTruthy();
+    expect(updated.find((u) => u.table === workPeriods)!.set.status).toBe("paid");
+  });
+
+  it("returns an advisory `warning` field (null-or-string), never a 403; null when nothing lags", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(withPeriod(passedPercent)),
+      })
+    ).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveProperty("warning");
+    expect(body.warning).toBeNull();
+  });
+
+  it("advisory flags `accepted_ahead_of_progress` when an earlier period is unpaid — still 200 (never blocks)", async () => {
+    const target = { ...period(PERIOD, "passed", "percent", 2), pct: "30.000" };
+    const earlier = { ...period("p-earlier", "pending", "percent", 1), pct: "20.000" };
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[workPeriods, [target, earlier]], [subconContracts, [contract(CONTRACT, "WO-1")]]],
+          updateBase: target,
+        }),
+      })
+    ).inject({ method: "POST", url, payload: {} });
+    expect(res.statusCode).toBe(200); // an advisory NEVER changes the status code
+    expect(res.json().warning).toBe("accepted_ahead_of_progress");
   });
 });
 
