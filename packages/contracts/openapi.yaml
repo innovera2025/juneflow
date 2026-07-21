@@ -2218,6 +2218,35 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
   /ar/invoices:
+    get:
+      tags: [finance]
+      summary: List AR invoices (filters status/etax_status/customer_id/period · dual-serves tax e-Tax queue)
+      operationId: listArInvoices
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Period"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: etax_status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: customer_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [finance]
       summary: AR invoice ({customer_id,lines[],credit_term}) → queues e-Tax
@@ -2245,6 +2274,18 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
   /ar/rv:
+    get:
+      tags: [finance]
+      summary: List AR receipt vouchers
+      operationId: listArRv
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [finance]
       summary: AR receipt voucher ({invoice_id,amount})
@@ -2264,6 +2305,119 @@ paths:
       responses:
         "201":
           $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ar/cn:
+    get:
+      tags: [finance]
+      summary: List AR credit notes
+      operationId: listArCn
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create AR credit note ({customer_id,ref_invoice_id,amount,reason}) — server VAT = round(amount×7/107)
+      operationId: createArCn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_id:
+                  type: string
+                  format: uuid
+                ref_invoice_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: number
+                reason:
+                  type: string
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ar/cn/{id}/approve:
+    post:
+      tags: [finance]
+      summary: Approve AR credit note → post to GL via posting inbox
+      operationId: approveArCn
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ar/aging:
+    get:
+      tags: [finance]
+      summary: AR aging (buckets by due_date)
+      operationId: getArAging
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ar/tax-register:
+    get:
+      tags: [finance]
+      summary: Tax register (derived from ar_invoice + rv · CX=status)
+      operationId: getArTaxRegister
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /ar/tax-register/{id}/cancel:
+    post:
+      tags: [finance]
+      summary: Cancel a tax-register entry
+      operationId: cancelArTaxRegister
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /tax/reports/vat:
+    get:
+      tags: [finance]
+      summary: VAT report (output=ar_invoice · input=ap_billing · ภ.พ.30)
+      operationId: getTaxReportVat
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /tax/reports/wht:
+    get:
+      tags: [finance]
+      summary: WHT report (ภ.ง.ด. split by tax_id heuristic)
+      operationId: getTaxReportWht
+      parameters:
+        - $ref: "#/components/parameters/Period"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /gl/posting-inbox:
@@ -2494,6 +2648,16 @@ paths:
           $ref: "#/components/responses/EntityList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /gl/periods:
+    get:
+      tags: [finance]
+      summary: List accounting periods (locked flag)
+      operationId: getGlPeriods
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /gl/close-period:
     post:
       tags: [finance]
@@ -2536,6 +2700,101 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fa/assets/{id}:
+    put:
+      tags: [finance]
+      summary: Update fixed asset
+      operationId: updateFaAsset
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fa/adjustments:
+    get:
+      tags: [finance]
+      summary: List FA adjustments (revalue / write-off history)
+      operationId: listFaAdjustments
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fa/revalue:
+    post:
+      tags: [finance]
+      summary: Revalue a fixed asset ({asset_id,new_value}) → adjustment + posting inbox
+      operationId: revalueFaAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                asset_id:
+                  type: string
+                  format: uuid
+                new_value:
+                  type: number
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fa/write-off:
+    post:
+      tags: [finance]
+      summary: Write off a fixed asset ({asset_id}) → adjustment + posting inbox
+      operationId: writeOffFaAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                asset_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fa/import:
+    post:
+      tags: [finance]
+      summary: Import fixed assets (bulk rows[])
+      operationId: importFaAssets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
       responses:
         "201":
           $ref: "#/components/responses/EntityCreated"
