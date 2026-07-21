@@ -23,12 +23,6 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
-| P2-WEB-25 | gl.inbox (P3) | 3ca4669 feature/web-gl-inbox | **orch-B ✅ merged** — gate-4.5 PASS (§0 fidelity · 37 keys+reuse · honest-disabled Post · C10) · follow-up P2-WEB-26 flip-flag | 2026-07-21 |
-| P2-BE-46 | P3 round-A sacred openapi A-D + migrations 0035/0036 + seed | f3c57c4 feature/backend | — (backend · additive-only · live migrate+seed 0000→0036 · 876 api) | 2026-07-21 |
-| P2-BE-47 | AR read-surface + CN + customers (C-179) | f3c57c4 feature/backend | — (backend · money-authority + honest-empty + tenant-door · gate 4.5) · ⚠ **CN-approve reversal JV mapping shares B-128 main-promote hold** (Dr 4010+2050/Cr 1030 = EXTRAPOLATED per B-128 · dev-merge free · hold main until Wei ratifies map) | 2026-07-21 |
-| P2-BE-48 | GL /gl/post + periods (**B-128 map-confirm gate**) | f3c57c4 feature/backend | ⚠ /gl/post merge-gated on Wei B-128 posting-map confirm (rest merges free) | 2026-07-21 |
-| P2-BE-49 | FA depreciation + adjust op-set | f3c57c4 feature/backend | — (backend · (cost−salvage)/life/12 · revalue honest-deferred · gate 4.5) | 2026-07-21 |
-| P2-BE-50 | tax reports (VAT/WHT) + etax retry nit | f3c57c4 feature/backend | — (backend · real Σ · gate 4.5) | 2026-07-21 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
@@ -47,3 +41,4 @@
 > ✅ **Phase-4 WEB batch → `main` `a99031d` (2026-07-20 · 0-drift · pin a32d618)** — subcon.accept + pm.dashboard/schedule(FIXED cal)/wo(functional B-117 picker) + pm.assets touch-up. CONSUME-ONLY (zero sacred · dict 1619 intact · B-106 dropped). orch-B VERIFIED: gate-4.5 ×2 PASS (B-118=ก slate ratified · orch-B caught the §0-rule-4 substitution) · zero hardcoded Thai · B-115/B-117 keys · FIXED calendar · C10 honest-empty · typecheck 0 · web 647. Visual: Wei manual dev-gallery review (automated G5 deferred → B-119 harness bring-up). 14th 0-drift promote. **🏁 PHASE-4 COMPLETE (backend Wave-0/1/2/3 + META-1 + web).**
 > ✅ **G5 regression gate → `main` `0e1ad79` (2026-07-20 · 0-drift · pin b38af22)** — B-119/B-120 CLOSED: visual harness bring-up (7 routes registered · 7 app-baseline refs incl subcon.accept first · settle-wait capture fix · 2 live-time masks · AA-epsilon 0.01% Wei-ruled) · round-6 fresh-stack proof 7/7 PASS + 16/16 self-checks · ZERO app-code · prototype gallery untouched (§0 design truth). Every future web merge runs the gate BEFORE merge. 16th 0-drift promote. **Phase-3 Finance opens.**
 > ✅ **Phase-3 Wave-0 + i18n Wave-A → `main` `6902dfb` (2026-07-21 · 0-drift · pin db76042)** — 6 zero-ruling handlers (ar server-money+RV-409 · etax C4 · gl trial/close CE-strict · fa) + 45 tests + 273 i18n keys (dicts 1892) + charter/B-121..126. orch-B: gate-4.5 ×2 · api 790 · LIVE 15/0 (bogus-money-ignored · locked-JV-409). 17th 0-drift. Carry: /customers unserved (C-179) · B-125.
+> ✅ **Phase-3 round-A + i18n Wave-B + gl.inbox → `main` `c2c1868` (2026-07-21 · 0-drift · pin 9ca4478)** — 16 sacred ops (192→208 · wei-approved:B-121..124) · migrations 0035/0036 · AR surface/CN-approve(×7/107 idempotent)/aging/tax-register/customers · /gl/post (map B-128=ก · double-derivation MATCH) + periods · FA surface ((cost−salvage)/life/12) · /tax/reports · 416 i18n keys (dicts 2308) · gl.inbox web. orch-B: gate-4.5 ×3 · api 876 · openapi additive line-verified. 18th 0-drift.
