@@ -59,6 +59,7 @@ import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
+import { ARAging, APAging } from "./screens/ar/fin-aging";
 import { BankCheque } from "./screens/bank/bank-cheque";
 import { BankReconciliation } from "./screens/bank/bank-recon";
 import { BankExport } from "./screens/bank/bank-export";
@@ -105,6 +106,9 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.inbox": GLPostingInbox,
   "ap.billing": APBilling,
   "ap.pv": APPaymentVoucher,
+  // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.
+  "ar.aging": ARAging,
+  "ap.aging": APAging,
   "bank.cheque": BankCheque,
   "bank.recon": BankReconciliation,
   "bank.export": BankExport,
