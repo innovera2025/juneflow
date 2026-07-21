@@ -40,6 +40,12 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 import { listGlPostingDocs } from "./gl-posting.js";
+import {
+  POSTING_MAP,
+  allocJvNo,
+  resolveAccountIds,
+  type PostingRule,
+} from "./gl-post.js";
 import { loadCaller, permAllowed } from "./authz.js";
 
 type JvRow = typeof jvs.$inferSelect;
@@ -400,6 +406,13 @@ async function postingInbox(db: TenantDb): Promise<Record<string, unknown>[]> {
 // Accounts with no jv_line activity do not appear (the aggregation is over the
 // real posted legs). Ordered by account code ascending (mirrors the mock's
 // code-grouped table + getCoa).
+//
+// NOTE (C-180, DEFERRED): the openapi declares GET /gl/reports/trial-balance
+// with a `?period=` filter, but this handler intentionally does NOT filter by
+// period — jv.period_id is NULL across the whole seed, so no leg is
+// period-attributable and applying a period filter would silently return an
+// empty balance. Period filtering is DEFERRED until the posting/close flow
+// populates jv.period_id (honest deferral — not implemented here).
 async function trialBalance(
   db: TenantDb,
   reply: FastifyReply,
@@ -528,6 +541,156 @@ async function closeGlPeriod(
   });
 }
 
+// ---------------------------------------------------------------------------
+// POST /gl/post — post source money docs to the GL (gl.jsx GLPostingInbox → Post)
+// ---------------------------------------------------------------------------
+// Body: { doc_ids: uuid[] } — the client names WHICH inbox docs to post; it
+// never sends money. MONEY AUTHORITY: each JV amount comes from the SOURCE ROW's
+// money field (POSTING_MAP.basis, surfaced as GlPostingDoc.amount), never the
+// client. Each requested doc is either POSTED (a balanced 2-leg JV) or SKIPPED
+// with an honest reason — the response reports both, never fabricating a post:
+//   - not in the tenant's inbox set        → skip "not found in this tenant's posting inbox"
+//   - already posted (idempotent)          → skip "already posted"
+//   - amount == null (gr = quantity, C10)  → skip "no postable money amount"
+//   - no posting rule for the source kind  → skip "no posting rule for this source kind"
+//   - a mapped COA code absent this tenant → skip "COA account missing"
+//   - else → post: Dr rule.dr = amount / Cr rule.cr = amount, source_doc = "<kind>:<id>".
+// finance.approve gates the route (LOCKS money into the ledger — mirror
+// close-period). Each posted doc gets its own transaction (header + 2 legs; a
+// leg failure rolls back the header — never an orphaned jv, mirrors createJv).
+
+/** Parse the body's doc_ids into a deduped non-empty id list, or an error message. */
+function parseDocIds(body: Record<string, unknown>): string[] | string {
+  const raw = body.doc_ids;
+  if (!Array.isArray(raw)) return "doc_ids must be a non-empty array";
+  const ids = raw.map((v) => str(v).trim()).filter((v) => v !== "");
+  if (ids.length === 0) return "doc_ids must be a non-empty array";
+  return [...new Set(ids)]; // dedupe: a repeated id must never post twice
+}
+
+async function postGlDocs(
+  db: TenantDb,
+  body: Record<string, unknown>,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const parsed = parseDocIds(body);
+  if (typeof parsed === "string") return badRequest(reply, parsed);
+  const requestedIds = parsed;
+
+  // The tenant's posting-inbox set (pending + posted), via the shared
+  // source-of-truth (already company-scoped). Money authority lives here: the
+  // amount is THIS row's money field, resolved server-side — the client cannot
+  // influence it (it sent only doc_ids).
+  const docs = await listGlPostingDocs(db);
+  const byId = new Map(docs.map((d) => [d.id, d]));
+
+  // Resolve every posting-map COA code ONCE (one company-scoped read) instead
+  // of an N+1 resolve per doc. Same skip semantics as a per-doc resolve: a code
+  // the tenant's COA lacks is simply absent from the map → that doc is skipped
+  // (never posted against a missing/mis-mapped account).
+  const accountIds = await resolveAccountIds(
+    db,
+    [...new Set(Object.values(POSTING_MAP).flatMap((r) => [r.dr, r.cr]))],
+  );
+
+  // JV numbers: allocate the batch's starting number ONCE, then increment per
+  // posted doc so numbers never collide within a single batch. A real DB
+  // continues the sequence on the next request from the committed max; the
+  // in-batch increment keeps the numbers unique even before those commits land.
+  const baseNo = await allocJvNo(db);
+  const noMatch = /^(.*-)(\d+)$/.exec(baseNo);
+  const noPrefix = noMatch ? noMatch[1]! : `${baseNo}-`;
+  const seqWidth = noMatch ? noMatch[2]!.length : 4;
+  let nextSeq = noMatch ? Number(noMatch[2]) : 1;
+  const allocNextNo = (): string =>
+    `${noPrefix}${String(nextSeq++).padStart(seqWidth, "0")}`;
+
+  const posted: { doc_id: string; source: string; jv_no: string; amount: number }[] = [];
+  const skipped: { doc_id: string; reason: string }[] = [];
+  let currency: string | null = null;
+
+  for (const docId of requestedIds) {
+    const doc = byId.get(docId);
+    if (!doc) {
+      skipped.push({ doc_id: docId, reason: "not found in this tenant's posting inbox" });
+      continue;
+    }
+    if (doc.posted) {
+      skipped.push({ doc_id: docId, reason: "already posted" });
+      continue;
+    }
+    if (doc.amount == null) {
+      // C10 honest gap: gr carries received/rejected QUANTITY, not a money
+      // amount — a doc with no real money value is NOT postable (never invent one).
+      skipped.push({ doc_id: docId, reason: "no postable money amount" });
+      continue;
+    }
+    const rule: PostingRule | undefined =
+      (POSTING_MAP as Record<string, PostingRule | undefined>)[doc.source];
+    if (!rule) {
+      // Defensive: listGlPostingDocs enumerates only mapped kinds today, but a
+      // future inbox kind without a rule must be skipped, never mis-posted.
+      skipped.push({ doc_id: docId, reason: "no posting rule for this source kind" });
+      continue;
+    }
+    const drId = accountIds.get(rule.dr);
+    const crId = accountIds.get(rule.cr);
+    if (!drId || !crId) {
+      skipped.push({ doc_id: docId, reason: "COA account missing" });
+      continue;
+    }
+
+    const amount = round2(doc.amount); // server authority — from the source row
+    const cur = doc.currency_code ?? "THB";
+    if (currency == null) currency = cur;
+    const jvId = randomUUID();
+    const jvNo = allocNextNo();
+    // A balanced 2-leg JV: Dr rule.dr = amount, Cr rule.cr = amount.
+    const lineRows: (typeof jvLines.$inferInsert)[] = [
+      { jvId, accountId: drId, dr: moneyStr(amount), cr: "0.00", currencyCode: cur },
+      { jvId, accountId: crId, dr: "0.00", cr: moneyStr(amount), currencyCode: cur },
+    ];
+    // ONE transaction per posted doc: header + both legs together. insertThrough
+    // re-proves this tenant owns the parent jv INSIDE the same tx (fail closed).
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(jvs, {
+          id: jvId,
+          no: jvNo,
+          sourceDoc: `${doc.source}:${doc.id}`,
+          memo: `post ${doc.source} ${doc.doc_no ?? doc.id}`,
+        })
+        .returning();
+      await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+    });
+    posted.push({ doc_id: doc.id, source: doc.source, jv_no: jvNo, amount });
+  }
+
+  return reply.code(200).send({
+    posted,
+    skipped,
+    currency_code: currency ?? "THB",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GET /gl/periods — accounting periods (gl.jsx GLPeriodClose period picker)
+// ---------------------------------------------------------------------------
+// Real source: accounting_period (company-scoped). Wire = the REAL columns
+// (id, period, locked, created_at). Ordered by period ascending so the picker
+// renders chronologically.
+async function listPeriods(db: TenantDb): Promise<Record<string, unknown>[]> {
+  const rows = (await db.select(accountingPeriods)) as AccountingPeriodRow[];
+  return [...rows]
+    .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
+    .map((p) => ({
+      id: p.id,
+      period: p.period,
+      locked: p.locked,
+      created_at: p.createdAt,
+    }));
+}
+
 /** Register the GL routes on the given (already /api/v1-prefixed) scope. */
 export function registerGlRoute(app: FastifyInstance): void {
   const withTenant =
@@ -541,6 +704,7 @@ export function registerGlRoute(app: FastifyInstance): void {
   app.get("/gl/coa", withTenant(getCoa));
   app.get("/gl/jv", withTenant(listJv));
   app.get("/gl/posting-inbox", withTenant(postingInbox));
+  app.get("/gl/periods", withTenant(listPeriods));
 
   // Trial balance is the opaque EntityOk (a single report object, not a list) —
   // it is NOT wrapped in the list envelope. Fail-closed 401 without a tenant.
@@ -576,5 +740,27 @@ export function registerGlRoute(app: FastifyInstance): void {
       });
     }
     return closeGlPeriod(db, (request.body ?? {}) as Record<string, unknown>, reply);
+  });
+
+  app.post("/gl/post", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    // Posting LOCKS money into the ledger (priority action) — require finance
+    // `approve` (mirrors close-period / bank reconcile). Fail-closed: an
+    // unattributable caller, or one lacking the perm, is denied 403 before any
+    // JV is written.
+    const caller = await loadCaller(request);
+    if (!caller) {
+      return reply
+        .code(403)
+        .send({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    }
+    if (!permAllowed(caller.perms, FINANCE_MODULE, "approve")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "GL posting requires the finance approve permission",
+      });
+    }
+    return postGlDocs(db, (request.body ?? {}) as Record<string, unknown>, reply);
   });
 }

@@ -36,11 +36,24 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 
-/** jv.source_doc "<table>:<uuid>" polymorphic ref (finance.ts GLPosting model). */
-export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll):([0-9a-fA-F-]{36})$/;
+/**
+ * jv.source_doc "<table>:<uuid>" polymorphic ref (finance.ts GLPosting model).
+ * ADDITIVE (Phase-3 finance): fa (depreciation) and cn (credit-note) post
+ * DIRECTLY from their own handlers (fa.ts / ar.ts) — they are NOT inbox rows —
+ * but their JVs record this SAME source_doc convention, so the shared ref must
+ * recognise `fa:` / `cn:` refs too. This only widens what the ref PARSES; the
+ * inbox enumeration in listGlPostingDocs below is unchanged (still the four
+ * kinds with a real backing table: pv/rv/gr/payroll).
+ */
+export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn):([0-9a-fA-F-]{36})$/;
 
-/** The source-doc kinds that have a real backing table (posting-inbox sources). */
-export type GlSourceKind = "pv" | "rv" | "gr" | "payroll";
+/**
+ * Every source-doc kind the shared source_doc convention can reference. The
+ * posting INBOX enumerates only the four that have a real backing table here
+ * (pv/rv/gr/payroll); fa/cn are valid refs written by their own direct-posting
+ * handlers and are never surfaced as inbox rows.
+ */
+export type GlSourceKind = "pv" | "rv" | "gr" | "payroll" | "fa" | "cn";
 
 /**
  * One posting-inbox row: a source money doc + its resolved posting state. The

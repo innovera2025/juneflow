@@ -362,6 +362,16 @@ const DOCNUM_SEED = [
   { type: "Stock Transfer", prefix: "TR", running: "0084", reset: "ทุกปีบัญชี", lock: "warehouse" },
   { type: "Issue (เบิก)", prefix: "IS", running: "0218", reset: "ทุกปีบัญชี", lock: "warehouse" },
   { type: "Journal Voucher", prefix: "JV", running: "0418", reset: "ทุกปีบัญชี", lock: "all" },
+  // B-121 Q7 (Wei-approved per-recon default): AR document counters so the
+  // invoice / receipt / tax-invoice / credit-note handlers allocate numbers from
+  // doc_numbering (the same source as PR/PO/JV). Fresh counters (running 0001) —
+  // no prototype exemplar; not in the master.jsx DOCNUM_SEED (which the docnum
+  // master screen mirrors), so the eventual docnum web port must account for the
+  // AR rows. reset/lock follow the accounting-doc convention (JV precedent).
+  { type: "AR Invoice", prefix: "INV", running: "0001", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Receipt Voucher", prefix: "RV", running: "0001", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Tax Invoice", prefix: "TX", running: "0001", reset: "ทุกปีบัญชี", lock: "all" },
+  { type: "Credit Note", prefix: "CN", running: "0001", reset: "ทุกปีบัญชี", lock: "all" },
 ];
 
 // accounting-extra.jsx:14 COA_SEED (23 GL accounts)
@@ -1438,7 +1448,13 @@ async function seed(): Promise<void> {
       );
 
       await tx.insert(schema.glAccounts).values(
-        COA_SEED.map((a) => ({ id: det(`gl:${a.code}`), companyId: CO1, code: a.code, name: a.name })),
+        // B-122 Q1 (F-GL2): classify each account from its code prefix so freshly
+        // seeded COA rows carry account_type (the migration 0035 backfill only
+        // touches rows that predate it — seed rows insert after migrate).
+        COA_SEED.map((a) => ({
+          id: det(`gl:${a.code}`), companyId: CO1, code: a.code, name: a.name,
+          accountType: ({ "1": "asset", "2": "liability", "3": "equity", "4": "revenue", "5": "expense" } as Record<string, string>)[a.code[0] ?? ""] ?? null,
+        })),
       );
 
       await tx.insert(schema.jvs).values(

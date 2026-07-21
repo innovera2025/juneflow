@@ -90,11 +90,12 @@ async function requireFinanceCreate(
 //   - finance.create perm (403 fail-closed).
 //   - invoice_ids a non-empty array (400 else).
 // For each id resolved WITHIN this tenant (a foreign id resolves to nothing and
-// is silently ignored — no leak): an invoice with etax_status `queued` flips to
-// `sent` (C4 state machine queued → sent); already-sent/rejected/void invoices
-// stay. This is a FakeTaxEngine stub — NO real RD send, NO fabricated ขบ.02
-// acknowledgement (Wei B-124). The flips run in one db.transaction (B-097).
-// Returns ActionOk with the count actually sent.
+// is silently ignored — no leak): an invoice with etax_status `queued` OR
+// `rejected` flips to `sent` (C4 state machine — a `rejected` invoice is
+// re-sendable; C-180 retry nit); already-sent/void invoices stay. This is a
+// FakeTaxEngine stub — NO real RD send, NO fabricated ขบ.02 acknowledgement (Wei
+// B-124). The flips run in one db.transaction (B-097). Returns ActionOk with the
+// count actually sent.
 async function sendEtax(
   db: TenantDb,
   request: FastifyRequest,
@@ -119,8 +120,10 @@ async function sendEtax(
       arInvoices,
       inArray(arInvoices.id, ids),
     )) as ArInvoiceRow[];
+    // C-180 retry nit: a `rejected` invoice is re-sendable — flip both queued and
+    // rejected to sent (already-sent/void are terminal and untouched).
     const queuedIds = owned
-      .filter((inv) => inv.etaxStatus === "queued")
+      .filter((inv) => inv.etaxStatus === "queued" || inv.etaxStatus === "rejected")
       .map((inv) => inv.id);
     if (queuedIds.length > 0) {
       await tx

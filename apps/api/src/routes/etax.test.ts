@@ -244,6 +244,25 @@ describe("POST /api/v1/etax/send", () => {
     expect(flip!.set.etaxStatus).toBe("sent");
   });
 
+  it("re-sends a rejected invoice (C-180 retry: rejected→sent)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: sendDb([arInvoice(INV0, "rejected")], updated),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/etax/send",
+      payload: { invoice_ids: [INV0] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().sent).toBe(1);
+    const flip = updated.find((u) => u.table === arInvoices);
+    expect(flip).toBeTruthy();
+    expect(flip!.set.etaxStatus).toBe("sent");
+  });
+
   it("leaves an already-sent invoice untouched (queued→sent only; no flip)", async () => {
     const updated: Updated[] = [];
     const res = await (
