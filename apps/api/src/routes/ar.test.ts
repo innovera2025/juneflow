@@ -577,6 +577,30 @@ describe("POST /api/v1/ar/rv", () => {
     expect(inserted).toHaveLength(0);
   });
 
+  it("P2-BE-52 RV round2: a sub-cent over (1070.004 vs outstanding 1070) settles, not 409", async () => {
+    // No prior rv → outstanding = 1070.00. round2(1070.004) = 1070.00 ≤ outstanding,
+    // so it SETTLES (201) + flips the invoice paid — the raw client float would
+    // have false-rejected (1070.004 > 1070.00 → 409). Money stays 2-dp minor-unit.
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rvDb([], inserted, updated),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ar/rv",
+      payload: { invoice_id: INV0, amount: 1070.004 },
+    });
+    expect(res.statusCode).toBe(201);
+    const ins = inserted.find((i) => i.table === rvs);
+    expect((ins!.values as Record<string, unknown>).amount).toBe("1070.00"); // round2 stored
+    // Σ rv (1070.00) ≥ amount+vat (1070) → invoice flips paid.
+    const flip = updated.find((u) => u.table === arInvoices);
+    expect(flip!.set.status).toBe("paid");
+  });
+
   it("creates the RV (201) within outstanding — source='invoice', no paid-flip yet", async () => {
     // outstanding = 70; a 50 receipt → total received 1050 < 1070 → stays open.
     const inserted: Inserted[] = [];
@@ -1001,6 +1025,26 @@ describe("POST /api/v1/ar/cn/:id/approve", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().message).toMatch(/already approved/);
     expect(inserted.find((i) => i.table === jvs)).toBeFalsy(); // no double post
+  });
+
+  it("409s a concurrent double-approve (23505 on the source_doc index → idempotent)", async () => {
+    // The CN passes the in-memory pre-check (no prior cn:<id> jv), but a racing
+    // approve committed first → the 0037 source_doc UNIQUE index trips 23505 in the
+    // tx. P2-BE-52: the handler maps it to the same 409, never a 500.
+    const base = approveDb({});
+    const db = {
+      ...(base as unknown as Record<string, unknown>),
+      transaction: async () => {
+        const e = new Error("duplicate key") as Error & { code: string };
+        e.code = "23505";
+        throw e;
+      },
+    } as unknown as typeof base;
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({ method: "POST", url: `/api/v1/ar/cn/${CN0}/approve` });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already approved/);
   });
 
   it("409s honestly when the tenant COA lacks a required posting account (never invents)", async () => {

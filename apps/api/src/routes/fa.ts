@@ -59,7 +59,7 @@ import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
-import { ACCT, allocJvNo, resolveAccountIds } from "./gl-post.js";
+import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
 
 type FixedAssetRow = typeof fixedAssets.$inferSelect;
 type FaAdjustmentRow = typeof faAdjustments.$inferSelect;
@@ -319,7 +319,9 @@ async function updateAsset(
 //   monthly = round2((cost − salvage) / life_years / 12)   [SERVER-authoritative,
 //   Wei B-123 Q1 — the prototype's cost/(life×12) MOCK BUG is NOT used].
 // IDEMPOTENT per (asset, period): skips when a jv already exists (this tenant)
-// with source_doc = `fa:<assetId>` AND memo = `depr:<period>`. Book-value FLOOR:
+// with source_doc = `fa:<assetId>:<period>` (the in-memory pre-check); the 0037
+// source_doc UNIQUE index makes it atomic — a racing post trips 23505 and is
+// mapped to the same skip (isUniqueViolation). Book-value FLOOR:
 // accumulated_depr may never exceed (cost − salvage) — the final period's monthly
 // is capped to the remainder, and a fully-depreciated asset is skipped. Each post
 // is ONE transaction: Dr 5100 admin-expense / Cr 1210 PP&E = monthly (both REAL
@@ -351,7 +353,11 @@ async function postDepreciation(
       .insert(jvs, {
         id: jvId,
         no,
-        sourceDoc: `fa:${asset.id}`,
+        // P2-BE-52: source_doc encodes (asset, period) so it is UNIQUE per post —
+        // the jv.source_doc partial UNIQUE index (0037) then makes double-posting
+        // the same asset+period impossible even under a race (idempotency was
+        // previously only the in-memory check below). memo stays the human label.
+        sourceDoc: `fa:${asset.id}:${period}`,
         memo: `depr:${period}`,
       })
       .returning();
@@ -387,11 +393,12 @@ async function runDepreciation(
   const assets = (await db.select(fixedAssets)) as FixedAssetRow[];
 
   // Idempotency index (per asset, per period): a prior depreciation post is a jv
-  // whose source_doc = `fa:<assetId>` AND memo = `depr:<period>`. Read the
-  // tenant's jvs once and key the existing posts.
+  // whose source_doc = `fa:<assetId>:<period>` (P2-BE-52 — the source_doc alone is
+  // now the key; the 0037 UNIQUE index enforces it atomically). Read the tenant's
+  // jvs once and key the existing posts by source_doc.
   const existingJvs = (await db.select(jvs)) as JvRow[];
   const postedKeys = new Set(
-    existingJvs.map((jv) => `${jv.sourceDoc ?? ""}|${jv.memo ?? ""}`),
+    existingJvs.map((jv) => jv.sourceDoc ?? ""),
   );
 
   // Resolve the two posting accounts ONCE (COA is tenant-global). A missing code
@@ -425,7 +432,7 @@ async function runDepreciation(
       continue;
     }
 
-    const key = `fa:${asset.id}|depr:${period}`;
+    const key = `fa:${asset.id}:${period}`;
     if (postedKeys.has(key)) {
       skipped.push({ asset_id: asset.id, reason: `already depreciated for ${period}` });
       continue;
@@ -461,9 +468,20 @@ async function runDepreciation(
       currencySet = true;
     }
 
-    const jvNo = await postDepreciation(db, asset, monthly, period, exprId, ppeId, accum);
-    posted.push({ asset_id: asset.id, amount: monthly, jv_no: jvNo });
-    postedKeys.add(key); // reflect this post (defensive against a duplicate row)
+    try {
+      const jvNo = await postDepreciation(db, asset, monthly, period, exprId, ppeId, accum);
+      posted.push({ asset_id: asset.id, amount: monthly, jv_no: jvNo });
+      postedKeys.add(key); // reflect this post (defensive against a duplicate row)
+    } catch (err) {
+      // P2-BE-52: a concurrent run posted this asset+period first — the 0037
+      // source_doc UNIQUE index tripped. Map to the same idempotent skip as the
+      // pre-check (never a 500, never a double post).
+      if (isUniqueViolation(err)) {
+        skipped.push({ asset_id: asset.id, reason: `already depreciated for ${period}` });
+        continue;
+      }
+      throw err;
+    }
   }
 
   return reply.code(200).send({ period, posted, skipped, currency_code: currency });

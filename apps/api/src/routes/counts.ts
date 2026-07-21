@@ -108,17 +108,36 @@ async function countAcceptQueue(db: TenantDb): Promise<number> {
   return rows.length;
 }
 
-/** PM work orders not yet closed (no customer signature — FLOW-C ปิดงาน). */
-async function countPmOpen(db: TenantDb): Promise<number> {
-  const rows = await db.selectThrough(
+// Scope hop chain for the open-PM scan (pm_workorder → pm_asset → pm_contract →
+// project). Named so selectOpenPmWorkOrders is the ONE place that defines the
+// open-PM query shared by the badge and the acceptance-center feed.
+const OPEN_PM_WO_HOPS = [
+  { fk: pmWorkOrders.assetId, parent: pmAssets },
+  { fk: pmAssets.contractId, parent: pmContracts },
+  { fk: pmContracts.projectId, parent: projects },
+];
+
+/**
+ * Tenant-scoped OPEN PM work orders — the SINGLE source of truth for "what is an
+ * open PM work order": not yet closed = no customer signature (FLOW-C ปิดงาน; the
+ * schema carries no status column, so closing = the customer sign-off). Both the
+ * `pm.wo` nav badge (countPmOpen) and the acceptance-center PM feed
+ * (subcon.ts /acceptance-center?type=pm) call THIS, so the badge count and the
+ * fan-in row list can never drift on the row set.
+ */
+export function selectOpenPmWorkOrders(db: TenantDb) {
+  return db.selectThrough(
     pmWorkOrders,
-    [
-      { fk: pmWorkOrders.assetId, parent: pmAssets },
-      { fk: pmAssets.contractId, parent: pmContracts },
-      { fk: pmContracts.projectId, parent: projects },
-    ],
+    OPEN_PM_WO_HOPS,
     isNull(pmWorkOrders.customerSign),
   );
+}
+
+/** pm.wo badge — PM work orders not yet closed (no customer signature — FLOW-C
+ *  ปิดงาน). Exported so sibling routes may reuse it; delegates to
+ *  selectOpenPmWorkOrders so the count and the feed share ONE open-PM query. */
+export async function countPmOpen(db: TenantDb): Promise<number> {
+  const rows = await selectOpenPmWorkOrders(db);
   return rows.length;
 }
 

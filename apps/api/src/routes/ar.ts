@@ -69,7 +69,7 @@ import { round2 } from "./money.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, resolveAccountIds } from "./gl-post.js";
+import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
 
 type ArInvoiceRow = typeof arInvoices.$inferSelect;
 type RvRow = typeof rvs.$inferSelect;
@@ -526,10 +526,14 @@ async function createArRv(
   )) as ArInvoiceRow[];
   if (!inv) return notFound(reply, `invoice ${invoiceId} not found`);
 
-  const amount = toNum(pick(body, "amount"));
-  if (amount == null || amount <= 0) {
+  const rawAmount = toNum(pick(body, "amount"));
+  if (rawAmount == null || rawAmount <= 0) {
     return badRequest(reply, "amount is required and must be greater than zero");
   }
+  // P2-BE-52: compare/store the receipt at 2-dp minor-unit precision (the same
+  // round2 the amount is stored at) so a sub-cent client value (e.g. 0.005 over)
+  // can neither false-reject a full settlement nor mis-decide the paid-flip.
+  const amount = round2(rawAmount);
 
   // Over-allocation guard: outstanding = (invoice amount + vat) − Σ prior receipts
   // (both tenant-scoped). REJECT an over-payment (409) — never clamp / partial.
@@ -765,17 +769,29 @@ async function approveCn(
 
   // B-097: jv header + its lines are ONE post (insertThrough re-proves this tenant
   // owns the just-created parent jv inside the same transaction).
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(jvs, {
-        id: jvId,
-        no: jvNo,
-        sourceDoc,
-        memo: `credit-note ${cn.no}`,
-      })
-      .returning();
-    await tx.insertThrough(jvLines, jvs, jvId, lineRows);
-  });
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(jvs, {
+          id: jvId,
+          no: jvNo,
+          sourceDoc,
+          memo: `credit-note ${cn.no}`,
+        })
+        .returning();
+      await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+    });
+  } catch (err) {
+    // P2-BE-52: a concurrent approve posted this CN first — the 0037 source_doc
+    // (`cn:<id>`) UNIQUE index tripped. Map to the same 409 as the pre-check
+    // (never a 500, never a duplicate reversal JV).
+    if (isUniqueViolation(err)) {
+      return reply
+        .code(409)
+        .send({ code: "INVALID_STATE", message: `credit note ${cnId} already approved` });
+    }
+    throw err;
+  }
 
   return reply.code(200).send({ id: cnId, jv_no: jvNo, amount, vat });
 }

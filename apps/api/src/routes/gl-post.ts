@@ -21,6 +21,23 @@ import { inArray } from "drizzle-orm";
 import { glAccounts, jvs } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 
+/**
+ * A Postgres UNIQUE-violation (SQLSTATE 23505). P2-BE-52: jv.source_doc carries a
+ * partial UNIQUE index (migration 0037) so a source money doc can be posted at
+ * most ONCE even under a concurrent race the check-then-insert can't cover. When
+ * the losing transaction's jv insert trips that constraint, the posting handler
+ * maps it to the SAME idempotent outcome as the pre-check (409 / skip "already
+ * posted") instead of a 500. The pg driver puts the SQLSTATE on `.code`; drizzle
+ * may nest the driver error under `.cause`, so check both.
+ */
+export function isUniqueViolation(err: unknown): boolean {
+  const code = (e: unknown): unknown =>
+    e && typeof e === "object" ? (e as { code?: unknown }).code : undefined;
+  if (code(err) === "23505") return true;
+  const cause = err && typeof err === "object" ? (err as { cause?: unknown }).cause : undefined;
+  return code(cause) === "23505";
+}
+
 /** The posting-inbox source kinds that have a real backing table (gl-posting.ts). */
 export type GlPostableKind = "pv" | "rv" | "gr" | "payroll";
 

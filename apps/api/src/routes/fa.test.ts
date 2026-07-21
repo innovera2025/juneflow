@@ -671,9 +671,9 @@ describe("POST /api/v1/fa/run-depreciation", () => {
     // Σ dr === Σ cr.
     expect(Number(dr!.dr) + Number(cr!.dr)).toBe(Number(dr!.cr) + Number(cr!.cr));
 
-    // The JV carries the idempotency source_doc + memo.
+    // The JV carries the idempotency source_doc (P2-BE-52: unique per asset+period) + memo.
     const jvIns = inserted.find((i) => i.table === jvs);
-    expect(jvIns!.values[0]!.sourceDoc).toBe(`fa:${FA0}`);
+    expect(jvIns!.values[0]!.sourceDoc).toBe(`fa:${FA0}:2026-05`);
     expect(jvIns!.values[0]!.memo).toBe("depr:2026-05");
 
     // The asset's accumulated_depr advances by the posted amount.
@@ -687,7 +687,8 @@ describe("POST /api/v1/fa/run-depreciation", () => {
       ...jvSeed,
       id: "jv-prior",
       no: "JV-2026-0001",
-      sourceDoc: `fa:${FA0}`,
+      // P2-BE-52: idempotency keys on source_doc alone (unique per asset+period).
+      sourceDoc: `fa:${FA0}:2026-05`,
       memo: "depr:2026-05",
     };
     const res = await (
@@ -705,6 +706,29 @@ describe("POST /api/v1/fa/run-depreciation", () => {
     // No JV / jv_line was inserted on an idempotent skip.
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
     expect(inserted.find((i) => i.table === jvLines)).toBeUndefined();
+  });
+
+  it("maps a concurrent double-depreciation (23505 on the source_doc index) to the idempotent skip", async () => {
+    // The asset passes the in-memory pre-check, but a racing run posted this
+    // asset+period first → the 0037 source_doc UNIQUE index trips 23505 in the tx.
+    // P2-BE-52: the handler maps it to the same skip, never a 500.
+    const base = deprDb({ assets: [faRow(FA0)] });
+    const db = {
+      ...(base as unknown as Record<string, unknown>),
+      transaction: async () => {
+        const e = new Error("duplicate key") as Error & { code: string };
+        e.code = "23505";
+        throw e;
+      },
+    } as unknown as typeof base;
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({ method: "POST", url: "/api/v1/fa/run-depreciation", payload: { period: "2026-05" } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.posted).toHaveLength(0);
+    expect(body.skipped[0].asset_id).toBe(FA0);
+    expect(body.skipped[0].reason).toMatch(/already depreciated/);
   });
 
   it("caps the final period's monthly to the book-value floor (accumulated ≤ cost − salvage)", async () => {
