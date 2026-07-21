@@ -62,6 +62,7 @@ import { APPaymentVoucher } from "./screens/ap/ap-pv";
 import { BankCheque } from "./screens/bank/bank-cheque";
 import { BankReconciliation } from "./screens/bank/bank-recon";
 import { BankExport } from "./screens/bank/bank-export";
+import { ARInvoice } from "./screens/ar/ar-invoice";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -108,6 +109,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "bank.cheque": BankCheque,
   "bank.recon": BankReconciliation,
   "bank.export": BankExport,
+  "ar.invoice": ARInvoice,
 };
 
 const rootRoute = createRootRoute({
