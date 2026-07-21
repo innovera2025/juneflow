@@ -19,10 +19,11 @@
 
 ## คิวรอ promote
 
-> **PHASE-3 ROUND-B QUEUED (2026-07-21 · orch-A · pin 9c2ae72)** — P2-BE-51 (statements+cashflow) on feature/backend await orch-B verify+merge · B-129 cashflow-method = Wei-ratify non-block. Round-A promoted → main c2c1868 (C-190). Prior: Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
+> **PHASE-3 ROUND-B + HARDENING QUEUED (2026-07-21 · orch-A · pins 09b3b23 + e243aa0)** — P2-BE-51 (statements+cashflow · pin 09b3b23) + P2-BE-52 (hardening · pin e243aa0) on feature/backend await orch-B verify+merge · B-129 cashflow-method = Wei-ratify non-block. Round-A promoted → main c2c1868 (C-190). Prior: Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-52 | Finance hardening — jv.source_doc unique idx + 23505 idempotency, RV round2, pm name/code, countPmOpen dedup | e243aa0 feature/backend | — (backend · migration 0037 additive · 886 api · live: index blocks dup-ref + multi-period depr + RV sub-cent + pm name/code) | 2026-07-21 |
 | P2-BE-51 | GL statements + cashflow reports (round-B) | 9c2ae72 feature/backend | — (backend · derive-only jv_line · C10 · 3 adversarial-verify PASS · 883 api · B-129 cashflow-method non-block) | 2026-07-21 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
