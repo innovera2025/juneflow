@@ -23,6 +23,8 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-WEB-26/29/31/32/33/35 + gl.trial | Phase-3 web merged batch | 30b7319·7d0bee9·603e2e1·f983d29·c8bc379·7ad6170·ef2d88a | **orch-B ✅ merged 8 pins** — gate-4.5 fan-out ×12 + adjudication (2 conflicting verdicts resolved by file ground-truth) · router union ×3 · typecheck 0 · web 779 · dict 2308 intact | 2026-07-21 |
+| P2-BE-51/52 | round-B + hardening | 09b3b23·c48b341 feature/backend | **orch-B ✅ merged** — gate-4.5 PASS (BS equality real · ships honest seed LOSS · 0037 predicate seed-proven · narrow 23505 · countPmOpen import) · 887 api | 2026-07-21 |
 | P2-BE-52 | Finance hardening — jv.source_doc unique idx + 23505 idempotency, RV round2, pm name/code, countPmOpen dedup | e243aa0 feature/backend | — (backend · migration 0037 additive · 886 api · live: index blocks dup-ref + multi-period depr + RV sub-cent + pm name/code) | 2026-07-21 |
 | P2-BE-51 | GL statements + cashflow reports (round-B) | 9c2ae72 feature/backend | — (backend · derive-only jv_line · C10 · 3 adversarial-verify PASS · 883 api · B-129 cashflow-method non-block) | 2026-07-21 |
 
