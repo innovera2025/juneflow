@@ -466,6 +466,322 @@ async function trialBalance(
 }
 
 // ---------------------------------------------------------------------------
+// GET /gl/reports/statements — balance sheet + income statement
+// (accounting-extra2.jsx financial statements). Opaque EntityOk (a single report
+// object, NOT list-enveloped) — mirrors trial-balance.
+// ---------------------------------------------------------------------------
+// Real source: jv_line (aggregated per account) THROUGH jv (jv_line has NO
+// company_id — a bare select escapes tenant scope) + gl_account (company-scoped)
+// which supplies code, name, AND account_type. Extends trialBalance() verbatim:
+// the ONLY new step is bucketing each account by gl_account.account_type instead
+// of one flat list. account_type ∈ {asset,liability,equity,revenue,expense}
+// (migration 0035 backfill from the code prefix). Sign convention per bucket:
+//   asset / expense  → debit-normal  (Σdr − Σcr)
+//   liability/equity/revenue → credit-normal (Σcr − Σdr)
+// net_income = revenue_total − expense_total, folded into equity as the current-
+// period "กำไรงวดปัจจุบัน" line so the two BS sides tie. No jv.status filter
+// (mirror precedent — includes the seed's one pending JV-0412; identity still
+// holds because each JV is internally ΣDR=ΣCR).
+//
+// C10 HONEST GAPS (return empty/null + // GAP, never fabricate):
+//   - PRIOR-YEAR column — every prior_* field is null. No prior-year data exists
+//     (all jv are 2026, jv.period_id is NULL across the seed). NEVER invent a
+//     prior period, reuse current values, or derive a delta.
+//   - equity (3010/3020) + revenue (4010-4040) — zero jv_line activity in the
+//     seed → empty rows + subtotal/total 0, but the 5 buckets stay structurally
+//     present (never dropped). Consequence: honest P&L net_income is a LOSS
+//     (0 − 506,733), nothing like the mock's profit — ship the loss.
+//   - margin/ratio KPI cards (from the mock) — OMITTED: revenue_total=0 makes
+//     them undefined (only derive a ratio when BOTH operands are real).
+//
+// NOTE (C-180, DEFERRED): the openapi declares ?period= but this handler does NOT
+// filter by period — jv.period_id is NULL across the whole seed, so a period
+// filter would silently return an empty statement. Honest deferral until the
+// posting/close flow populates jv.period_id (identical to trial-balance).
+type StmtBucket = "asset" | "liability" | "equity" | "revenue" | "expense";
+const STMT_BUCKETS: readonly StmtBucket[] = [
+  "asset",
+  "liability",
+  "equity",
+  "revenue",
+  "expense",
+];
+
+interface StmtRow {
+  account_code: string | null;
+  account_name: string | null;
+  amount: number;
+  prior_amount: null;
+}
+
+function byCode(
+  a: { account_code: string | null },
+  b: { account_code: string | null },
+): number {
+  const ac = a.account_code ?? "";
+  const bc = b.account_code ?? "";
+  return ac < bc ? -1 : ac > bc ? 1 : 0;
+}
+
+async function glStatements(
+  db: TenantDb,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const [lineRows, accountRows] = await Promise.all([
+    // jv_line scopes THROUGH jv (no company_id of its own) — the scoped root read.
+    db.selectThrough(jvLines, [
+      { fk: jvLines.jvId, parent: jvs },
+    ]) as Promise<JvLineRow[]>,
+    db.select(glAccounts) as Promise<GlAccountRow[]>,
+  ]);
+
+  const accounts = new Map(accountRows.map((a) => [a.id, a]));
+  const byAccount = new Map<string, { dr: number; cr: number }>();
+  let currency: string | null = null;
+  for (const ln of lineRows) {
+    if (currency == null) currency = ln.currencyCode ?? null;
+    const agg = byAccount.get(ln.accountId) ?? { dr: 0, cr: 0 };
+    agg.dr += num(ln.dr);
+    agg.cr += num(ln.cr);
+    byAccount.set(ln.accountId, agg);
+  }
+
+  // The 5 buckets stay structurally present even with zero activity (honest-empty
+  // — an account_type with no jv_line is a real 0, not a dropped section).
+  const buckets: Record<StmtBucket, StmtRow[]> = {
+    asset: [],
+    liability: [],
+    equity: [],
+    revenue: [],
+    expense: [],
+  };
+  for (const [accountId, agg] of byAccount) {
+    const account = accounts.get(accountId);
+    const type = account?.accountType ?? null;
+    if (type == null || !STMT_BUCKETS.includes(type as StmtBucket)) {
+      // GAP: an account with real activity but no account_type can't be placed
+      // in a section — excluded, never guessed (the 0035 backfill guarantees a
+      // type today, so this is a defensive fallthrough, not a live case).
+      continue;
+    }
+    const bucket = type as StmtBucket;
+    const debitNormal = bucket === "asset" || bucket === "expense";
+    const amount = round2(debitNormal ? agg.dr - agg.cr : agg.cr - agg.dr);
+    buckets[bucket].push({
+      account_code: account?.code ?? null,
+      account_name: account?.name ?? null,
+      amount,
+      // GAP: no prior-year data exists (all jv are 2026, period_id NULL) —
+      // honest-null, never invented.
+      prior_amount: null,
+    });
+  }
+  for (const t of STMT_BUCKETS) buckets[t].sort(byCode);
+
+  const sum = (rows: StmtRow[]): number =>
+    round2(rows.reduce((s, r) => s + r.amount, 0));
+  const assetsSubtotal = sum(buckets.asset);
+  const liabilitiesSubtotal = sum(buckets.liability);
+  const equityMembersSubtotal = sum(buckets.equity);
+  const revenueTotal = sum(buckets.revenue);
+  const expenseTotal = sum(buckets.expense);
+  const netIncome = round2(revenueTotal - expenseTotal);
+  // net_income is folded into equity (the "กำไรงวดปัจจุบัน" line) so the two BS
+  // sides tie: total_liabilities_equity = liabilities + (equity members + NI).
+  const equitySubtotal = round2(equityMembersSubtotal + netIncome);
+  const totalAssets = assetsSubtotal;
+  const totalLiabilitiesEquity = round2(liabilitiesSubtotal + equitySubtotal);
+  // The honest anchor — a REAL equality over real sums (never asserted): assets
+  // == liabilities + equity + net_income holds exactly when every JV is balanced
+  // (the C9 invariant POST /gl/jv enforces), mirroring the Dr=Cr footer.
+  const balanced = round2(totalAssets) === round2(totalLiabilitiesEquity);
+
+  return reply.code(200).send({
+    balance_sheet: {
+      assets: { rows: buckets.asset, subtotal: assetsSubtotal },
+      liabilities: { rows: buckets.liability, subtotal: liabilitiesSubtotal },
+      equity: {
+        // GAP: no jv_line touches 3010/3020 in the seed — honest-empty rows.
+        rows: buckets.equity,
+        net_income_line: { amount: netIncome, prior_amount: null },
+        subtotal: equitySubtotal,
+      },
+      total_assets: totalAssets,
+      total_liabilities_equity: totalLiabilitiesEquity,
+      prior_total_assets: null, // GAP: no prior-year period.
+      balanced,
+    },
+    income_statement: {
+      // GAP: no revenue jv_line in the seed — honest-empty rows + total 0.
+      revenue: { rows: buckets.revenue, total: revenueTotal, prior_total: null },
+      expense: { rows: buckets.expense, total: expenseTotal, prior_total: null },
+      net_income: netIncome,
+      prior_net_income: null, // GAP: no prior-year period.
+    },
+    currency_code: currency ?? "THB",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GET /gl/reports/cashflow — DIRECT-method cash flow (accounting-extra2.jsx).
+// Opaque EntityOk (single report object, NOT list-enveloped).
+// ---------------------------------------------------------------------------
+// METHOD = DIRECT / cash-account-movement (C10-safe & fully self-reconciling —
+// resolved conservatively toward C10; see honest gap #9 for the prototype-Indirect
+// divergence flag escalated to Wei). Real source: jv_line THROUGH jv + gl_account
+// (both scoped exactly as trial-balance). Algorithm: CASH codes = {1010,1020}. For
+// each JV with ≥1 cash leg, cashΔ = Σ(dr−cr) over its cash legs; each NON-cash
+// contra leg is attributed (cr−dr) — those attributions sum to cashΔ for a
+// balanced JV (C9), so the buckets reconcile to net_change to the cent (needs no
+// period deltas, no opening balances, no depreciation isolation).
+//
+// BUCKET MAPPING keys on the 4-digit COA CODE (account_type alone cannot split
+// asset into WC-vs-longterm or liability into operating-vs-financing). An unmapped
+// code falls through to a // GAP exclusion, never a silent bucket. Verified vs the
+// seeded COA (seed index.ts L378) + prototype bucketing (accounting-extra2.jsx).
+// FLAGS (honest-follow-prototype, Wei ruling — do NOT decide unilaterally):
+//   1150 ที่ดินรอการพัฒนา → investing (arguably operating-inventory for a
+//     real-estate developer); 5200 ดอกเบี้ยจ่าย → financing (IAS7 permits O or F).
+//
+// C10 HONEST GAPS: investing/financing = {lines:[],net:0} (no cash JV against
+// 1150/1210 resp. 2110/3xxx in the seed — real zeros, not fabricated);
+// opening_cash = 0 (no opening-balance JV exists — a real opening balance is not
+// derivable today); prior = null (no prior-year period). ?period= accepted but NOT
+// filtered (jv.period_id NULL across seed — honest deferral, identical to C-180).
+type CfBucket = "O" | "I" | "F";
+const CASH_CODES = new Set(["1010", "1020"]);
+const CF_BUCKET: Record<string, CfBucket> = {
+  "1030": "O", // ลูกหนี้การค้า — Δ WC asset
+  "1040": "O", // ลูกหนี้เงินประกัน Retention — Δ WC asset
+  "1140": "O", // งานระหว่างก่อสร้าง WIP/CIP — Δ WC inventory
+  "1150": "I", // ที่ดินรอการพัฒนา — investing (FLAG, see header)
+  "1210": "I", // ที่ดิน อาคาร อุปกรณ์ PP&E
+  "2010": "O", // เจ้าหนี้การค้า — Δ WC liability
+  "2030": "O", // เจ้าหนี้เงินประกันค้างจ่าย
+  "2040": "O", // เงินมัดจำ/เงินจองรับล่วงหน้า
+  "2050": "O", // ภาษีขายรอนำส่ง VAT
+  "2110": "F", // เงินกู้ยืมธนาคาร-โครงการ
+  "3010": "F", // ทุนจดทะเบียนชำระแล้ว
+  "3020": "F", // กำไร(ขาดทุน)สะสม
+  "4010": "O", // รายได้ (P&L → operating)
+  "4020": "O",
+  "4030": "O",
+  "4040": "O",
+  "5010": "O", // ต้นทุน/ค่าใช้จ่ายบริหาร (P&L → operating)
+  "5020": "O",
+  "5030": "O",
+  "5100": "O",
+  "5200": "F", // ดอกเบี้ยจ่าย interest paid — financing (FLAG, see header)
+};
+
+interface CfLine {
+  account_code: string | null;
+  account_name: string | null;
+  amount: number;
+}
+
+async function cashFlow(
+  db: TenantDb,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const [lineRows, accountRows] = await Promise.all([
+    db.selectThrough(jvLines, [
+      { fk: jvLines.jvId, parent: jvs },
+    ]) as Promise<JvLineRow[]>,
+    db.select(glAccounts) as Promise<GlAccountRow[]>,
+  ]);
+
+  const accounts = new Map(accountRows.map((a) => [a.id, a]));
+  const currency = lineRows[0]?.currencyCode ?? null;
+
+  // Group legs by their jv so each JV is classified as ONE cash event.
+  const linesByJv = new Map<string, JvLineRow[]>();
+  for (const ln of lineRows) {
+    const list = linesByJv.get(ln.jvId);
+    if (list) list.push(ln);
+    else linesByJv.set(ln.jvId, [ln]);
+  }
+
+  // Per bucket, accumulate the cash attributable to each contra account.
+  const bucketLines: Record<CfBucket, Map<string, number>> = {
+    O: new Map(),
+    I: new Map(),
+    F: new Map(),
+  };
+  let netChange = 0;
+  for (const lines of linesByJv.values()) {
+    // cashΔ = Σ(dr−cr) over this JV's cash legs. A JV with no cash leg is not a
+    // cash event → excluded entirely (e.g. an accrual-only JV like JV-0412).
+    let cashDelta = 0;
+    let hasCash = false;
+    for (const ln of lines) {
+      const code = accounts.get(ln.accountId)?.code ?? "";
+      if (CASH_CODES.has(code)) {
+        hasCash = true;
+        cashDelta += num(ln.dr) - num(ln.cr);
+      }
+    }
+    if (!hasCash) continue;
+    netChange += cashDelta;
+    // Attribute the cash movement to each NON-cash contra leg: (cr−dr) of the
+    // contra leg. These sum to cashΔ for a balanced JV, so the buckets reconcile
+    // to net_change exactly (a self-reconciling direct statement).
+    for (const ln of lines) {
+      const account = accounts.get(ln.accountId);
+      const code = account?.code ?? "";
+      if (CASH_CODES.has(code)) continue;
+      const bucket = CF_BUCKET[code];
+      if (!bucket) {
+        // GAP: a contra code absent from CF_BUCKET is excluded (and would be
+        // logged), never silently bucketed. No such code in the seed today.
+        continue;
+      }
+      const attribution = num(ln.cr) - num(ln.dr);
+      bucketLines[bucket].set(
+        ln.accountId,
+        (bucketLines[bucket].get(ln.accountId) ?? 0) + attribution,
+      );
+    }
+  }
+
+  const section = (bucket: CfBucket): { lines: CfLine[]; net: number } => {
+    const lines: CfLine[] = [...bucketLines[bucket].entries()]
+      .map(([accountId, amount]) => {
+        const account = accounts.get(accountId);
+        return {
+          account_code: account?.code ?? null,
+          account_name: account?.name ?? null,
+          amount: round2(amount),
+        };
+      })
+      .sort(byCode);
+    const net = round2(lines.reduce((s, l) => s + l.amount, 0));
+    return { lines, net };
+  };
+
+  // opening_cash is honest-0: no opening-balance JV exists in the seed (a real
+  // opening balance would need an opening-balance entry or a period cutoff — not
+  // derivable today). closing = opening + the real net cash movement.
+  const openingCash = 0;
+  const netChangeR = round2(netChange);
+  const closingCash = round2(openingCash + netChange);
+
+  return reply.code(200).send({
+    method: "direct",
+    operating: section("O"),
+    // GAP: no cash JV against 1150/1210 in the seed → honest-empty {lines:[],net:0}.
+    investing: section("I"),
+    // GAP: no cash JV against 2110/3xxx in the seed → honest-empty {lines:[],net:0}.
+    financing: section("F"),
+    opening_cash: openingCash,
+    net_change: netChangeR,
+    closing_cash: closingCash,
+    prior: null, // GAP: no prior-year period exists — honest-null, never invented.
+    currency_code: currency ?? "THB",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // POST /gl/close-period — lock an accounting period (gl.jsx GLPeriodClose)
 // ---------------------------------------------------------------------------
 // Body: { period } — a CE 'YYYY-MM' key (STRICT). Closing a period sets
@@ -712,6 +1028,24 @@ export function registerGlRoute(app: FastifyInstance): void {
     const db = request.db;
     if (!db) return unauthenticated(reply);
     return trialBalance(db, reply);
+  });
+
+  // Financial statements (balance sheet + income statement) — opaque EntityOk,
+  // NOT list-enveloped. ?period= accepted (contract) but NOT filtered (honest
+  // deferral, C-180). Fail-closed 401 without a tenant; no perm gate (a read,
+  // mirrors trial-balance).
+  app.get("/gl/reports/statements", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return glStatements(db, reply);
+  });
+
+  // Direct-method cash flow — opaque EntityOk. Same ?period= honest deferral +
+  // fail-closed read gate (no perm gate — mirrors trial-balance).
+  app.get("/gl/reports/cashflow", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return cashFlow(db, reply);
   });
 
   app.post("/gl/jv", async (request, reply) => {
