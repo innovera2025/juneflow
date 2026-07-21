@@ -57,6 +57,7 @@ import { PMWorkOrders } from "./screens/pm/wo-list";
 import { GLChartOfAccounts } from "./screens/gl/gl-coa";
 import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
+import { ARTaxInvoice } from "./screens/ar/ar-tax";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
 import { BankCheque } from "./screens/bank/bank-cheque";
@@ -103,6 +104,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.coa": GLChartOfAccounts,
   "gl.jv": GLJournalVoucher,
   "gl.inbox": GLPostingInbox,
+  "ar.tax": ARTaxInvoice,
   "ap.billing": APBilling,
   "ap.pv": APPaymentVoucher,
   "bank.cheque": BankCheque,
