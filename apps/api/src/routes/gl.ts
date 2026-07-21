@@ -43,6 +43,7 @@ import { listGlPostingDocs } from "./gl-posting.js";
 import {
   POSTING_MAP,
   allocJvNo,
+  isUniqueViolation,
   resolveAccountIds,
   type PostingRule,
 } from "./gl-post.js";
@@ -968,18 +969,29 @@ async function postGlDocs(
     ];
     // ONE transaction per posted doc: header + both legs together. insertThrough
     // re-proves this tenant owns the parent jv INSIDE the same tx (fail closed).
-    await db.transaction(async (tx) => {
-      await tx
-        .insert(jvs, {
-          id: jvId,
-          no: jvNo,
-          sourceDoc: `${doc.source}:${doc.id}`,
-          memo: `post ${doc.source} ${doc.doc_no ?? doc.id}`,
-        })
-        .returning();
-      await tx.insertThrough(jvLines, jvs, jvId, lineRows);
-    });
-    posted.push({ doc_id: doc.id, source: doc.source, jv_no: jvNo, amount });
+    try {
+      await db.transaction(async (tx) => {
+        await tx
+          .insert(jvs, {
+            id: jvId,
+            no: jvNo,
+            sourceDoc: `${doc.source}:${doc.id}`,
+            memo: `post ${doc.source} ${doc.doc_no ?? doc.id}`,
+          })
+          .returning();
+        await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+      });
+      posted.push({ doc_id: doc.id, source: doc.source, jv_no: jvNo, amount });
+    } catch (err) {
+      // P2-BE-52: a concurrent /gl/post posted this doc first — the 0037
+      // source_doc UNIQUE index tripped. Map to the same idempotent skip as the
+      // doc.posted pre-check (never a 500, never a duplicate JV).
+      if (isUniqueViolation(err)) {
+        skipped.push({ doc_id: doc.id, reason: "already posted" });
+        continue;
+      }
+      throw err;
+    }
   }
 
   return reply.code(200).send({

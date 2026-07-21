@@ -482,6 +482,11 @@ export function registerPmRoute(app: FastifyInstance): void {
     const body = (request.body ?? {}) as Record<string, unknown>;
     const contractId = str(pick(body, "contract_id", "contractId")).trim();
     const kind = str(pick(body, "kind")).trim();
+    // name + code gained real (nullable) columns in migration 0034 (B-110). The
+    // asset card reads them, so persist them onto the row (Wave-0 dropped them
+    // honestly while they had no backing column). Absent/blank → null.
+    const name = str(pick(body, "name")).trim() || null;
+    const code = str(pick(body, "code")).trim() || null;
     const site = has(body, "site") ? str(pick(body, "site")).trim() || null : null;
     const cycle = has(body, "cycle") ? str(pick(body, "cycle")).trim() || null : null;
     const nextDue = has(body, "next_due", "nextDue")
@@ -516,7 +521,7 @@ export function registerPmRoute(app: FastifyInstance): void {
     // insertThrough re-verifies tenant ownership of the anchoring project before
     // writing (fail-closed) — the asset can never land under a foreign project.
     const [created] = await db.insertThrough(pmAssets, projects, contract.projectId, [
-      { contractId, kind, site, cycle, nextDue },
+      { contractId, kind, name, code, site, cycle, nextDue },
     ]);
     return reply.code(201).send(assetWire(created!));
   });

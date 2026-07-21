@@ -1328,6 +1328,30 @@ describe("POST /api/v1/gl/post", () => {
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
   });
 
+  it("maps a concurrent double-post (23505 on the source_doc index) to the idempotent skip", async () => {
+    // The doc passes the in-memory pre-check (pending), but a racing /gl/post
+    // committed the jv first → the 0037 source_doc UNIQUE index trips 23505 in the
+    // tx. P2-BE-52: the handler maps it to the same skip, never a 500.
+    const base = postDb({
+      rvRows: [{ id: RV_A, amount: "2148000.00", currencyCode: "THB", createdAt: D }],
+    });
+    const db = {
+      ...(base as unknown as Record<string, unknown>),
+      transaction: async () => {
+        const e = new Error("duplicate key") as Error & { code: string };
+        e.code = "23505";
+        throw e;
+      },
+    } as unknown as typeof base;
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [RV_A] } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.posted).toHaveLength(0);
+    expect(body.skipped).toEqual([{ doc_id: RV_A, reason: "already posted" }]);
+  });
+
   it("skips a doc_id not in the tenant's posting inbox", async () => {
     const res = await (
       await buildTestApp({

@@ -57,7 +57,7 @@
 // then updates only the resolved ids — a foreign id resolves to nothing → 404 and
 // is never written). Without a resolved tenant, request.db is absent → 401.
 import type { FastifyInstance } from "fastify";
-import { eq, inArray, isNull } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   subconContracts,
   workPeriods,
@@ -78,6 +78,10 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
+// The open-PM work-order query is owned by counts.ts (the pm.wo badge source);
+// the acceptance-center PM feed reuses it so the two can never drift (see the
+// pm slice below).
+import { selectOpenPmWorkOrders } from "./counts.js";
 
 type SubconContractRow = typeof subconContracts.$inferSelect;
 type WorkPeriodRow = typeof workPeriods.$inferSelect;
@@ -135,16 +139,13 @@ const DEFECT_HOPS = [
   { fk: subconContracts.projectId, parent: projects },
 ];
 
-// Wave-3 acceptance-center fan-in scope chains (B-107e). The pm / gr feeds live
-// in sibling groups that carry NO company_id of their own, so each anchors on
-// the company_id-scoped project root exactly like the subcon chains above.
-//   pm_workorder → pm_asset → pm_contract → project   (mirror counts.ts countPmOpen)
+// Wave-3 acceptance-center fan-in scope chains (B-107e). The gr feed lives in a
+// sibling group that carries NO company_id of its own, so it anchors on the
+// company_id-scoped project root exactly like the subcon chains above.
 //   gr → po → pr → project    |    gr → wo → pr → project   (mirror gr.ts dual path)
-const PM_WO_HOPS = [
-  { fk: pmWorkOrders.assetId, parent: pmAssets },
-  { fk: pmAssets.contractId, parent: pmContracts },
-  { fk: pmContracts.projectId, parent: projects },
-];
+// The pm feed reuses counts.selectOpenPmWorkOrders (pm_workorder → pm_asset →
+// pm_contract → project) — ONE source of truth for the open-PM query, shared with
+// the pm.wo badge (countPmOpen) so the feed and the badge can never drift.
 const GR_PO_HOPS = [
   { fk: grs.poId, parent: pos },
   { fk: pos.prId, parent: prs },
@@ -1086,16 +1087,13 @@ export function registerSubconRoute(app: FastifyInstance): void {
     const query = (request.query ?? {}) as Record<string, unknown>;
     const type = str(pick(query, "type")).trim() || "period";
 
-    // PM slice — pm_workorder awaiting close = unsigned (customer_sign IS NULL),
-    // scoped pm_workorder → pm_asset → pm_contract → project (identical hops +
-    // predicate as counts.ts countPmOpen, so this list and the badge never
-    // drift). honest-empty when every PM work order is already signed/closed.
+    // PM slice — pm_workorder awaiting close = unsigned (customer_sign IS NULL).
+    // The open-PM query is imported from counts.selectOpenPmWorkOrders (the ONE
+    // source of truth, shared with the pm.wo badge countPmOpen), so this feed and
+    // the badge can never drift on what an open PM work order is. honest-empty when
+    // every PM work order is already signed/closed.
     if (type === "pm") {
-      const rows = await db.selectThrough(
-        pmWorkOrders,
-        PM_WO_HOPS,
-        isNull(pmWorkOrders.customerSign),
-      );
+      const rows = await selectOpenPmWorkOrders(db);
       // META-1 enrichment: project_name (asset → contract → project), a composed
       // title (asset name/kind), owner = the REAL tech. Every read is scoped.
       const [assetById, pmContractProjects, projName] = await Promise.all([
