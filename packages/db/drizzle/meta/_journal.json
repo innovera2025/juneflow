@@ -246,6 +246,20 @@
       "when": 1784521348471,
       "tag": "0034_mean_kylun",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1784600767712,
+      "tag": "0035_luxuriant_valkyrie",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1784601351821,
+      "tag": "0036_burly_korg",
+      "breakpoints": true
     }
   ]
 }

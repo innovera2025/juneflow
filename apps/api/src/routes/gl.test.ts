@@ -903,3 +903,260 @@ describe("POST /api/v1/gl/close-period", () => {
     expect(params).toContain("2026-05");
   });
 });
+
+// ===========================================================================
+// POST /gl/post — post source money docs to the GL (money = server authority)
+// ===========================================================================
+const GR_A = "dddd0000-0000-0000-0000-0000000000dd";
+const UNKNOWN_ID = "eeee0000-0000-0000-0000-0000000000ee";
+
+// A stub carrying: the loadCaller/authz rows (users + roles), the posting-inbox
+// source rows (pv/rv/gr/payroll), the jvs the inbox resolver + allocJvNo +
+// insertThrough ownership all read, and the gl_account rows resolveAccountIds
+// resolves the posting-map codes against.
+const postDb = (
+  opts: {
+    rvRows?: unknown[];
+    pvRows?: unknown[];
+    grRows?: unknown[];
+    payrollRows?: unknown[];
+    jvRows?: unknown[];
+    accounts?: unknown[];
+    financeApprove?: boolean;
+    inserted?: Inserted[];
+    captured?: Captured[];
+  } = {},
+) =>
+  stubDb({
+    rows: [
+      [users, [userRow]],
+      [roles, [roleRow(opts.financeApprove ?? true)]],
+      [pvs, opts.pvRows ?? []],
+      [rvs, opts.rvRows ?? []],
+      [grs, opts.grRows ?? []],
+      [payrolls, opts.payrollRows ?? []],
+      // default: one owned jv with a free-text source_doc — references nothing by
+      // the convention (so no inbox doc reads posted) and seeds allocJvNo at 0001.
+      [jvs, opts.jvRows ?? [{ id: "jv-own", companyId: COMPANY, no: "JV-2026-0001", sourceDoc: "REM" }]],
+      [glAccounts, opts.accounts ?? [glAcc(ACC_CASH, "1020", "เงินฝากธนาคาร", null), glAcc(ACC_AR, "1030", "ลูกหนี้การค้า", null)]],
+    ],
+    inserted: opts.inserted,
+    captured: opts.captured,
+  });
+
+describe("POST /api/v1/gl/post", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/gl/post",
+      payload: { doc_ids: [RV_A] },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+
+  it("403s a caller lacking finance.approve (fail closed — no JV written)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          rvRows: [{ id: RV_A, amount: "100.00", currencyCode: "THB", createdAt: D }],
+          financeApprove: false,
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [RV_A] } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toMatch(/finance approve permission/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("400s a missing / empty doc_ids array", async () => {
+    const appx = await buildTestApp({ resolveTenant: async () => SESSION, db: postDb({}) });
+    const empty = await appx.inject({
+      method: "POST",
+      url: "/api/v1/gl/post",
+      payload: { doc_ids: [] },
+    });
+    expect(empty.statusCode).toBe(400);
+    expect(empty.json().code).toBe("VALIDATION");
+    const missing = await appx.inject({
+      method: "POST",
+      url: "/api/v1/gl/post",
+      payload: {},
+    });
+    expect(missing.statusCode).toBe(400);
+  });
+
+  it("posts an rv doc — Dr 1020 / Cr 1030 balanced, source_doc set, money from the SOURCE row", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          rvRows: [{ id: RV_A, amount: "2148000.00", currencyCode: "THB", createdAt: D }],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gl/post",
+      // client smuggles an amount — it MUST be ignored (server authority).
+      payload: { doc_ids: [RV_A], amount: 999999 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.skipped).toHaveLength(0);
+    expect(body.posted).toHaveLength(1);
+    const p = body.posted[0];
+    expect(p.doc_id).toBe(RV_A);
+    expect(p.source).toBe("rv");
+    expect(p.amount).toBe(2_148_000); // from the rv row — NOT the client's 999999
+    expect(p.jv_no).toMatch(/^JV-\d{4}-\d{4}$/);
+    expect(body.currency_code).toBe("THB");
+
+    // jv header: company_id force-set + the "rv:<uuid>" source_doc convention ref.
+    const jvIns = inserted.find((i) => i.table === jvs);
+    expect(jvIns).toBeTruthy();
+    expect(jvIns!.values[0]!.companyId).toBe(COMPANY);
+    expect(jvIns!.values[0]!.sourceDoc).toBe(`rv:${RV_A}`);
+    expect(jvIns!.values[0]!.no).toBe("JV-2026-0002"); // one past the seeded 0001
+
+    // two balanced legs: Dr 1020 (cash) = amount, Cr 1030 (AR) = amount.
+    const lineIns = inserted.find((i) => i.table === jvLines);
+    expect(lineIns).toBeTruthy();
+    expect(lineIns!.values).toHaveLength(2);
+    expect(lineIns!.values[0]!.accountId).toBe(ACC_CASH);
+    expect(lineIns!.values[0]!.dr).toBe("2148000.00");
+    expect(lineIns!.values[0]!.cr).toBe("0.00");
+    expect(lineIns!.values[1]!.accountId).toBe(ACC_AR);
+    expect(lineIns!.values[1]!.dr).toBe("0.00");
+    expect(lineIns!.values[1]!.cr).toBe("2148000.00");
+  });
+
+  it("skips a gr doc — no postable money amount (gr carries quantity, C10 honest gap)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({ grRows: [{ id: GR_A, no: "GR-001", createdAt: D }], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [GR_A] } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.posted).toHaveLength(0);
+    expect(body.skipped).toEqual([{ doc_id: GR_A, reason: "no postable money amount" }]);
+    expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // nothing posted
+  });
+
+  it("skips an already-posted doc (idempotent) — a jv already carries its rv:<uuid> ref", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          rvRows: [{ id: RV_A, amount: "2148000.00", currencyCode: "THB", createdAt: D }],
+          jvRows: [
+            { id: "jv-posted", companyId: COMPANY, no: "JV-2026-0420", sourceDoc: `rv:${RV_A}` },
+          ],
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [RV_A] } });
+    const body = res.json();
+    expect(body.posted).toHaveLength(0);
+    expect(body.skipped).toEqual([{ doc_id: RV_A, reason: "already posted" }]);
+    expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
+  });
+
+  it("skips a doc_id not in the tenant's posting inbox", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({ rvRows: [{ id: RV_A, amount: "100.00", currencyCode: "THB", createdAt: D }] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [UNKNOWN_ID] } });
+    const body = res.json();
+    expect(body.posted).toHaveLength(0);
+    expect(body.skipped).toEqual([
+      { doc_id: UNKNOWN_ID, reason: "not found in this tenant's posting inbox" },
+    ]);
+  });
+
+  it("skips when a mapped COA account is missing in the tenant's chart (never mis-posts)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          rvRows: [{ id: RV_A, amount: "100.00", currencyCode: "THB", createdAt: D }],
+          accounts: [glAcc(ACC_CASH, "1020", "เงินฝากธนาคาร", null)], // 1030 (Cr) absent
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [RV_A] } });
+    const body = res.json();
+    expect(body.posted).toHaveLength(0);
+    expect(body.skipped).toEqual([{ doc_id: RV_A, reason: "COA account missing" }]);
+  });
+});
+
+// ===========================================================================
+// GET /gl/periods — accounting periods list (company-scoped, period-ordered)
+// ===========================================================================
+describe("GET /api/v1/gl/periods", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/gl/periods" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+
+  it("lists accounting periods (B-014 envelope), period-ordered, real columns only", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [
+              accountingPeriods,
+              [
+                periodRow(PERIOD, /* locked */ true, "2026-06"),
+                periodRow("per-2", false, "2026-04"),
+                periodRow("per-3", false, "2026-05"),
+              ],
+            ],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/periods" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(3);
+    // period-ordered ascending
+    expect(body.data.map((r: { period: string }) => r.period)).toEqual([
+      "2026-04",
+      "2026-05",
+      "2026-06",
+    ]);
+    const jun = body.data.find((r: { period: string }) => r.period === "2026-06");
+    expect(jun.locked).toBe(true);
+    expect(Object.keys(jun).sort()).toEqual(["created_at", "id", "locked", "period"]);
+  });
+
+  it("binds company_id on the accounting_period read (tenant scope)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[accountingPeriods, [periodRow(PERIOD, false, "2026-05")]]],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/periods" });
+    const read = captured.find((c) => c.table === accountingPeriods);
+    expect(read).toBeTruthy();
+    expect(paramsOf(read!.where)).toContain(COMPANY);
+  });
+});

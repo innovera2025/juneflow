@@ -119,6 +119,12 @@ export const glAccounts = pgTable(
     }),
     code: text("code").notNull(),
     name: text("name").notNull(),
+    // B-122 Q1 (F-GL2, migration 0035): the account classification driving the
+    // trial-balance / statements sign convention and the /gl/post posting map.
+    // Additive + nullable; the migration back-populates it from the code prefix
+    // (1→asset, 2→liability, 3→equity, 4→revenue, 5→expense) so pre-existing
+    // COA rows classify without a reseed. Stable English codes (i18n display).
+    accountType: text("account_type"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -295,6 +301,13 @@ export const arInvoices = pgTable("ar_invoice", {
   vat: numeric("vat", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
   creditTerm: integer("credit_term"),
+  // B-121 Q2 (migration 0035): the invoice due date (created = date + credit_term
+  // days at POST) and the payment lifecycle status. due_date drives AR aging
+  // buckets; status flips open → paid when Σ rv.amount ≥ amount + vat (Q4). Nullable
+  // due_date (a draft with no term); status defaults 'open' so the additive ADD
+  // COLUMN backfills existing rows safely.
+  dueDate: date("due_date"),
+  status: text("status").notNull().default("open"),
   etaxStatus: etaxStatus("etax_status").notNull().default("queued"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
@@ -303,6 +316,39 @@ export const arInvoices = pgTable("ar_invoice", {
     .notNull()
     .defaultNow(),
 }, (t) => [index("ar_invoice_company_idx").on(t.companyId)]);
+
+/**
+ * ARInvoiceLine — one billed line of an AR invoice (B-121 Q2, migration 0035).
+ * The header (ar_invoice.amount/vat) is server-authoritative — amount = Σ line
+ * (qty × unit_price) and vat = 7% via the tax engine (POST /ar/invoices already
+ * ignores any client-supplied total). Storing the lines makes that total
+ * auditable and lets GET /ar/invoices/{id} render the breakdown. No company_id:
+ * a child row scopes through ar_invoice via the parent FK (selectThrough), the
+ * jv_line precedent. qty/unit_price/amount are numeric; amount = qty × unit_price
+ * per line (money → currency_code).
+ */
+export const arInvoiceLines = pgTable("ar_invoice_line", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  arInvoiceId: uuid("ar_invoice_id")
+    .notNull()
+    .references(() => arInvoices.id, { onDelete: "cascade" }),
+  description: text("description"),
+  qty: numeric("qty", { precision: 16, scale: 2 }).notNull().default("0"),
+  unitPrice: numeric("unit_price", { precision: 16, scale: 2 })
+    .notNull()
+    .default("0"),
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  // A child row scopes through ar_invoice — index the parent FK (jv_line precedent).
+  index("ar_invoice_line_invoice_idx").on(t.arInvoiceId),
+]);
 
 /**
  * RV — receipt voucher recording payment against an AR invoice (data-dictionary
@@ -314,12 +360,25 @@ export const rvs = pgTable("rv", {
   companyId: uuid("company_id")
     .notNull()
     .references(() => companies.id, { onDelete: "cascade" }),
-  invoiceId: uuid("invoice_id")
-    .notNull()
-    .references(() => arInvoices.id, { onDelete: "restrict" }),
+  // B-121 Q3 (migration 0035): invoice_id is now NULLABLE — a retention-refund RV
+  // (source='retention-refund') settles a held-back retention, not an invoice, so
+  // it carries no invoice_id. An invoice-receipt RV (source='invoice') still sets it.
+  invoiceId: uuid("invoice_id").references(() => arInvoices.id, {
+    onDelete: "restrict",
+  }),
   amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
   method: text("method"),
+  // B-121 Q3 (migration 0035): receipt-document metadata + lifecycle. `no` is the
+  // receipt number, receipt_date the calendar date received, bank the receiving
+  // account. status 'open'→'posted' on GL post. source discriminates an
+  // invoice-receipt from a retention-refund (drives the nullable invoice_id).
+  // Defaults keep the additive ADD COLUMN safe on existing rows.
+  no: text("no"),
+  receiptDate: date("receipt_date"),
+  bank: text("bank"),
+  status: text("status").notNull().default("open"),
+  source: text("source").notNull().default("invoice"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -578,6 +637,22 @@ export const fixedAssets = pgTable("fixed_asset", {
   lifeYears: integer("life_years"),
   ccId: uuid("cc_id").references(() => costCenters.id, { onDelete: "set null" }),
   deprMethod: text("depr_method"),
+  // B-123 Q4 (migration 0035 superset · Wei-confirmed): the depreciation-basis and
+  // lifecycle columns runFaDepreciation needs. Straight-line per Wei's Q1 ruling:
+  // monthly depr = (cost − salvage) / life_years / 12, accumulated_depr is the
+  // running total the run advances (idempotent per period), book value =
+  // cost − accumulated_depr (DERIVED, never stored, to avoid drift). acquired_date
+  // anchors the depreciation start. status 'active'→'disposed'/'written_off' via the
+  // FA adjust op-set (Q5). Money columns → currency_code; defaults keep the additive
+  // ADD COLUMN safe on existing rows.
+  salvage: numeric("salvage", { precision: 16, scale: 2 })
+    .notNull()
+    .default("0"),
+  acquiredDate: date("acquired_date"),
+  accumulatedDepr: numeric("accumulated_depr", { precision: 16, scale: 2 })
+    .notNull()
+    .default("0"),
+  status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -585,6 +660,43 @@ export const fixedAssets = pgTable("fixed_asset", {
     .notNull()
     .defaultNow(),
 }, (t) => [index("fixed_asset_company_idx").on(t.companyId)]);
+
+/**
+ * FAAdjustment — a revaluation or write-off applied to a fixed asset (B-123 Q5,
+ * migration 0036). The FA adjust op-set (PUT /fa/assets/{id}, POST /fa/revalue,
+ * POST /fa/write-off) records the change here so GET /fa/adjustments has a real
+ * backing (never a fabricated history — C10). A revalue captures the new book
+ * value; a write-off captures the carrying amount removed. Each adjustment posts
+ * a balanced JV (jv_id back-links it) via the same posting-inbox convention as
+ * depreciation. finance.approve-gated → status starts 'approved' (the approve
+ * perm IS the draft→approve gate; a future draft workflow can default 'draft').
+ * Its own company_id (aggregate-root pattern, mirrors ar_invoice) → GET is a
+ * plain company-scoped select. amount is money → currency_code.
+ */
+export const faAdjustments = pgTable("fa_adjustment", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  assetId: uuid("asset_id")
+    .notNull()
+    .references(() => fixedAssets.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // 'revalue' | 'write_off'
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  jvId: uuid("jv_id").references(() => jvs.id, { onDelete: "set null" }),
+  memo: text("memo"),
+  status: text("status").notNull().default("approved"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  index("fa_adjustment_company_idx").on(t.companyId),
+  index("fa_adjustment_asset_idx").on(t.assetId),
+]);
 
 // ---------------------------------------------------------------------------
 // Labor cost (Worker -> Attendance -> Payroll) + OPEX

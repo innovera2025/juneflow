@@ -58,10 +58,12 @@ import { registerBoqReportsRoute } from "./routes/boq-reports.js";
 import { registerAnalyticsRoute } from "./routes/analytics.js";
 import { registerGlRoute } from "./routes/gl.js";
 import { registerArRoute } from "./routes/ar.js";
+import { registerCustomersRoute } from "./routes/customers.js";
 import { registerEtaxRoute } from "./routes/etax.js";
 import { registerFaRoute } from "./routes/fa.js";
 import { registerApRoute } from "./routes/ap.js";
 import { registerBankRoute } from "./routes/bank.js";
+import { registerTaxRoute } from "./routes/tax.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -188,10 +190,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerAnalyticsRoute(v1);
       registerGlRoute(v1);
       registerArRoute(v1);
+      registerCustomersRoute(v1);
       registerEtaxRoute(v1);
       registerFaRoute(v1);
       registerApRoute(v1);
       registerBankRoute(v1);
+      registerTaxRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,
