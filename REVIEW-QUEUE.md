@@ -19,10 +19,15 @@
 
 ## คิวรอ promote
 
-> **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
+> **PHASE-3 ROUND-A QUEUED (2026-07-21 · orch-A · pin f3c57c4)** — P2-BE-46..50 on feature/backend await orch-B verify+merge · /gl/post (P2-BE-48) HOLDS on Wei B-128 posting-map confirm. Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-46 | P3 round-A sacred openapi A-D + migrations 0035/0036 + seed | f3c57c4 feature/backend | — (backend · additive-only · live migrate+seed 0000→0036 · 876 api) | 2026-07-21 |
+| P2-BE-47 | AR read-surface + CN + customers (C-179) | f3c57c4 feature/backend | — (backend · money-authority + honest-empty + tenant-door · gate 4.5) · ⚠ **CN-approve reversal JV mapping shares B-128 main-promote hold** (Dr 4010+2050/Cr 1030 = EXTRAPOLATED per B-128 · dev-merge free · hold main until Wei ratifies map) | 2026-07-21 |
+| P2-BE-48 | GL /gl/post + periods (**B-128 map-confirm gate**) | f3c57c4 feature/backend | ⚠ /gl/post merge-gated on Wei B-128 posting-map confirm (rest merges free) | 2026-07-21 |
+| P2-BE-49 | FA depreciation + adjust op-set | f3c57c4 feature/backend | — (backend · (cost−salvage)/life/12 · revalue honest-deferred · gate 4.5) | 2026-07-21 |
+| P2-BE-50 | tax reports (VAT/WHT) + etax retry nit | f3c57c4 feature/backend | — (backend · real Σ · gate 4.5) | 2026-07-21 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
