@@ -23,6 +23,7 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-WEB-25 | gl.inbox (P3) | 3ca4669 feature/web-gl-inbox | **orch-B ✅ merged** — gate-4.5 PASS (§0 fidelity · 37 keys+reuse · honest-disabled Post · C10) · follow-up P2-WEB-26 flip-flag | 2026-07-21 |
 | P2-BE-46 | P3 round-A sacred openapi A-D + migrations 0035/0036 + seed | f3c57c4 feature/backend | — (backend · additive-only · live migrate+seed 0000→0036 · 876 api) | 2026-07-21 |
 | P2-BE-47 | AR read-surface + CN + customers (C-179) | f3c57c4 feature/backend | — (backend · money-authority + honest-empty + tenant-door · gate 4.5) · ⚠ **CN-approve reversal JV mapping shares B-128 main-promote hold** (Dr 4010+2050/Cr 1030 = EXTRAPOLATED per B-128 · dev-merge free · hold main until Wei ratifies map) | 2026-07-21 |
 | P2-BE-48 | GL /gl/post + periods (**B-128 map-confirm gate**) | f3c57c4 feature/backend | ⚠ /gl/post merge-gated on Wei B-128 posting-map confirm (rest merges free) | 2026-07-21 |
