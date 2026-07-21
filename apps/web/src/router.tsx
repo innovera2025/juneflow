@@ -63,6 +63,7 @@ import { ARTaxInvoice } from "./screens/ar/ar-tax";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
 import { ARAging, APAging } from "./screens/ar/fin-aging";
+import { ARCreditNote } from "./screens/ar/ar-cn";
 import { BankCheque } from "./screens/bank/bank-cheque";
 import { BankReconciliation } from "./screens/bank/bank-recon";
 import { BankExport } from "./screens/bank/bank-export";
@@ -116,6 +117,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.
   "ar.aging": ARAging,
   "ap.aging": APAging,
+  "ar.cn": ARCreditNote,
   "bank.cheque": BankCheque,
   "bank.recon": BankReconciliation,
   "bank.export": BankExport,
