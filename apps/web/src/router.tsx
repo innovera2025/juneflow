@@ -59,6 +59,7 @@ import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
+import { ARCreditNote } from "./screens/ar/ar-cn";
 import { BankCheque } from "./screens/bank/bank-cheque";
 import { BankReconciliation } from "./screens/bank/bank-recon";
 import { BankExport } from "./screens/bank/bank-export";
@@ -105,6 +106,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.inbox": GLPostingInbox,
   "ap.billing": APBilling,
   "ap.pv": APPaymentVoucher,
+  "ar.cn": ARCreditNote,
   "bank.cheque": BankCheque,
   "bank.recon": BankReconciliation,
   "bank.export": BankExport,
