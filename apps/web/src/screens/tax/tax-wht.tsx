@@ -41,6 +41,7 @@ import {
   whtAllCount,
   formatMoney,
   formatMoney2,
+  thousands,
   EMPTY_WHT_REPORT,
   type WhtReport,
   type WhtGroup,
@@ -65,8 +66,8 @@ function th(w?: number, right = false): CSSProperties {
   };
 }
 
-/** MiniKpi card, inlined from ds.jsx MiniKpi (same as gl-inbox). */
-function MiniKpi({ label, value, sub, tone, icon }: { label: string; value: string; sub?: string; tone: string; icon: IconName }) {
+/** MiniKpi card, inlined from ds.jsx MiniKpi (same as gl-inbox, with the optional unit span L349). */
+function MiniKpi({ label, value, unit, sub, tone, icon }: { label: string; value: string; unit?: string; sub?: string; tone: string; icon: IconName }) {
   return (
     <div style={{ padding: 18, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-sm)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -90,6 +91,7 @@ function MiniKpi({ label, value, sub, tone, icon }: { label: string; value: stri
         <span className="num" style={{ fontSize: 24, fontWeight: 700, color: tone, letterSpacing: "-0.018em" }}>
           {value}
         </span>
+        {unit && <span style={{ fontSize: 12, color: "var(--text-3)" }}>{unit}</span>}
       </div>
       {sub && <div style={{ fontSize: 10.5, color: "var(--text-3)", marginTop: 3 }}>{sub}</div>}
     </div>
@@ -538,7 +540,7 @@ export function TaxWHT() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
         <MiniKpi label={t("tax.wht.kpiPnd3")} value={String(report.pnd3.count)} sub={whtSub(report.pnd3)} tone="var(--info)" icon="user" />
         <MiniKpi label={t("tax.wht.kpiPnd53")} value={String(report.pnd53.count)} sub={whtSub(report.pnd53)} tone="var(--brand)" icon="users" />
-        <MiniKpi label={t("tax.wht.kpiTotal")} value={formatMoney(report.totalWht)} sub={t("tax.wht.kpiTotalSub")} tone="var(--accent)" icon="ledger" />
+        <MiniKpi label={t("tax.wht.kpiTotal")} value={thousands(report.totalWht)} unit={t("tax.unitKB")} sub={t("tax.wht.kpiTotalSub")} tone="var(--accent)" icon="ledger" />
         <MiniKpi label={t("tax.wht.kpiDue")} value={DASH} tone="var(--warn)" icon="calendar" />
       </div>
 

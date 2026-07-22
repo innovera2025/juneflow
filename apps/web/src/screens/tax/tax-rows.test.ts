@@ -15,6 +15,8 @@ import {
   whtAllCount,
   formatMoney,
   formatMoney2,
+  millions,
+  thousands,
   round2,
   EMPTY_VAT_REPORT,
   EMPTY_WHT_REPORT,
@@ -157,5 +159,26 @@ describe("money formatters", () => {
   it("round2 tidies a client-derived box to 2 dp", () => {
     expect(round2(1400000.005)).toBe(1400000.01);
     expect(round2(Number.NaN)).toBe(0);
+  });
+});
+
+describe("scaled KPI helpers (M / K)", () => {
+  it("millions scales to millions with exactly 2 decimals (prototype VAT KPI values)", () => {
+    expect(millions(2_240_000)).toBe("2.24"); // VAT sales -> "2.24"
+    expect(millions(840_000)).toBe("0.84"); // VAT purchases -> "0.84"
+    expect(millions(1_400_000)).toBe("1.40"); // VAT net -> "1.40" (trailing zero kept)
+    expect(millions(0)).toBe("0.00"); // edge: zero
+    expect(millions(-1_400_000)).toBe("-1.40"); // edge: negative (credit)
+    expect(millions(2_999_000)).toBe("3.00"); // edge: rounds 2.999 up to 3.00
+    expect(millions(Number.NaN)).toBe("0.00"); // edge: non-finite -> "0.00"
+  });
+
+  it("thousands scales to thousands, no decimals, with grouping (prototype WHT total KPI value)", () => {
+    expect(thousands(240_000)).toBe("240"); // WHT total -> "240"
+    expect(thousands(1_240_000)).toBe("1,240"); // grouping over 1M
+    expect(thousands(0)).toBe("0"); // edge: zero
+    expect(thousands(-240_000)).toBe("-240"); // edge: negative
+    expect(thousands(240_500)).toBe("241"); // edge: rounds 240.5 up to 241
+    expect(thousands(Number.NaN)).toBe("0"); // edge: non-finite -> "0"
   });
 });

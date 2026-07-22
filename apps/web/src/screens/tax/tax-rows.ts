@@ -236,3 +236,25 @@ export function formatMoney2(n: number): string {
   const [int, frac] = fixed.split(".");
   return sign + int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + frac;
 }
+
+/**
+ * Scale a money magnitude to millions with exactly 2 decimals ("2240000" -> "2.24"), matching the
+ * prototype's VAT KPI value (tax.jsx value="2.24" / "0.84" / "1.40"; its "M baht" unit is the i18n
+ * subcon.unitMBaht key, never this string). ASCII digits + dot only; non-finite -> "0.00".
+ */
+export function millions(n: number): string {
+  const safe = Number.isFinite(n) ? n : 0;
+  return (safe / 1e6).toFixed(2);
+}
+
+/**
+ * Scale a money magnitude to thousands with no decimals + thousands grouping ("240000" -> "240"),
+ * matching the prototype's WHT total KPI value (tax.jsx value="240"; its "K baht" unit is the i18n
+ * tax.unitKB key, never this string). ASCII digits + comma only; non-finite -> "0".
+ */
+export function thousands(n: number): string {
+  const safe = Number.isFinite(n) ? n : 0;
+  const rounded = Math.round(safe / 1e3);
+  const sign = rounded < 0 ? "-" : "";
+  return sign + Math.abs(rounded).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}

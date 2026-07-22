@@ -44,6 +44,7 @@ import {
   vatBoxes,
   formatMoney,
   formatMoney2,
+  millions,
   EMPTY_VAT_REPORT,
   type VatReport,
   type VatBoxes,
@@ -80,8 +81,9 @@ const MONTH_KEYS = [
   "tax.form.month12",
 ] as const;
 
-/** KPI card, inlined from dashboard.jsx Kpi (label + value + optional sub + accent). */
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
+/** KPI card, inlined from dashboard.jsx Kpi (label + value + optional unit + sub + accent). The unit
+ *  span mirrors dashboard.jsx L109 (a subordinate --text-3 span after the value). */
+function Kpi({ label, value, unit, sub, accent }: { label: string; value: string; unit?: string; sub?: string; accent?: string }) {
   return (
     <Card pad={18}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -91,6 +93,7 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
         <span className="num" style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", color: accent || "var(--text)" }}>
           {value}
         </span>
+        {unit && <span style={{ fontSize: 13, color: "var(--text-3)", fontWeight: 500 }}>{unit}</span>}
       </div>
       {sub && <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 4 }}>{sub}</div>}
     </Card>
@@ -385,10 +388,10 @@ function PND30Form({ report, onClose }: { report: VatReport; onClose: () => void
           </div>
         </div>
 
-        {/* Filing type */}
+        {/* Filing type — filing1 (normal filing) is the default -> checked (tax-forms.jsx L179). */}
         <div style={{ display: "flex", gap: 18, fontSize: 11, marginBottom: 6 }}>
           <span>
-            <span className="ck" />
+            <span className="ck on" />
             {t("tax.form30.filing1")}
           </span>
           <span>
@@ -440,7 +443,8 @@ function PND30Form({ report, onClose }: { report: VatReport; onClose: () => void
         <div className="box" style={{ marginBottom: 6 }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
             {t("tax.form30.taxMonth")}
-            <span className="field-line" style={{ minWidth: 50, marginLeft: 8 }}>{beYear || DASH}</span>
+            <b style={{ marginLeft: 8 }}>{t("boq.arcFldYearBe")}</b>{" "}
+            <span className="field-line" style={{ minWidth: 50 }}>{beYear || DASH}</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 4, fontSize: 10.5 }}>
             {MONTH_KEYS.map((mk, i) => (
@@ -604,9 +608,9 @@ export function TaxVAT() {
     >
       {/* KPI strip (4): 3 real Σ figures + 1 presentational status (em-dash value, static sub). */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
-        <Kpi label={t("tax.vat.kpiOutput")} value={formatMoney(report.outputVat)} accent="var(--ok)" />
-        <Kpi label={t("tax.vat.kpiInput")} value={formatMoney(report.inputVat)} accent="var(--info)" />
-        <Kpi label={t("tax.vat.kpiNet")} value={formatMoney(report.netVat)} sub={t("tax.vat.kpiNetSub")} accent="var(--danger)" />
+        <Kpi label={t("tax.vat.kpiOutput")} value={millions(report.outputVat)} unit={t("subcon.unitMBaht")} accent="var(--ok)" />
+        <Kpi label={t("tax.vat.kpiInput")} value={millions(report.inputVat)} unit={t("subcon.unitMBaht")} accent="var(--info)" />
+        <Kpi label={t("tax.vat.kpiNet")} value={millions(report.netVat)} unit={t("subcon.unitMBaht")} sub={t("tax.vat.kpiNetSub")} accent="var(--danger)" />
         <Kpi label={t("common.status")} value={DASH} sub={t("tax.vat.kpiStatusSub")} accent="var(--brand)" />
       </div>
 
