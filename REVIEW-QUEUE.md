@@ -23,6 +23,8 @@
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-53 | retention release (B-125=ก) | feab61a feature/backend | **orch-B ✅ merged** — server money (client 99999999 ignored live) · Dr2030/Cr1020 · due-12mo gate · 0038 · 903 api · B-131 escalated-not-guessed | 2026-07-22 |
+| P2-WEB-27/28/30/34/36 | 5 rework pins | 56556bc·d33f4a9·9f6fea1·653b71a·7311c4a | **orch-B ✅ merged** — fast re-gate 5/5 fix-grep verified (GL panel · real badge count · M฿ KPI · write_off kind-aware · real PUT + server-count import toast) · web 889 | 2026-07-22 |
 | P2-BE-53 | Retention release — GET /retention register + POST /retention/release (B-125) | c1536f2 feature/backend | — (backend · sacred openapi + migration 0038 · money=SERVER · derive due/status · 903 api · live 14/14 Dr2030/Cr1020 · B-131 semantics non-block) | 2026-07-22 |
 | P2-WEB-26/29/31/32/33/35 + gl.trial | Phase-3 web merged batch | 30b7319·7d0bee9·603e2e1·f983d29·c8bc379·7ad6170·ef2d88a | **orch-B ✅ merged 8 pins** — gate-4.5 fan-out ×12 + adjudication (2 conflicting verdicts resolved by file ground-truth) · router union ×3 · typecheck 0 · web 779 · dict 2308 intact | 2026-07-21 |
 | P2-BE-51/52 | round-B + hardening | 09b3b23·c48b341 feature/backend | **orch-B ✅ merged** — gate-4.5 PASS (BS equality real · ships honest seed LOSS · 0037 predicate seed-proven · narrow 23505 · countPmOpen import) · 887 api | 2026-07-21 |
