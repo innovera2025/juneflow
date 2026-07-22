@@ -74,6 +74,7 @@ import { TaxVAT } from "./screens/tax/tax-vat";
 import { TaxWHT } from "./screens/tax/tax-wht";
 import { FADepreciation } from "./screens/fa/fa-depr";
 import { FAAdjust } from "./screens/fa/fa-adjust";
+import { ARInvoice } from "./screens/ar/ar-invoice";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -134,6 +135,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "tax.wht": TaxWHT,
   "fa.depr": FADepreciation,
   "fa.adjust": FAAdjust,
+  "ar.invoice": ARInvoice,
 };
 
 const rootRoute = createRootRoute({
