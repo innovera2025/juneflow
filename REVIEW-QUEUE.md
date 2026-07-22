@@ -19,10 +19,11 @@
 
 ## คิวรอ promote
 
-> **PHASE-3 ROUND-B + HARDENING QUEUED (2026-07-21 · orch-A · pins 09b3b23 + e243aa0)** — P2-BE-51 (statements+cashflow · pin 09b3b23) + P2-BE-52 (hardening · pin e243aa0) on feature/backend await orch-B verify+merge · B-129 cashflow-method = Wei-ratify non-block. Round-A promoted → main c2c1868 (C-190). Prior: Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
+> **PHASE-3 P2-BE-53 RETENTION QUEUED (2026-07-22 · orch-A · pin c1536f2)** — retention release on feature/backend await orch-B verify+merge · B-131 semantics = Wei-ratify non-block · B-128 NOTE-2 = retention posting-map. Round-B (P2-BE-51/52) merged → dev a7b51d2. Prior: Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-53 | Retention release — GET /retention register + POST /retention/release (B-125) | c1536f2 feature/backend | — (backend · sacred openapi + migration 0038 · money=SERVER · derive due/status · 903 api · live 14/14 Dr2030/Cr1020 · B-131 semantics non-block) | 2026-07-22 |
 | P2-WEB-26/29/31/32/33/35 + gl.trial | Phase-3 web merged batch | 30b7319·7d0bee9·603e2e1·f983d29·c8bc379·7ad6170·ef2d88a | **orch-B ✅ merged 8 pins** — gate-4.5 fan-out ×12 + adjudication (2 conflicting verdicts resolved by file ground-truth) · router union ×3 · typecheck 0 · web 779 · dict 2308 intact | 2026-07-21 |
 | P2-BE-51/52 | round-B + hardening | 09b3b23·c48b341 feature/backend | **orch-B ✅ merged** — gate-4.5 PASS (BS equality real · ships honest seed LOSS · 0037 predicate seed-proven · narrow 23505 · countPmOpen import) · 887 api | 2026-07-21 |
 | P2-BE-52 | Finance hardening — jv.source_doc unique idx + 23505 idempotency, RV round2, pm name/code, countPmOpen dedup | e243aa0 feature/backend | — (backend · migration 0037 additive · 886 api · live: index blocks dup-ref + multi-period depr + RV sub-cent + pm name/code) | 2026-07-21 |
