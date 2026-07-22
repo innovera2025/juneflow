@@ -23,9 +23,12 @@
  * prototype's readOnly mock number is dropped); the date / due / unit-project / ref-phase
  * fields have no wire column → presentational (shown for fidelity, not persisted); the
  * customer tax-id line's {project} slot has no customer.project column → em-dash. The
- * prototype's mock GL Dr/Cr preview (hardcoded accounts, no i18n keys, no wire) is
- * dropped in favour of the real line-total summary. No create-success toast key exists →
- * the modal closes and the invalidated list surfaces the new invoice (honest).
+ * prototype's auto-GL Dr/Cr panel is RESTORED (orch-B gate C-195) as a presentational
+ * live preview (fin.glAutoTitle + gl.stmt.rowAr/rowHouseSales + the real selected
+ * customer + the previewTotal figure on both legs) — it is NEVER sent; money stays
+ * server-authoritative (the server posts the real balanced entry with the VAT split).
+ * No create-success toast key exists → the modal closes and the invalidated list
+ * surfaces the new invoice (honest).
  */
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
@@ -98,6 +101,9 @@ export function ARInvoiceForm({ onClose }: ARInvoiceFormProps) {
   const subtotal = previewSubtotal(drafts);
   const vat = previewVat(subtotal);
   const total = previewTotal(subtotal);
+  // Auto-GL preview leg figure — mirrors the prototype's equal 2-line presentation;
+  // "—" until there are line drafts (honest), never sent (server is money authority).
+  const glPreview = total > 0 ? formatMoney(total) : DASH;
 
   const wireLines = toWireLines(drafts);
   const busy = createInvoice.isPending;
@@ -294,6 +300,44 @@ export function ARInvoiceForm({ onClose }: ARInvoiceFormProps) {
               <td style={{ padding: "4px 0", color: "var(--text)", fontWeight: 700 }}>{t("common.total")}</td>
               <td className="num" style={{ textAlign: "right", fontWeight: 700, color: "var(--brand)" }}>
                 {formatMoney(total)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Auto-GL posting preview (RESTORED — orch-B gate C-195). Presentational LIVE
+          preview only: the same previewTotal figure on both legs mirrors the prototype's
+          simplified equal-2-line presentation; it is NEVER sent — the server posts the
+          real balanced journal entry (with the VAT split). Account codes 1201 / 4101 are
+          verbatim COA literals; Dr / Cr are verbatim labels. */}
+      <div style={{ padding: 14, background: "var(--brand-soft)", borderRadius: 10, marginBottom: 14 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-3)",
+            marginBottom: 6,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          {t("fin.glAutoTitle")}
+        </div>
+        <table style={{ width: "100%", fontSize: 12 }}>
+          <tbody>
+            <tr>
+              <td style={{ padding: "4px 0", color: "var(--text-2)" }}>Dr</td>
+              <td>{`1201 ${t("gl.stmt.rowAr")} · ${selectedCustomer ? selectedCustomer.name : DASH}`}</td>
+              <td className="num" style={{ textAlign: "right", fontWeight: 600 }}>
+                {glPreview}
+              </td>
+            </tr>
+            <tr>
+              <td style={{ padding: "4px 0", color: "var(--text-2)" }}>Cr</td>
+              <td>{`4101 ${t("gl.stmt.rowHouseSales")}`}</td>
+              <td className="num" style={{ textAlign: "right", fontWeight: 600 }}>
+                {glPreview}
               </td>
             </tr>
           </tbody>
