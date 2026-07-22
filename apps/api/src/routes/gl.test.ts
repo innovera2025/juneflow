@@ -144,12 +144,28 @@ const ACC_CASH = "acc00000-0000-0000-0000-000000001020";
 const ACC_AR = "acc00000-0000-0000-0000-000000001030";
 const ACC_COST = "acc00000-0000-0000-0000-000000005020";
 
-const glAcc = (id: string, code: string, name: string, parentId: string | null) => ({
+// account_type (migration 0035 backfill) derived from the code prefix, so the
+// statements classifier sees real types without every caller passing one.
+const TYPE_BY_PREFIX: Record<string, string> = {
+  "1": "asset",
+  "2": "liability",
+  "3": "equity",
+  "4": "revenue",
+  "5": "expense",
+};
+const glAcc = (
+  id: string,
+  code: string,
+  name: string,
+  parentId: string | null,
+  accountType: string | null = TYPE_BY_PREFIX[code[0] ?? ""] ?? null,
+) => ({
   id,
   companyId: COMPANY,
   parentId,
   code,
   name,
+  accountType,
   createdAt: D,
   updatedAt: D,
 });
@@ -742,6 +758,247 @@ describe("GET /api/v1/gl/reports/trial-balance", () => {
 });
 
 // ===========================================================================
+// GET /gl/reports/statements + /cashflow — the two account-type reports.
+// The canned rows below mirror the REAL 7-JV seed (index.ts L595 JV_BOOKS +
+// L378 COA_SEED) verbatim, so the asserted figures are the true Σ over stored
+// jv_line — never a value hand-computed against the impl.
+// ===========================================================================
+const ACC_HAND = "acc00000-0000-0000-0000-000000001010"; // 1010 asset (CASH)
+const ACC_WIP = "acc00000-0000-0000-0000-000000001140"; // 1140 asset
+const ACC_PPE = "acc00000-0000-0000-0000-000000001210"; // 1210 asset
+const ACC_AP = "acc00000-0000-0000-0000-000000002010"; // 2010 liability
+const ACC_DEP = "acc00000-0000-0000-0000-000000002040"; // 2040 liability
+const ACC_VAT = "acc00000-0000-0000-0000-000000002050"; // 2050 liability
+const ACC_LABOR = "acc00000-0000-0000-0000-000000005030"; // 5030 expense
+const ACC_ADMIN = "acc00000-0000-0000-0000-000000005100"; // 5100 expense
+const ACC_INT = "acc00000-0000-0000-0000-000000005200"; // 5200 expense
+// ACC_CASH = 1020 (bank, CASH) · ACC_AR = 1030 (asset) · ACC_COST = 5020 (expense).
+
+const stmtAccounts = [
+  glAcc(ACC_HAND, "1010", "เงินสดในมือ", null),
+  glAcc(ACC_CASH, "1020", "เงินฝากธนาคาร - กระแสรายวัน (KBANK)", null),
+  glAcc(ACC_AR, "1030", "ลูกหนี้การค้า", null),
+  glAcc(ACC_WIP, "1140", "งานระหว่างก่อสร้าง (WIP/CIP)", null),
+  glAcc(ACC_PPE, "1210", "ที่ดิน อาคาร และอุปกรณ์", null),
+  glAcc(ACC_AP, "2010", "เจ้าหนี้การค้า", null),
+  glAcc(ACC_DEP, "2040", "เงินมัดจำ/เงินจองรับล่วงหน้า", null),
+  glAcc(ACC_VAT, "2050", "ภาษีขายรอนำส่ง (VAT)", null),
+  glAcc(ACC_COST, "5020", "ต้นทุนวัสดุก่อสร้าง", null),
+  glAcc(ACC_LABOR, "5030", "ค่าแรง / ค่าจ้างเหมาช่วง", null),
+  glAcc(ACC_ADMIN, "5100", "ค่าใช้จ่ายในการบริหาร", null),
+  glAcc(ACC_INT, "5200", "ดอกเบี้ยจ่าย", null),
+];
+
+// The 7 seeded JV books (index.ts L595) as jv_line rows. jvId groups the legs
+// for the cashflow per-JV classification; the pending JV-0412 is INCLUDED (no
+// status filter — it is internally balanced, so identity holds).
+const stmtJvLines = [
+  jvLine("jv-0418", ACC_CASH, 2_148_000, 0),
+  jvLine("jv-0418", ACC_AR, 0, 2_148_000),
+  jvLine("jv-0417", ACC_AP, 8040, 0),
+  jvLine("jv-0417", ACC_VAT, 0, 8040),
+  jvLine("jv-0416", ACC_COST, 90466, 0),
+  jvLine("jv-0416", ACC_AP, 0, 90466),
+  jvLine("jv-0415", ACC_COST, 100000, 0),
+  jvLine("jv-0415", ACC_LABOR, 119200, 0),
+  jvLine("jv-0415", ACC_WIP, 0, 219200),
+  jvLine("jv-0414", ACC_ADMIN, 4167, 0),
+  jvLine("jv-0414", ACC_PPE, 0, 4167),
+  jvLine("jv-0413", ACC_ADMIN, 8400, 0),
+  jvLine("jv-0413", ACC_HAND, 0, 8400),
+  jvLine("jv-0412", ACC_ADMIN, 92250, 0),
+  jvLine("jv-0412", ACC_INT, 92250, 0),
+  jvLine("jv-0412", ACC_AP, 0, 92250),
+  jvLine("jv-0412", ACC_DEP, 0, 92250),
+];
+
+const stmtDb = (extra: Partial<StubOpts> = {}) =>
+  stubDb({
+    rows: [
+      [glAccounts, stmtAccounts],
+      [jvLines, stmtJvLines],
+    ],
+    ...extra,
+  });
+
+describe("GET /api/v1/gl/reports/statements", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      url: "/api/v1/gl/reports/statements",
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+  });
+
+  it("classifies real Σ into a balanced BS + IS, prior-year honest-null", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stmtDb() })
+    ).inject({ url: "/api/v1/gl/reports/statements" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const bs = body.balance_sheet;
+
+    // ASSETS (debit-normal Σdr−Σcr), code-ordered, only accounts with activity.
+    expect(bs.assets.rows.map((r: { account_code: string }) => r.account_code)).toEqual([
+      "1010",
+      "1020",
+      "1030",
+      "1140",
+      "1210",
+    ]);
+    const bank = bs.assets.rows.find((r: { account_code: string }) => r.account_code === "1020");
+    expect(bank.account_name).toBe("เงินฝากธนาคาร - กระแสรายวัน (KBANK)");
+    expect(bank.amount).toBe(2_148_000);
+    expect(bank.prior_amount).toBeNull(); // prior-year honest-null on every row
+    expect(bs.assets.rows.find((r: { account_code: string }) => r.account_code === "1010").amount).toBe(-8400);
+    expect(bs.assets.subtotal).toBe(-231_767);
+
+    // LIABILITIES (credit-normal Σcr−Σdr).
+    expect(bs.liabilities.rows.map((r: { account_code: string }) => r.account_code)).toEqual([
+      "2010",
+      "2040",
+      "2050",
+    ]);
+    expect(bs.liabilities.rows.find((r: { account_code: string }) => r.account_code === "2010").amount).toBe(174_676);
+    expect(bs.liabilities.subtotal).toBe(274_966);
+
+    // EQUITY — honest-empty rows (no 3010/3020 activity) + net_income folded in.
+    expect(bs.equity.rows).toEqual([]);
+    expect(bs.equity.net_income_line.amount).toBe(-506_733);
+    expect(bs.equity.net_income_line.prior_amount).toBeNull();
+    expect(bs.equity.subtotal).toBe(-506_733);
+
+    // The two BS sides tie (balanced == a real equality over real sums).
+    expect(bs.total_assets).toBe(-231_767);
+    expect(bs.total_liabilities_equity).toBe(-231_767);
+    expect(bs.prior_total_assets).toBeNull();
+    expect(bs.balanced).toBe(true);
+
+    // INCOME STATEMENT — revenue honest-empty; expense debit-normal; NI a LOSS.
+    const is = body.income_statement;
+    expect(is.revenue.rows).toEqual([]);
+    expect(is.revenue.total).toBe(0);
+    expect(is.revenue.prior_total).toBeNull();
+    expect(is.expense.rows.map((r: { account_code: string }) => r.account_code)).toEqual([
+      "5020",
+      "5030",
+      "5100",
+      "5200",
+    ]);
+    expect(is.expense.rows.find((r: { account_code: string }) => r.account_code === "5020").amount).toBe(190_466);
+    expect(is.expense.rows.find((r: { account_code: string }) => r.account_code === "5100").amount).toBe(104_817);
+    expect(is.expense.total).toBe(506_733);
+    expect(is.net_income).toBe(-506_733);
+    expect(is.prior_net_income).toBeNull();
+
+    expect(body.currency_code).toBe("THB");
+  });
+
+  it("reads jv_line scoped THROUGH jv (never a bare jv_line select) — company param bound", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [jvLines, [jvLine("jv-x", ACC_COST, 1, 0)]],
+            [glAccounts, [glAcc(ACC_COST, "5020", "x", null)]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/reports/statements" });
+    const lineRead = captured.find((c) => c.table === jvLines);
+    expect(lineRead).toBeTruthy();
+    expect(lineRead!.joins).toContain(jvs);
+    expect(paramsOf(lineRead!.where)).toContain(COMPANY);
+  });
+});
+
+describe("GET /api/v1/gl/reports/cashflow", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      url: "/api/v1/gl/reports/cashflow",
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+  });
+
+  it("DIRECT method — real bucket sums, honest-empty investing/financing, prior null", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stmtDb() })
+    ).inject({ url: "/api/v1/gl/reports/cashflow" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.method).toBe("direct");
+
+    // OPERATING — cash movement attributed to its contra account, code-ordered:
+    //   JV-0418 (cash 1020 +2,148,000) → contra 1030 +2,148,000
+    //   JV-0413 (cash 1010 −8,400)     → contra 5100 −8,400
+    expect(body.operating.lines.map((l: { account_code: string }) => l.account_code)).toEqual([
+      "1030",
+      "5100",
+    ]);
+    expect(body.operating.lines.find((l: { account_code: string }) => l.account_code === "1030").amount).toBe(2_148_000);
+    expect(body.operating.lines.find((l: { account_code: string }) => l.account_code === "5100").amount).toBe(-8400);
+    expect(body.operating.net).toBe(2_139_600);
+
+    // INVESTING / FINANCING — honest-empty (no cash JV touches those accounts).
+    expect(body.investing).toEqual({ lines: [], net: 0 });
+    expect(body.financing).toEqual({ lines: [], net: 0 });
+
+    // opening honest-0, closing = opening + real net movement, prior honest-null.
+    expect(body.opening_cash).toBe(0);
+    expect(body.net_change).toBe(2_139_600);
+    expect(body.closing_cash).toBe(2_139_600);
+    expect(body.prior).toBeNull();
+    expect(body.currency_code).toBe("THB");
+  });
+
+  it("excludes a JV with no cash leg + reconciles buckets to net_change", async () => {
+    // A pure accrual JV (no 1010/1020 leg) contributes nothing to cash flow;
+    // net_change stays the real cash movement and the buckets sum to it.
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stmtDb() })
+    ).inject({ url: "/api/v1/gl/reports/cashflow" });
+    const body = res.json();
+    const bucketNet =
+      body.operating.net + body.investing.net + body.financing.net;
+    expect(bucketNet).toBe(body.net_change); // self-reconciling
+    // JV-0412 (accrual-only) never surfaces a 5200/2040 cash line.
+    const allLines = [
+      ...body.operating.lines,
+      ...body.investing.lines,
+      ...body.financing.lines,
+    ].map((l: { account_code: string }) => l.account_code);
+    expect(allLines).not.toContain("5200");
+    expect(allLines).not.toContain("2040");
+  });
+
+  it("reads jv_line scoped THROUGH jv (never a bare jv_line select) — company param bound", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [jvLines, [jvLine("jv-x", ACC_CASH, 1, 0)]],
+            [glAccounts, [glAcc(ACC_CASH, "1020", "x", null)]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/reports/cashflow" });
+    const lineRead = captured.find((c) => c.table === jvLines);
+    expect(lineRead).toBeTruthy();
+    expect(lineRead!.joins).toContain(jvs);
+    expect(paramsOf(lineRead!.where)).toContain(COMPANY);
+  });
+});
+
+// ===========================================================================
 // POST /gl/close-period — CE-strict lock-only period close (Wei C-176)
 // ===========================================================================
 describe("POST /api/v1/gl/close-period", () => {
@@ -1069,6 +1326,30 @@ describe("POST /api/v1/gl/post", () => {
     expect(body.posted).toHaveLength(0);
     expect(body.skipped).toEqual([{ doc_id: RV_A, reason: "already posted" }]);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
+  });
+
+  it("maps a concurrent double-post (23505 on the source_doc index) to the idempotent skip", async () => {
+    // The doc passes the in-memory pre-check (pending), but a racing /gl/post
+    // committed the jv first → the 0037 source_doc UNIQUE index trips 23505 in the
+    // tx. P2-BE-52: the handler maps it to the same skip, never a 500.
+    const base = postDb({
+      rvRows: [{ id: RV_A, amount: "2148000.00", currencyCode: "THB", createdAt: D }],
+    });
+    const db = {
+      ...(base as unknown as Record<string, unknown>),
+      transaction: async () => {
+        const e = new Error("duplicate key") as Error & { code: string };
+        e.code = "23505";
+        throw e;
+      },
+    } as unknown as typeof base;
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [RV_A] } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.posted).toHaveLength(0);
+    expect(body.skipped).toEqual([{ doc_id: RV_A, reason: "already posted" }]);
   });
 
   it("skips a doc_id not in the tenant's posting inbox", async () => {

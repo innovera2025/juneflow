@@ -2170,6 +2170,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Retention register — held ledgers (due = created_at + 12mo) */
+        get: operations["getRetentionRegister"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/retention/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Release a retention tranche ({ledger_id}) — validate held + due-12mo · 50/50 (B-107d) · posts via the ret posting-inbox */
+        post: operations["releaseRetention"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/etax/send": {
         parameters: {
             query?: never;
@@ -6168,6 +6202,44 @@ export interface operations {
         };
         responses: {
             201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getRetentionRegister: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    releaseRetention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    ledger_id?: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["ActionOk"];
             401: components["responses"]["Unauthorized"];
         };
     };

@@ -89,11 +89,10 @@ const DASH = "—";
 const POSTED_TAG = "posted";
 /**
  * POST /gl/post handler readiness (B-122). The op is DECLARED in the contract (postGl) but its
- * HANDLER IS NOT LIVE YET - Wei's ruling: the Post button is disabled + honest until it lands.
- * Flip to true when orch-A's POST /gl/post handler merges - B-122. The useGlPost() mutation stays
- * wired so flipping this flag makes the button live with no further change.
+ * HANDLER IS LIVE as of Phase-3 round-A (POST /gl/post merged - B-122/P2-BE-48). The Post button
+ * is now enabled by real selection; the useGlPost() mutation posts the selected pending doc ids.
  */
-const GL_POST_HANDLER_READY = false;
+const GL_POST_HANDLER_READY = true;
 
 /** Table header cell style (ds.jsx th(), as ported in gl-jv.tsx). */
 function th(w?: number, right = false): CSSProperties {
@@ -452,7 +451,7 @@ export function GLPostingInbox() {
             kind="ok"
             size="md"
             icon="check"
-            disabled={!GL_POST_HANDLER_READY || pendingSelectedCount === 0}
+            disabled={!GL_POST_HANDLER_READY || pendingSelectedCount === 0 || glPost.isPending}
             onClick={postSelected}
           >
             {t("gl.inbox.postAllBtn")}

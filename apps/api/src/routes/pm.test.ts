@@ -339,17 +339,23 @@ describe("POST /api/v1/pm/assets", () => {
       payload: {
         contract_id: CONTRACT,
         kind: "ลิฟต์",
+        // B-110 / migration 0034 — the asset's real display name + code columns.
+        name: "ลิฟต์โดยสาร MAXTECH MX-1000",
+        code: "LIFT-A01",
         site: "อาคาร A · โถงกลาง",
         cycle: "รายเดือน",
         next_due: "2026-06-20",
       },
     });
     expect(res.statusCode).toBe(201);
-    // The write carries exactly the schema columns (no invented fields).
+    // The write carries exactly the schema columns (no invented fields) —
+    // name + code persist (B-110 / migration 0034).
     const write = inserted.find((w) => w.table === pmAssets)!;
     expect(write.rows[0]).toEqual({
       contractId: CONTRACT,
       kind: "ลิฟต์",
+      name: "ลิฟต์โดยสาร MAXTECH MX-1000",
+      code: "LIFT-A01",
       site: "อาคาร A · โถงกลาง",
       cycle: "รายเดือน",
       nextDue: "2026-06-20",
@@ -357,6 +363,8 @@ describe("POST /api/v1/pm/assets", () => {
     expect(res.json()).toMatchObject({
       contract_id: CONTRACT,
       kind: "ลิฟต์",
+      name: "ลิฟต์โดยสาร MAXTECH MX-1000",
+      code: "LIFT-A01",
       site: "อาคาร A · โถงกลาง",
       cycle: "รายเดือน",
       next_due: "2026-06-20",

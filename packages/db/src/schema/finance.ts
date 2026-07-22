@@ -420,6 +420,19 @@ export const jvs = pgTable("jv", {
   // 0030 (perf-reaudit-finance): GL period-close + reporting filter jv by its
   // accounting period — index the nullable period FK. Mirrors 0024.
   index("jv_period_idx").on(t.periodId),
+  // 0037 (P2-BE-52): a source money doc posts to the GL at most ONCE. source_doc
+  // is the polymorphic "<kind>:<uuid>" (or "fa:<uuid>:<period>") posting ref; a
+  // partial UNIQUE index makes a concurrent double-post (the /gl/post, CN-approve,
+  // and FA-depreciation handlers all check-then-insert, which races) impossible at
+  // the DB layer — the losing tx trips 23505 and the handler maps it to the same
+  // idempotent 409/skip. The predicate matches ONLY real posting refs
+  // (`^<kind>:`): the seed's JV_BOOKS use FREE-TEXT source labels ("REM" / "Manual"
+  // ×2 / "GR auto" / …) that are intentionally non-unique (gl-posting.ts) and MUST
+  // stay outside this constraint (a bare IS NOT NULL would fail the seed on the two
+  // "Manual" rows). Manual JVs with a null/free-text source_doc are unconstrained.
+  uniqueIndex("jv_source_doc_uq")
+    .on(t.sourceDoc)
+    .where(sql`${t.sourceDoc} ~ '^(pv|rv|gr|payroll|fa|cn|ret):'`),
 ]);
 
 /**

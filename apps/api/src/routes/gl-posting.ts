@@ -45,7 +45,11 @@ import type { TenantDb } from "../db/tenant-db.js";
  * inbox enumeration in listGlPostingDocs below is unchanged (still the four
  * kinds with a real backing table: pv/rv/gr/payroll).
  */
-export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn):([0-9a-fA-F-]{36})$/;
+// The optional `:YYYY-MM` tail is the FA-depreciation period discriminator
+// (P2-BE-52): a depreciation post's source_doc is `fa:<assetId>:<period>` so it is
+// unique per (asset, period) under the jv.source_doc UNIQUE index, while the other
+// kinds stay `<kind>:<uuid>` (one post per document).
+export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn|ret):([0-9a-fA-F-]{36})(:\d{4}-\d{2}|:\d+)?$/;
 
 /**
  * Every source-doc kind the shared source_doc convention can reference. The

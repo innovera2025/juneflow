@@ -64,6 +64,7 @@ import { registerFaRoute } from "./routes/fa.js";
 import { registerApRoute } from "./routes/ap.js";
 import { registerBankRoute } from "./routes/bank.js";
 import { registerTaxRoute } from "./routes/tax.js";
+import { registerRetentionRoute } from "./routes/retention.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -196,6 +197,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerApRoute(v1);
       registerBankRoute(v1);
       registerTaxRoute(v1);
+      registerRetentionRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,

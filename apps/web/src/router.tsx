@@ -57,11 +57,24 @@ import { PMWorkOrders } from "./screens/pm/wo-list";
 import { GLChartOfAccounts } from "./screens/gl/gl-coa";
 import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
+import { GLTrialBalance } from "./screens/gl/gl-trial";
+import { ARReceiveVoucher } from "./screens/ar/ar-rv";
+import { ARTaxInvoice } from "./screens/ar/ar-tax";
+import { GLPeriodClose } from "./screens/gl/gl-close";
+import { FARegister } from "./screens/fa/fa-register";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
+import { ARAging, APAging } from "./screens/ar/fin-aging";
+import { ARCreditNote } from "./screens/ar/ar-cn";
 import { BankCheque } from "./screens/bank/bank-cheque";
 import { BankReconciliation } from "./screens/bank/bank-recon";
 import { BankExport } from "./screens/bank/bank-export";
+import { TaxETax } from "./screens/tax/tax-etax";
+import { TaxVAT } from "./screens/tax/tax-vat";
+import { TaxWHT } from "./screens/tax/tax-wht";
+import { FADepreciation } from "./screens/fa/fa-depr";
+import { FAAdjust } from "./screens/fa/fa-adjust";
+import { ARInvoice } from "./screens/ar/ar-invoice";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -103,11 +116,26 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.coa": GLChartOfAccounts,
   "gl.jv": GLJournalVoucher,
   "gl.inbox": GLPostingInbox,
+  "gl.trial": GLTrialBalance,
+  "ar.rv": ARReceiveVoucher,
+  "ar.tax": ARTaxInvoice,
+  "gl.close": GLPeriodClose,
+  "fa.register": FARegister,
   "ap.billing": APBilling,
   "ap.pv": APPaymentVoucher,
+  // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.
+  "ar.aging": ARAging,
+  "ap.aging": APAging,
+  "ar.cn": ARCreditNote,
   "bank.cheque": BankCheque,
   "bank.recon": BankReconciliation,
   "bank.export": BankExport,
+  "tax.etax": TaxETax,
+  "tax.vat": TaxVAT,
+  "tax.wht": TaxWHT,
+  "fa.depr": FADepreciation,
+  "fa.adjust": FAAdjust,
+  "ar.invoice": ARInvoice,
 };
 
 const rootRoute = createRootRoute({
