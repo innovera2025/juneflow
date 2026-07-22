@@ -14,9 +14,12 @@
  *   - the reason textarea has no wire field (the server generates the memo) -> omitted.
  *   - the GL double-entry preview listed a mock 1501/3301 pair; the real posting is DEFERRED, so
  *     showing those lines would fabricate an entry that never posts -> omitted. All reported.
- *   The success toast (fa.revalue.toast) carries a "post to GL" suffix that reads optimistically
- *   for a revalue whose posting is deferred; it is the only blessed keyed copy, used with real
- *   {code}/{amount}/{diff} and reported (same treatment as gl-inbox's applyFilterToast).
+ *   The success toast (fa.revalue.toast) is filled from the SERVER RESPONSE: {amount} = the server's
+ *   recorded new value (ActionOk.amount = round2(new_value)), NOT the client-typed input; {diff} is
+ *   derived from that server amount minus the REAL loaded before book value (both server data). Its
+ *   static "post to GL" suffix is part of the blessed key and reads optimistically for a revalue
+ *   whose GL posting is deferred (the key has no JV placeholder, so the response's null jv_no is not
+ *   surfaced) — reported (same treatment as gl-inbox's applyFilterToast).
  *
  * i18n (rule 2): fa.revalue.* keys + reused keys (subcon.unitBaht / common.cancel). ZERO Thai/baht
  * in this .tsx (B-073).
@@ -28,7 +31,7 @@ import { Btn } from "../../ui/button";
 import { Field } from "../../ui/field";
 import { useShellCtx } from "../../shell/shell-context";
 import { formatMoney, round2, toFaAsset, type FaAsset } from "./fa-depr-rows";
-import { useFaAssetList, useRevalue } from "./use-fa-depr";
+import { faActionNum, useFaAssetList, useRevalue } from "./use-fa-depr";
 
 const DASH = "—";
 
@@ -81,12 +84,21 @@ export function RevalueForm({ onClose }: { onClose: () => void }) {
     revalue.mutate(
       { asset_id: selected.id, new_value: afterNum },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
+          // SERVER-authoritative new carrying value (fa.ts revalue -> ActionOk.amount = round2(new_value)),
+          // never the client-typed afterNum. The response carries no before/diff field, so the signed
+          // difference is derived from the server amount and the REAL loaded before book value (both
+          // server data, not optimistic). Absent amount -> em-dash (honest, no fabricated value).
+          const amount = faActionNum(res, "amount");
+          const amountStr = amount == null ? DASH : formatMoney(amount);
+          const serverDiff = amount == null ? null : round2(amount - before);
+          const diffStr =
+            serverDiff == null ? DASH : `${serverDiff > 0 ? "+" : ""}${formatMoney(serverDiff)}`;
           ctx.notify(
             t("fa.revalue.toast")
               .replace("{code}", selected.name || selected.id)
-              .replace("{amount}", formatMoney(afterNum))
-              .replace("{diff}", `${diff > 0 ? "+" : ""}${formatMoney(diff)}`),
+              .replace("{amount}", amountStr)
+              .replace("{diff}", diffStr),
           );
           onClose();
         },

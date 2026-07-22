@@ -15,9 +15,11 @@
  *   - the reason textarea: the server generates the memo -> omitted.
  *   - the GL double-entry preview: the real posting is Dr 5100 / Cr 1210 (fa.ts), not the
  *     prototype's disposal-entry mock -> omitted. All reported.
- *   The success toast (fa.writeoff.toast) is filled with the real removed carrying amount
- *   (result = "loss", since a write-off removes the whole book value); its "post to GL" suffix
- *   is honest when book_value > 0 (a JV posts) and reported for the zero-book deferred edge.
+ *   The success toast (fa.writeoff.toast) is filled from the SERVER RESPONSE amount (fa.ts writeOff
+ *   -> ActionOk.amount = book_value), NOT the client-optimistic book value (result = "loss", since
+ *   a write-off removes the whole book value); its static "post to GL" suffix is part of the blessed
+ *   key. The toast key has no JV placeholder, so the response's jv_no (null when GL posting is
+ *   deferred for a zero book value / missing COA account) is not surfaced here.
  *
  * i18n (rule 2): fa.writeoff.* + fa.statusWriteoff + fa.revalue.fieldAsset (reused "select asset")
  * + subcon.unitBaht + common.cancel. ZERO Thai/baht in this .tsx (B-073).
@@ -29,7 +31,7 @@ import { Btn } from "../../ui/button";
 import { Field } from "../../ui/field";
 import { useShellCtx } from "../../shell/shell-context";
 import { formatMoney, toFaAsset, type FaAsset } from "./fa-depr-rows";
-import { useFaAssetList, useWriteOff } from "./use-fa-depr";
+import { faActionNum, useFaAssetList, useWriteOff } from "./use-fa-depr";
 
 const DASH = "—";
 
@@ -77,13 +79,16 @@ export function WriteOffForm({ onClose }: { onClose: () => void }) {
     writeOff.mutate(
       { asset_id: selected.id },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
+          // SERVER-authoritative removed carrying amount (fa.ts writeOff -> amount: book_value),
+          // never the client-optimistic book value. Absent -> em-dash (honest).
+          const amount = faActionNum(res, "amount");
           ctx.notify(
             t("fa.writeoff.toast")
               .replace("{kind}", t("fa.statusWriteoff"))
               .replace("{code}", selected.name || selected.id)
               .replace("{result}", t("fa.writeoff.wordLoss"))
-              .replace("{amount}", formatMoney(book)),
+              .replace("{amount}", amount == null ? DASH : formatMoney(amount)),
           );
           onClose();
         },

@@ -18,7 +18,9 @@
  *   - kind -> the real wire kind (revalue / write_off) as a coloured badge; the server writes no
  *     'sale' kind, so the sale tab is always 0 (honest empty, mirrors gl.inbox scheduled/error).
  *   - reason -> the real memo (em-dash when empty).
- *   - before + gain/loss -> NO wire column -> em-dash; after -> the real `amount`.
+ *   - before / after -> the single wire `amount` placed by kind (adjustColumns): a revalue's amount
+ *     is the NEW value -> "after" (before em-dashes); a write_off's amount is the REMOVED book value
+ *     -> "before" (after em-dashes). gain/loss -> NO wire figure -> always em-dash (never a 0).
  *   - date -> the real created_at (UTC); status -> the real 'approved' badge.
  *   The TabBar is PRESENTATIONAL (active fixed to "all"; the counts are real per kind) — the
  *   prototype's tabs did not filter either (onChange noop, fa.jsx L621).
@@ -36,6 +38,7 @@ import { Btn } from "../../ui/button";
 import { Page } from "../../shell/page";
 import { useShellCtx } from "../../shell/shell-context";
 import {
+  adjustColumns,
   adjustKindMeta,
   countByKind,
   formatDate,
@@ -269,6 +272,7 @@ export function FAAdjust() {
               ) : (
                 rows.map((r) => {
                   const date = formatDate(r.createdAt);
+                  const cols = adjustColumns(r);
                   return (
                     <tr
                       key={r.id}
@@ -285,11 +289,10 @@ export function FAAdjust() {
                         <span style={{ color: "var(--brand)" }}>{r.assetId || DASH}</span>
                       </td>
                       <td style={td}>{r.memo || <span style={{ color: "var(--text-3)" }}>{DASH}</span>}</td>
-                      {/* before: no wire column -> em-dash */}
-                      <td style={{ ...td, textAlign: "right" }}>{moneyOrDash(null)}</td>
-                      {/* after: the real amount */}
-                      <td style={{ ...td, textAlign: "right" }}>{moneyOrDash(r.amount)}</td>
-                      {/* gain/loss: no wire column -> em-dash */}
+                      {/* before/after: the single wire amount placed by kind (write_off -> before, revalue -> after); the empty side em-dashes */}
+                      <td style={{ ...td, textAlign: "right" }}>{moneyOrDash(cols.before)}</td>
+                      <td style={{ ...td, textAlign: "right" }}>{moneyOrDash(cols.after)}</td>
+                      {/* gain/loss: no wire figure -> em-dash (never a fabricated 0) */}
                       <td style={{ ...td, textAlign: "right" }}>{moneyOrDash(null)}</td>
                       <td style={{ ...td, fontSize: 11.5, color: "var(--text-3)" }} className="num">
                         {date || DASH}

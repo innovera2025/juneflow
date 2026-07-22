@@ -50,6 +50,27 @@ function authed(): boolean {
   return getAuthToken() != null;
 }
 
+/**
+ * Read a finite number field off a RESOLVED fa mutation response (the ActionOk the server sends).
+ * The write-off / revalue endpoints reply with a RAW ActionOk ({ id, asset_id, kind, amount,
+ * jv_no }) — unlike the list endpoints it is NOT list-enveloped — so the resolved value is the
+ * ActionOk itself; a future `{ data: {...} }` wrapper is tolerated defensively. Returns null when
+ * the field is absent / non-finite (the caller em-dashes rather than fabricating a value).
+ */
+export function faActionNum(res: unknown, key: string): number | null {
+  if (res == null || typeof res !== "object") return null;
+  const obj = res as Record<string, unknown>;
+  const src =
+    obj.data != null && typeof obj.data === "object" ? (obj.data as Record<string, unknown>) : obj;
+  const v = src[key];
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number.parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 /** GET /fa/assets — the tenant's fixed-asset catalogue (B-014 envelope). */
 export function useFaAssetList() {
   return useQuery<Row[]>({

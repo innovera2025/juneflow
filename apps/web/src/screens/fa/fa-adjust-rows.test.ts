@@ -6,6 +6,7 @@
 import { describe, it, expect } from "vitest";
 import {
   toFaAdjustment,
+  adjustColumns,
   adjustKindMeta,
   countByKind,
   filterByKind,
@@ -68,6 +69,27 @@ describe("adjustKindMeta", () => {
     expect(adjustKindMeta("write_off")).toEqual({ badge: "writeoff", bg: "var(--danger-soft)", fg: "var(--danger)" });
     expect(adjustKindMeta("sale")).toEqual({ badge: "sale", bg: "var(--info-soft)", fg: "var(--info)" });
     expect(adjustKindMeta("mystery")).toEqual({ badge: "other", bg: "var(--surface-3)", fg: "var(--text-2)" });
+  });
+});
+
+describe("adjustColumns (kind-aware before/after placement of the single wire amount)", () => {
+  it("revalue -> amount is the NEW value: after column, before em-dashes (null)", () => {
+    expect(adjustColumns(adj({ kind: "revalue", amount: 72000000 }))).toEqual({
+      before: null,
+      after: 72000000,
+    });
+  });
+
+  it("write_off -> amount is the REMOVED book value: before column, after em-dashes (null)", () => {
+    expect(adjustColumns(adj({ kind: "write_off", amount: 188000 }))).toEqual({
+      before: 188000,
+      after: null,
+    });
+  });
+
+  it("unknown kind -> both null (honest, no assumption about the amount's meaning)", () => {
+    expect(adjustColumns(adj({ kind: "sale", amount: 380000 }))).toEqual({ before: null, after: null });
+    expect(adjustColumns(adj({ kind: "mystery", amount: 5 }))).toEqual({ before: null, after: null });
   });
 });
 

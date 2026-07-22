@@ -10,8 +10,11 @@
  *     status, memo:string|null, created_at }  (fa.ts adjustmentWire).
  *
  * HONEST GAPS (never fabricated) — see fa-adjust.tsx for the screen-level notes:
- *   - the wire has ONE `amount` (revalue: the new value; write_off: the removed carrying amount)
- *     and NO before-value / gain-loss columns -> those cells em-dash.
+ *   - the wire carries ONE `amount` whose MEANING is kind-dependent (see adjustColumns()): a
+ *     revalue's amount is the NEW carrying value -> the "after" (colAfter) column, before em-dashes;
+ *     a write_off's amount is the REMOVED book value -> the "before" (colBefore) column, after
+ *     em-dashes. The gain/loss (diff) column has NO wire figure -> it always em-dashes (a missing
+ *     column is honest — never a fabricated 0).
  *   - there is NO document-number column -> the "no" cell shows the real record `id`.
  *   - the server has NO 'sale' kind (write_off covers disposal) -> the sale tab is always 0
  *     (honest empty, mirrors gl.inbox scheduled/error).
@@ -100,6 +103,31 @@ export function adjustKindMeta(kind: AdjustKind): KindMeta {
       return { badge: "sale", bg: "var(--info-soft)", fg: "var(--info)" };
     default:
       return { badge: "other", bg: "var(--surface-3)", fg: "var(--text-2)" };
+  }
+}
+
+/**
+ * The single wire `amount` placed into the history's before/after columns by kind. One amount per
+ * row, meaning fixed by kind — never assumed for an unknown kind:
+ *   - revalue   -> amount is the NEW carrying value  -> { before: null, after: amount }
+ *   - write_off -> amount is the REMOVED book value  -> { before: amount, after: null }
+ *   - any other -> unknown meaning                    -> { before: null, after: null } (honest)
+ * A null column em-dashes on screen (no fabricated 0). The gain/loss (diff) column has no wire and
+ * is never derived here — it always em-dashes on the screen.
+ */
+export interface AdjustColumns {
+  before: number | null;
+  after: number | null;
+}
+
+export function adjustColumns(row: FaAdjustment): AdjustColumns {
+  switch (row.kind) {
+    case "revalue":
+      return { before: null, after: row.amount };
+    case "write_off":
+      return { before: row.amount, after: null };
+    default:
+      return { before: null, after: null };
   }
 }
 
