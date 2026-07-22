@@ -24,12 +24,21 @@
  *     locked_by / locked_at, so the actor em-dashes and the date shows created_at (the only wire
  *     date). Honest-empty when nothing is locked.
  *
- *   CHECKLIST (presentational): the 10 steps are STATIC labels (gl.close.step1..step10). There is
- *     NO per-step completion wire, so every step renders as PENDING — the prototype's per-step done
- *     flags + notes are fabricated mock data and are dropped (rule 3, never fabricate). The per-step
- *     action (gl.close.actionBtn) is presentational (a toast). The progress bar reflects the (0)
- *     done-count, NOT a real signal. The CLOSE BUTTON is gated on real close-ability (an open CE
- *     period exists), NOT on the mock all-checklist-done — an honest gate.
+ *   CHECKLIST (presentational, except step5's real count): the 10 steps are STATIC labels
+ *     (gl.close.step1..step10). There is NO per-step completion wire, so every step renders as
+ *     PENDING — the prototype's per-step done flags + notes are fabricated mock data and are dropped
+ *     (rule 3, never fabricate). The per-step action (gl.close.actionBtn) is presentational (a
+ *     toast). The progress bar reflects the (0) done-count, NOT a real signal. The CLOSE BUTTON is
+ *     gated on real close-ability (an open CE period exists), NOT on the mock all-checklist-done —
+ *     an honest gate.
+ *     STEP5 REAL COUNT: the "check Posting-Inbox pending items" step (gl.close.step5) carries a note
+ *     showing the REAL pending count from useBadgeCount("gl.inbox") — the SAME live GET /counts
+ *     value that drives the sidebar gl.inbox badge. It renders honestly: the real number when
+ *     loaded, em-dash when absent/zero (useBadgeCount folds 0 -> undefined, matching the sidebar's
+ *     no-pill state). The prototype's baht half ("832K baht") has NO wire, so it em-dashes (never a
+ *     fabricated figure). The prototype's remaining-{n}-items phrasing has no matching dict key
+ *     (consume-only i18n; the sole "{n} items" key is boq.* domain with the wrong wording) — so the
+ *     bare count renders until a sacred round adds gl.close.step5Note (reported for Wave-C).
  *
  * MISSING-KEY BLOCKER (STOP+report): gl.close.step3 (the FA-depreciation step) is ABSENT from the
  * Wave-A i18n batch, so the checklist renders 9 of the prototype's 10 steps until a sacred i18n
@@ -58,6 +67,7 @@ import {
   type PeriodRow,
 } from "./gl-close-rows";
 import { useGlPeriods, useCloseGlPeriod } from "./use-gl-close";
+import { useBadgeCount } from "../../shell/use-shell-data";
 
 const DASH = "—";
 
@@ -139,12 +149,17 @@ function ClosePeriodConfirm({ period, onClose }: { period: string; onClose: () =
   );
 }
 
-/** A single checklist row (gl.jsx L785-804). Presentational — done is always false (no wire). */
-function ChecklistRow({ label, done, actionLabel, onAction }: {
+/**
+ * A single checklist row (gl.jsx L785-804). Presentational — done is always false (no wire). The
+ * optional `note` sub-line carries a real sub-value for the one wired step (step5's Posting-Inbox
+ * count); every other row passes it undefined and stays label-only.
+ */
+function ChecklistRow({ label, done, actionLabel, onAction, note }: {
   label: string;
   done: boolean;
   actionLabel: string;
   onAction: () => void;
+  note?: string;
 }) {
   return (
     <div
@@ -177,6 +192,9 @@ function ChecklistRow({ label, done, actionLabel, onAction }: {
         <div style={{ fontSize: 12.5, fontWeight: 600, color: done ? "var(--ok)" : "var(--text)" }}>
           {label}
         </div>
+        {note != null && (
+          <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3 }}>{note}</div>
+        )}
       </div>
       {!done && (
         <Btn kind="ghost" size="sm" icon="arrowR" onClick={onAction}>
@@ -192,6 +210,15 @@ export function GLPeriodClose() {
   const ctx = useShellCtx();
 
   const periodsQ = useGlPeriods();
+
+  // step5 ("check Posting-Inbox pending items") carries the REAL pending count — the SAME live
+  // /counts value that drives the sidebar gl.inbox badge (useBadgeCount folds 0/absent -> undefined,
+  // so a not-loaded or zero count em-dashes exactly like the sidebar's no-pill state).
+  const inboxCount = useBadgeCount("gl.inbox");
+  // Honest step5 note: real count when loaded (else em-dash) · baht em-dash (the prototype's
+  // "832K baht" value half has NO wire, so it is never fabricated). No dict key matches the
+  // prototype's remaining-{n}-items phrasing (consume-only i18n) -> bare count until gl.close.step5Note.
+  const step5Note = `${inboxCount ?? DASH} · ${DASH}`;
 
   const rows = useMemo<PeriodRow[]>(() => (periodsQ.data ?? []).map(toPeriodRow), [periodsQ.data]);
   const openPeriod = useMemo(() => deriveOpenPeriod(rows), [rows]);
@@ -260,6 +287,9 @@ export function GLPeriodClose() {
                 done={false}
                 actionLabel={t("gl.close.actionBtn")}
                 onAction={() => ctx.notify(t("gl.close.actionToast"))}
+                // Only step5 (Posting-Inbox pending items) gets the real count note; the rest stay
+                // label-only (presentational, no per-step wire).
+                note={key === "gl.close.step5" ? step5Note : undefined}
               />
             ))}
           </div>
