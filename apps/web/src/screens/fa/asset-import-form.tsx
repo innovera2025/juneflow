@@ -8,14 +8,19 @@
  * spec caption, and the preview banner match the prototype. Every string is a fa.* / boq.* /
  * common.* dict key (t) — no Thai/baht literal in source (rule 2); tokens back every colour.
  *
- * PRESENTATIONAL (reported honestly, never fabricated) — there is NO file-upload / parse endpoint:
- * this whole flow is presentational. POST /fa/import (fa.ts importAssets) exists, but it needs
- * client-PARSED rows, which this mock file-picker does not produce (the prototype's on-screen
- * sample rows are un-keyed Thai mock data — rule 2 + rule 3 — so the preview sample TABLE is
- * dropped, not fabricated). The download/upload/confirm actions are UI acknowledgments only; the
- * confirm count is the screen's own baked-in mock figure (the fa.import.btnConfirm + checkPass copy
- * bake "24"), kept for internal consistency of the presentational flow — no asset is really
- * imported here.
+ * HONEST-DISABLED (Section-0, never fabricated) — POST /fa/import (fa.ts importAssets) is REAL and
+ * wired here (useImportFaAssets), but it needs client-PARSED rows. There is NO file-upload / parse
+ * endpoint and NO XLSX parser in this app, and the prototype's on-screen sample rows are un-keyed
+ * Thai mock data (rule 2 + rule 3) — so no genuine rows can be produced this round. Fabricating the
+ * prototype's 24 mock rows is FORBIDDEN by Section-0, which outranks "fire a real POST". Therefore:
+ *   - the earlier FAKE success toast (a ctx.notify claiming N imported with NO server call) is
+ *     REMOVED — the confirm no longer lies about importing anything;
+ *   - the confirm button is HONEST-DISABLED (parsedRows is genuinely empty) + carries an honest
+ *     note; the real hook is staged so it fires a truthful POST the moment rows can be produced;
+ *   - the 2-stage UI (download-template / upload cards -> file-passed banner) is kept intact for
+ *     fidelity — it is presentational prototype chrome; the sample preview TABLE stays dropped.
+ * BLOCKER (filed centrally, not here): import needs a backend upload+parse endpoint OR a manual
+ * multi-row entry form OR an accepted honest-disable ruling. Note copy pends a Wave-C key.
  */
 import { useState } from "react";
 import type { CSSProperties } from "react";
@@ -23,11 +28,11 @@ import { useI18n } from "../../i18n";
 import { Btn } from "../../ui/button";
 import { Icon } from "../../ui/icon";
 import { useShellCtx } from "../../shell/shell-context";
+import { useImportFaAssets, type ImportFaAssetRow } from "./use-fa";
 
+const DASH = "—";
 /** The template filename (ASCII constant, matches fa.import.fileLine {file}). */
 const TEMPLATE_FILE = "FA-Template-2026.xlsx";
-/** The screen's own baked-in mock count (fa.import.btnConfirm / checkPass copy already say "24"). */
-const IMPORT_SAMPLE_COUNT = 24;
 
 /** A dashed info card (download-template / upload) — token-backed. */
 function dashedCard(tone: string): CSSProperties {
@@ -47,6 +52,28 @@ export function AssetImportForm({ onClose }: AssetImportFormProps) {
   const { t } = useI18n();
   const ctx = useShellCtx();
   const [stage, setStage] = useState<"pick" | "preview">("pick");
+  const importM = useImportFaAssets();
+
+  // No file-upload / parse endpoint + no XLSX parser exists, and Section-0 forbids fabricating the
+  // prototype's mock rows -> there are genuinely ZERO parseable rows this round. The confirm is
+  // honest-disabled; the real POST /fa/import path below only fires if real rows ever appear.
+  const parsedRows: ImportFaAssetRow[] = [];
+  const canConfirm = parsedRows.length > 0 && !importM.isPending;
+
+  const confirmImport = () => {
+    if (parsedRows.length === 0) return; // never fabricate rows (Section-0 rule 3)
+    importM.mutate(
+      { rows: parsedRows },
+      {
+        onSuccess: (res) => {
+          const imported = Number((res as Record<string, unknown>).imported ?? parsedRows.length);
+          onClose();
+          // Real server count — not a baked figure.
+          ctx.notify(t("fa.register.toastImport").replace("{count}", String(imported)));
+        },
+      },
+    );
+  };
 
   return (
     <>
@@ -176,25 +203,22 @@ export function AssetImportForm({ onClose }: AssetImportFormProps) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <Btn kind="outline" size="md" onClick={onClose}>
           {t("common.cancel")}
         </Btn>
         <div style={{ flex: 1 }} />
         {stage === "preview" && (
-          <Btn
-            kind="primary"
-            size="md"
-            icon="check"
-            onClick={() => {
-              onClose();
-              ctx.notify(
-                t("fa.register.toastImport").replace("{count}", String(IMPORT_SAMPLE_COUNT)),
-              );
-            }}
-          >
-            {t("fa.import.btnConfirm")}
-          </Btn>
+          <>
+            {/* Honest note that file parsing is not available yet — DASH interim, pending the
+                Wave-C key fa.import.disabledNote (never minted here). */}
+            <span style={{ fontSize: 11, color: "var(--text-3)" }}>{DASH}</span>
+            {/* Honest-disabled: no genuine rows can be produced -> the confirm cannot fire a
+                truthful POST /fa/import (Section-0). The real handler is wired in confirmImport. */}
+            <Btn kind="primary" size="md" icon="check" disabled={!canConfirm} onClick={confirmImport}>
+              {t("fa.import.btnConfirm")}
+            </Btn>
+          </>
         )}
       </div>
     </>

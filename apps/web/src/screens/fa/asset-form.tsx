@@ -2,15 +2,20 @@
  * AssetForm — the "register a fixed asset" modal body, opened by FARegister via ctx.openModal
  * (size "lg"). Focused real port of pototype/fa.jsx AssetForm (L144-240): the code+name row, the
  * category/location/date row, the cost/life/salvage row, the method/cost-center/account row, and
- * the depreciation-preview box + cancel/submit footer are the prototype's.
+ * the depreciation-preview box + cancel/submit footer are the prototype's. The SAME form serves
+ * both create and EDIT (fa.jsx: AssetForm takes `initial`; the AssetDetail "edit" button opens it
+ * pre-filled) — an optional `asset` prop switches the form to edit mode.
  *
  * Design fidelity (rule 1): the field grids, the required asterisks, and the preview card layout
  * match the prototype. Every string is a fa.* / common.* dict key (t) — no Thai/baht literal in
  * source (rule 2); tokens back every colour (rule 6). The BAHT unit is a unicode-escape constant
  * so the glyph never trips the i18n-guard (master/user-add-form.tsx precedent).
  *
- * Data (rule 3): "save" runs the real POST /fa/assets (use-fa.ts) then invalidates the register +
- * toasts + closes. The prototype's local setAssets seed is dropped — the server owns the row.
+ * Data (rule 3): "save" runs the real POST /fa/assets (create) or PUT /fa/assets/{id} (edit) via
+ * use-fa.ts, then invalidates the register + toasts + closes. The prototype's local setAssets seed
+ * is dropped — the server owns the row. EDIT prefills from the real AssetRow (GET /fa/assets) and
+ * submits a partial-merge PUT. Interim toast: fa.register.toastAdd is reused for edit too (no
+ * fa.register.toastEdit key exists yet — reported as a Wave-C candidate, not minted).
  *
  * REAL vs PRESENTATIONAL (reported honestly, never fabricated) — POST /fa/assets (fa.ts
  * createAsset) accepts only { name (required), cost?, salvage?, acquired_date?, life_years?,
@@ -37,8 +42,8 @@ import { Field } from "../../ui/field";
 import { useShellCtx } from "../../shell/shell-context";
 import { useCostCenterList } from "../master/use-cost-centers";
 import { toCostCenterRow } from "../master/cc-rows";
-import { useCreateFaAsset } from "./use-fa";
-import { formatMoney } from "./fa-register-rows";
+import { useCreateFaAsset, useUpdateFaAsset } from "./use-fa";
+import { formatMoney, type AssetRow } from "./fa-register-rows";
 
 const DASH = "—";
 /** THAI BAHT SIGN (U+0E3F) via unicode escape (i18n-guard-safe). */
@@ -86,13 +91,19 @@ function parseNum(raw: string): number {
 }
 
 export interface AssetFormProps {
+  /** When present, the form is in EDIT mode — prefilled from this row + submitted via PUT. */
+  asset?: AssetRow;
   onClose: () => void;
 }
 
-export function AssetForm({ onClose }: AssetFormProps) {
+export function AssetForm({ asset, onClose }: AssetFormProps) {
   const { t } = useI18n();
   const ctx = useShellCtx();
+  const isEdit = asset != null;
   const createAsset = useCreateFaAsset();
+  // Curried by id — the empty-string id in create mode is inert (updateAsset.mutate is only called
+  // in edit mode, so the closure is never exercised without a real asset id).
+  const updateAsset = useUpdateFaAsset(asset?.id ?? "");
   const ccQ = useCostCenterList();
 
   const costCenters = useMemo(
@@ -100,22 +111,27 @@ export function AssetForm({ onClose }: AssetFormProps) {
     [ccQ.data],
   );
 
-  // REAL (persisted) fields.
-  const [name, setName] = useState("");
-  const [date, setDate] = useState("");
-  const [cost, setCost] = useState("");
-  const [life, setLife] = useState("5");
-  const [salvage, setSalvage] = useState("");
-  const [methodKey, setMethodKey] = useState<MethodKey>(METHOD_KEYS[0]);
-  const [ccId, setCcId] = useState("");
-  // PRESENTATIONAL (not sent) fields.
+  // REAL (persisted) fields — prefilled from the AssetRow in edit mode, else the create defaults.
+  const [name, setName] = useState(asset?.name ?? "");
+  const [date, setDate] = useState(asset?.acquiredDate ?? "");
+  const [cost, setCost] = useState(asset ? String(asset.cost) : "");
+  const [life, setLife] = useState(asset?.lifeYears != null ? String(asset.lifeYears) : "5");
+  const [salvage, setSalvage] = useState(asset ? String(asset.salvage) : "");
+  // Resolve the stored free-text method label back to its option key (fallback: straight-line).
+  const [methodKey, setMethodKey] = useState<MethodKey>(() => {
+    const found = METHOD_KEYS.find((k) => t(k) === asset?.deprMethod);
+    return found ?? METHOD_KEYS[0];
+  });
+  const [ccId, setCcId] = useState(asset?.ccId ?? "");
+  // PRESENTATIONAL (not sent) fields — category/location/account have no wire column, so they stay
+  // at the create defaults even in edit mode (nothing to prefill them from).
   const [category, setCategory] = useState<CategoryKey>("fa.catMachine");
   const [location, setLocation] = useState("");
   const [account, setAccount] = useState("");
   const [nameBad, setNameBad] = useState(false);
   const [costBad, setCostBad] = useState(false);
 
-  const busy = createAsset.isPending;
+  const busy = createAsset.isPending || updateAsset.isPending;
 
   const lifeNum = Number.parseInt(life, 10);
   const costNum = parseNum(cost);
@@ -133,29 +149,36 @@ export function AssetForm({ onClose }: AssetFormProps) {
     setCostBad(cBad);
     if (nBad || cBad) return;
 
-    createAsset.mutate(
-      {
-        name: name.trim(),
-        cost: costNum,
-        salvage: salvageNum,
-        ...(date.trim() ? { acquired_date: date.trim() } : {}),
-        ...(Number.isFinite(lifeNum) && lifeNum > 0 ? { life_years: lifeNum } : {}),
-        ...(ccId ? { cc_id: ccId } : {}),
-        depr_method: t(methodKey),
-      },
-      {
-        onSuccess: (created) => {
-          const c = created as Record<string, unknown>;
-          const createdName = typeof c.name === "string" && c.name ? c.name : name.trim();
-          onClose();
-          // fa.register.toastAdd carries a {code} + {name} template; the wire has no human code
-          // (the server assigns a uuid) -> the {code} slot resolves to an em-dash, honestly.
-          ctx.notify(
-            t("fa.register.toastAdd").replace("{code}", DASH).replace("{name}", createdName),
-          );
-        },
-      },
-    );
+    // The same body shape serves POST (create) and PUT (partial-merge edit) — only the keys
+    // present are written server-side.
+    const body = {
+      name: name.trim(),
+      cost: costNum,
+      salvage: salvageNum,
+      ...(date.trim() ? { acquired_date: date.trim() } : {}),
+      ...(Number.isFinite(lifeNum) && lifeNum > 0 ? { life_years: lifeNum } : {}),
+      ...(ccId ? { cc_id: ccId } : {}),
+      depr_method: t(methodKey),
+    };
+
+    const onSuccess = (saved: unknown) => {
+      const c = saved as Record<string, unknown>;
+      const savedName = typeof c.name === "string" && c.name ? c.name : name.trim();
+      onClose();
+      // fa.register.toastAdd carries a {code} + {name} template; the wire has no human code (the
+      // server assigns a uuid) -> the {code} slot resolves to an em-dash, honestly. Reused for
+      // edit too, interim — there is no fa.register.toastEdit key yet (reported as a Wave-C
+      // candidate, never minted here).
+      ctx.notify(
+        t("fa.register.toastAdd").replace("{code}", DASH).replace("{name}", savedName),
+      );
+    };
+
+    if (isEdit) {
+      updateAsset.mutate(body, { onSuccess });
+    } else {
+      createAsset.mutate(body, { onSuccess });
+    }
   };
 
   return (

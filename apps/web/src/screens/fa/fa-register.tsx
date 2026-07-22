@@ -422,7 +422,10 @@ export function FARegister() {
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={9} style={{ padding: 40, textAlign: "center", color: "var(--text-3)", fontSize: 12.5 }}>
-                    {t("common.all")}
+                    {/* Honest neutral empty state — there is NO canonical empty/no-data dict key
+                        (common.all = "All" is wrong copy here). DASH interim, pending the Wave-C
+                        key fa.register.empty (never minted here). */}
+                    {DASH}
                   </td>
                 </tr>
               ) : (

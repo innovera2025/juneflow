@@ -21,9 +21,10 @@
  *   - HISTORY: an in-service asset shows the real "registered on {date}" line; a written-off asset
  *     em-dashes (the detailed revalue/write-off history lives on GET /fa/adjustments, not wired in
  *     this port).
- *   - ACTIONS: close is real; print toasts (presentational); attach + edit are PRESENTATIONAL
- *     (the prototype's attach modal + RF2 edit form are out of this port's scope, and use-fa wires
- *     only list + create — PUT /fa/assets/{id} exists for a future edit wave). Flagged.
+ *   - ACTIONS: close is real; print toasts (presentational); attach is PRESENTATIONAL (the
+ *     prototype's attach modal is out of this port's scope); EDIT is REAL — the "edit" button
+ *     opens the AssetForm pre-filled for this asset (fa.jsx AssetDetail -> openAssetEditForm ->
+ *     the shared AssetForm), which submits a partial-merge PUT /fa/assets/{id} (use-fa.ts).
  */
 import { useMemo } from "react";
 import type { CSSProperties, ReactNode } from "react";
@@ -33,6 +34,7 @@ import { Icon } from "../../ui/icon";
 import { useShellCtx } from "../../shell/shell-context";
 import { useCostCenterList } from "../master/use-cost-centers";
 import { toCostCenterRow } from "../master/cc-rows";
+import { AssetForm } from "./asset-form";
 import {
   buildSchedule,
   isNoDepr,
@@ -105,6 +107,21 @@ export function AssetDetail({ asset, onClose }: AssetDetailProps) {
   const tone = statusTone(asset.status);
   const methodLabel = asset.deprMethod || t("fa.methodNone");
   const ageLabel = asset.lifeYears != null ? t("fa.lifeYears").replace("{n}", String(asset.lifeYears)) : DASH;
+
+  // Detail -> edit (fa.jsx AssetDetail L434 openAssetEditForm): the "edit" button REPLACES this
+  // detail modal with the shared AssetForm pre-filled for this asset (a partial-merge PUT). No
+  // dedicated fa.register.editTitle/editSubtitle key exists yet, so the modal reuses common.edit as
+  // the title + the asset name as the subtitle (both existing) — reported as Wave-C candidates.
+  const openEdit = () => {
+    ctx.openModal({
+      title: t("common.edit"),
+      subtitle: asset.name,
+      icon: "edit",
+      iconTone: "var(--brand)",
+      size: "lg",
+      body: ({ close }: { close: () => void }) => <AssetForm asset={asset} onClose={close} />,
+    });
+  };
 
   return (
     <>
@@ -280,7 +297,7 @@ export function AssetDetail({ asset, onClose }: AssetDetailProps) {
           {t("common.print")}
         </Btn>
         <div style={{ flex: 1 }} />
-        <Btn kind="primary" size="md" icon="edit">
+        <Btn kind="primary" size="md" icon="edit" onClick={openEdit}>
           {t("common.edit")}
         </Btn>
       </div>
