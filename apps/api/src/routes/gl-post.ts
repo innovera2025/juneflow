@@ -61,11 +61,14 @@ export const POSTING_MAP: Record<GlPostableKind, PostingRule> = {
   payroll: { dr: "5030", cr: "1020", basis: "amount", real: false, note: "extrapolated — no payroll exemplar in JV_BOOKS" },
 };
 
-/** Named COA codes the direct-posting handlers (CN, FA) reference by intent. */
+/** Named COA codes the direct-posting handlers (CN, FA, retention) reference by intent. */
 export const ACCT = {
   bank: "1020",
   ar: "1030",
   ap: "2010",
+  // เจ้าหนี้เงินประกันผลงานค้างจ่าย — the retention we withheld from a vendor/subcon
+  // (a liability). Releasing it back pays the vendor: Dr 2030 / Cr 1020 (P2-BE-53).
+  retentionPayable: "2030",
   vatOutput: "2050",
   revenue: "4010",
   materials: "5020",

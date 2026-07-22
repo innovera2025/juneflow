@@ -2936,6 +2936,39 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /retention:
+    get:
+      tags: [finance]
+      summary: Retention register — held ledgers (due = created_at + 12mo)
+      operationId: getRetentionRegister
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /retention/release:
+    post:
+      tags: [finance]
+      summary: Release a retention tranche ({ledger_id}) — validate held + due-12mo · 50/50 (B-107d) · posts via the ret posting-inbox
+      operationId: releaseRetention
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ledger_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /etax/send:
     post:
       tags: [finance]

@@ -1560,7 +1560,11 @@ async function seed(): Promise<void> {
           id: det(`ret:${i}`), companyId: CO1, woId: det(`wo:${i}`),
           vendorId: det(`vendor:${at(SUBC_CONTRACTS, i).firm}`), contractId: det(`subc:${i}`),
           scope: `งานงวดที่ ${i + 1}`, rate: "5.00", withheld: m(40_000 * (i + 1)), returned: m(0),
-          dueDate: null, status: "held",
+          // P2-BE-53 (recon D · demonstrability): row 0's 12-month warranty has
+          // elapsed (past due_date) so the retention register shows a real 'due'
+          // row and POST /retention/release has a releasable happy path in a fresh
+          // DB; rows 1-3 keep the derived due (created_at + 12mo → 'holding').
+          dueDate: i === 0 ? "2025-01-15" : null, status: "held",
         })),
       );
 
