@@ -69,6 +69,8 @@ import { BankCheque } from "./screens/bank/bank-cheque";
 import { BankReconciliation } from "./screens/bank/bank-recon";
 import { BankExport } from "./screens/bank/bank-export";
 import { TaxETax } from "./screens/tax/tax-etax";
+import { TaxVAT } from "./screens/tax/tax-vat";
+import { TaxWHT } from "./screens/tax/tax-wht";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -124,6 +126,8 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "bank.recon": BankReconciliation,
   "bank.export": BankExport,
   "tax.etax": TaxETax,
+  "tax.vat": TaxVAT,
+  "tax.wht": TaxWHT,
 };
 
 const rootRoute = createRootRoute({
