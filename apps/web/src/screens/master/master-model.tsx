@@ -234,7 +234,7 @@ export function MasterModel() {
                     </Btn>
                     {/* Edit action — no onClick in the prototype (master.jsx:569); a
                         render-only dead button. No PATCH /models exists (B-050). */}
-                    <Btn kind="ghost" size="sm" icon="edit" />
+                    <Btn kind="ghost" size="sm" icon="edit" label={t("common.edit")} />
                     <span
                       className="num"
                       style={{

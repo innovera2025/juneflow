@@ -586,7 +586,7 @@ export function POList() {
                 <Btn kind="ghost" size="sm" icon="edit">
                   {t("common.edit")}
                 </Btn>
-                <Btn kind="ghost" size="sm" icon="print" />
+                <Btn kind="ghost" size="sm" icon="print" label={t("common.print")} />
                 <Btn
                   kind="ghost"
                   size="sm"

@@ -401,7 +401,7 @@ export function MasterProject() {
                         {t("project.unitViewBtn")}
                       </Btn>
                       {/* Edit action — no-op in the prototype (icon-only ghost button). */}
-                      <Btn kind="ghost" size="sm" icon="edit" />
+                      <Btn kind="ghost" size="sm" icon="edit" label={t("common.edit")} />
                     </div>
                   </div>
 
