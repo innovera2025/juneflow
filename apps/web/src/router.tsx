@@ -49,6 +49,7 @@ import { MasterModel } from "./screens/master/master-model";
 import { MasterProject } from "./screens/master/master-project";
 import { MasterProjectType } from "./screens/master/master-project-type";
 import { MasterVendor } from "./screens/master/master-vendor";
+import { MasterCustomer } from "./screens/master/master-customer";
 import { UsersPermissions } from "./screens/master/users-permissions";
 import { PMDashboard } from "./screens/pm/pm-dashboard";
 import { PMSchedule } from "./screens/pm/pm-schedule";
@@ -110,6 +111,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "master.project": MasterProject,
   "master.ptype": MasterProjectType,
   "master.vendor": MasterVendor,
+  "master.customer": MasterCustomer,
   "pm.dashboard": PMDashboard,
   "pm.schedule": PMSchedule,
   "pm.assets": PMAssets,
