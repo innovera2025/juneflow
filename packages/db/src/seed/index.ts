@@ -379,6 +379,11 @@ const COA_SEED = [
   { code: "1010", name: "เงินสดในมือ" }, { code: "1020", name: "เงินฝากธนาคาร - กระแสรายวัน (KBANK)" },
   { code: "1030", name: "ลูกหนี้การค้า" }, { code: "1040", name: "ลูกหนี้เงินประกันผลงาน (Retention)" },
   { code: "1140", name: "งานระหว่างก่อสร้าง (WIP/CIP)" }, { code: "1150", name: "ที่ดินรอการพัฒนา" },
+  // P2-BE-54 (B-137 · Wei ratify): the "มัดจำจ่าย" advance-to-supplier ASSET the
+  // ap.jsx APDeposit posting ("Dr มัดจำจ่าย / Cr เงินสด") requires — absent from the
+  // original COA (2040 is a deposit RECEIVED, a liability). code 1160 in the current-
+  // asset band; classified 'asset' by the code-prefix account_type derivation.
+  { code: "1160", name: "เงินมัดจำจ่ายล่วงหน้า (Advance to suppliers)" },
   { code: "1210", name: "ที่ดิน อาคาร และอุปกรณ์" }, { code: "2010", name: "เจ้าหนี้การค้า" },
   { code: "2030", name: "เจ้าหนี้เงินประกันผลงานค้างจ่าย" }, { code: "2040", name: "เงินมัดจำ/เงินจองรับล่วงหน้า" },
   { code: "2050", name: "ภาษีขายรอนำส่ง (VAT)" }, { code: "2110", name: "เงินกู้ยืมธนาคาร - โครงการ" },
