@@ -19,10 +19,11 @@
 
 ## คิวรอ promote
 
-> **PROGRAM-1 FINANCE-TAIL — P2-BE-54 ap.deposit QUEUED (2026-07-26 · orch-A · pin 34ea3a6)** — on feature/backend await orch-B verify+merge · B-137 (COA 1160 + Cr cash-vs-bank) = Wei-ratify non-block. Phase-3 promoted → main. Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
+> **PROGRAM-2 OP-CORE WAVE-0 — P2-BE-55 labor QUEUED (2026-07-26 · orch-A · pin 2dec493)** — labor route + 3 reads on feature/backend await orch-B verify+merge. Program-1 (P2-BE-54) merged → dev. Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-55 | labor Wave-0 — mount labor route + GET /labor/workers|attendance|payroll (3 reads) | 2dec493 feature/backend | — (backend · 3 opaque list reads · seeded 8 workers · 925 api · live 7/7) | 2026-07-26 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
