@@ -694,16 +694,16 @@ function BalanceTable({
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
         <thead style={{ position: "sticky", top: 0, background: "var(--surface-2)", zIndex: 1 }}>
           <tr style={{ color: "var(--text-3)" }}>
-            <th style={th(60)}>{tp(P("thCode"))}</th>
-            <th style={th(54)}>{tp(P("typeFilter"))}</th>
-            <th style={th()}>{tp(P("unitItems"))}</th>
-            <th style={th(70)}>{tp(P("thUnit"))}</th>
-            <th style={th(110, true)}>{t("boq.ovThBoqQty")}</th>
-            <th style={th(110, true)}>{t("boq.ovThUsed")}</th>
-            <th style={th(110, true)}>{t("boq.ovThBalance")}</th>
-            <th style={th(120, true)}>{t("boq.ovThBoqValue")}</th>
-            <th style={th(120, true)}>{t("boq.ovThBalanceValue")}</th>
-            <th style={th(110)}>{t("boq.ovThPctUsed")}</th>
+            <th scope="col" style={th(60)}>{tp(P("thCode"))}</th>
+            <th scope="col" style={th(54)}>{tp(P("typeFilter"))}</th>
+            <th scope="col" style={th()}>{tp(P("unitItems"))}</th>
+            <th scope="col" style={th(70)}>{tp(P("thUnit"))}</th>
+            <th scope="col" style={th(110, true)}>{t("boq.ovThBoqQty")}</th>
+            <th scope="col" style={th(110, true)}>{t("boq.ovThUsed")}</th>
+            <th scope="col" style={th(110, true)}>{t("boq.ovThBalance")}</th>
+            <th scope="col" style={th(120, true)}>{t("boq.ovThBoqValue")}</th>
+            <th scope="col" style={th(120, true)}>{t("boq.ovThBalanceValue")}</th>
+            <th scope="col" style={th(110)}>{t("boq.ovThPctUsed")}</th>
           </tr>
         </thead>
         <tbody>

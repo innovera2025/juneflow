@@ -617,13 +617,13 @@ export function BOQApproval() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                     <thead>
                       <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                        <th style={th(54)}>{tp(P("thType"))}</th>
-                        <th style={th(110)}>{tp(P("thCode"))}</th>
-                        <th style={th()}>{t("boq.edCatMaterial")}</th>
-                        <th style={th(130)}>{t("boq.aprThEdit")}</th>
-                        <th style={th(110, true)}>{t("boq.aprThOldVal")}</th>
-                        <th style={th(110, true)}>{t("boq.aprThNewVal")}</th>
-                        <th style={th(130, true)}>{t("boq.aprThDeltaVal")}</th>
+                        <th scope="col" style={th(54)}>{tp(P("thType"))}</th>
+                        <th scope="col" style={th(110)}>{tp(P("thCode"))}</th>
+                        <th scope="col" style={th()}>{t("boq.edCatMaterial")}</th>
+                        <th scope="col" style={th(130)}>{t("boq.aprThEdit")}</th>
+                        <th scope="col" style={th(110, true)}>{t("boq.aprThOldVal")}</th>
+                        <th scope="col" style={th(110, true)}>{t("boq.aprThNewVal")}</th>
+                        <th scope="col" style={th(130, true)}>{t("boq.aprThDeltaVal")}</th>
                       </tr>
                     </thead>
                     <tbody>

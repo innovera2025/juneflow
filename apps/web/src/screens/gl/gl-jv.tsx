@@ -261,13 +261,13 @@ export function GLJournalVoucher() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(140)}>{tp(P("thNo"))}</th>
-                <th style={th(110)}>{tp(P("thDate"))}</th>
-                <th style={th()}>{tp(P("thDesc"))}</th>
-                <th style={th(60)}>{tp(P("thLines"))}</th>
-                <th style={th(130, true)}>{tp(P("thValue"))}</th>
-                <th style={th(110)}>{tp(P("filterSource"))}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(140)}>{tp(P("thNo"))}</th>
+                <th scope="col" style={th(110)}>{tp(P("thDate"))}</th>
+                <th scope="col" style={th()}>{tp(P("thDesc"))}</th>
+                <th scope="col" style={th(60)}>{tp(P("thLines"))}</th>
+                <th scope="col" style={th(130, true)}>{tp(P("thValue"))}</th>
+                <th scope="col" style={th(110)}>{tp(P("filterSource"))}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

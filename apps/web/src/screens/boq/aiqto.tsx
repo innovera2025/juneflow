@@ -768,14 +768,14 @@ function QtoReview({
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(160)}>{t("boq.aiqThElement")}</th>
-                  <th style={th(90)}>{tp(P("thCode"))}</th>
-                  <th style={th()}>{t("nav.boq.list" as DictKey)}</th>
-                  <th style={th(60)}>{tp(P("thUnit"))}</th>
-                  <th style={th(90, "right")}>{t("boq.aiqThQty")}</th>
-                  <th style={th(80)}>{tp(P("thCat"))}</th>
-                  <th style={th(70)}>{t("boq.aiqThAi")}</th>
-                  <th style={th(40)} />
+                  <th scope="col" style={th(160)}>{t("boq.aiqThElement")}</th>
+                  <th scope="col" style={th(90)}>{tp(P("thCode"))}</th>
+                  <th scope="col" style={th()}>{t("nav.boq.list" as DictKey)}</th>
+                  <th scope="col" style={th(60)}>{tp(P("thUnit"))}</th>
+                  <th scope="col" style={th(90, "right")}>{t("boq.aiqThQty")}</th>
+                  <th scope="col" style={th(80)}>{tp(P("thCat"))}</th>
+                  <th scope="col" style={th(70)}>{t("boq.aiqThAi")}</th>
+                  <th scope="col" style={th(40)} />
                 </tr>
               </thead>
               <tbody>

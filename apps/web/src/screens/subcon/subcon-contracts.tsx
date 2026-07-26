@@ -232,12 +232,12 @@ export function SubconContracts() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(140)}>{t("subcon.colWoPo")}</th>
-                <th style={th()}>{t("subcon.colSubconWork")}</th>
-                <th style={th(150)}>{t("subcon.colMethod")}</th>
-                <th style={th(120, true)}>{t("subcon.colValueBaht")}</th>
-                <th style={{ ...th(140), textAlign: "center" }}>{t("subcon.colProgressLong")}</th>
-                <th style={th(120)}>{t("subcon.colAccept")}</th>
+                <th scope="col" style={th(140)}>{t("subcon.colWoPo")}</th>
+                <th scope="col" style={th()}>{t("subcon.colSubconWork")}</th>
+                <th scope="col" style={th(150)}>{t("subcon.colMethod")}</th>
+                <th scope="col" style={th(120, true)}>{t("subcon.colValueBaht")}</th>
+                <th scope="col" style={{ ...th(140), textAlign: "center" }}>{t("subcon.colProgressLong")}</th>
+                <th scope="col" style={th(120)}>{t("subcon.colAccept")}</th>
               </tr>
             </thead>
             <tbody>

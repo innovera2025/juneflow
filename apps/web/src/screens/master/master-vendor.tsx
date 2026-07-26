@@ -437,14 +437,14 @@ export function MasterVendor() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(90)}>{tp(vendorStrings.thCode as PhraseKey)}</th>
-                  <th style={th()}>{t("vendor.thName")}</th>
-                  <th style={th(100)}>{tp(vendorStrings.thType as PhraseKey)}</th>
-                  <th style={th(130)}>{t("vendor.thTaxId")}</th>
-                  <th style={th(110)}>{t("vendor.thTerm")}</th>
-                  <th style={{ ...th(120), textAlign: "right" }}>{t("vendor.thSpend")}</th>
-                  <th style={th(90)}>{t("common.status")}</th>
-                  <th style={th(50)} />
+                  <th scope="col" style={th(90)}>{tp(vendorStrings.thCode as PhraseKey)}</th>
+                  <th scope="col" style={th()}>{t("vendor.thName")}</th>
+                  <th scope="col" style={th(100)}>{tp(vendorStrings.thType as PhraseKey)}</th>
+                  <th scope="col" style={th(130)}>{t("vendor.thTaxId")}</th>
+                  <th scope="col" style={th(110)}>{t("vendor.thTerm")}</th>
+                  <th scope="col" style={{ ...th(120), textAlign: "right" }}>{t("vendor.thSpend")}</th>
+                  <th scope="col" style={th(90)}>{t("common.status")}</th>
+                  <th scope="col" style={th(50)} />
                 </tr>
               </thead>
               {/* Empty tbody when the catalogue is empty = the table's empty state (no invented

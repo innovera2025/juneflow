@@ -227,13 +227,13 @@ function FinAging({ side }: { side: AgingSide }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
           <thead>
             <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-              <th style={th()}>{isAp ? t("fin.aging.thVendor") : t("fin.aging.thCustomer")}</th>
-              <th style={{ ...th(120), textAlign: "right" }}>{t("fin.aging.bucketCurrent")}</th>
-              <th style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.th30")}</th>
-              <th style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.th60")}</th>
-              <th style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.th90")}</th>
-              <th style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.thOver90")}</th>
-              <th style={{ ...th(130), textAlign: "right" }}>{t("fin.aging.thTotal")}</th>
+              <th scope="col" style={th()}>{isAp ? t("fin.aging.thVendor") : t("fin.aging.thCustomer")}</th>
+              <th scope="col" style={{ ...th(120), textAlign: "right" }}>{t("fin.aging.bucketCurrent")}</th>
+              <th scope="col" style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.th30")}</th>
+              <th scope="col" style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.th60")}</th>
+              <th scope="col" style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.th90")}</th>
+              <th scope="col" style={{ ...th(110), textAlign: "right" }}>{t("fin.aging.thOver90")}</th>
+              <th scope="col" style={{ ...th(130), textAlign: "right" }}>{t("fin.aging.thTotal")}</th>
             </tr>
           </thead>
           <tbody>

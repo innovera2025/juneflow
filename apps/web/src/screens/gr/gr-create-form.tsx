@@ -291,10 +291,10 @@ export function GRCreateForm({ onClose }: GRCreateFormProps) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ color: "var(--text-3)" }}>
-              <th style={{ ...thCell(80, true) }}>{t("gr.create.colOrdered")}</th>
-              <th style={{ ...thCell(90, true) }}>{t("gr.create.colReceived")}</th>
-              <th style={{ ...thCell(70) }}>{tp(P("thUnit"))}</th>
-              <th style={{ ...thCell(90) }}>{t("gr.create.colCondition")}</th>
+              <th scope="col" style={{ ...thCell(80, true) }}>{t("gr.create.colOrdered")}</th>
+              <th scope="col" style={{ ...thCell(90, true) }}>{t("gr.create.colReceived")}</th>
+              <th scope="col" style={{ ...thCell(70) }}>{tp(P("thUnit"))}</th>
+              <th scope="col" style={{ ...thCell(90) }}>{t("gr.create.colCondition")}</th>
             </tr>
           </thead>
           <tbody>

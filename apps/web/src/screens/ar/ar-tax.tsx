@@ -315,14 +315,14 @@ export function ARTaxInvoice() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(80)}>{t("subcon.colType")}</th>
-                <th style={th(150)}>{t("subcon.colNo")}</th>
-                <th style={th(110)}>{t("subcon.colDate")}</th>
-                <th style={th()}>{t("ar.taxInvoice.thCustomerItem")}</th>
-                <th style={th(120, true)}>{t("subcon.colValue")}</th>
-                <th style={th(90, true)}>{t("ar.taxInvoice.thVat7")}</th>
-                <th style={th(120, true)}>{t("ar.taxInvoice.thNet")}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(80)}>{t("subcon.colType")}</th>
+                <th scope="col" style={th(150)}>{t("subcon.colNo")}</th>
+                <th scope="col" style={th(110)}>{t("subcon.colDate")}</th>
+                <th scope="col" style={th()}>{t("ar.taxInvoice.thCustomerItem")}</th>
+                <th scope="col" style={th(120, true)}>{t("subcon.colValue")}</th>
+                <th scope="col" style={th(90, true)}>{t("ar.taxInvoice.thVat7")}</th>
+                <th scope="col" style={th(120, true)}>{t("ar.taxInvoice.thNet")}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

@@ -400,14 +400,14 @@ export function POList() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                 <thead>
                   <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                    <th style={th()}>{t("po.list.colNo")}</th>
-                    <th style={th()}>{tp(P("thVendor"))}</th>
-                    <th style={th(110)}>{t("po.list.colRefPr")}</th>
-                    <th style={th(120, true)}>{tp(P("thValue"))}</th>
-                    <th style={th(110)}>{tp(P("thDeposit"))}</th>
-                    <th style={th(110)}>{t("po.list.colPaid")}</th>
-                    <th style={th(120)}>{t("po.list.receiveGoods")}</th>
-                    <th style={th(110)}>{t("common.status")}</th>
+                    <th scope="col" style={th()}>{t("po.list.colNo")}</th>
+                    <th scope="col" style={th()}>{tp(P("thVendor"))}</th>
+                    <th scope="col" style={th(110)}>{t("po.list.colRefPr")}</th>
+                    <th scope="col" style={th(120, true)}>{tp(P("thValue"))}</th>
+                    <th scope="col" style={th(110)}>{tp(P("thDeposit"))}</th>
+                    <th scope="col" style={th(110)}>{t("po.list.colPaid")}</th>
+                    <th scope="col" style={th(120)}>{t("po.list.receiveGoods")}</th>
+                    <th scope="col" style={th(110)}>{t("common.status")}</th>
                   </tr>
                 </thead>
                 <tbody>

@@ -197,13 +197,13 @@ export function MasterCustomer() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(90)}>{tp(customerStrings.thCode as PhraseKey)}</th>
-                  <th style={th()}>{t("customer.thName")}</th>
-                  <th style={th(110)}>{tp(customerStrings.thType as PhraseKey)}</th>
+                  <th scope="col" style={th(90)}>{tp(customerStrings.thCode as PhraseKey)}</th>
+                  <th scope="col" style={th()}>{t("customer.thName")}</th>
+                  <th scope="col" style={th(110)}>{tp(customerStrings.thType as PhraseKey)}</th>
                   {/* tax-id header: exact-value reuse until a customer.thTaxId is minted. */}
-                  <th style={th(130)}>{t("vendor.thTaxId")}</th>
-                  <th style={th(180)}>{t("customer.thProjectUnit")}</th>
-                  <th style={{ ...th(120), textAlign: "right" }}>
+                  <th scope="col" style={th(130)}>{t("vendor.thTaxId")}</th>
+                  <th scope="col" style={th(180)}>{t("customer.thProjectUnit")}</th>
+                  <th scope="col" style={{ ...th(120), textAlign: "right" }}>
                     {tp(customerStrings.thValue as PhraseKey)}
                   </th>
                 </tr>

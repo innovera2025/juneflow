@@ -251,15 +251,15 @@ export function FAAdjust() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(140)}>{t("subcon.colNo")}</th>
-                <th style={th(100)}>{t("subcon.colType")}</th>
-                <th style={th(110)}>{t("fa.breadcrumbAssets")}</th>
-                <th style={th()}>{t("subcon.colReason")}</th>
-                <th style={th(120, true)}>{t("fa.adjust.colBefore")}</th>
-                <th style={th(120, true)}>{t("fa.adjust.colAfter")}</th>
-                <th style={th(110, true)}>{t("fa.adjust.colGainLoss")}</th>
-                <th style={th(110)}>{t("subcon.colDate")}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(140)}>{t("subcon.colNo")}</th>
+                <th scope="col" style={th(100)}>{t("subcon.colType")}</th>
+                <th scope="col" style={th(110)}>{t("fa.breadcrumbAssets")}</th>
+                <th scope="col" style={th()}>{t("subcon.colReason")}</th>
+                <th scope="col" style={th(120, true)}>{t("fa.adjust.colBefore")}</th>
+                <th scope="col" style={th(120, true)}>{t("fa.adjust.colAfter")}</th>
+                <th scope="col" style={th(110, true)}>{t("fa.adjust.colGainLoss")}</th>
+                <th scope="col" style={th(110)}>{t("subcon.colDate")}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

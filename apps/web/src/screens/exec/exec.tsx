@@ -282,11 +282,11 @@ export function ExecDashboard() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th()}>{tp(P("thProject"))}</th>
-                  <th style={{ ...th(110), textAlign: "right" }}>{tp(P("thBudget"))}</th>
-                  <th style={{ ...th(110), textAlign: "right" }}>{tp(P("thActual"))}</th>
-                  <th style={th(140)}>{tp(P("thProgress"))}</th>
-                  <th style={th(110)}>{tp(P("thHealth"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thProject"))}</th>
+                  <th scope="col" style={{ ...th(110), textAlign: "right" }}>{tp(P("thBudget"))}</th>
+                  <th scope="col" style={{ ...th(110), textAlign: "right" }}>{tp(P("thActual"))}</th>
+                  <th scope="col" style={th(140)}>{tp(P("thProgress"))}</th>
+                  <th scope="col" style={th(110)}>{tp(P("thHealth"))}</th>
                 </tr>
               </thead>
               <tbody>

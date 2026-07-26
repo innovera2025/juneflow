@@ -330,7 +330,7 @@ export function UsersPermissions() {
               >
                 <thead>
                   <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                    <th style={th()}>{t("users.moduleCol")}</th>
+                    <th scope="col" style={th()}>{t("users.moduleCol")}</th>
                     {permCols.map((p, i) => (
                       <th key={i} style={{ ...th(80), textAlign: "center" }}>
                         {p}

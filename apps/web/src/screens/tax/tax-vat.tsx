@@ -490,9 +490,9 @@ function PND30Form({ report, onClose }: { report: VatReport; onClose: () => void
           <table style={{ flex: 1 }}>
             <thead>
               <tr>
-                <th style={{ width: 30 }}>{t("tax.form30.colNo")}</th>
+                <th scope="col" style={{ width: 30 }}>{t("tax.form30.colNo")}</th>
                 <th />
-                <th style={{ width: 150 }}>{t("tax.form30.colAmount")}</th>
+                <th scope="col" style={{ width: 150 }}>{t("tax.form30.colAmount")}</th>
               </tr>
             </thead>
             <tbody>

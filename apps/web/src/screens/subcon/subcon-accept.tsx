@@ -502,19 +502,19 @@ export function SubconAccept() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(50)}>{t("subcon.colPeriod")}</th>
-                <th style={th()}>{t("subcon.colDetail")}</th>
-                <th style={th(110, true)}>
+                <th scope="col" style={th(50)}>{t("subcon.colPeriod")}</th>
+                <th scope="col" style={th()}>{t("subcon.colDetail")}</th>
+                <th scope="col" style={th(110, true)}>
                   {method === "distance" || method === "unit"
                     ? t("subcon.colQty")
                     : method === "percent"
                       ? PERCENT_SIGN
                       : t("subcon.colMilestone")}
                 </th>
-                <th style={th(120, true)}>{t("subcon.colValueBaht")}</th>
-                <th style={th(120)}>{t("subcon.colDoc")}</th>
-                <th style={th(130)}>{t("common.status")}</th>
-                <th style={th(110, true)}>{t("subcon.colAccept")}</th>
+                <th scope="col" style={th(120, true)}>{t("subcon.colValueBaht")}</th>
+                <th scope="col" style={th(120)}>{t("subcon.colDoc")}</th>
+                <th scope="col" style={th(130)}>{t("common.status")}</th>
+                <th scope="col" style={th(110, true)}>{t("subcon.colAccept")}</th>
               </tr>
             </thead>
             <tbody>

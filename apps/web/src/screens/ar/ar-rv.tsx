@@ -262,13 +262,13 @@ export function ARReceiveVoucher() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(140)}>{t("ar.rv.thNo")}</th>
-                <th style={th()}>{t("ar.rv.thPayer")}</th>
-                <th style={th(140)}>{t("ar.rv.thArRef")}</th>
-                <th style={th(110)}>{t("ar.rv.thMethod")}</th>
-                <th style={th(120, true)}>{t("ar.rv.thNet")}</th>
-                <th style={th(110)}>{t("subcon.colDate")}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(140)}>{t("ar.rv.thNo")}</th>
+                <th scope="col" style={th()}>{t("ar.rv.thPayer")}</th>
+                <th scope="col" style={th(140)}>{t("ar.rv.thArRef")}</th>
+                <th scope="col" style={th(110)}>{t("ar.rv.thMethod")}</th>
+                <th scope="col" style={th(120, true)}>{t("ar.rv.thNet")}</th>
+                <th scope="col" style={th(110)}>{t("subcon.colDate")}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

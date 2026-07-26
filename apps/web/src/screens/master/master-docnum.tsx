@@ -130,13 +130,13 @@ export function MasterDocNum() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th()}>{t("docnum.thType")}</th>
-                <th style={th()}>{t("docnum.thFormat")}</th>
-                <th style={th()}>{t("docnum.thExample")}</th>
-                <th style={th(120)}>{t("docnum.thNext")}</th>
-                <th style={th(110)}>{t("docnum.thReset")}</th>
-                <th style={th(120)}>{t("docnum.thLock")}</th>
-                <th style={th(36)} />
+                <th scope="col" style={th()}>{t("docnum.thType")}</th>
+                <th scope="col" style={th()}>{t("docnum.thFormat")}</th>
+                <th scope="col" style={th()}>{t("docnum.thExample")}</th>
+                <th scope="col" style={th(120)}>{t("docnum.thNext")}</th>
+                <th scope="col" style={th(110)}>{t("docnum.thReset")}</th>
+                <th scope="col" style={th(120)}>{t("docnum.thLock")}</th>
+                <th scope="col" style={th(36)} />
               </tr>
             </thead>
             {/* Empty tbody when the catalogue is empty = the table's empty state (no

@@ -254,13 +254,13 @@ export function GLChartOfAccounts() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(90)}>{tp(P("unitCode"))}</th>
-                <th style={th()}>{tp(P("thName"))}</th>
-                <th style={th(200)}>{tp(P("thGroup"))}</th>
-                <th style={th(70, "center")}>Dr/Cr</th>
-                <th style={th(150, "right")}>{tp(P("thBalance"))}</th>
-                <th style={th(90)}>{t("common.status")}</th>
-                <th style={th(80)} />
+                <th scope="col" style={th(90)}>{tp(P("unitCode"))}</th>
+                <th scope="col" style={th()}>{tp(P("thName"))}</th>
+                <th scope="col" style={th(200)}>{tp(P("thGroup"))}</th>
+                <th scope="col" style={th(70, "center")}>Dr/Cr</th>
+                <th scope="col" style={th(150, "right")}>{tp(P("thBalance"))}</th>
+                <th scope="col" style={th(90)}>{t("common.status")}</th>
+                <th scope="col" style={th(80)} />
               </tr>
             </thead>
             <tbody>

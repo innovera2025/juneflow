@@ -1324,19 +1324,19 @@ export function BOQEditor() {
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                           <thead style={{ position: "sticky", top: 0, background: "var(--surface-2)" }}>
                             <tr style={{ color: "var(--text-3)" }}>
-                              <th style={th(28)}>
+                              <th scope="col" style={th(28)}>
                                 <input type="checkbox" checked={allDisplayedSelected} onChange={toggleAll} />
                               </th>
-                              <th style={th(100)}>{tp(S("thCode"))}</th>
-                              <th style={th(54)}>{tp(S("thType"))}</th>
-                              <th style={th()}>{t("boq.edThMaterialItem")}</th>
-                              <th style={th()}>{tp(S("thDetail"))}</th>
-                              <th style={th(130)}>{t("boq.edThCostName")}</th>
-                              <th style={th(80, true)}>{t("boq.edThQty")}</th>
-                              <th style={th(70)}>{t("boq.edThUnitEn")}</th>
-                              <th style={th(110, true)}>{t("boq.edThPriceUnit")}</th>
-                              <th style={th(120, true)}>{t("boq.edThTotal")}</th>
-                              <th style={th(36)} />
+                              <th scope="col" style={th(100)}>{tp(S("thCode"))}</th>
+                              <th scope="col" style={th(54)}>{tp(S("thType"))}</th>
+                              <th scope="col" style={th()}>{t("boq.edThMaterialItem")}</th>
+                              <th scope="col" style={th()}>{tp(S("thDetail"))}</th>
+                              <th scope="col" style={th(130)}>{t("boq.edThCostName")}</th>
+                              <th scope="col" style={th(80, true)}>{t("boq.edThQty")}</th>
+                              <th scope="col" style={th(70)}>{t("boq.edThUnitEn")}</th>
+                              <th scope="col" style={th(110, true)}>{t("boq.edThPriceUnit")}</th>
+                              <th scope="col" style={th(120, true)}>{t("boq.edThTotal")}</th>
+                              <th scope="col" style={th(36)} />
                             </tr>
                           </thead>
                           <tbody>

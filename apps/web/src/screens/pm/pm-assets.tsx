@@ -408,15 +408,15 @@ export function PMAssets() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(110)}>{t("pm.colCode")}</th>
-                  <th style={th()}>{t("pm.colName")}</th>
-                  <th style={th(120)}>{t("pm.colKind")}</th>
-                  <th style={th(150)}>{t("pm.colSite")}</th>
-                  <th style={th(100)}>{t("pm.colCycle")}</th>
-                  <th style={th(100)}>{t("pm.colLastPm")}</th>
-                  <th style={th(100)}>{t("pm.colNextPm")}</th>
-                  <th style={th(120)}>{t("common.status")}</th>
-                  <th style={th(120)}>{t("pm.colContract")}</th>
+                  <th scope="col" style={th(110)}>{t("pm.colCode")}</th>
+                  <th scope="col" style={th()}>{t("pm.colName")}</th>
+                  <th scope="col" style={th(120)}>{t("pm.colKind")}</th>
+                  <th scope="col" style={th(150)}>{t("pm.colSite")}</th>
+                  <th scope="col" style={th(100)}>{t("pm.colCycle")}</th>
+                  <th scope="col" style={th(100)}>{t("pm.colLastPm")}</th>
+                  <th scope="col" style={th(100)}>{t("pm.colNextPm")}</th>
+                  <th scope="col" style={th(120)}>{t("common.status")}</th>
+                  <th scope="col" style={th(120)}>{t("pm.colContract")}</th>
                 </tr>
               </thead>
               <tbody>

@@ -334,13 +334,13 @@ export function PMWorkOrders() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(150)}>{t("pm.colWoNo")}</th>
-                  <th style={th(110)}>{t("pm.type")}</th>
-                  <th style={th()}>{t("pm.colAssetSite")}</th>
-                  <th style={th(150)}>{t("pm.tech")}</th>
-                  <th style={th(100)}>{t("pm.due")}</th>
-                  <th style={th(130)}>{t("pm.sla")}</th>
-                  <th style={th(140)}>{t("common.status")}</th>
+                  <th scope="col" style={th(150)}>{t("pm.colWoNo")}</th>
+                  <th scope="col" style={th(110)}>{t("pm.type")}</th>
+                  <th scope="col" style={th()}>{t("pm.colAssetSite")}</th>
+                  <th scope="col" style={th(150)}>{t("pm.tech")}</th>
+                  <th scope="col" style={th(100)}>{t("pm.due")}</th>
+                  <th scope="col" style={th(130)}>{t("pm.sla")}</th>
+                  <th scope="col" style={th(140)}>{t("common.status")}</th>
                 </tr>
               </thead>
               <tbody>

@@ -382,15 +382,15 @@ export function BOQList() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ color: "var(--text-3)", background: "var(--surface-2)" }}>
-                  <th style={th(140)}>{t("boq.listThCodeBoq")}</th>
-                  <th style={th()}>{t("boq.listThNameBoq")}</th>
-                  <th style={th(220)}>{t("boq.listThScope")}</th>
-                  <th style={th(130, true)}>{tp(P("thValue"))}</th>
-                  <th style={th(120)}>{t("common.status")}</th>
-                  <th style={th(90)}>{tp(P("thVersion"))}</th>
-                  <th style={th(140)}>{tp(P("thOwner"))}</th>
-                  <th style={th(110)}>{tp(P("thUpdated"))}</th>
-                  <th style={th(120, true)}>{tp(P("thManage"))}</th>
+                  <th scope="col" style={th(140)}>{t("boq.listThCodeBoq")}</th>
+                  <th scope="col" style={th()}>{t("boq.listThNameBoq")}</th>
+                  <th scope="col" style={th(220)}>{t("boq.listThScope")}</th>
+                  <th scope="col" style={th(130, true)}>{tp(P("thValue"))}</th>
+                  <th scope="col" style={th(120)}>{t("common.status")}</th>
+                  <th scope="col" style={th(90)}>{tp(P("thVersion"))}</th>
+                  <th scope="col" style={th(140)}>{tp(P("thOwner"))}</th>
+                  <th scope="col" style={th(110)}>{tp(P("thUpdated"))}</th>
+                  <th scope="col" style={th(120, true)}>{tp(P("thManage"))}</th>
                 </tr>
               </thead>
               <tbody>

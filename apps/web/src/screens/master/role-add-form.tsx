@@ -173,7 +173,7 @@ export function RoleAddForm({ ctx, onClose }: RoleAddFormProps) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
           <thead style={{ position: "sticky", top: 0, background: "var(--surface-2)" }}>
             <tr style={{ color: "var(--text-3)" }}>
-              <th style={th()}>{t("users.moduleCol")}</th>
+              <th scope="col" style={th()}>{t("users.moduleCol")}</th>
               {permCols.map((p, i) => (
                 <th key={i} style={{ ...th(70), textAlign: "center" }}>
                   {p}
