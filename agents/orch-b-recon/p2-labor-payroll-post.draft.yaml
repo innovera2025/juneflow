@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DRAFT (references-only) — agents/orch-b-recon/p2-labor-payroll-post.draft.yaml
+# Sacred action op for B-140 RG-6 · POST /labor/payroll/{id}/post
+#
+# Author: orch-B (recon). NOT applied to sacred files by orch-B.
+# orch-A files + implements the real sacred round into packages/contracts/openapi.yaml
+# under SACRED_OVERRIDE=wei-approved:B-140 (authorization recorded BLOCKERS.md:162).
+# Purpose of this draft: orch-A + orch-B gate against ONE shared op-set.
+#
+# Citations (real files read):
+#   • pototype/labor.jsx  LaborPayroll  L191-256 — the "จ่ายค่าแรง + ลงต้นทุน" post:
+#       - L193  wageOf = round(days*wage + ot*(wage/8)*1.5)  → OT 1.5x / 8h (RG-3 server default)
+#       - L199  "บันทึก Dr 1140 WIP-ค่าแรง (…) / Cr เงินฝากธนาคาร"  → RG-6 JV lines
+#       - L251  "ต้นทุนเข้า WIP โครงการอัตโนมัติ (Dr 1140 / Cr ธนาคาร)"
+#   • packages/contracts/openapi.yaml  POST /ap/deposit      L2154-2184 — closest money-posting template
+#   • packages/contracts/openapi.yaml  POST /pv/{id}/approve L2234-2247 — closest {id} action-op shape (IdPath + ActionOk, no body)
+#   • packages/contracts/openapi.yaml  /labor/* ops          L2866-2921 — Entity-opaque style + tags:[finance] mirrored here
+#   • BLOCKERS.md:162  B-140 RG-6 = Dr 1140 WIP-labor / Cr bank + cc_id · monthly YYYY-MM ·
+#                      compute-at-read breakdown · OT 1.5x/8h server default · authorize this op
+#
+# Style contract (PLAN.md §0): no invented fields — 200 returns the opaque Entity
+# (ActionOk) carrying the posted payroll + jv ref; tenant-scoped by company_id from JWT;
+# money is SERVER-computed (client sends only {id}, no requestBody); every JV money line
+# carries currency_code + cc_id (cost center). Response set 200/401/409 matches the
+# RG-6 authorization enumeration (no 404 in scope for this draft).
+#
+# NOTE (orch-A): the spec has no Conflict/409 response component today, so the 409 is
+# inlined against #/components/schemas/Error (same pattern as the NotFound/Unauthorized
+# responses). Promote to a shared Conflict response component if the inventory round
+# (B-141) introduces one — keep this op referencing whatever lands.
+# ─────────────────────────────────────────────────────────────────────────────
+
+paths:
+  /labor/payroll/{id}/post:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [finance]
+      summary: >-
+        Post a monthly payroll period (id = a 'YYYY-MM' payroll) to cost — action
+        endpoint, no body. Server computes each worker's pay
+        (days × wage × day_fraction + OT × (wage/8) × 1.5, OT 1.5x/8h tenant-overridable
+        default) and books the journal voucher Dr 1140 WIP-labor / Cr bank, every line
+        carrying cc_id (cost center) + currency_code. Idempotent: source_doc 'payroll:{id}'
+        is unique via jv_source_doc_uq, so re-posting an already-posted period — or posting
+        a period with no attendance lines — returns 409 and writes no JV.
+      operationId: postLaborPayroll
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >-
+            Payroll already posted (jv_source_doc_uq on source_doc 'payroll:{id}' is
+            already booked), or the period has no attendance lines to post (no-lines
+            guard). No JV is written — the guard closes the door inside the posting tx.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
