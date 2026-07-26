@@ -64,6 +64,7 @@ import { GLPeriodClose } from "./screens/gl/gl-close";
 import { FARegister } from "./screens/fa/fa-register";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
+import { APRetention } from "./screens/ap/ap-retention";
 import { ARAging, APAging } from "./screens/ar/fin-aging";
 import { ARCreditNote } from "./screens/ar/ar-cn";
 import { BankCheque } from "./screens/bank/bank-cheque";
@@ -123,6 +124,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "fa.register": FARegister,
   "ap.billing": APBilling,
   "ap.pv": APPaymentVoucher,
+  "ap.retention": APRetention,
   // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.
   "ar.aging": ARAging,
   "ap.aging": APAging,
