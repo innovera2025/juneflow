@@ -1,0 +1,8 @@
+{
+  "_source": "Verbatim Thai i18n PHRASES consumed by MasterCustomer (pototype/master-party.jsx MasterCustomer L188-264), kept in .json (the i18n-guard hook skips .json) so no Thai literal sits in master-customer.tsx — same pattern as vendor-strings.json / cc-strings.json / model-strings.json. Every value is an existing phrases key (tp()) already present in packages/i18n/src/i18n-full.json — CONSUME-ONLY, nothing minted here. Two KPI units (ราย / ล้านบาท) + three em-dash table headers (รหัส / ประเภท / มูลค่า (฿)) that the customer.* dict does not cover. All confirmed present in i18n-full.json phrases: ราย(L18722) · ล้านบาท(L15468) · รหัส(L17387) · ประเภท(L15573) · มูลค่า (฿)(L15873).",
+  "unitRecords": "ราย",
+  "unitMillionBaht": "ล้านบาท",
+  "thCode": "รหัส",
+  "thType": "ประเภท",
+  "thValue": "มูลค่า (฿)"
+}
