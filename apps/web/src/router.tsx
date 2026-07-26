@@ -60,6 +60,7 @@ import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
 import { GLTrialBalance } from "./screens/gl/gl-trial";
 import { GLStatements } from "./screens/gl/gl-statements";
+import { GLCashFlow } from "./screens/gl/gl-cashflow";
 import { ARReceiveVoucher } from "./screens/ar/ar-rv";
 import { ARTaxInvoice } from "./screens/ar/ar-tax";
 import { GLPeriodClose } from "./screens/gl/gl-close";
@@ -122,6 +123,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.inbox": GLPostingInbox,
   "gl.trial": GLTrialBalance,
   "gl.statements": GLStatements,
+  "gl.cashflow": GLCashFlow,
   "ar.rv": ARReceiveVoucher,
   "ar.tax": ARTaxInvoice,
   "gl.close": GLPeriodClose,
