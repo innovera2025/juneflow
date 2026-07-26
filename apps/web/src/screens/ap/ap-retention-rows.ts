@@ -116,6 +116,17 @@ export function formatMoney(n: number): string {
 }
 
 /**
+ * A money magnitude in millions, fixed to 2 decimals ("2240000" -> "2.24") — the prototype's
+ * `(sum / 1e6).toFixed(2)` for the mixed-scale KPIs (accounting-extra2.jsx L44/L46: held + withheld
+ * are shown in millions). The unit label ("million baht") is an i18n key on the screen (pm.unitMillion,
+ * cross-module reuse). Non-finite -> "0.00".
+ */
+export function millionsValue(n: number): string {
+  if (!Number.isFinite(n)) return "0.00";
+  return (n / 1e6).toFixed(2);
+}
+
+/**
  * The wire due_date is already an ISO 'YYYY-MM-DD' (retention.ts isoDate). Validate + pass it
  * through; return "" for a missing/invalid value (the cell em-dashes). The prototype's Thai month
  * label came from a mock `due` field and is not reproduced (§0 rule 3 — no fabricated locale).

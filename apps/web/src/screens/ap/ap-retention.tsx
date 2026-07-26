@@ -49,6 +49,7 @@ import { useShellCtx } from "../../shell/shell-context";
 import {
   toRetentionRow,
   formatMoney,
+  millionsValue,
   sumRemaining,
   sumWithheld,
   sumReturned,
@@ -271,13 +272,14 @@ export function APRetention() {
         </Btn>
       }
     >
-      {/* KPI strip (4) — all real from the register: held (Σremaining) · due count · withheld
-          (Σwithheld) · returned (Σreturned). Money in full baht (class num). */}
+      {/* KPI strip (4) — all real from the register, MIXED scale (prototype accounting-extra2.jsx
+          L44-47): held (Σremaining) + withheld (Σwithheld) shown in millions (÷1e6, pm.unitMillion);
+          due = count of 'due' rows (unitContract); returned (Σreturned) in full baht (unitBaht). */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 16 }}>
         <Kpi
           label={t("ap.retention.kpiHeldLabel")}
-          value={formatMoney(held)}
-          unit={t("subcon.unitBaht")}
+          value={millionsValue(held)}
+          unit={t("pm.unitMillion")}
           sub={t("ap.retention.kpiHeldSub")}
           accent="var(--brand)"
         />
@@ -290,8 +292,8 @@ export function APRetention() {
         />
         <Kpi
           label={t("ap.retention.kpiWithheldLabel")}
-          value={formatMoney(withheld)}
-          unit={t("subcon.unitBaht")}
+          value={millionsValue(withheld)}
+          unit={t("pm.unitMillion")}
           sub={t("ap.retention.kpiWithheldSub").replace("{n}", String(contracts))}
           accent="var(--text)"
         />

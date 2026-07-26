@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   toRetentionRow,
   formatMoney,
+  millionsValue,
   formatDueDate,
   sumRemaining,
   sumWithheld,
@@ -93,11 +94,18 @@ describe("toRetentionRow", () => {
   });
 });
 
-describe("formatMoney + formatDueDate", () => {
+describe("formatMoney + millionsValue + formatDueDate", () => {
   it("groups thousands, signs negatives, no baht symbol", () => {
     expect(formatMoney(420000)).toBe("420,000");
     expect(formatMoney(-315000)).toBe("-315,000");
     expect(formatMoney(0)).toBe("0");
+  });
+
+  it("renders millions to 2 decimals (prototype (sum/1e6).toFixed(2) — mixed-scale KPIs)", () => {
+    expect(millionsValue(2_240_000)).toBe("2.24");
+    expect(millionsValue(1_310_000)).toBe("1.31");
+    expect(millionsValue(0)).toBe("0.00");
+    expect(millionsValue(Number.NaN)).toBe("0.00");
   });
 
   it("passes a valid ISO due date through, '' on missing/invalid (cell em-dashes)", () => {
