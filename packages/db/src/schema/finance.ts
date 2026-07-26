@@ -770,6 +770,15 @@ export const workers = pgTable("worker", {
   name: text("name").notNull(),
   dayRate: numeric("day_rate", { precision: 16, scale: 2 }),
   currencyCode: text("currency_code").notNull().default("THB"),
+  // B-140 RG-1 (migration 0040): worker-master superset from labor.jsx WorkerForm
+  // (code/ทีม/หัวหน้า/ความชำนาญ/ประเภทค่าจ้าง/ใช้งาน). All additive + nullable/defaulted
+  // (safe ADD COLUMN on the seeded rows). Stable English codes (i18n display).
+  code: text("code"),
+  team: text("team"),
+  supervisor: text("supervisor"),
+  skill: text("skill"),
+  payType: text("pay_type"),
+  active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -792,6 +801,12 @@ export const attendances = pgTable("attendance", {
     .references(() => workers.id, { onDelete: "cascade" }),
   day: date("day").notNull(),
   ot: numeric("ot", { precision: 8, scale: 2 }).notNull().default("0"),
+  // B-140 RG-2 (migration 0040): the daily attendance status (มา/ครึ่งวัน/ขาด) and
+  // its pay factor. status drives day_fraction {full:1, half:0.5, absent:0} — the
+  // OT/pay calc is pay = day_rate × day_fraction + ot × (day_rate/8) × 1.5 (RG-3).
+  // Additive: status defaults 'full', day_fraction defaults 1 (safe on seeded rows).
+  status: text("status").notNull().default("full"),
+  dayFraction: numeric("day_fraction", { precision: 3, scale: 2 }).notNull().default("1"),
   ccId: uuid("cc_id").references(() => costCenters.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()

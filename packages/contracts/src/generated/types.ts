@@ -2170,6 +2170,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/labor/payroll/{id}/post": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post a payroll run to GL (Dr 1140 WIP-labor / Cr bank + cc_id) — server money (B-140) */
+        post: operations["postLaborPayroll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/opex/budgets": {
         parameters: {
             query?: never;
@@ -6229,6 +6246,21 @@ export interface operations {
         };
         responses: {
             201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    postLaborPayroll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
             401: components["responses"]["Unauthorized"];
         };
     };
