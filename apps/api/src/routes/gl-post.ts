@@ -12,6 +12,12 @@
 //   gr       Dr 5020 materials / Cr 2010 AP        REAL  (JV-2026-0416 "GR auto")
 //   pv       Dr 2010 AP        / Cr 1020 bank      EXTRAPOLATED (no PV exemplar)
 //   payroll  Dr 5030 labor     / Cr 1020 bank      EXTRAPOLATED (no payroll exemplar)
+//     ^ DIVERGENCE (B-144, gate-4.5): the dedicated POST /labor/payroll/{id}/post
+//       (B-140) capitalises labor to Dr 1140 WIP instead — a payroll can post via
+//       EITHER path (both share source_doc payroll:<id> → the unique index lets only
+//       one win, so no double-post), but which GL account depends on which endpoint
+//       fires. Awaiting Wei reconciliation (realign this map to 1140, or drop
+//       payroll from the generic inbox, or keep both with a documented rule).
 // Direct-posting handlers (not inbox-sourced) use the ACCT codes below:
 //   fa depr  Dr 5100 admin-exp / Cr 1210 PP&E      REAL  (JV-2026-0414 "FA auto")
 //   cn       Dr 4010 revenue + Dr 2050 VAT / Cr 1030 AR   EXTRAPOLATED (invoice reversal)

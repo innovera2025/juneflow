@@ -2947,6 +2947,18 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /labor/payroll/{id}/post:
+    post:
+      tags: [finance]
+      summary: Post a payroll run to GL (Dr 1140 WIP-labor / Cr bank + cc_id) — server money (B-140)
+      operationId: postLaborPayroll
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /opex/budgets:
     get:
       tags: [finance]
