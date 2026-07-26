@@ -68,6 +68,7 @@ import { registerRetentionRoute } from "./routes/retention.js";
 import { registerApDepositRoute } from "./routes/ap-deposit.js";
 import { registerLaborRoute } from "./routes/labor.js";
 import { registerInventoryRoute } from "./routes/inventory.js";
+import { registerLandSalesRoute } from "./routes/land-sales.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -204,6 +205,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerApDepositRoute(v1);
       registerLaborRoute(v1);
       registerInventoryRoute(v1);
+      registerLandSalesRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,
