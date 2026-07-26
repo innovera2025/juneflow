@@ -79,6 +79,11 @@ const ROUTES = [
   ["fa-register", "fa.register"],
   ["fa-depr", "fa.depr"],
   ["fa-adjust", "fa.adjust"],
+  ["gl-statements", "gl.statements"],
+  ["gl-cashflow", "gl.cashflow"],
+  ["ap-retention", "ap.retention"],
+  ["master-customer", "master.customer"],
+  ["pm-contracts", "pm.contracts"],
 ];
 (async () => {
   const browser = await chromium.launch();
@@ -134,6 +139,11 @@ rows = [
   {"screen":"fa-register","route":"fa.register","ref":"app-baseline/fa-register.png","masks":MASKS},
   {"screen":"fa-depr","route":"fa.depr","ref":"app-baseline/fa-depr.png","masks":MASKS},
   {"screen":"fa-adjust","route":"fa.adjust","ref":"app-baseline/fa-adjust.png","masks":MASKS},
+  {"screen":"gl-statements","route":"gl.statements","ref":"app-baseline/gl-statements.png","masks":MASKS},
+  {"screen":"gl-cashflow","route":"gl.cashflow","ref":"app-baseline/gl-cashflow.png","masks":MASKS},
+  {"screen":"ap-retention","route":"ap.retention","ref":"app-baseline/ap-retention.png","masks":MASKS},
+  {"screen":"master-customer","route":"master.customer","ref":"app-baseline/master-customer.png","masks":MASKS},
+  {"screen":"pm-contracts","route":"pm.contracts","ref":"app-baseline/pm-contracts.png","masks":MASKS},
 ]
 m["screens"] = rows
 m["note"] += " B-120=ข (2026-07-20 · Wei): refs switched to app-baseline/ — captures of the Wei-APPROVED app (a99031d content, same rendering environment) → strict-0 = a real REGRESSION gate. The prototype gallery pack stays untouched as the §0 design ground-truth used at PORT time (human/agent comparison). Masks dropped (same-env). Re-baseline only after a Wei-approved visual change, never to silence a diff."
