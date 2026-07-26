@@ -19,10 +19,11 @@
 
 ## คิวรอ promote
 
-> **PHASE-3 P2-BE-53 RETENTION QUEUED (2026-07-22 · orch-A · pin c1536f2)** — retention release on feature/backend await orch-B verify+merge · B-131 semantics = Wei-ratify non-block · B-128 NOTE-2 = retention posting-map. Round-B (P2-BE-51/52) merged → dev a7b51d2. Prior: Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
+> **PROGRAM-1 FINANCE-TAIL — P2-BE-54 ap.deposit QUEUED (2026-07-26 · orch-A · pin 34ea3a6)** — on feature/backend await orch-B verify+merge · B-137 (COA 1160 + Cr cash-vs-bank) = Wei-ratify non-block. Phase-3 promoted → main. Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P2-BE-54 | ap.deposit — GET /ap/deposit register + POST /ap/deposit (vendor deposit · Program-1) | 34ea3a6 feature/backend | — (backend · sacred + migration 0039 · money=SERVER · Dr1160/Cr1010 · COA 1160 B-137 · 918 api · live 14/14) | 2026-07-26 |
 
 > ✅ **batch #2 (46 งาน) → `main` `1eb2ecb` (2026-07-13)** — Phase 0 + P1 login · audit 0 defects.
 > ✅ **batch #3 (21 งาน) → `main` `43e0b70` (2026-07-14)** — sacred rounds 4 (i18n §1/5/7/8 + envelope B-014 + contract §4/6) · routes/shell/Dart · 14-agent audit 0 blocker.
