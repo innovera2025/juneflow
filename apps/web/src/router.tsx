@@ -49,8 +49,10 @@ import { MasterModel } from "./screens/master/master-model";
 import { MasterProject } from "./screens/master/master-project";
 import { MasterProjectType } from "./screens/master/master-project-type";
 import { MasterVendor } from "./screens/master/master-vendor";
+import { MasterCustomer } from "./screens/master/master-customer";
 import { UsersPermissions } from "./screens/master/users-permissions";
 import { PMDashboard } from "./screens/pm/pm-dashboard";
+import { PMContracts } from "./screens/pm/pm-contracts";
 import { PMSchedule } from "./screens/pm/pm-schedule";
 import { PMAssets } from "./screens/pm/pm-assets";
 import { PMWorkOrders } from "./screens/pm/wo-list";
@@ -58,12 +60,15 @@ import { GLChartOfAccounts } from "./screens/gl/gl-coa";
 import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
 import { GLTrialBalance } from "./screens/gl/gl-trial";
+import { GLStatements } from "./screens/gl/gl-statements";
+import { GLCashFlow } from "./screens/gl/gl-cashflow";
 import { ARReceiveVoucher } from "./screens/ar/ar-rv";
 import { ARTaxInvoice } from "./screens/ar/ar-tax";
 import { GLPeriodClose } from "./screens/gl/gl-close";
 import { FARegister } from "./screens/fa/fa-register";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
+import { APRetention } from "./screens/ap/ap-retention";
 import { ARAging, APAging } from "./screens/ar/fin-aging";
 import { ARCreditNote } from "./screens/ar/ar-cn";
 import { BankCheque } from "./screens/bank/bank-cheque";
@@ -108,7 +113,9 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "master.project": MasterProject,
   "master.ptype": MasterProjectType,
   "master.vendor": MasterVendor,
+  "master.customer": MasterCustomer,
   "pm.dashboard": PMDashboard,
+  "pm.contracts": PMContracts,
   "pm.schedule": PMSchedule,
   "pm.assets": PMAssets,
   "pm.wo": PMWorkOrders,
@@ -117,12 +124,15 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.jv": GLJournalVoucher,
   "gl.inbox": GLPostingInbox,
   "gl.trial": GLTrialBalance,
+  "gl.statements": GLStatements,
+  "gl.cashflow": GLCashFlow,
   "ar.rv": ARReceiveVoucher,
   "ar.tax": ARTaxInvoice,
   "gl.close": GLPeriodClose,
   "fa.register": FARegister,
   "ap.billing": APBilling,
   "ap.pv": APPaymentVoucher,
+  "ap.retention": APRetention,
   // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.
   "ar.aging": ARAging,
   "ap.aging": APAging,

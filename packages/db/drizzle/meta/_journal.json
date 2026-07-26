@@ -274,6 +274,13 @@
       "when": 1784703133490,
       "tag": "0038_icy_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785069627154,
+      "tag": "0039_ancient_thaddeus_ross",
+      "breakpoints": true
     }
   ]
 }

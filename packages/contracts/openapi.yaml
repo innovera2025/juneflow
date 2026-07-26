@@ -2138,6 +2138,50 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /ap/deposit:
+    get:
+      tags: [finance]
+      summary: Vendor deposit register (มัดจำจ่าย · balance = amount − used)
+      operationId: listApDeposit
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create a vendor deposit ({vendor_id,po_id?,wo_id?,amount,pct?,reason?}) — posts Dr advance-to-supplier / Cr cash via the dep posting inbox
+      operationId: createApDeposit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vendor_id:
+                  type: string
+                  format: uuid
+                po_id:
+                  type: string
+                  format: uuid
+                wo_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: number
+                pct:
+                  type: number
+                reason:
+                  type: string
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /ap/pv:
     get:
       tags: [finance]

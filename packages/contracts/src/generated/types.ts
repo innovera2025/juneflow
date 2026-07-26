@@ -1491,6 +1491,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ap/deposit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Vendor deposit register (มัดจำจ่าย · balance = amount − used) */
+        get: operations["listApDeposit"];
+        put?: never;
+        /** Create a vendor deposit ({vendor_id,po_id?,wo_id?,amount,pct?,reason?}) — posts Dr advance-to-supplier / Cr cash via the dep posting inbox */
+        post: operations["createApDeposit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ap/pv": {
         parameters: {
             query?: never;
@@ -5305,6 +5323,51 @@ export interface operations {
                     retention?: number;
                     /** Format: date */
                     due_date?: string;
+                };
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listApDeposit: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createApDeposit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    vendor_id?: string;
+                    /** Format: uuid */
+                    po_id?: string;
+                    /** Format: uuid */
+                    wo_id?: string;
+                    amount?: number;
+                    pct?: number;
+                    reason?: string;
                 };
             };
         };

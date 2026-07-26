@@ -275,6 +275,48 @@ export const pvs = pgTable("pv", {
     .defaultNow(),
 }, (t) => [index("pv_company_idx").on(t.companyId)]);
 
+/**
+ * APDeposit — a deposit PAID to a vendor before goods/work are received (ap.jsx
+ * APDeposit "มัดจำจ่ายให้ผู้ขาย · Vendor Deposit", P2-BE-54). The prototype's GL is
+ * explicit: "Dr มัดจำจ่าย, Cr เงินสด" — paying a deposit is an ASSET (an advance to
+ * the supplier, COA 1160) funded from cash. It offsets back against the vendor's
+ * AP when goods/work are billed (`used` grows toward `amount`; balance =
+ * amount − used, SERVER-computed, never stored). Linked to a PO or a WO (the
+ * prototype's "อ้างถึง PO / WO" — one of po_id / wo_id set), both nullable FKs.
+ * amount is money → currency_code; pct is the deposit percentage (nullable — the
+ * form's "% มัดจำ"). status free text (the mock's 'approved'). company_id tenant root.
+ */
+export const apDeposits = pgTable("ap_deposit", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  no: text("no").notNull(),
+  vendorId: uuid("vendor_id").references(() => vendors.id, {
+    onDelete: "restrict",
+  }),
+  poId: uuid("po_id").references(() => pos.id, { onDelete: "set null" }),
+  woId: uuid("wo_id").references(() => wos.id, { onDelete: "set null" }),
+  reason: text("reason"),
+  pct: numeric("pct", { precision: 6, scale: 2 }),
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull().default("0"),
+  used: numeric("used", { precision: 16, scale: 2 }).notNull().default("0"),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  status: text("status").notNull().default("approved"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  index("ap_deposit_company_idx").on(t.companyId),
+  // The register + offset join a deposit back to its vendor/PO/WO — index the FKs.
+  index("ap_deposit_vendor_idx").on(t.vendorId),
+  index("ap_deposit_po_idx").on(t.poId),
+  index("ap_deposit_wo_idx").on(t.woId),
+]);
+
 // ---------------------------------------------------------------------------
 // AR (receivables)
 // ---------------------------------------------------------------------------
@@ -432,7 +474,7 @@ export const jvs = pgTable("jv", {
   // "Manual" rows). Manual JVs with a null/free-text source_doc are unconstrained.
   uniqueIndex("jv_source_doc_uq")
     .on(t.sourceDoc)
-    .where(sql`${t.sourceDoc} ~ '^(pv|rv|gr|payroll|fa|cn|ret):'`),
+    .where(sql`${t.sourceDoc} ~ '^(pv|rv|gr|payroll|fa|cn|ret|dep):'`),
 ]);
 
 /**
