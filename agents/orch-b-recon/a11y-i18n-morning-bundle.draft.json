@@ -1,0 +1,7 @@
+{
+  "_meta": "a11y aria-label sacred-i18n mini-bundle · orch-B compiled 2026-07-27 · Wei-pending (values invented — aria-labels have NO prototype source, so Wei must rule the Thai text · file as B-147 in morning). Unblocks a11y FIX-3 modal-close + FIX-4 chrome icon menus. Screen-specific icon buttons (edit/delete/print/export) reuse EXISTING common.* keys during FIX-4 — only these 3 chrome generics are net-new.",
+  "_reuse_existing": "common.edit/delete/print/export/search/filter/save/cancel/back already exist — icon buttons map to them, no new key",
+  "common.close": { "th": "ปิด", "en": "Close", "zh": "关闭", "ar": "إغلاق", "_use": "modal.tsx L126 close-btn aria-label · FIX-3" },
+  "common.more": { "th": "เพิ่มเติม", "en": "More", "zh": "更多", "ar": "المزيد", "_use": "kebab/overflow menu triggers (boq-list/editor, master-company/vendor, tweaks-popover) · FIX-4" },
+  "common.menu": { "th": "เมนู", "en": "Menu", "zh": "菜单", "ar": "القائمة", "_use": "app-shell L100 nav toggle · FIX-2/4" }
+}
