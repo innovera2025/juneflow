@@ -22,29 +22,36 @@ const TONE_ICON: Record<ToastTone, IconName> = {
 
 export function ToastHost() {
   const { toast } = useShellCtx();
-  if (!toast) return null;
+  // Persistent polite live region so screen readers announce each toast as it
+  // appears (the empty wrapper renders no pixels — the visible pill is the same
+  // position:fixed element as before). left:"50%"+translateX centers correctly in
+  // both dir modes, so it is intentionally NOT converted to a logical inset.
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 28,
-        left: "50%",
-        transform: "translateX(-50%)",
-        padding: "12px 18px",
-        background: TONE_BG[toast.tone],
-        color: "#fff",
-        borderRadius: 10,
-        boxShadow: "0 12px 32px rgba(15,23,42,0.18)",
-        fontSize: 13,
-        fontWeight: 600,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        zIndex: 6000,
-      }}
-    >
-      <Icon name={TONE_ICON[toast.tone]} size={16} />
-      {toast.msg}
+    <div role="status" aria-live="polite" aria-atomic="true">
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 28,
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "12px 18px",
+            background: TONE_BG[toast.tone],
+            color: "#fff",
+            borderRadius: 10,
+            boxShadow: "0 12px 32px rgba(15,23,42,0.18)",
+            fontSize: 13,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 6000,
+          }}
+        >
+          <Icon name={TONE_ICON[toast.tone]} size={16} />
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }

@@ -26,6 +26,8 @@ export interface BtnProps {
   disabled?: boolean;
   type?: "button" | "submit";
   style?: CSSProperties;
+  /** Accessible name for icon-only buttons (applied as aria-label). */
+  label?: string;
 }
 
 const SIZES: Record<BtnSize, { h: number; px: number; fs: number; gap: number; ic: number }> = {
@@ -53,6 +55,7 @@ export function Btn({
   disabled,
   type = "button",
   style = {},
+  label,
 }: BtnProps) {
   const s = SIZES[size];
   const k = KINDS[kind];
@@ -61,6 +64,7 @@ export function Btn({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-label={label}
       style={{
         display: "inline-flex",
         alignItems: "center",
