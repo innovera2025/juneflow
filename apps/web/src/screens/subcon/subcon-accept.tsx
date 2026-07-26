@@ -417,7 +417,7 @@ export function SubconAccept() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <Icon name="trend" size={16} color="var(--brand)" />
             <span style={{ fontSize: 13.5, fontWeight: 700 }}>{t("subcon.progressRefTitle")}</span>
-            <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
+            <span style={{ marginInlineStart: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
               {projectName || DASH}
             </span>
           </div>
@@ -463,7 +463,7 @@ export function SubconAccept() {
             <span style={{ fontSize: 13.5, fontWeight: 700 }}>
               {t(method === "unit" ? "subcon.progressByUnit" : "subcon.progressByDistance")}
             </span>
-            <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }} className="num">
+            <span style={{ marginInlineStart: "auto", fontSize: 11.5, color: "var(--text-3)" }} className="num">
               {DASH}
             </span>
           </div>
@@ -619,7 +619,7 @@ export function SubconAccept() {
           <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
             {t("subcon.fileCount").replace("{n}", DASH)}
           </span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <div style={{ marginInlineStart: "auto", display: "flex", gap: 6 }}>
             <Btn
               kind="ghost"
               size="sm"

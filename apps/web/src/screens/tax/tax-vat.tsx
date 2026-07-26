@@ -443,7 +443,7 @@ function PND30Form({ report, onClose }: { report: VatReport; onClose: () => void
         <div className="box" style={{ marginBottom: 6 }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
             {t("tax.form30.taxMonth")}
-            <b style={{ marginLeft: 8 }}>{t("boq.arcFldYearBe")}</b>{" "}
+            <b style={{ marginInlineStart: 8 }}>{t("boq.arcFldYearBe")}</b>{" "}
             <span className="field-line" style={{ minWidth: 50 }}>{beYear || DASH}</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 4, fontSize: 10.5 }}>

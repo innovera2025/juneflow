@@ -238,7 +238,7 @@ export function MasterModel() {
                     <span
                       className="num"
                       style={{
-                        marginLeft: "auto",
+                        marginInlineStart: "auto",
                         fontSize: 10.5,
                         color: "var(--text-3)",
                         alignSelf: "center",

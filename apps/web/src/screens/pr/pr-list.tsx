@@ -222,7 +222,7 @@ function ApprovalSteps({ step, total, status }: { step: number; total: number; s
       ))}
       <span
         className="num"
-        style={{ fontSize: 10.5, color: "var(--text-3)", marginLeft: 6, fontWeight: 600 }}
+        style={{ fontSize: 10.5, color: "var(--text-3)", marginInlineStart: 6, fontWeight: 600 }}
       >
         {approvalStepLabel(step, total, status)}
       </span>
@@ -487,7 +487,7 @@ export function PRList() {
               border: "none",
               background: "none",
               fontWeight: 600,
-              marginLeft: "auto",
+              marginInlineStart: "auto",
               cursor: "pointer",
             }}
           >

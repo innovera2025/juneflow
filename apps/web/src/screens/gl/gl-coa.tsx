@@ -236,7 +236,7 @@ export function GLChartOfAccounts() {
               </option>
             ))}
           </select>
-          <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
+          <span style={{ marginInlineStart: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
             {filtered.length} {tp(P("unitCode"))}
           </span>
         </div>
@@ -276,7 +276,7 @@ export function GLChartOfAccounts() {
                         <span style={{ fontSize: 12, fontWeight: 800, color: c.color }}>
                           {tp(P("unitCat"))} {c.id} · {className(c.id)}
                         </span>
-                        <span style={{ fontSize: 10.5, color: "var(--text-3)", marginLeft: 8 }}>
+                        <span style={{ fontSize: 10.5, color: "var(--text-3)", marginInlineStart: 8 }}>
                           {tp(P("natureWord"))} {nature} · {items.length} {tp(P("unitCode"))}
                         </span>
                       </>

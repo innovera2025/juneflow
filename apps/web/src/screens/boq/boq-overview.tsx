@@ -293,7 +293,7 @@ function FlowRow({
             background: color,
             display: "flex",
             alignItems: "center",
-            paddingLeft: 10,
+            paddingInlineStart: 10,
             color: "#fff",
             fontSize: 10.5,
             fontWeight: 600,
@@ -721,7 +721,7 @@ function BalanceGroupRows({ name, rows }: { name: string; rows: BalanceItem[] })
     <>
       <tr style={{ background: "var(--brand-soft)" }}>
         <td colSpan={10} style={{ padding: "8px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--brand)" }}>
-          <Icon name="chevD" size={11} style={{ marginRight: 6, verticalAlign: "middle" }} />
+          <Icon name="chevD" size={11} style={{ marginInlineEnd: 6, verticalAlign: "middle" }} />
           {name}
         </td>
       </tr>

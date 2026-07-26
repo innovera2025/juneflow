@@ -106,7 +106,7 @@ function ScopePill({
           color: "var(--text)",
         }}
       >
-        <div style={{ lineHeight: 1.1, flex: 1, textAlign: "left", minWidth: 0 }}>
+        <div style={{ lineHeight: 1.1, flex: 1, textAlign: "start", minWidth: 0 }}>
           <div style={{ fontSize: 9.5, color: "var(--text-3)", fontWeight: 600 }}>{label}</div>
           <div
             style={{

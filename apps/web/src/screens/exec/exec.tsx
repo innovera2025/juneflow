@@ -148,7 +148,7 @@ function EmptyState({ height = 60 }: { height?: number }) {
 /** Table header cell (pototype/ds.jsx th, 214-219). */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -257,7 +257,7 @@ export function ExecDashboard() {
               <div style={{ fontSize: 11, color: "var(--text-3)" }}>{fill(tp(P("acceptSub")), { value: DASH })}</div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 16, marginLeft: "auto", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 16, marginInlineStart: "auto", alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 12 }}>
               {tp(P("acceptPending"))} <b className="num" style={{ fontSize: 15 }}>{DASH}</b>
             </span>

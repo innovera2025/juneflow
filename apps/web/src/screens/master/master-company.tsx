@@ -190,7 +190,7 @@ export function MasterCompany() {
                       alignItems: "center",
                       gap: 12,
                       padding: "10px 14px",
-                      marginLeft: r.level * 28,
+                      marginInlineStart: r.level * 28,
                       borderRadius: 8,
                       marginBottom: 4,
                       background:
@@ -241,7 +241,7 @@ export function MasterCompany() {
                         <span
                           className="num"
                           style={{
-                            marginLeft: 8,
+                            marginInlineStart: 8,
                             fontSize: 10.5,
                             fontWeight: 700,
                             padding: "1px 6px",
@@ -253,7 +253,7 @@ export function MasterCompany() {
                           {r.code}
                         </span>
                         {kids && isCollapsed && (
-                          <span style={{ marginLeft: 8, fontSize: 10, color: "var(--text-3)" }}>
+                          <span style={{ marginInlineStart: 8, fontSize: 10, color: "var(--text-3)" }}>
                             {`· ${childCount(rows, r.id)} ${t("org.unitSub")}`}
                           </span>
                         )}

@@ -667,7 +667,7 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
                         {t(r.key)}
                       </button>
                     </div>
-                    <div style={{ display: "flex", gap: 10, marginTop: 9, paddingLeft: 30 }}>
+                    <div style={{ display: "flex", gap: 10, marginTop: 9, paddingInlineStart: 30 }}>
                       <PhotoChip label={t("pm.before")} />
                       <PhotoChip label={t("pm.after")} video={c.result === "repair"} />
                     </div>

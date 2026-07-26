@@ -665,7 +665,7 @@ export function AIQuantityTakeoff() {
                       {done ? <Icon name="check" size={15} /> : <Icon name={s.icon} size={14} />}
                     </div>
                     <span style={{ fontSize: 12.5, fontWeight: 500 }}>{t(s.labelKey)}</span>
-                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: done ? "var(--ok)" : "var(--brand)" }}>
+                    <span style={{ marginInlineStart: "auto", fontSize: 11, fontWeight: 700, color: done ? "var(--ok)" : "var(--brand)" }}>
                       {done ? t("boq.repStatusDone") : t("boq.aiqProcActive")}
                     </span>
                   </div>
@@ -752,7 +752,7 @@ function QtoReview({
             {fill(t("boq.aiqLowConfBadge"), { n: String(low) })}
           </span>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+        <div style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
           <Btn kind="soft" size="sm" icon="filter" onClick={() => ctx.notify(t("boq.aiqSuggestSpecToast"))}>
             {t("boq.aiqSuggestSpec")}
           </Btn>
@@ -969,7 +969,7 @@ function QtoSummary({ jobId, rows }: { jobId: string | null; rows: QtoRow[] }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
         <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>
           {t("boq.aiqKpiValue")}
-          <b className="num" style={{ fontSize: 17, color: "var(--brand)", marginLeft: 8 }}>
+          <b className="num" style={{ fontSize: 17, color: "var(--brand)", marginInlineStart: 8 }}>
             {has ? `${formatMoney(total)} ${BAHT}` : DASH}
           </b>
         </div>

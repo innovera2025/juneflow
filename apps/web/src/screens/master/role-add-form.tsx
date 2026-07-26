@@ -59,7 +59,7 @@ function fieldStyle(): CSSProperties {
 /** Table header cell style - ported verbatim from ds.jsx th() (214-219). */
 function th(width?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "8px 10px",
     fontSize: 10.5,
     fontWeight: 600,

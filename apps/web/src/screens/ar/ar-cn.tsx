@@ -228,7 +228,7 @@ function openExportModal(ctx: ShellCtx, s: ExportStrings): void {
               borderRadius: 10,
               background: "var(--surface)",
               cursor: "pointer",
-              textAlign: "left",
+              textAlign: "start",
               fontFamily: "inherit",
             }}
           >

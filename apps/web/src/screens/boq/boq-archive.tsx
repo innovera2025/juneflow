@@ -356,7 +356,7 @@ export function BOQArchive() {
                       </td>
                       {/* WIRE GAP 2: no attachments table + no revise-history log — both counts em-dash. */}
                       <td style={{ ...td, color: "var(--text-2)", fontSize: 11.5 }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginInlineEnd: 8 }}>
                           <Icon name="paperclip" size={12} color="var(--text-3)" />—
                         </span>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>

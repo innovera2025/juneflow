@@ -233,7 +233,7 @@ export function UserAddForm({ ctx, roles, onClose }: UserAddFormProps) {
               height: 20,
               borderRadius: 999,
               background: "#fff",
-              marginLeft: active ? 20 : 0,
+              marginInlineStart: active ? 20 : 0,
               transition: ".15s",
             }}
           />

@@ -400,7 +400,7 @@ export function BOMTemplates() {
                   <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
                     {fill(t("boq.bomUpdatedAt"), { date: DASH })}
                   </span>
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                  <div style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
                     <Btn kind="ghost" size="sm" icon="download" onClick={() => ctx.notify(t("boq.bomExportToast"))}>
                       {t("vendor.btnExport" as DictKey)}
                     </Btn>

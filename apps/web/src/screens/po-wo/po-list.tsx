@@ -591,7 +591,7 @@ export function POList() {
                   kind="ghost"
                   size="sm"
                   icon="x"
-                  style={{ color: "var(--danger)", marginLeft: "auto" }}
+                  style={{ color: "var(--danger)", marginInlineStart: "auto" }}
                   onClick={() => confirmCancel(selectedRow)}
                 >
                   {t("po.list.cancelPo")}

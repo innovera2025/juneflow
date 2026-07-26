@@ -276,7 +276,7 @@ export function AssetDetail({ asset, onClose }: AssetDetailProps) {
               name="check"
               size={12}
               color="var(--ok)"
-              style={{ verticalAlign: "middle", marginRight: 4 }}
+              style={{ verticalAlign: "middle", marginInlineEnd: 4 }}
             />
             {t("fa.detail.historyNone").replace("{date}", asset.acquiredDate)}
           </>

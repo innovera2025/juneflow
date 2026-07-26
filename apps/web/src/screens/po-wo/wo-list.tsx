@@ -528,7 +528,7 @@ export function WOList() {
                   kind="ghost"
                   size="sm"
                   icon="flag"
-                  style={{ marginLeft: "auto", color: "var(--ok)" }}
+                  style={{ marginInlineStart: "auto", color: "var(--ok)" }}
                   onClick={() => confirmClose(selectedRow)}
                 >
                   {tp(P("tabClosedContract"))}

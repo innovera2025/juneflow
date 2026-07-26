@@ -109,7 +109,7 @@ function PMCalendar({
       >
         <Icon name="calendar" size={16} color="var(--brand)" />
         <span style={{ fontSize: 13.5, fontWeight: 700 }}>{title || DASH}</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-3)" }}>{hint}</span>
+        <span style={{ marginInlineStart: "auto", fontSize: 11, color: "var(--text-3)" }}>{hint}</span>
       </div>
       <div style={{ padding: 16 }}>
         <div
@@ -145,7 +145,7 @@ function PMCalendar({
                   padding: 5,
                   fontSize: 11,
                   position: "relative",
-                  textAlign: "left",
+                  textAlign: "start",
                   cursor: "pointer",
                   fontFamily: "inherit",
                   border: sel ? "2px solid var(--brand)" : "1px solid var(--border)",
@@ -439,7 +439,7 @@ export function PMSchedule() {
                           flex: 1,
                           minWidth: 0,
                           borderLeft: "1px solid var(--border)",
-                          paddingLeft: 11,
+                          paddingInlineStart: 11,
                         }}
                       >
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>{p.name || DASH}</div>

@@ -213,7 +213,7 @@ function BudgetControlBar({
         <Icon name="pie" size={16} color="var(--brand)" />
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>{t("boq.edCbsTitle")}</div>
         <span style={{ fontSize: 11, color: "var(--text-3)" }}>{t("boq.edCbsSubtitle")}</span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 16, fontSize: 11.5 }}>
+        <div style={{ marginInlineStart: "auto", display: "flex", gap: 16, fontSize: 11.5 }}>
           {totals.map(([l, v, c]) => (
             <span key={l} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
               <span style={{ color: "var(--text-3)", fontSize: 10 }}>{l}</span>
@@ -353,7 +353,7 @@ function ItemRow({
           <span
             className="num"
             style={{
-              marginLeft: 8,
+              marginInlineStart: 8,
               fontSize: 10,
               fontWeight: 700,
               padding: "1px 6px",
@@ -427,7 +427,7 @@ function ItemRow({
                 borderRadius: 8,
                 padding: 4,
                 boxShadow: "0 8px 24px rgba(15,23,42,0.18)",
-                textAlign: "left",
+                textAlign: "start",
               }}
             >
               {/* WIRE GAP 4: no update endpoint — edit is a deferred stub. */}
@@ -591,7 +591,7 @@ function ItemFormModal({
               value={priceStr}
               onChange={(e) => setPriceStr(e.target.value)}
               className="num"
-              style={{ ...fieldStyle(), paddingRight: 24 }}
+              style={{ ...fieldStyle(), paddingInlineEnd: 24 }}
             />
             <span style={{ position: "absolute", right: 10, top: 9, fontSize: 12, color: "var(--text-3)" }}>{BAHT}</span>
           </div>
@@ -1192,7 +1192,7 @@ export function BOQEditor() {
                       >
                         <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
                           {activeGroup?.name ?? "—"}
-                          <span style={{ color: "var(--text-3)", fontWeight: 500, marginLeft: 6 }}>· {activeRows.length}</span>
+                          <span style={{ color: "var(--text-3)", fontWeight: 500, marginInlineStart: 6 }}>· {activeRows.length}</span>
                         </div>
                         <div
                           style={{
@@ -1248,7 +1248,7 @@ export function BOQEditor() {
                             );
                           })}
                         </div>
-                        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
+                        <div style={{ marginInlineStart: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
                           {readOnly ? (
                             <span
                               style={{
@@ -1519,7 +1519,7 @@ function EmptyState({
                 flexDirection: "column",
                 alignItems: "flex-start",
                 gap: 6,
-                textAlign: "left",
+                textAlign: "start",
                 padding: "16px 16px",
                 borderRadius: 10,
                 cursor: "pointer",

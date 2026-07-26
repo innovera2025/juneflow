@@ -47,7 +47,7 @@ const DASH = "—";
 /** Table header cell style, ported from ds.jsx th() (L214-219). */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,

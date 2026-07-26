@@ -64,7 +64,7 @@ const BUCKET_6190_TONE = "#B45309";
 /** Table header cell style (ds.jsx th()), inlined. */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,

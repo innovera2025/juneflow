@@ -319,7 +319,7 @@ function NavRow({
         {hasSub && <Icon name={isOpen ? "chevD" : "chevR"} size={14} style={{ opacity: 0.6 }} />}
       </div>
       {hasSub && isOpen && (
-        <div style={{ paddingLeft: 30, margin: "2px 0 6px" }}>
+        <div style={{ paddingInlineStart: 30, margin: "2px 0 6px" }}>
           {item.sub!.map((s) => {
             const isActive = s.id === active;
             return (

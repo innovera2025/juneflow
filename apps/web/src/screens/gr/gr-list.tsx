@@ -479,7 +479,7 @@ export function GRList() {
                               style={{
                                 fontSize: 9.5,
                                 fontWeight: 700,
-                                marginRight: 5,
+                                marginInlineEnd: 5,
                                 padding: "1px 4px",
                                 borderRadius: 3,
                                 background: kind === "PO" ? "var(--brand-soft)" : "var(--accent-soft)",
@@ -590,7 +590,7 @@ export function GRList() {
                       kind="ghost"
                       size="sm"
                       icon="x"
-                      style={{ color: "var(--danger)", marginLeft: "auto" }}
+                      style={{ color: "var(--danger)", marginInlineStart: "auto" }}
                       onClick={() => confirmCancel(selectedRow)}
                     >
                       {t("common.cancel")}

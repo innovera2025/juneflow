@@ -88,7 +88,7 @@ export function AppShell() {
                 <b className="num" style={{ color: "var(--brand)" }}>{ref}</b>
               </span>
             )}
-            <span style={{ marginLeft: "auto", color: "var(--text-3)", fontSize: 11 }}>
+            <span style={{ marginInlineStart: "auto", color: "var(--text-3)", fontSize: 11 }}>
               {t("common.navHistory")} · {ctx.history.length}
             </span>
           </div>

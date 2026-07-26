@@ -340,7 +340,7 @@ export function BOQList() {
             <option value="revise">{tp(P("statusRevise"))}</option>
             <option value="pending">{tp(P("statusPending"))}</option>
           </FilterSelect>
-          <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
+          <span style={{ marginInlineStart: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
             {t("boq.listShowCount")
               .replace("{shown}", String(rows.length))
               .replace("{total}", String(docs.length))}
@@ -491,7 +491,7 @@ export function BOQList() {
                                 borderRadius: 8,
                                 padding: 4,
                                 boxShadow: "0 8px 24px rgba(15,23,42,0.18)",
-                                textAlign: "left",
+                                textAlign: "start",
                               }}
                             >
                               <div

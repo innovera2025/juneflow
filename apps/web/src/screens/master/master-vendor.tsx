@@ -58,7 +58,7 @@ type Entity = components["schemas"]["Entity"];
 /** Table header cell style, ported from ds.jsx th() (L214-219). */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -379,7 +379,7 @@ export function MasterVendor() {
                   }}
                 >
                   {tab.label}
-                  <span className="num" style={{ marginLeft: 5, opacity: 0.8 }}>
+                  <span className="num" style={{ marginInlineStart: 5, opacity: 0.8 }}>
                     {tab.count}
                   </span>
                 </button>
@@ -396,7 +396,7 @@ export function MasterVendor() {
               border: "1px solid var(--border)",
               borderRadius: 7,
               background: "var(--surface)",
-              marginLeft: "auto",
+              marginInlineStart: "auto",
             }}
           >
             <Icon name="search" size={13} color="var(--text-3)" />

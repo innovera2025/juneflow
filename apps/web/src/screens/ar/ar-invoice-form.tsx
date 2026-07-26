@@ -204,7 +204,7 @@ export function ARInvoiceForm({ onClose }: ARInvoiceFormProps) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ color: "var(--text-3)" }}>
-              <th style={{ textAlign: "left", padding: "0 8px 6px 0", fontSize: 10.5, fontWeight: 600 }}>
+              <th style={{ textAlign: "start", padding: "0 8px 6px 0", fontSize: 10.5, fontWeight: 600 }}>
                 {t("subcon.colDetail")}
               </th>
               <th style={{ textAlign: "right", padding: "0 8px 6px", fontSize: 10.5, fontWeight: 600, width: 90 }}>

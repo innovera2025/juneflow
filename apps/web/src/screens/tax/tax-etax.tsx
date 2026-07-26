@@ -289,7 +289,7 @@ export function TaxETax() {
                 borderRadius: 10,
                 background: "var(--surface)",
                 cursor: "pointer",
-                textAlign: "left",
+                textAlign: "start",
                 fontFamily: "inherit",
               }}
             >

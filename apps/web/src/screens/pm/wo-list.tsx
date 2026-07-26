@@ -74,7 +74,7 @@ const MIDDOT = "·";
 /** Table header cell style (ds.jsx th()). */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -216,7 +216,7 @@ export function PMWorkOrders() {
                 borderRadius: 10,
                 background: "var(--surface)",
                 cursor: "pointer",
-                textAlign: "left",
+                textAlign: "start",
                 fontFamily: "inherit",
               }}
             >
