@@ -61,10 +61,14 @@ export const POSTING_MAP: Record<GlPostableKind, PostingRule> = {
   payroll: { dr: "5030", cr: "1020", basis: "amount", real: false, note: "extrapolated — no payroll exemplar in JV_BOOKS" },
 };
 
-/** Named COA codes the direct-posting handlers (CN, FA, retention) reference by intent. */
+/** Named COA codes the direct-posting handlers (CN, FA, retention, deposit) reference by intent. */
 export const ACCT = {
+  cash: "1010",
   bank: "1020",
   ar: "1030",
+  // เงินมัดจำจ่ายล่วงหน้า — a deposit PAID to a vendor is an asset (advance to
+  // supplier). Paying it: Dr 1160 / Cr 1010 cash (ap.jsx APDeposit · P2-BE-54).
+  advanceToSupplier: "1160",
   ap: "2010",
   // เจ้าหนี้เงินประกันผลงานค้างจ่าย — the retention we withheld from a vendor/subcon
   // (a liability). Releasing it back pays the vendor: Dr 2030 / Cr 1020 (P2-BE-53).
