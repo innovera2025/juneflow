@@ -8141,6 +8141,24 @@
       "zh": "PM Dashboard",
       "ar": "PM Dashboard"
     },
+    "common.close": {
+      "th": "ปิด",
+      "en": "Close",
+      "zh": "关闭",
+      "ar": "إغلاق"
+    },
+    "common.more": {
+      "th": "เพิ่มเติม",
+      "en": "More",
+      "zh": "更多",
+      "ar": "المزيد"
+    },
+    "common.menu": {
+      "th": "เมนู",
+      "en": "Menu",
+      "zh": "菜单",
+      "ar": "القائمة"
+    },
     "labor.crumbSection": {
       "th": "แรงงาน & ค่าแรง",
       "en": "แรงงาน & ค่าแรง",
