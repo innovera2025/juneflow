@@ -17,6 +17,7 @@ import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  apBillings,
   downPaymentTxns,
   glAccounts,
   jvLines,
@@ -908,6 +909,7 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().message).toMatch(/finance create permission/);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // no money posted on a denied deal
+    expect(inserted.find((i) => i.table === apBillings)).toBeUndefined(); // and no subledger row (B-164)
   });
 
   it("computes the buy deposit (area/1600 × price × 10%) + posts Dr 1150 / Cr 2010, source deal:<id>", async () => {
@@ -930,6 +932,15 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     expect(lines.reduce((s, l) => s + Number(l.dr), 0)).toBe(lines.reduce((s, l) => s + Number(l.cr), 0));
     const jvIns = inserted.find((i) => i.table === jvs)!.values as Record<string, unknown>;
     expect(jvIns.sourceDoc).toBe("deal:p1");
+
+    // B-164: the Cr 2010 AP is ALSO recorded in the AP subledger (ap_billing) in the
+    // same tx, so the payable surfaces in AP aging — not only the GL JV.
+    const bill = inserted.find((i) => i.table === apBillings)!.values as Record<string, unknown>;
+    expect(bill.amount).toBe("250000.00"); // matches the Cr 2010 line
+    expect(bill.kind).toBe("deposit");
+    expect(bill.status).toBe("draft");
+    expect(bill.currencyCode).toBe("THB");
+    expect(bill.vendorId).toBeNull(); // a land deal has no vendor FK — never invented
   });
 
   it("422s a lease deal (PV formula undefined — never a guessed amount)", async () => {
@@ -977,6 +988,7 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     ).inject({ method: "POST", url: "/api/v1/land/plots/p1/deal", payload: { type: "buy" } });
     expect(res.statusCode).toBe(409);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
+    expect(inserted.find((i) => i.table === apBillings)).toBeUndefined(); // pre-check returns before the tx (B-164)
   });
 
   it("409s honestly when the tenant COA lacks a required posting account", async () => {

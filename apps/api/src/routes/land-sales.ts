@@ -29,6 +29,8 @@
 //   booking  Dr 1020 bank / Cr 2040 advance-received = received     source booking:<unitId>
 //   down     Dr 1020 bank / Cr 2040 advance-received = received     source down:<unitId>:<seq>
 //   deal     Dr 1150 land-held / Cr 2010 AP          = 10% deposit  source deal:<plotId>
+//     ^ B-164 (Wei=ก): also writes an ap_billing (kind=deposit) subledger row in the
+//       SAME tx so the Cr 2010 payable shows in AP aging, not only the GL JV.
 // A loan application (SA-6) is a RECORDED document, NOT a GL posting — its ask/
 // approved amounts are stored as supplied, no JV. A contract signing (B-161(c)) is
 // unit metadata only — no JV.
@@ -42,6 +44,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import {
+  apBillings,
   downPaymentTxns,
   jvLines,
   jvs,
@@ -809,6 +812,22 @@ async function createLandPlotDeal(
 
   try {
     await db.transaction(async (tx) => {
+      // B-164 (Wei=ก): the Cr 2010 AP is a real payable to the land owner — record it
+      // in the AP subledger (ap_billing) so it surfaces in GET /ap/billings + aging,
+      // not just the GL. Same tx as the JV: the jv_source_doc_uq 23505 on a concurrent
+      // double-post rolls this row back too (ap_billing carries no own unique key), so
+      // there is never an orphan subledger row. A land deal has no vendor FK
+      // (plot.owner is free text), so vendor_id/due_date stay null (never invented).
+      await tx
+        .insert(apBillings, {
+          vendorId: null,
+          amount: moneyStr(deposit),
+          vat: "0",
+          currencyCode,
+          status: "draft",
+          kind: "deposit",
+        })
+        .returning();
       await tx.insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `land-deal ${plotId}` }).returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
