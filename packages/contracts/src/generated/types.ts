@@ -2625,6 +2625,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sales/service": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List after-sales service tickets
+         * @description Tenant-scoped ticket register (sales-service.jsx list L22). Rows are the opaque service_ticket columns (no, unit, customer, channel, category, title, priority, status, assignee, opened_date, scheduled_date) PLUS the derived warranty-months-remaining (SV-2, read-time from sales_unit.transfer_at + 12mo). The tab filters (active/all/high/closed) and the technician/category/KPI panels are FE-side over this same list.
+         */
+        get: operations["listServiceTickets"];
+        put?: never;
+        /** Create service ticket (รับเรื่อง + มอบหมาย) */
+        post: operations["createServiceTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/service/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** Get service ticket detail */
+        get: operations["getServiceTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/service/{id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign + schedule a service ticket — received -> scheduled (action endpoint)
+         * @description Status changes go through action endpoints only (api-contract.md, SV-3). Valid only when the ticket is currently 'received'; the pre-state is folded into the UPDATE WHERE (B-149) so a concurrent flip 409s.
+         */
+        post: operations["scheduleServiceTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/service/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start the repair — scheduled -> fixing (action endpoint) */
+        post: operations["startServiceTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/service/{id}/fix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark repair complete — fixing -> fixed (action endpoint) */
+        post: operations["fixServiceTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/service/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close a service ticket + send survey — fixed -> closed (action endpoint) */
+        post: operations["closeServiceTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/counts": {
         parameters: {
             query?: never;
@@ -7067,6 +7186,133 @@ export interface operations {
             200: components["responses"]["ActionOk"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listServiceTickets: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createServiceTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getServiceTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    scheduleServiceTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    startServiceTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    fixServiceTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    closeServiceTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getCounts: {
