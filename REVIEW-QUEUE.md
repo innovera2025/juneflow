@@ -19,10 +19,12 @@
 
 ## คิวรอ promote
 
-> **PROGRAM-2 OP-CORE — P2-BE-56 labor-write QUEUED (2026-07-27 · orch-A · pin 18cd95f)** — labor create+OT+payroll→JV on feature/backend await orch-B verify+merge. Wave-0 (P2-BE-55) merged. Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
+> **PROGRAM-3 SALES+LAND — P3-BE-01 land-sales Wave-0 QUEUED (2026-07-27 · orch-A · pin 077823f)** — zero-ruling reads (GET /sales/leads + /land/plots · mount only · no sacred/migration/i18n) on feature/backend await orch-B verify+merge. **PROGRAM-2 OP-CORE — P2-BE-57 inventory QUEUED (2026-07-27 · orch-A · pin cb2a1b2)** — inventory 13 ops + transfer/issue on feature/backend await orch-B verify+merge. Labor lane (P2-BE-55/56) merged → dev. Prior: **QUEUE EMPTY (2026-07-21 · PHASE-3 Wave-0 + i18n Wave-A PROMOTED → main `6902dfb` · 0-drift · pin db76042)** — P2-BE-44/45 promoted → history. Next batch = orch-C gl.inbox + orch-A round-A.
 
 | task id | โมดูล | diff | ภาพเทียบ gallery | วันที่ |
 |---|---|---|---|---|
+| P3-BE-01 | land-sales Wave-0 — mount route + GET /sales/leads + /land/plots (zero-ruling reads) | 077823f feature/backend | — (backend · NO sacred/migration/i18n · opaque reads on declared ops · stage kanban axis · price_per_rai money+currency_code · 983 api +5 · live 10 leads/8 plots + 401) | 2026-07-27 |
+| P2-BE-57 | inventory subsystem — 13 ops + stock_ledger + transfer/issue (B-141) | cb2a1b2 feature/backend | — (backend · sacred 13 ops + migration 0041 · standard-cost server · atomic dual-wh + issue cost-to-BOQ + neg-stock 409 · 978 api · live 19/19 · B-148 non-block) | 2026-07-27 |
 | P2-BE-56 | labor write slice — create ops + OT/pay calc + payroll→JV (B-140) | 18cd95f feature/backend | — (backend · migration 0040 · money=SERVER OT calc · Dr1140/Cr1020 · 949 api · live 13/13) | 2026-07-27 |
 | P2-BE-55 | labor Wave-0 — mount labor route + GET /labor/workers|attendance|payroll (3 reads) | 2dec493 feature/backend | — (backend · 3 opaque list reads · seeded 8 workers · 925 api · live 7/7) | 2026-07-26 |
 
