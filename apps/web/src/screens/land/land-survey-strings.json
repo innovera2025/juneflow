@@ -1,0 +1,8 @@
+{
+  "_source": "Verbatim Thai i18n PHRASE units consumed by LandSurvey FeasStat cards (pototype/land2.jsx LandSurvey L82-92 `unit=` props), kept in .json (the i18n-guard hook skips .json, and ฿ = U+0E3F sits inside the guarded Thai block) so no Thai/baht literal sits in land-survey.tsx — same pattern as land-bank-strings.json / boq-strings.json. The land.survey.* DICT keys (B-153) cover every FeasStat LABEL but not the four Thai/baht UNIT suffixes; these reuse existing PHRASES keys (tp), consuming only — nothing minted. The two ASCII units MWp/MWh have no phrase entry and reuse the existing dashboard.unitMWp/unitMWh DICT keys (t) in the .tsx instead. Confirmed present in i18n-full.json phrases: ล้านบาท, ปี, ยูนิต, ตร.ม., ฿.",
+  "unitMillionBaht": "ล้านบาท",
+  "unitYear": "ปี",
+  "unitUnits": "ยูนิต",
+  "unitSqm": "ตร.ม.",
+  "unitBaht": "฿"
+}
