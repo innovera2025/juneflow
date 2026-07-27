@@ -100,6 +100,20 @@ async function firstBookedSalesUnitId(client: APIRequestContext): Promise<string
 }
 
 /**
+ * The down-instalment seq numbers already recorded for one sales_unit, read from
+ * GET /sales/downs — which post-B-167 sources the AUTHORITATIVE down_payment_txn
+ * (not the lost-update-prone sales_unit.down jsonb mirror). Used to pick a fresh
+ * instalment_no for the race and to assert the read-model count after it.
+ */
+async function downSeqsFor(client: APIRequestContext, salesUnitId: string): Promise<number[]> {
+  const rows = rowsOf(await okJson(await client.get("/api/v1/sales/downs"), "GET /sales/downs"));
+  return rows
+    .filter((r) => String(r.sales_unit_id ?? r.unit_id ?? "") === salesUnitId)
+    .map((r) => Number(r.seq))
+    .filter((n) => Number.isFinite(n));
+}
+
+/**
  * A FRESH un-dealt land_plot id: a plot carrying a positive area + price (so the
  * server-computed 10% deposit is > 0) whose deal JV has NOT been posted yet. The
  * dealt set is derived from the journal (source_doc `deal:<plotId>`). Returns null
@@ -207,7 +221,7 @@ liveDescribe("B-163 sales money-post concurrency (live seeded stack, G4)", () =>
     );
   });
 
-  test("DOWN race: N concurrent first-downs on one booked unit collide on seq → exactly one wins, rest 409", async () => {
+  test("DOWN race: N concurrent submits of the SAME instalment_no on one booked unit collide on unique(sales_unit_id,seq) → exactly one wins, rest 409 (B-167 stable natural key)", async () => {
     const salesUnitId = await firstBookedSalesUnitId(finMgr);
     test.skip(
       salesUnitId == null,
@@ -215,11 +229,22 @@ liveDescribe("B-163 sales money-post concurrency (live seeded stack, G4)", () =>
     );
     const suid = salesUnitId as string;
 
-    // seq is server-derived (existing instalments + 1): all N read the same current
-    // state → the same seq → the same source_doc down:<suid>:<seq> → exactly one wins.
+    // B-167 (Wei=ข-expanded): the down dedup key is now the CLIENT-provided instalment_no
+    // (the "งวดที่ N" selected in DownPaymentReceiveForm), used AS the STABLE
+    // unique(sales_unit_id, seq) key — NOT the old server-derived count+1, which let a
+    // SERIALIZED reader (count read after a prior commit) compute a fresh seq and ESCAPE
+    // the index → b163 previously caught [201,409,201] = double-post. Pick a FRESH
+    // instalment_no (max existing + 1) so this is a genuine first-post of that งวด, then
+    // fire N concurrent submits of the SAME instalment_no → they collide on the unique
+    // index → exactly one commits, the losers trip 23505 → 409 (whole tx rolls back).
+    const seqsBefore = await downSeqsFor(finMgr, suid);
+    const target = (seqsBefore.length ? Math.max(...seqsBefore) : 0) + 1;
+
     const responses = await Promise.all(
       Array.from({ length: N }, () =>
-        finMgr.post("/api/v1/sales/downs", { data: { sales_unit_id: suid, amount: DOWN_AMOUNT } }),
+        finMgr.post("/api/v1/sales/downs", {
+          data: { sales_unit_id: suid, amount: DOWN_AMOUNT, instalment_no: target },
+        }),
       ),
     );
     const statuses = responses.map((r) => r.status());
@@ -242,6 +267,21 @@ liveDescribe("B-163 sales money-post concurrency (live seeded stack, G4)", () =>
         expect(await errorCode(res), "down loser 409 → INVALID_STATE").toBe("INVALID_STATE");
       }
     }
+
+    // B-167 SECOND defect (read-model lost-update): GET /sales/downs now reads the
+    // authoritative down_payment_txn (not the jsonb mirror overwritten wholesale from an
+    // outside-tx read). After the race the unit must carry EXACTLY one MORE instalment
+    // than before, with the winning instalment_no present exactly once — proving no
+    // double-post AND no undercount.
+    const seqsAfter = await downSeqsFor(finMgr, suid);
+    expect(
+      seqsAfter.length,
+      `exactly one new instalment recorded (before ${seqsBefore.length}, after ${seqsAfter.length})`,
+    ).toBe(seqsBefore.length + 1);
+    expect(
+      seqsAfter.filter((s) => s === target),
+      `winning instalment_no ${target} appears exactly once (no double-post, no undercount)`,
+    ).toHaveLength(1);
   });
 
   test("DEAL race: N concurrent buy-deals on one fresh plot → exactly one 200/201, rest 409, no 5xx", async () => {

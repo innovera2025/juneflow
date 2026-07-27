@@ -17,11 +17,12 @@
  * the per-unit register.
  *
  * money = SERVER (rule: this is a WRITE screen with money authority): the register is a
- * pure read; the receive modal POSTs ONLY { sales_unit_id, amount, paid_at? } — the
- * server auto-assigns the instalment seq (existing + 1), posts + balances the receipt
- * JV (Dr 1020 bank / Cr 2040 advance-received = amount), and returns jv_no. The client
- * NEVER sends a seq, a Dr/Cr line, or a JV/RV number (buildDownBody enforces this). A
- * duplicate seq answers 409 (idempotent replay), surfaced honestly by the form.
+ * pure read; the receive modal POSTs { sales_unit_id, instalment_no (+ seq alias),
+ * amount, paid_at? } — B-167: the client sends the user-selected instalment number (the
+ * server keys unique(sales_unit_id, seq) on it), posts + balances the receipt JV (Dr 1020
+ * bank / Cr 2040 advance-received = amount), and returns jv_no. The client NEVER sends a
+ * Dr/Cr line or a JV/RV number (buildDownBody enforces this). A duplicate instalment
+ * answers 409 (a repeat instalment via the unique key), surfaced honestly by the form.
  *
  * REAL vs em-dash (honest, never fabricated) — see sales-down-rows.ts:
  *   - customer name  -> the /sales/downs wire has NO customer_id -> em-dash (the modal
@@ -52,7 +53,7 @@
  * fabricated toast (gl.close precedent). Tokens back every colour (rule 6); ZERO Thai/baht
  * in this .tsx (B-073) — every glyph lives only in i18n-full.json.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
@@ -73,6 +74,7 @@ import {
   customerNameById,
   downSubmittable,
   buildDownBody,
+  nextInstalmentNo,
   type UnitDownRow,
   type DownDraft,
 } from "./sales-down-rows";
@@ -215,13 +217,20 @@ function TabBar({ tabs }: { tabs: readonly { id: string; label: string; count: s
  * DownReceiveForm — the receive-down-payment modal body (sales-process.jsx
  * DownPaymentReceiveForm), inlined like the prototype keeps it in sales-process.jsx.
  *
- * WIRED: a REAL POST /sales/downs. money=SERVER — the client supplies ONLY the unit,
- * the received amount, and an optional receive date; the server assigns the seq, posts +
- * balances the JV, and returns jv_no.
+ * WIRED: a REAL POST /sales/downs. money=SERVER — the client supplies the unit, the
+ * user-selected instalment number (B-167), the received amount, and an optional receive
+ * date; the server uses the instalment number as the natural-key seq, posts + balances
+ * the JV, and returns jv_no.
+ *
+ * B-167 (P3 promote gate): the prototype's instalment-no Select (sales-process.jsx:465) is
+ * RESTORED — the client sends the selected instalment number as `instalment_no` (+ `seq`
+ * alias · Entity-opaque · field name coordinated with orch-A, C-267). The server keys the
+ * unique(sales_unit_id, seq) on it (STABLE natural key) instead of the old server-derived
+ * count+1 (the serialized-escape that double-posted under concurrency, C-268/B-165).
  *
  * HONEST DIVERGENCES (flagged, never fabricated):
- *   - the prototype's instalment-no field is DROPPED: the server owns the seq
- *     (existing + 1) — collecting it would gather data the client must not send.
+ *   - the instalment-no Select shows the number only (no 'of N' plan-total / per-instalment
+ *     amount — neither is on the wire); options run 1..next-instalment.
  *   - the prototype's payment-method field is DROPPED: the POST body has NO
  *     method counterpart (ar-rv-form drop-not-collect precedent).
  *   - the prototype's auto-GL box (Dr 1101 / Cr 2151, RV-2026-0096) is DROPPED: posting a
@@ -237,6 +246,7 @@ function DownReceiveForm({ onClose }: { onClose: () => void }) {
   const ctx = useShellCtx();
 
   const contractsQ = useSalesContracts();
+  const downsQ = useSalesDowns();
   const customersQ = useCustomerList();
   const createDown = useCreateSalesDown();
 
@@ -252,15 +262,24 @@ function DownReceiveForm({ onClose }: { onClose: () => void }) {
     () => customerNameById((customersQ.data ?? []).map(toCustomerRef)),
     [customersQ.data],
   );
+  // B-167: the user selects the instalment-no (instalment number). Default = the unit's next
+  // instalment (recorded count + 1); it resets whenever the chosen unit changes.
+  const downRows = useMemo(() => (downsQ.data ?? []).map(toDownRow), [downsQ.data]);
+  const nextSeq = nextInstalmentNo(downRows, salesUnitId);
+  const [instalmentNo, setInstalmentNo] = useState(1);
+  useEffect(() => {
+    setInstalmentNo(nextSeq);
+  }, [nextSeq]);
 
   const amount = Number.parseFloat(amountRaw);
   const amountNum = Number.isFinite(amount) ? amount : 0;
-  const draft: DownDraft = { salesUnitId, amount: amountNum, paidAt };
+  const draft: DownDraft = { salesUnitId, instalmentNo, amount: amountNum, paidAt };
 
   const submit = () => {
     if (!downSubmittable(draft)) return;
-    // money=SERVER: only { sales_unit_id, amount, paid_at? } — the server owns the seq +
-    // the JV; a duplicate seq (409) is surfaced honestly below.
+    // money=SERVER: the client sends the unit, the selected instalment number, and the
+    // amount (+ optional paid_at) — never a Dr/Cr line or a JV/RV number; the server posts
+    // the JV. A duplicate instalment (409 via unique(sales_unit_id, seq)) surfaces below.
     createDown.mutate(buildDownBody(draft), {
       // No success toast (the notifyReceiveSaved key is absent + names a mock RV number
       // the server does not return): the register refresh (the hook invalidates the list)
@@ -280,6 +299,24 @@ function DownReceiveForm({ onClose }: { onClose: () => void }) {
             {units.map((u) => (
               <option key={u.id} value={u.id}>
                 {custMap.get(u.customerId) || DASH}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {/* B-167: instalment-no — the instalment number the user selects; sent as instalment_no
+            (the server uses it as the natural-key seq). Default = the unit's next
+            instalment; options run 1..next (backfill allowed; the server dedups a repeat
+            with 409 via unique(sales_unit_id, seq)). */}
+        <Field label={t("sales.down.fieldInstallmentNo")} required>
+          <select
+            value={instalmentNo}
+            onChange={(e) => setInstalmentNo(Number(e.target.value))}
+            className="num"
+            style={{ ...headInput, fontFamily: "var(--font-num)" }}
+          >
+            {Array.from({ length: Math.max(nextSeq, instalmentNo) }, (_, i) => i + 1).map((seq) => (
+              <option key={seq} value={seq}>
+                {seq}
               </option>
             ))}
           </select>

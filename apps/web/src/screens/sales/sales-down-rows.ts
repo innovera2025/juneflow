@@ -41,12 +41,14 @@
  *   (the register row count). Everything requiring a time-window / due schedule / plan
  *   total is em-dashed (ar-rv "RV this month" precedent).
  *
- * RECEIVE (POST /sales/downs) — money=SERVER: the client composes ONLY
- * { sales_unit_id, amount, paid_at? }. The server auto-assigns the instalment seq
- * (existing length + 1), posts + balances the receipt JV (Dr 1020 bank / Cr 2040
- * advance-received = amount), and returns jv_no. The client NEVER sends a seq, a
- * Dr/Cr line, or a JV/RV number (buildDownBody enforces this). A duplicate seq answers
- * 409 (idempotent replay), surfaced honestly by the form.
+ * RECEIVE (POST /sales/downs) — money=SERVER: the client composes
+ * { sales_unit_id, instalment_no (+ seq alias), amount, paid_at? }. B-167: the client
+ * sends the USER-SELECTED instalment number — the server keys unique(sales_unit_id, seq)
+ * on it (a STABLE natural key, replacing the old server-derived count+1 that escaped
+ * serialization under concurrency). The server posts + balances the receipt JV (Dr 1020
+ * bank / Cr 2040 advance-received = amount) and returns jv_no. The client NEVER sends a
+ * Dr/Cr line or a JV/RV number (buildDownBody enforces this). A duplicate instalment
+ * answers 409, surfaced honestly by the form.
  *
  * No Thai/baht leaks here (B-073) — formatMoney is ASCII digits + commas only; every
  * visible label is resolved via t() in the .tsx from the sales.down.* / common.* dict.
@@ -231,32 +233,61 @@ export function customerNameById(customers: readonly CustomerRef[] | undefined):
 }
 
 /**
- * The receive-form draft — the ONLY fields the client owns. money=SERVER: the seq,
- * the Dr/Cr JV lines, and the jv_no are all the server's (never in this draft).
+ * The receive-form draft — the fields the client owns. money=SERVER: the Dr/Cr JV
+ * lines and the jv_no are the server's (never in this draft). B-167: the client now
+ * DOES provide the instalment number (the instalment-no the user selects) — the server uses it
+ * AS the natural-key seq (unique(sales_unit_id, seq) dedups the concurrent-receipt
+ * race). The client still never sends a Dr/Cr line, a server-computed amount, or a
+ * JV/RV number.
  */
 export interface DownDraft {
   /** The chosen sales_unit_id (REQUIRED). */
   salesUnitId: string;
+  /** The instalment number the user selects (instalment-no N · REQUIRED, integer >= 1) — B-167. */
+  instalmentNo: number;
   /** The real cash received (REQUIRED, finite > 0 — a legitimate client value). */
   amount: number;
   /** Optional receive date (ISO); "" -> omitted so the server defaults to today. */
   paidAt: string;
 }
 
-/** The submit is enabled once a unit is chosen and a positive amount is entered. */
+/** Submit is enabled once a unit + a valid instalment number + a positive amount are set. */
 export function downSubmittable(d: DownDraft): boolean {
-  return d.salesUnitId.trim() !== "" && Number.isFinite(d.amount) && d.amount > 0;
+  return (
+    d.salesUnitId.trim() !== "" &&
+    Number.isInteger(d.instalmentNo) &&
+    d.instalmentNo >= 1 &&
+    Number.isFinite(d.amount) &&
+    d.amount > 0
+  );
 }
 
 /**
- * Compose the opaque POST /sales/downs body from the draft. money=SERVER: ONLY
- * sales_unit_id + amount (+ paid_at when supplied) — NEVER a seq, a Dr/Cr line, or a
- * JV/RV number. The server assigns the seq (existing + 1), posts + balances the JV,
- * and returns jv_no.
+ * The default instalment number to receive for a unit = its recorded-instalment count
+ * + 1 (mirrors the server's prior auto-seq). Derived from the flat register rows; 1
+ * when the unit has no instalments yet or no unit is chosen.
+ */
+export function nextInstalmentNo(
+  rows: readonly { salesUnitId: string }[],
+  salesUnitId: string,
+): number {
+  if (!salesUnitId) return 1;
+  return rows.filter((r) => r.salesUnitId === salesUnitId).length + 1;
+}
+
+/**
+ * Compose the opaque POST /sales/downs body from the draft. B-167: the client-selected
+ * instalment number is sent under BOTH `instalment_no` (the ruled field name) and `seq`
+ * (the backend's internal column) — the Entity body is opaque, so sending both makes the
+ * web + backend agree regardless of the handler's pick() order (coordinated with orch-A,
+ * C-267). money=SERVER: the client NEVER sends a Dr/Cr line, a server-computed amount, or
+ * a JV/RV number — the server posts + balances the JV and returns jv_no.
  */
 export function buildDownBody(d: DownDraft): Record<string, unknown> {
   const body: Record<string, unknown> = {
     sales_unit_id: d.salesUnitId.trim(),
+    instalment_no: d.instalmentNo,
+    seq: d.instalmentNo,
     amount: d.amount,
   };
   const paidAt = d.paidAt.trim();

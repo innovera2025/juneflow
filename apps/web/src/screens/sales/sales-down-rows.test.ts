@@ -19,6 +19,7 @@ import {
   customerNameById,
   downSubmittable,
   buildDownBody,
+  nextInstalmentNo,
   type DownRow,
   type DownDraft,
 } from "./sales-down-rows";
@@ -164,33 +165,59 @@ describe("toContractUnit + toCustomerRef + customerNameById", () => {
 });
 
 describe("downSubmittable", () => {
-  it("requires a unit and a positive finite amount", () => {
-    const base: DownDraft = { salesUnitId: "u-1", amount: 47350, paidAt: "" };
+  it("requires a unit, a valid instalment number, and a positive finite amount", () => {
+    const base: DownDraft = { salesUnitId: "u-1", instalmentNo: 8, amount: 47350, paidAt: "" };
     expect(downSubmittable(base)).toBe(true);
     expect(downSubmittable({ ...base, salesUnitId: "" })).toBe(false);
     expect(downSubmittable({ ...base, salesUnitId: "   " })).toBe(false);
+    expect(downSubmittable({ ...base, instalmentNo: 0 })).toBe(false);
+    expect(downSubmittable({ ...base, instalmentNo: -1 })).toBe(false);
+    expect(downSubmittable({ ...base, instalmentNo: 1.5 })).toBe(false);
     expect(downSubmittable({ ...base, amount: 0 })).toBe(false);
     expect(downSubmittable({ ...base, amount: -1 })).toBe(false);
     expect(downSubmittable({ ...base, amount: Number.NaN })).toBe(false);
   });
 });
 
-describe("buildDownBody (money=SERVER contract)", () => {
-  it("sends ONLY sales_unit_id + amount (+ paid_at when supplied) — never seq/Dr-Cr/jv", () => {
-    const body = buildDownBody({ salesUnitId: "u-1", amount: 47350, paidAt: "2026-05-25" });
-    expect(body).toEqual({ sales_unit_id: "u-1", amount: 47350, paid_at: "2026-05-25" });
-    // The client never composes the server's fields.
-    expect(body).not.toHaveProperty("seq");
+describe("buildDownBody (money=SERVER contract · B-167)", () => {
+  it("sends sales_unit_id + the selected instalment (instalment_no + seq alias) + amount + paid_at — never Dr/Cr/jv", () => {
+    const body = buildDownBody({ salesUnitId: "u-1", instalmentNo: 8, amount: 47350, paidAt: "2026-05-25" });
+    expect(body).toEqual({
+      sales_unit_id: "u-1",
+      instalment_no: 8,
+      seq: 8,
+      amount: 47350,
+      paid_at: "2026-05-25",
+    });
+    // B-167: the client-selected instalment number IS sent (under both names for the
+    // web+backend field-name coordination). The client still never composes JV fields.
+    expect(body.instalment_no).toBe(8);
+    expect(body.seq).toBe(8);
     expect(body).not.toHaveProperty("dr");
     expect(body).not.toHaveProperty("cr");
     expect(body).not.toHaveProperty("jv_no");
   });
 
   it("omits paid_at when blank (server defaults to today) and trims the unit id", () => {
-    expect(buildDownBody({ salesUnitId: "  u-2  ", amount: 100, paidAt: "" })).toEqual({
+    expect(buildDownBody({ salesUnitId: "  u-2  ", instalmentNo: 1, amount: 100, paidAt: "" })).toEqual({
       sales_unit_id: "u-2",
+      instalment_no: 1,
+      seq: 1,
       amount: 100,
     });
-    expect(buildDownBody({ salesUnitId: "u-3", amount: 100, paidAt: "   " })).not.toHaveProperty("paid_at");
+    expect(
+      buildDownBody({ salesUnitId: "u-3", instalmentNo: 1, amount: 100, paidAt: "   " }),
+    ).not.toHaveProperty("paid_at");
+  });
+});
+
+describe("nextInstalmentNo", () => {
+  it("returns the unit's recorded-count + 1; 1 for a fresh unit or no selection", () => {
+    const rows = [{ salesUnitId: "u-1" }, { salesUnitId: "u-1" }, { salesUnitId: "u-2" }];
+    expect(nextInstalmentNo(rows, "u-1")).toBe(3);
+    expect(nextInstalmentNo(rows, "u-2")).toBe(2);
+    expect(nextInstalmentNo(rows, "u-new")).toBe(1);
+    expect(nextInstalmentNo(rows, "")).toBe(1);
+    expect(nextInstalmentNo([], "u-1")).toBe(1);
   });
 });
