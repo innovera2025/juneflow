@@ -270,6 +270,24 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "land-survey",
+      "route": "land.survey",
+      "ref": "app-baseline/land-survey.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "land-dd",
+      "route": "land.dd",
+      "ref": "app-baseline/land-dd.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
