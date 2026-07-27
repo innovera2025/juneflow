@@ -311,6 +311,11 @@ export const leads = pgTable("lead", {
   interest: text("interest"),
   stage: leadStage("stage").notNull().default("lead"),
   hot: boolean("hot").notNull().default(false),
+  // SA-1 (B-158 Wei=ก): 3-state warmth (hot/warm/cold) superseding the hot boolean.
+  // Additive + non-breaking — `hot` is retained for back-compat (leadWire still emits
+  // it); migration 0042 backfills warmth from hot (true→'hot', false→'warm'). The web
+  // CRM kanban reads warmth; a later cleanup may drop hot once nothing reads it.
+  warmth: text("warmth"),
   lastContactAt: date("last_contact_at"),
   note: text("note"),
   ownerUserId: uuid("owner_user_id").references(() => users.id, {

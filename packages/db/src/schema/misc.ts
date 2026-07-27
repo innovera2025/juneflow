@@ -56,6 +56,13 @@ export const landPlots = pgTable("land_plot", {
   currencyCode: text("currency_code").notNull().default("THB"),
   stage: text("stage"),
   tenure: text("tenure"),
+  // LA-2 (B-158 Wei=ก): Land Bank registry columns visible in the prototype but not
+  // previously modelled — additive nullable (a plot without them renders em-dash).
+  title: text("title"),
+  tambon: text("tambon"),
+  amphoe: text("amphoe"),
+  prov: text("prov"),
+  owner: text("owner"),
   ddChecklist: jsonb("dd_checklist").$type<unknown>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
@@ -181,3 +188,69 @@ export const auditLogs = pgTable("audit_log", {
     .notNull()
     .defaultNow(),
 }, (t) => [index("audit_log_company_idx").on(t.companyId)]);
+
+/**
+ * LoanApplication — a mortgage application for a sold unit (SA-6 · B-157 Wei=ก;
+ * sales.jsx SalesLoan: bank / ask / approved / term / submit + result dates /
+ * 5-state status). The prototype's single sales_unit.loan numeric could not carry
+ * this — it is its own record. money columns carry currency_code (server-owned);
+ * ask/approved are RECORDED as supplied (SA-6 is a recorded application, not a GL
+ * posting — no money=SERVER recompute). company-scoped (company_id root).
+ */
+export const loanApplications = pgTable("loan_application", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  salesUnitId: uuid("sales_unit_id").references(() => salesUnits.id, {
+    onDelete: "set null",
+  }),
+  bank: text("bank"),
+  askAmt: numeric("ask_amt", { precision: 16, scale: 2 }),
+  approvedAmt: numeric("approved_amt", { precision: 16, scale: 2 }),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  term: integer("term"), // loan term in years
+  submitDate: date("submit_date"),
+  resultDate: date("result_date"),
+  // 5-state (sales.jsx): submitted | approved | partial | rejected | transfer
+  status: text("status").notNull().default("submitted"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [index("loan_application_company_idx").on(t.companyId)]);
+
+/**
+ * DownPaymentTxn — one installment of a unit's down-payment schedule (SA-5 · B-158
+ * Wei=ก; sales-process.jsx SalesDown: seq · due · amount · paid_at · RV-per-งวด ·
+ * done/total derive). Supersedes the sales_unit.down jsonb array. CREATED here in
+ * 0042 but WIRED in batch-2 (per B-161 rec — batch-1 createSalesDown posts the
+ * simple receipt); rv_id is a soft uuid ref to finance.rv (no cross-schema FK, per
+ * the issue_line.cc_id precedent). company-scoped; money col carries currency_code.
+ */
+export const downPaymentTxns = pgTable("down_payment_txn", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  salesUnitId: uuid("sales_unit_id")
+    .notNull()
+    .references(() => salesUnits.id, { onDelete: "cascade" }),
+  seq: integer("seq"),
+  dueDate: date("due_date"),
+  amount: numeric("amount", { precision: 16, scale: 2 }),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  paidAt: date("paid_at"),
+  rvId: uuid("rv_id"), // soft ref → finance.rv.id (no cross-schema FK)
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  index("down_payment_txn_company_idx").on(t.companyId),
+  index("down_payment_txn_unit_idx").on(t.salesUnitId),
+]);
