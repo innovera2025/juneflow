@@ -42,6 +42,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import {
+  downPaymentTxns,
   jvLines,
   jvs,
   landPlots,
@@ -64,6 +65,7 @@ type LeadRow = typeof leads.$inferSelect;
 type LandPlotRow = typeof landPlots.$inferSelect;
 type SalesUnitRow = typeof salesUnits.$inferSelect;
 type LoanRow = typeof loanApplications.$inferSelect;
+type DownPaymentTxnRow = typeof downPaymentTxns.$inferSelect;
 type JvRow = typeof jvs.$inferSelect;
 type LeadStage = (typeof leadStage.enumValues)[number];
 
@@ -626,12 +628,12 @@ async function createSalesBooking(
 }
 
 // POST /sales/downs — record one down-payment instalment + its receipt JV
-// (sales-process.jsx SalesDown). Load the sales_unit by id (404), append { seq,
-// amount, paid_at } to the down jsonb array (seq = existing length + 1). The
-// received amount (validated finite > 0) posts Dr 1020 bank / Cr 2040 advance-
-// received = amount, keyed source_doc `down:<salesUnitId>:<seq>` (per-instalment
-// idempotency). Unit update + JV are ONE transaction. Does NOT write the
-// down_payment_txn table (batch-2) and does NOT generate a schedule.
+// (sales-process.jsx SalesDown). Load the sales_unit by id (404). The received
+// amount (validated finite > 0) posts Dr 1020 bank / Cr 2040 advance-received =
+// amount, keyed source_doc `down:<salesUnitId>:<seq>`. B-165: seq + the
+// down_payment_txn row + the JV + the jsonb mirror are ALL written in ONE tx with
+// the seq computed in-tx against down_payment_txn (unique(sales_unit_id, seq)) so
+// concurrent first-downs collide → 409 (no double-post). Does NOT generate a schedule.
 async function createSalesDown(
   db: TenantDb,
   body: Record<string, unknown>,
@@ -651,15 +653,8 @@ async function createSalesDown(
   if (!unit) return notFound(reply, `sales unit ${salesUnitId} not found`);
 
   const existingDown = Array.isArray(unit.down) ? unit.down : [];
-  const seq = existingDown.length + 1;
   const paidAt =
     str(pick(body, "paid_at", "paidAt")).trim() || new Date().toISOString().slice(0, 10);
-
-  const sourceDoc = `down:${salesUnitId}:${seq}`;
-  const priorJv = (await db.select(jvs, eq(jvs.sourceDoc, sourceDoc))) as JvRow[];
-  if (priorJv.length > 0) {
-    return conflict(reply, `down instalment ${seq} for unit ${salesUnitId} already recorded`);
-  }
 
   const acctIds = await resolveAccountIds(db, [ACCT.bank, ACCT.advanceReceived]);
   const bankId = acctIds.get(ACCT.bank);
@@ -682,20 +677,49 @@ async function createSalesDown(
     return conflict(reply, "internal: down journal entry does not balance");
   }
 
-  const newDown = [...existingDown, { seq, amount: round2(amt), paid_at: paidAt }];
-
+  // B-165 (money double-post fix): the seq + ALL writes happen INSIDE the tx. seq =
+  // (in-tx count of this unit's down_payment_txn rows) + 1 — two concurrent first-
+  // downs both read the same committed count (an uncommitted insert is invisible
+  // under READ COMMITTED) → both compute seq=1 → the down_payment_txn_unit_seq_uq
+  // unique index lets exactly one win; the loser's insert trips 23505 → its whole tx
+  // rolls back → 409 (no duplicate instalment, no duplicate receipt JV). The prior
+  // code read seq = down.length+1 OUTSIDE the tx, so concurrent first-downs saw
+  // distinct committed lengths → distinct seqs → both committed (b163 live-E2E
+  // [201,201] double-post). This wires down_payment_txn (SA-5/B-161b) as the guard.
   try {
-    await db.transaction(async (tx) => {
-      await tx.update(salesUnits, { down: newDown }, eq(salesUnits.id, salesUnitId)).returning();
-      await tx.insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `sales-down ${salesUnitId}:${seq}` }).returning();
+    const newDown = await db.transaction(async (tx) => {
+      const priorTxns = (await tx.select(
+        downPaymentTxns,
+        eq(downPaymentTxns.salesUnitId, salesUnitId),
+      )) as DownPaymentTxnRow[];
+      const seq = priorTxns.length + 1;
+      const sourceDoc = `down:${salesUnitId}:${seq}`;
+      // the instalment row — the unique(sales_unit_id, seq) dedup point (SA-5).
+      await tx
+        .insert(downPaymentTxns, {
+          salesUnitId,
+          seq,
+          amount: moneyStr(amt),
+          currencyCode,
+          paidAt,
+        })
+        .returning();
+      // the balanced receipt JV (source_doc down:<unit>:<seq> — a second unique guard).
+      await tx
+        .insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `sales-down ${salesUnitId}:${seq}` })
+        .returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+      // jsonb mirror so the existing GET /sales/downs read (listDowns) is unchanged.
+      const nd = [...existingDown, { seq, amount: round2(amt), paid_at: paidAt }];
+      await tx.update(salesUnits, { down: nd }, eq(salesUnits.id, salesUnitId)).returning();
+      return nd;
     });
     return reply.code(201).send({ ...unitWire({ ...unit, down: newDown }), jv_no: jvNo });
   } catch (err) {
     if (isUniqueViolation(err)) {
       return reply.code(409).send({
         code: "INVALID_STATE",
-        message: `down instalment ${seq} for unit ${salesUnitId} already recorded`,
+        message: `a concurrent or duplicate down instalment for unit ${salesUnitId} was rejected`,
       });
     }
     throw err;

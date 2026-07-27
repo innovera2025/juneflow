@@ -21,6 +21,7 @@
 import {
   pgTable,
   index,
+  uniqueIndex,
   text,
   uuid,
   integer,
@@ -253,4 +254,8 @@ export const downPaymentTxns = pgTable("down_payment_txn", {
 }, (t) => [
   index("down_payment_txn_company_idx").on(t.companyId),
   index("down_payment_txn_unit_idx").on(t.salesUnitId),
+  // B-165: dedup guard for concurrent down instalments — two concurrent first-downs
+  // both compute seq = in-tx count + 1 (uncommitted rows invisible under READ
+  // COMMITTED → both see the same count → same seq) and collide here → 23505 → 409.
+  uniqueIndex("down_payment_txn_unit_seq_uq").on(t.salesUnitId, t.seq),
 ]);
