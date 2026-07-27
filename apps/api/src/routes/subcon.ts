@@ -57,7 +57,7 @@
 // then updates only the resolved ids — a foreign id resolves to nothing → 404 and
 // is never written). Without a resolved tenant, request.db is absent → 401.
 import type { FastifyInstance } from "fastify";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   subconContracts,
   workPeriods,
@@ -180,6 +180,18 @@ const WO_PR_HOPS = [
   { fk: prs.projectId, parent: projects },
 ];
 const PR_HOPS = [{ fk: prs.projectId, parent: projects }];
+
+/**
+ * B-149 optimistic-lock miss: a guarded status flip matched 0 rows because a
+ * concurrent inspect/approve-payment already moved the period out of its expected
+ * pre-state. Thrown inside the transaction so the whole write rolls back → 409.
+ */
+class StaleStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StaleStateError";
+  }
+}
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -823,13 +835,21 @@ export function registerSubconRoute(app: FastifyInstance): void {
         eq(workPeriods.contractId, resolved.contract.id),
       );
       const warning = progressWarning(resolved.period, siblings);
+      // B-149 optimistic guard: fold the inspectable pre-state into the WHERE so a
+      // concurrent pass/reject that already moved this period matches 0 rows → 409.
       const [period] = await db.updateThroughChain(
         workPeriods,
         PERIOD_HOPS,
         { status: "passed" },
-        eq(workPeriods.id, id),
+        and(eq(workPeriods.id, id), inArray(workPeriods.status, ["delivered", "inspecting"])),
       );
-      return reply.code(200).send({ ...periodWire(period!), warning });
+      if (!period) {
+        return reply.code(409).send({
+          code: "INVALID_STATE",
+          message: "only a delivered work period can be inspected",
+        });
+      }
+      return reply.code(200).send({ ...periodWire(period), warning });
     }
 
     // REJECT → rejected + a Defect List (flows.html L47 "ตีกลับ + Defect List
@@ -856,36 +876,49 @@ export function registerSubconRoute(app: FastifyInstance): void {
     // The status flip + acceptance-ensure + defect inserts are ONE inspection —
     // a single transaction so a rejected period can never exist without its
     // Defect List (the defects hang off the acceptance).
-    const { period, createdDefects } = await db.transaction(async (tx) => {
-      const [period] = await tx.updateThroughChain(
-        workPeriods,
-        PERIOD_HOPS,
-        { status: "rejected" },
-        eq(workPeriods.id, id),
-      );
-      // Defects attach to the period's acceptance — ensure one exists (create an
-      // empty acceptance if the contractor delivered without docs/photos).
-      const acceptanceId = existing
-        ? existing.id
-        : (await tx.insertThrough(acceptances, projects, projectId, [{ periodId: id }]))[0]!.id;
-      const createdDefects = defectDrafts.length
-        ? await tx.insertThrough(
-            defects,
-            projects,
-            projectId,
-            defectDrafts.map((d) => ({ ...d, acceptanceId })),
-          )
-        : [];
-      return { period: period!, createdDefects };
-    });
+    try {
+      const { period, createdDefects } = await db.transaction(async (tx) => {
+        // B-149 optimistic guard: fold the inspectable pre-state into the WHERE so a
+        // concurrent pass/reject that already moved this period matches 0 rows → throw
+        // (roll back the reject + its defects) → 409.
+        const [period] = await tx.updateThroughChain(
+          workPeriods,
+          PERIOD_HOPS,
+          { status: "rejected" },
+          and(eq(workPeriods.id, id), inArray(workPeriods.status, ["delivered", "inspecting"])),
+        );
+        if (!period) {
+          throw new StaleStateError("only a delivered work period can be inspected");
+        }
+        // Defects attach to the period's acceptance — ensure one exists (create an
+        // empty acceptance if the contractor delivered without docs/photos).
+        const acceptanceId = existing
+          ? existing.id
+          : (await tx.insertThrough(acceptances, projects, projectId, [{ periodId: id }]))[0]!.id;
+        const createdDefects = defectDrafts.length
+          ? await tx.insertThrough(
+              defects,
+              projects,
+              projectId,
+              defectDrafts.map((d) => ({ ...d, acceptanceId })),
+            )
+          : [];
+        return { period, createdDefects };
+      });
 
-    // A reject is not an acceptance, so the out-of-sequence advisory does not
-    // apply — warning is honestly null (the reject always proceeds regardless).
-    return reply.code(200).send({
-      ...periodWire(period),
-      defects: createdDefects.map(defectWire),
-      warning: null,
-    });
+      // A reject is not an acceptance, so the out-of-sequence advisory does not
+      // apply — warning is honestly null (the reject always proceeds regardless).
+      return reply.code(200).send({
+        ...periodWire(period),
+        defects: createdDefects.map(defectWire),
+        warning: null,
+      });
+    } catch (err) {
+      if (err instanceof StaleStateError) {
+        return reply.code(409).send({ code: "INVALID_STATE", message: err.message });
+      }
+      throw err;
+    }
   });
 
   // POST /periods/:id/approve-payment — approve the payment of an inspected-PASS
@@ -938,57 +971,74 @@ export function registerSubconRoute(app: FastifyInstance): void {
     // never be `paid` without its AP billing + retention record. ap_billing and
     // retention_ledger carry company_id → plain scoped tx.insert (force-set);
     // the period status flips through the scoped chain door (never a bare update).
-    const { billing } = await db.transaction(async (tx) => {
-      const [billing] = (await tx
-        .insert(apBillings, {
-          vendorId: contract.vendorId,
-          poId: null,
-          grId: null,
-          woId: null,
-          invoiceNo: null,
-          dueDate: null,
-          amount: moneyStr(gross),
-          retention: moneyStr(retentionAmount),
-          currencyCode: contract.currencyCode,
-          status: "draft",
-        })
-        .returning()) as ApBillingRow[];
-      await tx
-        .insert(retentionLedgers, {
-          contractId: contract.id,
-          vendorId: contract.vendorId,
-          woId: null,
-          rate: contract.retentionPct,
-          withheld: moneyStr(retentionAmount),
-          returned: "0",
-          status: "held",
-          currencyCode: contract.currencyCode,
-          scope: `งวด ${period.seq}`,
-        })
-        .returning();
-      await tx.updateThroughChain(
-        workPeriods,
-        PERIOD_HOPS,
-        { status: "paid" },
-        eq(workPeriods.id, id),
-      );
-      return { billing: billing! };
-    });
+    try {
+      const { billing } = await db.transaction(async (tx) => {
+        const [billing] = (await tx
+          .insert(apBillings, {
+            vendorId: contract.vendorId,
+            poId: null,
+            grId: null,
+            woId: null,
+            invoiceNo: null,
+            dueDate: null,
+            amount: moneyStr(gross),
+            retention: moneyStr(retentionAmount),
+            currencyCode: contract.currencyCode,
+            status: "draft",
+          })
+          .returning()) as ApBillingRow[];
+        await tx
+          .insert(retentionLedgers, {
+            contractId: contract.id,
+            vendorId: contract.vendorId,
+            woId: null,
+            rate: contract.retentionPct,
+            withheld: moneyStr(retentionAmount),
+            returned: "0",
+            status: "held",
+            currencyCode: contract.currencyCode,
+            scope: `งวด ${period.seq}`,
+          })
+          .returning();
+        // B-149 optimistic guard: fold the passed pre-state into the WHERE. Two
+        // concurrent approve-payments both pass the JS pre-check above, but only one
+        // can flip passed→paid — the loser matches 0 rows here → throw, rolling back
+        // this call's AP billing + retention (no double payment). No unique index
+        // covers this post, so THIS guard is the sole race backstop.
+        const [advanced] = await tx.updateThroughChain(
+          workPeriods,
+          PERIOD_HOPS,
+          { status: "paid" },
+          and(eq(workPeriods.id, id), eq(workPeriods.status, "passed")),
+        );
+        if (!advanced) {
+          throw new StaleStateError(
+            "only a passed (inspected) work period can be approved for payment",
+          );
+        }
+        return { billing: billing! };
+      });
 
-    // Frozen op (ActionOk) — an informative ok-shaped body. The 50/50 retention
-    // release (handover + 12-mo warranty, B-107d) is a LATER accounting lane;
-    // here the retention is only recorded HELD.
-    return reply.code(200).send({
-      ok: true,
-      status: "paid",
-      basis: period.basis,
-      gross,
-      retention: retentionAmount,
-      net: round2(gross - retentionAmount),
-      ap_billing_id: billing.id,
-      currency_code: contract.currencyCode,
-      warning,
-    });
+      // Frozen op (ActionOk) — an informative ok-shaped body. The 50/50 retention
+      // release (handover + 12-mo warranty, B-107d) is a LATER accounting lane;
+      // here the retention is only recorded HELD.
+      return reply.code(200).send({
+        ok: true,
+        status: "paid",
+        basis: period.basis,
+        gross,
+        retention: retentionAmount,
+        net: round2(gross - retentionAmount),
+        ap_billing_id: billing.id,
+        currency_code: contract.currencyCode,
+        warning,
+      });
+    } catch (err) {
+      if (err instanceof StaleStateError) {
+        return reply.code(409).send({ code: "INVALID_STATE", message: err.message });
+      }
+      throw err;
+    }
   });
 
   // POST /defects/:id/fix — the contractor fixes a defect + uploads the after

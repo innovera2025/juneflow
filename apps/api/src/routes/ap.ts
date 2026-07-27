@@ -43,7 +43,7 @@
 //   - ap_billing `aging` derives from due_date (days past due); the seed carries
 //     no due_date, so aging reads null there rather than an invented age.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   apBillings,
   grs,
@@ -607,12 +607,21 @@ async function approvePvHandler(
     });
   }
 
+  // B-149 optimistic guard: fold the pending pre-state into the WHERE. A
+  // concurrent approve that already flipped this PV updates 0 rows here → 409
+  // (atomic backstop past the JS pre-check above).
   const [updated] = (await db
-    .update(pvs, { status: "approved" }, eq(pvs.id, id))
+    .update(pvs, { status: "approved" }, and(eq(pvs.id, id), eq(pvs.status, "pending")))
     .returning()) as PvRow[];
+  if (!updated) {
+    return reply.code(409).send({
+      code: "INVALID_STATE",
+      message: "only a pending PV can be approved",
+    });
+  }
 
   // Re-resolve the payee for the echo (single-row read).
-  const firstBilling = updated!.billingIds[0] ?? null;
+  const firstBilling = updated.billingIds[0] ?? null;
   let vendorId: string | null = null;
   let vendorName: string | null = null;
   if (firstBilling) {
@@ -626,7 +635,7 @@ async function approvePvHandler(
       vendorName = vendor?.name ?? null;
     }
   }
-  return reply.code(200).send(await pvWire(updated!, { vendorId, vendorName }));
+  return reply.code(200).send(await pvWire(updated, { vendorId, vendorName }));
 }
 
 // ---------------------------------------------------------------------------

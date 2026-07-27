@@ -76,7 +76,7 @@
 //     the coherent existing-account choice; stated here so a ratify blocker is filed.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   inventoryItems,
   issueLines,
@@ -198,6 +198,18 @@ class NegativeStockError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "NegativeStockError";
+  }
+}
+
+/**
+ * B-149 optimistic-lock miss: the guarded status UPDATE matched 0 rows because a
+ * concurrent call already advanced the doc out of its pending pre-state. Thrown
+ * inside the approve transaction so the whole action rolls back → mapped to 409.
+ */
+class StaleStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StaleStateError";
   }
 }
 
@@ -893,12 +905,23 @@ async function approveTransfer(
       for (const row of ledgerRows) {
         await tx.insert(stockLedgers, row).returning();
       }
-      await tx
-        .update(stockTransfers, { status: "approved" }, eq(stockTransfers.id, transferId))
+      // B-149 optimistic guard: fold the pending pre-state into the WHERE so the
+      // flip is atomic. If a concurrent approve already advanced this transfer, 0
+      // rows match here → roll the whole move back (the ledger legs above) and 409.
+      const advanced = await tx
+        .update(
+          stockTransfers,
+          { status: "approved" },
+          and(eq(stockTransfers.id, transferId), eq(stockTransfers.status, "pending")),
+        )
         .returning();
+      if (advanced.length === 0) {
+        throw new StaleStateError(`stock transfer ${transferId} is no longer pending`);
+      }
     });
   } catch (err) {
     if (err instanceof NegativeStockError) return conflict(reply, err.message);
+    if (err instanceof StaleStateError) return conflict(reply, err.message);
     throw err;
   }
 
