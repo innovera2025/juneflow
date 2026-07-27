@@ -429,7 +429,7 @@ export function NewBOQForm({ onClose, presetTemplate, existingNos, existingDocs 
                 type="button"
                 onClick={() => setExcelReady(false)}
                 style={{
-                  marginLeft: "auto",
+                  marginInlineStart: "auto",
                   border: "none",
                   background: "transparent",
                   cursor: "pointer",

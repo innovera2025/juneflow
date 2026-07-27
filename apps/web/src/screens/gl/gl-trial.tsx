@@ -187,12 +187,12 @@ export function GLTrialBalance() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(80)}>{t("cc.thCode")}</th>
-                <th style={th()}>{t("gl.trial.colName")}</th>
-                <th style={th(140, true)}>{t("gl.trial.colCarry")}</th>
-                <th style={th(140, true)}>{t("gl.trial.colDrPeriod")}</th>
-                <th style={th(140, true)}>{t("gl.trial.colCrPeriod")}</th>
-                <th style={th(140, true)}>{t("gl.trial.colBalance")}</th>
+                <th scope="col" style={th(80)}>{t("cc.thCode")}</th>
+                <th scope="col" style={th()}>{t("gl.trial.colName")}</th>
+                <th scope="col" style={th(140, true)}>{t("gl.trial.colCarry")}</th>
+                <th scope="col" style={th(140, true)}>{t("gl.trial.colDrPeriod")}</th>
+                <th scope="col" style={th(140, true)}>{t("gl.trial.colCrPeriod")}</th>
+                <th scope="col" style={th(140, true)}>{t("gl.trial.colBalance")}</th>
               </tr>
             </thead>
             <tbody>

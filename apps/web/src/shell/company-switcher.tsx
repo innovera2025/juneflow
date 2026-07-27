@@ -200,7 +200,7 @@ export function CompanySwitcher() {
         >
           {active.short}
         </span>
-        <span style={{ lineHeight: 1.1, textAlign: "left" }}>
+        <span style={{ lineHeight: 1.1, textAlign: "start" }}>
           <span style={{ display: "block", fontSize: 9.5, color: "var(--text-3)", fontWeight: 500 }}>{ct("companyEyebrow")}</span>
           <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
             {active.short} · {bizShort}

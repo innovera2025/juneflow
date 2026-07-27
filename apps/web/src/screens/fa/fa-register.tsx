@@ -407,15 +407,15 @@ export function FARegister() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(100)}>{t("cc.thCode")}</th>
-                <th style={th()}>{t("fa.colName")}</th>
-                <th style={th(120)}>{t("fa.fieldCat")}</th>
-                <th style={th(100)}>{t("fa.fieldLoc")}</th>
-                <th style={th(80)}>{t("fa.colLife")}</th>
-                <th style={th(130, true)}>{t("fa.colCostBaht")}</th>
-                <th style={th(130, true)}>{t("fa.accumDepr")}</th>
-                <th style={th(130, true)}>{t("fa.colBook")}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(100)}>{t("cc.thCode")}</th>
+                <th scope="col" style={th()}>{t("fa.colName")}</th>
+                <th scope="col" style={th(120)}>{t("fa.fieldCat")}</th>
+                <th scope="col" style={th(100)}>{t("fa.fieldLoc")}</th>
+                <th scope="col" style={th(80)}>{t("fa.colLife")}</th>
+                <th scope="col" style={th(130, true)}>{t("fa.colCostBaht")}</th>
+                <th scope="col" style={th(130, true)}>{t("fa.accumDepr")}</th>
+                <th scope="col" style={th(130, true)}>{t("fa.colBook")}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

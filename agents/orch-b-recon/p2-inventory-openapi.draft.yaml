@@ -1,0 +1,324 @@
+# =============================================================================
+# p2-inventory-openapi.draft.yaml  —  B-141 B7 SACRED inventory openapi round
+# =============================================================================
+# STATUS: references-only draft (orch-B recon). NOT applied to sacred files by
+#   orch-B. orch-A files + implements the real sacred round under
+#   SACRED_OVERRIDE=wei-approved:B-141 (authorization RECORDED BLOCKERS.md:163).
+#   orch-B verifies the applied round is additive (0 removed).
+#
+# PROVENANCE / CITATIONS
+#   - Wei ruling  : BLOCKERS.md:163 (B-141) — B1 standard-cost · B2 stock_ledger
+#                   (per item,warehouse) · B3 transfer_line/issue_line · B4 transfer
+#                   pending->approved atomic dual-warehouse (B-097 txn door) ·
+#                   B5 issue posts cost-to-BOQ (GR->AP class, server money) ·
+#                   B6 negative-stock 409 · B7 authorize ~13 openapi ops.
+#   - Screens     : pototype/inventory.jsx — InventoryItems (L14), InventoryStock
+#                   (L113), InventoryTransfer (L213), InventoryIssue (L269);
+#                   forms ItemAddForm (L327), ItemImportForm (L383), ItemExportForm
+#                   (L458), WarehouseAddForm (L490), TransferAddForm (L524),
+#                   IssueAddForm (L590).
+#   - Schema      : packages/db/src/schema/extensions.ts — warehouses (L85),
+#                   inventoryItems (L106), stockTransfers (L136), materialIssues
+#                   (L169). stock_ledger / transfer_line / issue_line are B2/B3
+#                   NEW tables (orch-A migration; not yet in schema).
+#   - STYLE mirror: apps/api/src/routes/labor.ts + openapi.yaml §labor
+#                   (listLaborWorkers/Attendance/Payroll, lines 2866-2949) —
+#                   Entity-opaque: list -> EntityList, create -> EntityCreated,
+#                   detail -> EntityOk, action -> ActionOk, flat 401 fail-closed.
+#
+# INVARIANTS (hold on every op below — one shared op-set for orch-A + orch-B)
+#   - Tenant-scoped: every table carries company_id; the scoped TenantDb.select()
+#     door is company-scoped by construction. No resolved tenant -> flat 401
+#     ({code:UNAUTHENTICATED} — mirror labor.ts unauthenticated()).
+#   - Money is SERVER-computed, NEVER client: item.price is the standard cost (B1);
+#     transfer.value / issue.value / stock balance value = server Sum(qty x
+#     standard-cost). Every money field carries currency_code (default THB).
+#   - Rows are opaque Entity (snake_case wire of REAL columns — C10, no fabrication).
+#   - ADDITIVE-ONLY: reuses existing components (Entity, EntityList, EntityOk,
+#     EntityCreated, ActionOk, IdPath, Filter, Page, Unauthorized, NotFound).
+#     No component removed/renamed. New tag `inventory` (orch-A registers it).
+#
+# OP INDEX (13 ops · 8 [read] / 5 [write])
+#   1  GET  /inventory/items                       [read]  Item Master list
+#   2  GET  /inventory/items/{id}                  [read]  item detail
+#   3  POST /inventory/items                       [write] create item (plain)
+#   4  GET  /inventory/warehouses                  [read]  warehouse list
+#   5  POST /inventory/warehouses                  [write] create warehouse (plain)
+#   6  GET  /inventory/stock                       [read]  per-warehouse balance
+#   7  GET  /inventory/transfers                   [read]  transfer list
+#   8  GET  /inventory/transfers/{id}              [read]  transfer detail (+lines)
+#   9  POST /inventory/transfers                   [write] * create transfer (pending)
+#   10 POST /inventory/transfers/{id}/approve      [write] * approve (atomic dual-wh)
+#   11 GET  /inventory/issues                      [read]  issue list
+#   12 GET  /inventory/issues/{id}                 [read]  issue detail (+lines)
+#   13 POST /inventory/issues                      [write] * create issue + post
+#   ( * = the 3 mutating ops with money/txn semantics — see MUTATION SEMANTICS )
+#
+#   Deferred / not in this round: ItemImportForm bulk import (fold to a later
+#   /inventory/items/import round, mirror /fa/import) and ItemExportForm
+#   (client-side download, no server mutation) — kept out to hold the ~13 count.
+#
+# MUTATION SEMANTICS (the 3 * ops — money/txn + which posting each triggers)
+#   [9] POST /inventory/transfers  (create, status=pending)
+#       Money: header.value = server Sum(line.qty x item.price[standard-cost]) +
+#       currency_code; client never sends value. Persists stock_transfer header +
+#       transfer_line rows (B3). Txn: NO stock movement, NO JV on create — movement
+#       is deferred to /approve (prototype L578: stock cut only "เมื่อผู้รับยืนยัน").
+#   [10] POST /inventory/transfers/{id}/approve  (pending -> approved)
+#       Txn (B4 · B-097 atomic door — ONE db transaction): for every transfer_line,
+#       decrement stock_ledger(from_warehouse,item) and increment
+#       stock_ledger(to_warehouse,item); then flip status pending->approved.
+#       B6 guard: if any from-wh line would go negative the WHOLE tx rolls back ->
+#       409 (no partial dual-wh move; mirrors B-097 live-rollback proof). Posting:
+#       NONE — internal relocation at standard-cost has no P&L; pure stock_ledger
+#       dual-write, no JV, no cost-to-BOQ.
+#   [13] POST /inventory/issues  (create + post immediately)
+#       Money: header.value = server Sum(line.qty x item.price[standard-cost]) +
+#       currency_code. Persists material_issue header + issue_line rows (B3).
+#       Txn (B-097 atomic door — ONE db transaction): decrement
+#       stock_ledger(from_warehouse,item) per line; B6 guard -> 409 rollback of the
+#       whole issue if any line is short (prototype clamps qty<=stock, server is
+#       authoritative). Posting (B5 · GR->AP cost class, server money): posts
+#       cost-to-BOQ — Dr project WIP / BOQ material cost, Cr inventory asset (at
+#       standard-cost) — cost flows to the issue's project BOQ (prototype L655
+#       "ผูกต้นทุนไปยัง BOQ ของ {proj}"). Exact COA codes = B5 impl detail (orch-A).
+# =============================================================================
+
+paths:
+  # --- ITEMS (Item Master · inventory.jsx InventoryItems L14 / ItemAddForm L327) --
+  /inventory/items:
+    get:
+      tags: [inventory]
+      summary: List inventory items (Item Master)        # [read]
+      operationId: listInventoryItems
+      parameters:
+        - $ref: "#/components/parameters/Filter"          # ?filter — code/name search, cat, warehouse, stock-status
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"       # rows: standard-cost price + currency_code, on-hand stock, status
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [inventory]
+      summary: Create inventory item                      # [write] plain create (no money txn — price is a stored standard cost)
+      operationId: createInventoryItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /inventory/items/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [inventory]
+      summary: Get inventory item detail                  # [read]
+      operationId: getInventoryItem
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- WAREHOUSES (inventory.jsx InventoryStock cards L113 / WarehouseAddForm L490) -
+  /inventory/warehouses:
+    get:
+      tags: [inventory]
+      summary: List warehouses (Stock screen cards)       # [read] item-count / value / alerts / util are derived rollups
+      operationId: listWarehouses
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [inventory]
+      summary: Create warehouse                           # [write] plain create (identity only — name/location/owner)
+      operationId: createWarehouse
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # --- STOCK (per-warehouse balance · inventory.jsx InventoryStock table L163) -----
+  /inventory/stock:
+    get:
+      tags: [inventory]
+      summary: List per-warehouse stock balances          # [read] one row per (item,warehouse) from stock_ledger (B2); qty + value=qty x standard-cost + currency_code + status
+      operationId: listStockBalances
+      parameters:
+        - name: warehouse
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter balances to one warehouse (Stock screen drills a warehouse card -> its item balances).
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # --- TRANSFERS (inventory.jsx InventoryTransfer L213 / TransferAddForm L524) -----
+  /inventory/transfers:
+    get:
+      tags: [inventory]
+      summary: List stock transfers                       # [read] value + currency_code server-owned; status pending/approved
+      operationId: listStockTransfers
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [inventory]
+      # [write] * MONEY/TXN: header.value = server Sum(qty x item.price[standard-cost]) + currency_code; persists stock_transfer + transfer_line (B3);
+      #                      status=pending; NO stock movement + NO JV on create (movement deferred to /approve).
+      summary: Create stock transfer (pending)
+      operationId: createStockTransfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /inventory/transfers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [inventory]
+      summary: Get stock transfer detail (+ lines)        # [read] header + transfer_line rows
+      operationId: getStockTransfer
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /inventory/transfers/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [inventory]
+      # [write] * MONEY/TXN: B4 atomic dual-warehouse move (B-097 door, ONE tx) — per line decrement stock_ledger(from_wh) + increment stock_ledger(to_wh),
+      #                      then status pending->approved. B6: any from-wh line going negative rolls back the WHOLE tx -> 409 (no partial move).
+      #                      POSTING: none — internal relocation at standard-cost, no P&L; pure stock_ledger dual-write (no JV, no cost-to-BOQ).
+      summary: Approve stock transfer — atomic dual-warehouse move (action endpoint)
+      description: >-
+        Status changes go through action endpoints only (api-contract.md).
+        Approve moves stock from -> to in a single transaction (B4); negative
+        stock aborts the whole move with 409 (B6).
+      operationId: approveStockTransfer
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"          # NOTE: Conflict response is NEW — see COMPONENT ADDENDUM below
+
+  # --- ISSUES (inventory.jsx InventoryIssue L269 / IssueAddForm L590) --------------
+  /inventory/issues:
+    get:
+      tags: [inventory]
+      summary: List material issues                       # [read] value + currency_code server-owned; status pending/approved
+      operationId: listMaterialIssues
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [inventory]
+      # [write] * MONEY/TXN: header.value = server Sum(qty x item.price[standard-cost]) + currency_code; persists material_issue + issue_line (B3).
+      #                      B-097 atomic tx: decrement stock_ledger(from_wh) per line; B6 negative-stock -> 409 rollback of whole issue.
+      #                      POSTING (B5, GR->AP class, server money): cost-to-BOQ — Dr project WIP/BOQ material cost, Cr inventory asset (standard-cost).
+      summary: Create material issue (posts + cuts stock)
+      operationId: createMaterialIssue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"          # NOTE: Conflict response is NEW — see COMPONENT ADDENDUM below
+  /inventory/issues/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [inventory]
+      summary: Get material issue detail (+ lines)        # [read] header + issue_line rows
+      operationId: getMaterialIssue
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+# =============================================================================
+# COMPONENT ADDENDUM (still additive — one NEW response, no removals)
+# =============================================================================
+# The negative-stock 409 (B6) needs a Conflict response. openapi.yaml has no
+# `Conflict` response today (grep: only Unauthorized/NotFound/QuotaExceeded/
+# ActionOk/EntityOk/EntityCreated/EntityList). orch-A adds this ONE component
+# under components.responses (additive — nothing else references it yet):
+#
+#   components:
+#     responses:
+#       Conflict:
+#         description: >-
+#           State conflict — the action cannot apply against current state
+#           (e.g. negative stock on transfer-approve / issue-post, B-141 B6).
+#         content:
+#           application/json:
+#             schema:
+#               $ref: "#/components/schemas/Error"
+#
+# If orch-A prefers zero new components, drop the "409" blocks above and let the
+# guard surface as a generic error — but a typed 409 mirrors B-097's txn-door
+# contract and is the honest shape for the negative-stock guard.
+# =============================================================================

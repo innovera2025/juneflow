@@ -89,6 +89,13 @@ export const warehouses = pgTable("warehouse", {
     .references(() => companies.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   location: text("location"),
+  // P2 Inventory (B-141 · Wei warehouse-superset ruling · migration 0041): the
+  // WarehouseAddForm carries code/type/owner/capacity that the 0005 schema lacked.
+  // Additive + nullable (safe ADD COLUMN on the seeded rows). Stable English codes.
+  code: text("code"),
+  type: text("type"),
+  owner: text("owner"),
+  capacity: numeric("capacity", { precision: 18, scale: 4 }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -192,6 +199,96 @@ export const materialIssues = pgTable("material_issue", {
     .notNull()
     .defaultNow(),
 }, (t) => [index("material_issue_company_idx").on(t.companyId)]);
+
+/**
+ * StockLedger — the per-(item, warehouse) append-only movement ledger (B-141 B2,
+ * migration 0041). The 0005 inventory_item.stock scalar is a single total and
+ * cannot express a per-warehouse balance; this ledger is the source of truth:
+ * on-hand(item, warehouse) = Σ(qty) over its rows. qty is SIGNED — positive =
+ * receipt/transfer-in, negative = issue/transfer-out. Written by transfer approve
+ * (two atomic rows, B4), issue post (one -qty row, B5), and receipts. The
+ * negative-stock guard (B6) asserts Σ(qty)+delta ≥ 0 before a -qty write, else 409.
+ * ref_doc records what moved it ("transfer:<id>"/"issue:<id>"). Standard-cost
+ * valuation (B1): value = inventory_item.price × Σ(qty), computed at read.
+ * company_id tenant root; item/warehouse are real FKs (a per-wh balance is
+ * meaningless without both). Append-only → no updated_at.
+ */
+export const stockLedgers = pgTable("stock_ledger", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  itemId: uuid("item_id")
+    .notNull()
+    .references(() => inventoryItems.id, { onDelete: "cascade" }),
+  warehouseId: uuid("warehouse_id")
+    .notNull()
+    .references(() => warehouses.id, { onDelete: "cascade" }),
+  qty: numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
+  refDoc: text("ref_doc"),
+  movedAt: timestamp("moved_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  index("stock_ledger_company_idx").on(t.companyId),
+  // the balance rollup key: Σ(qty) GROUP BY (item, warehouse) WHERE company.
+  index("stock_ledger_item_wh_idx").on(t.companyId, t.itemId, t.warehouseId),
+  index("stock_ledger_warehouse_idx").on(t.warehouseId),
+]);
+
+/**
+ * TransferLine — one line of a stock transfer (B-141 B3, migration 0041). The 0005
+ * stock_transfer header keeps only aggregate qty + value; the TransferAddForm has
+ * per-line {item, qty}. A child row scopes through its parent stock_transfer (no
+ * own company_id — the gr_item precedent). from_wh/to_wh mirror the header's
+ * warehouses (nullable). value/currency stay on the header (standard-cost derived).
+ */
+export const transferLines = pgTable("transfer_line", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transferId: uuid("transfer_id")
+    .notNull()
+    .references(() => stockTransfers.id, { onDelete: "cascade" }),
+  itemId: uuid("item_id")
+    .notNull()
+    .references(() => inventoryItems.id, { onDelete: "cascade" }),
+  qty: numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
+  fromWh: uuid("from_wh").references(() => warehouses.id, { onDelete: "set null" }),
+  toWh: uuid("to_wh").references(() => warehouses.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [index("transfer_line_transfer_idx").on(t.transferId)]);
+
+/**
+ * IssueLine — one line of a material issue (B-141 B3, migration 0041). Child of
+ * material_issue (scopes through the parent — no own company_id). cc_id is an
+ * optional cost-dimension pointer (stored as-is, like the labor/jv cc_id
+ * convention). qty is the issued quantity; the issue's money value is DERIVED
+ * (qty × inventory_item.price, standard-cost) on the header + at post time.
+ */
+export const issueLines = pgTable("issue_line", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  issueId: uuid("issue_id")
+    .notNull()
+    .references(() => materialIssues.id, { onDelete: "cascade" }),
+  itemId: uuid("item_id")
+    .notNull()
+    .references(() => inventoryItems.id, { onDelete: "cascade" }),
+  qty: numeric("qty", { precision: 18, scale: 4 }).notNull().default("0"),
+  ccId: uuid("cc_id"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [index("issue_line_issue_idx").on(t.issueId)]);
 
 // ---------------------------------------------------------------------------
 // Item 2 — Lead / CRM (5-stage funnel) — sales-crm.jsx `LEADS_BY_STAGE`

@@ -135,7 +135,7 @@ function CfSection({
       </tr>
       {section.lines.map((r, i) => (
         <tr key={r.code || `${i}`} style={{ borderTop: "1px solid var(--border)" }}>
-          <td style={{ ...TD, paddingLeft: 30 }}>{r.label || DASH}</td>
+          <td style={{ ...TD, paddingInlineStart: 30 }}>{r.label || DASH}</td>
           <td className="num" style={{ ...TD, textAlign: "right", fontWeight: 600, color: r.amount < 0 ? "var(--danger)" : "var(--text)" }}>
             {formatParen(r.amount)}
           </td>

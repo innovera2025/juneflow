@@ -179,7 +179,7 @@ export function AcceptForm({
           {/* the on-site measured qty is not captured/sent + the unit label is a wire
               gap (B-107a) -> em-dash; the money value (right) is the real period amount. */}
           <span className="num" style={{ fontSize: 14, fontWeight: 700, color: "var(--text-3)" }}>{DASH}</span>
-          <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
+          <span style={{ marginInlineStart: "auto", fontSize: 12.5 }}>
             {t("subcon.equalsValue").replace("{value}", formatMoney(periodAmount))}
           </span>
         </div>
@@ -277,7 +277,7 @@ export function AcceptForm({
         </span>
         <span
           style={{
-            marginLeft: "auto",
+            marginInlineStart: "auto",
             display: "inline-flex",
             alignItems: "center",
             gap: 5,

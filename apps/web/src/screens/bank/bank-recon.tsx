@@ -344,15 +344,15 @@ export function BankReconciliation() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(28)}>
+                <th scope="col" style={th(28)}>
                   {/* Presentational (bulk-reconcile is not wired), checked=matched. */}
                   <input type="checkbox" readOnly />
                 </th>
-                <th style={th(100)}>{tp(P("thDate"))}</th>
-                <th style={th()}>{tp(P("thDesc"))}</th>
-                <th style={th(130, true)}>{tp(P("thAmount"))}</th>
-                <th style={th(160)}>{tp(P("thMatch"))}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(100)}>{tp(P("thDate"))}</th>
+                <th scope="col" style={th()}>{tp(P("thDesc"))}</th>
+                <th scope="col" style={th(130, true)}>{tp(P("thAmount"))}</th>
+                <th scope="col" style={th(160)}>{tp(P("thMatch"))}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

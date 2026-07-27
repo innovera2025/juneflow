@@ -53,7 +53,7 @@
 // The caller's role.approvalLevel must reach the tier the PO's amount demands
 // (the highest triggered tier); a lower tier — or an unattributable caller — 403.
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   pos,
   prs,
@@ -367,9 +367,20 @@ export function registerPoRoute(app: FastifyInstance): void {
       pos,
       PO_HOPS,
       { status: "approved", approvalStep: requiredTierCount(amount) },
-      eq(pos.id, id),
+      and(eq(pos.id, id), eq(pos.status, "pending")),
+      // B-149 optimistic guard — the pending pre-state re-applied to the FINAL
+      // UPDATE (updateThroughChain resolves then updates in two round-trips, so a
+      // guard only in the resolve `where` above would NOT be atomic). A concurrent
+      // approve/reject that already moved this PO re-matches 0 rows here → 409.
+      eq(pos.status, "pending"),
     );
-    return reply.code(200).send(poWire(updated!));
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a pending PO can be approved",
+      });
+    }
+    return reply.code(200).send(poWire(updated));
   });
 
   // POST /po/:id/reject — pending → rejected. reason is REQUIRED by the contract
@@ -421,9 +432,18 @@ export function registerPoRoute(app: FastifyInstance): void {
       pos,
       PO_HOPS,
       { status: "rejected" },
-      eq(pos.id, id),
+      and(eq(pos.id, id), eq(pos.status, "pending")),
+      // B-149 atomic guard on the FINAL UPDATE — a concurrent approve+reject can't
+      // leave a money-approved PO flipped to rejected (loser re-matches 0 rows → 409).
+      eq(pos.status, "pending"),
     );
-    return reply.code(200).send(poWire(updated!));
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a pending PO can be rejected",
+      });
+    }
+    return reply.code(200).send(poWire(updated));
   });
 
   // POST /po/:id/variation-order — attach an add/cut amendment (data-dictionary

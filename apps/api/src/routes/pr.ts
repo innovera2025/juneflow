@@ -58,7 +58,7 @@
 // role.approvalLevel must reach the tier the PR's amount demands (the highest
 // triggered tier); a lower tier — or an unattributable caller — gets 403.
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   boqDocs,
   boqGroups,
@@ -582,9 +582,18 @@ export function registerPrRoute(app: FastifyInstance): void {
         approvalStep: requiredTierCount(amount),
         approvedAt: new Date(),
       },
-      eq(prs.id, id),
+      // B-149 optimistic guard: fold the pending pre-state into the WHERE so the
+      // flip is atomic — a concurrent approve/reject that already moved this PR
+      // updates 0 rows here → 409 (closes the TOCTOU past the JS pre-check above).
+      and(eq(prs.id, id), eq(prs.status, "pending")),
     );
-    return reply.code(200).send(prWire(updated!, amount, currency));
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a pending PR can be approved",
+      });
+    }
+    return reply.code(200).send(prWire(updated, amount, currency));
   });
 
   // POST /pr/:id/reject — pending → rejected. reason is REQUIRED by the contract
@@ -638,8 +647,16 @@ export function registerPrRoute(app: FastifyInstance): void {
       prs.projectId,
       pr.projectId,
       { status: "rejected" },
-      eq(prs.id, id),
+      // B-149: same optimistic guard — a concurrent approve+reject race can no
+      // longer leave a money-approved PR flipped to rejected (0 rows → 409).
+      and(eq(prs.id, id), eq(prs.status, "pending")),
     );
-    return reply.code(200).send(await prWireWithAmount(db, updated!));
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a pending PR can be rejected",
+      });
+    }
+    return reply.code(200).send(await prWireWithAmount(db, updated));
   });
 }

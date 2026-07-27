@@ -400,7 +400,7 @@ export function BOMTemplates() {
                   <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
                     {fill(t("boq.bomUpdatedAt"), { date: DASH })}
                   </span>
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                  <div style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
                     <Btn kind="ghost" size="sm" icon="download" onClick={() => ctx.notify(t("boq.bomExportToast"))}>
                       {t("vendor.btnExport" as DictKey)}
                     </Btn>
@@ -414,13 +414,13 @@ export function BOMTemplates() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                   <thead>
                     <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                      <th style={bomTh(54)}>{tp(P("thCat"))}</th>
-                      <th style={bomTh(86)}>{tp(P("thCode"))}</th>
-                      <th style={bomTh()}>{tp(P("thItem"))}</th>
-                      <th style={bomTh(70, "right")}>{tp(P("thQty"))}</th>
-                      <th style={bomTh(70)}>{tp(P("thUnit"))}</th>
-                      <th style={bomTh(110, "right")}>{tp(P("thPrice"))}</th>
-                      <th style={bomTh(130, "right")}>{tp(P("thTotal"))}</th>
+                      <th scope="col" style={bomTh(54)}>{tp(P("thCat"))}</th>
+                      <th scope="col" style={bomTh(86)}>{tp(P("thCode"))}</th>
+                      <th scope="col" style={bomTh()}>{tp(P("thItem"))}</th>
+                      <th scope="col" style={bomTh(70, "right")}>{tp(P("thQty"))}</th>
+                      <th scope="col" style={bomTh(70)}>{tp(P("thUnit"))}</th>
+                      <th scope="col" style={bomTh(110, "right")}>{tp(P("thPrice"))}</th>
+                      <th scope="col" style={bomTh(130, "right")}>{tp(P("thTotal"))}</th>
                     </tr>
                   </thead>
                   {/* Category bands render from the real BomLine[] (empty until boms.items is

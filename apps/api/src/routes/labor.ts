@@ -1,0 +1,589 @@
+// Labor handlers — Program-2 Op-Core (labor read surface + write/calc slice B-140).
+// Wires the labor.jsx Worker / Attendance / Payroll registers: list the tenant's
+// workers, their daily attendance, and their payroll runs (Wave-0 reads), PLUS the
+// create ops and the payroll → JV posting (B-140). The schema (finance.ts worker /
+// attendance / payroll — Worker → Attendance → Payroll labor-cost chain, superset
+// columns added by migration 0040) and the contract paths (openapi.yaml §finance —
+// opaque EntityList/EntityCreated/ActionOk) ALL pre-exist. This file wires the
+// handlers and is registered in app.ts (registerLaborRoute) by the orchestrator.
+//
+// Contract (openapi.yaml §finance — opaque Entity, NO openapi edit this slice):
+//   GET  /labor/workers          → EntityList    — workers        (listLaborWorkers)
+//   GET  /labor/attendance       → EntityList    — attendance     (listLaborAttendance)
+//   GET  /labor/payroll          → EntityList    — payroll runs   (listLaborPayroll)
+//   POST /labor/workers          → EntityCreated — add a worker    (createLaborWorker)
+//   POST /labor/attendance       → EntityCreated — record a day    (createLaborAttendance)
+//   POST /labor/payroll          → EntityCreated — run payroll     (createLaborPayroll)
+//   POST /labor/payroll/{id}/post→ ActionOk      — post to the GL   (postLaborPayroll)
+// Each row/body is the opaque Entity (snake_case wire of the REAL columns). A
+// read/POST on an opaque endpoint needs no contract change (FLOW-A opaque-Entity).
+//
+// MONEY = SERVER AUTHORITY (gate-4.5 hard rule, B-140 RG-3): a payroll `amount` is
+// NEVER a client value — it is COMPUTED server-side by summing, over the worker's
+// attendance rows in the period, day_rate × day_fraction + ot × (day_rate/8) × 1.5
+// (the 1.5× OT multiplier on the hourly rate = day_rate/8). Likewise
+// attendance.day_fraction is SERVER-DERIVED from `status` ({full:1, half:0.5,
+// absent:0}), never trusted from the body. The payroll → GL post reads the STORED
+// payroll.amount inside the same transaction (never a re-trusted client figure).
+//
+// DIRECTION (labor-is-WIP): posting a payroll capitalises the labor into
+// work-in-progress and pays it from the bank — Dr 1140 งานระหว่างก่อสร้าง (WIP/CIP)
+// / Cr 1020 bank = amount, carrying the payroll's cost-center on both legs. 1140 is
+// a real COA_SEED code (resolved per-tenant at post time — never invented, C-177).
+//
+// Tenant scope (fail closed): worker / attendance / payroll all carry company_id →
+// the scoped TenantDb.select()/insert() doors bind company_id by construction. A
+// supplied worker_id is re-verified against the tenant (scoped select → 400 for a
+// foreign id). jv_line hangs off jv (no company_id) → written through insertThrough
+// (re-proves this tenant owns the just-created parent jv). cc_id is an optional
+// cost-dimension pointer stored as-is (the register wire already emits it raw;
+// cost_center scopes through project and is not re-joined here — honest note). A
+// read needs only a resolved tenant; without one, request.db is absent → flat 401.
+//
+// Financial authorization (B-082 F1 lineage): a create is a financial mutation →
+// finance.create; posting a payroll LOCKS money to the GL → finance.approve
+// (loadCaller/permAllowed) — fail-closed 403 for an unattributable caller or one
+// lacking the perm. Reads gate on the resolved tenant only. AuditLog fires
+// automatically (middleware) on a 2xx.
+//
+// HONEST notes (C10 — flagged, never fabricated):
+//   - a payroll with no attendance in the period computes amount 0 (honest, not an
+//     error) — the register then simply shows a zero run.
+//   - the payroll → GL post is idempotent: source_doc `payroll:<id>` is unique
+//     under the jv_source_doc_uq index (migration 0037), so a double-post trips
+//     23505 → 409 (the pre-check + the DB constraint are both enforced).
+import { randomUUID } from "node:crypto";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { eq } from "drizzle-orm";
+import { attendances, jvLines, jvs, payrolls, workers } from "@juneflow/db/schema";
+import type { TenantDb } from "../db/tenant-db.js";
+import { round2 } from "./money.js";
+import { has, pick, str, toNum } from "./procurement.js";
+import { loadCaller, permAllowed } from "./authz.js";
+import { listEnvelope } from "./list-envelope.js";
+import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+
+type WorkerRow = typeof workers.$inferSelect;
+type AttendanceRow = typeof attendances.$inferSelect;
+type PayrollRow = typeof payrolls.$inferSelect;
+type JvRow = typeof jvs.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** The perms-matrix module (seed MODULE_IDS) that governs finance mutations. */
+const FINANCE_MODULE = "finance";
+
+/**
+ * The WIP/CIP account labor capitalises into — 1140 งานระหว่างก่อสร้าง (a real
+ * COA_SEED code, NOT a named ACCT const in gl-post.ts). Resolved per-tenant at post
+ * time via resolveAccountIds; a tenant whose COA lacks it → honest 409 (C-177).
+ */
+const WIP_LABOR = "1140";
+
+/** The valid attendance statuses (labor.jsx AttendanceForm — มา/ครึ่งวัน/ขาด). */
+const ATTENDANCE_STATUSES = new Set(["full", "half", "absent"]);
+
+/**
+ * status → day_fraction (the pay factor). SERVER-DERIVED, never a client value
+ * (B-140 RG-2): a full day pays 1, half day 0.5, an absence 0. Stored as the
+ * numeric-column string.
+ */
+const DAY_FRACTION: Record<string, string> = {
+  full: "1",
+  half: "0.5",
+  absent: "0",
+};
+
+/** The OT premium on the hourly rate (1.5× time-and-a-half, B-140 RG-3). */
+const OT_MULTIPLIER = 1.5;
+
+/** Standard hours per work day — the divisor that derives the hourly rate. */
+const HOURS_PER_DAY = 8;
+
+// ---------------------------------------------------------------------------
+// Reply helpers (flat contract Error shape {code,message})
+// ---------------------------------------------------------------------------
+
+/** Flat 401 (fail closed) when no tenant was resolved onto the request. */
+function unauthenticated(reply: FastifyReply): FastifyReply {
+  return reply
+    .code(401)
+    .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+}
+
+/** Flat 400 VALIDATION error. */
+function badRequest(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(400).send({ code: "VALIDATION", message });
+}
+
+/** Flat 403 FORBIDDEN error. */
+function forbidden(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(403).send({ code: "FORBIDDEN", message });
+}
+
+/** Flat 404 NOT_FOUND error. */
+function notFound(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(404).send({ code: "NOT_FOUND", message });
+}
+
+/** Flat 409 INVALID_STATE error. */
+function conflict(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(409).send({ code: "INVALID_STATE", message });
+}
+
+// ---------------------------------------------------------------------------
+// Parse + money helpers
+// ---------------------------------------------------------------------------
+
+/** Coerce a drizzle numeric (string) / number / null to a finite number, else 0. */
+function num(value: unknown): number {
+  if (value == null) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** A computed 2-dp money magnitude as the numeric-column string ("618.75"). */
+function moneyStr(n: number): string {
+  return round2(n).toFixed(2);
+}
+
+/** Coerce an opaque flag to a boolean, else the default (accepts bool / "true"/"false"). */
+function boolOr(value: unknown, dflt: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (value === "true" || value === 1 || value === "1") return true;
+  if (value === "false" || value === 0 || value === "0") return false;
+  return dflt;
+}
+
+/** An optional trimmed text field: the trimmed body value, or null when absent/empty. */
+function optText(body: Record<string, unknown>, ...keys: string[]): string | null {
+  if (!has(body, ...keys)) return null;
+  return str(pick(body, ...keys)).trim() || null;
+}
+
+// ---------------------------------------------------------------------------
+// Financial-authz gates (B-082 F1 model — invents no new policy)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fail-closed gate for the create ops: the caller must be attributable AND carry
+ * `finance.create`. Sends the 403 and returns false on failure. Mirrors ar.ts /
+ * ap-deposit.ts requireFinanceCreate.
+ */
+async function requireFinanceCreate(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean> {
+  const caller = await loadCaller(request);
+  if (!caller) {
+    forbidden(reply, "caller cannot be attributed");
+    return false;
+  }
+  if (!permAllowed(caller.perms, FINANCE_MODULE, "create")) {
+    forbidden(reply, "this action requires the finance create permission");
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Fail-closed gate for the payroll → GL post: the caller must be attributable AND
+ * carry `finance.approve` (posting locks money to the ledger). Mirrors retention.ts
+ * requireFinanceApprove.
+ */
+async function requireFinanceApprove(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean> {
+  const caller = await loadCaller(request);
+  if (!caller) {
+    forbidden(reply, "caller cannot be attributed");
+    return false;
+  }
+  if (!permAllowed(caller.perms, FINANCE_MODULE, "approve")) {
+    forbidden(reply, "this action requires the finance approve permission");
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Wire serializers (snake_case wire of the REAL columns — C10, no fabrication)
+// ---------------------------------------------------------------------------
+
+// GET/POST /labor/workers — labor master (labor.jsx WORKERS_SEED + WorkerForm
+// superset: code/team/supervisor/skill/pay_type/active). day_rate is money →
+// currency_code. Ordered by name (the register's deterministic worker list).
+function workerWire(w: WorkerRow): Record<string, unknown> {
+  return {
+    id: w.id,
+    name: w.name,
+    day_rate: w.dayRate != null ? num(w.dayRate) : null,
+    currency_code: w.currencyCode,
+    code: w.code,
+    team: w.team,
+    supervisor: w.supervisor,
+    skill: w.skill,
+    pay_type: w.payType,
+    active: w.active,
+    created_at: w.createdAt,
+  };
+}
+
+// GET/POST /labor/attendance — a worker's daily time record. ot in hours; status
+// (full/half/absent) drives the SERVER-DERIVED day_fraction pay factor; cc_id
+// charges the day to a cost center. Ordered newest-first (day desc).
+function attendanceWire(a: AttendanceRow): Record<string, unknown> {
+  return {
+    id: a.id,
+    worker_id: a.workerId,
+    day: a.day,
+    ot: num(a.ot),
+    status: a.status,
+    day_fraction: num(a.dayFraction),
+    cc_id: a.ccId,
+    created_at: a.createdAt,
+  };
+}
+
+// GET/POST /labor/payroll — a worker's payout for a period. amount is money →
+// currency_code (SERVER-computed at create); period is a 'YYYY-MM' key. Ordered
+// newest-first (created_at desc).
+function payrollWire(p: PayrollRow): Record<string, unknown> {
+  return {
+    id: p.id,
+    worker_id: p.workerId,
+    period: p.period,
+    amount: num(p.amount),
+    currency_code: p.currencyCode,
+    cc_id: p.ccId,
+    created_at: p.createdAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reads (company-scoped list envelopes — mirror the sibling master-data GETs)
+// ---------------------------------------------------------------------------
+
+async function listWorkers(db: TenantDb): Promise<Record<string, unknown>[]> {
+  const rows = (await db.select(workers)) as WorkerRow[];
+  return [...rows]
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .map(workerWire);
+}
+
+async function listAttendance(db: TenantDb): Promise<Record<string, unknown>[]> {
+  const rows = (await db.select(attendances)) as AttendanceRow[];
+  return [...rows]
+    .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0))
+    .map(attendanceWire);
+}
+
+async function listPayroll(db: TenantDb): Promise<Record<string, unknown>[]> {
+  const rows = (await db.select(payrolls)) as PayrollRow[];
+  return [...rows]
+    .sort((a, b) => {
+      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bt - at;
+    })
+    .map(payrollWire);
+}
+
+// ---------------------------------------------------------------------------
+// POST /labor/workers — add a worker (labor.jsx WorkerForm)
+// ---------------------------------------------------------------------------
+// Body (opaque Entity): { name, day_rate?, code?, team?, supervisor?, skill?,
+// pay_type?, active? }. Gated finance.create (fail-closed 403); name required
+// (→ 400). The superset columns are stored verbatim (nullable text; active
+// defaults true). company_id is force-set by the scoped insert door. Returns 201.
+async function createLaborWorker(
+  db: TenantDb,
+  request: FastifyRequest,
+  body: Record<string, unknown>,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  if (!(await requireFinanceCreate(request, reply))) return reply;
+
+  const name = str(pick(body, "name")).trim();
+  if (!name) return badRequest(reply, "name is required");
+
+  const dayRateRaw = toNum(pick(body, "day_rate", "dayRate"));
+  const dayRate = dayRateRaw != null ? moneyStr(dayRateRaw) : null;
+  const active = has(body, "active") ? boolOr(pick(body, "active"), true) : true;
+
+  const [worker] = (await db
+    .insert(workers, {
+      name,
+      dayRate,
+      currencyCode: "THB",
+      code: optText(body, "code"),
+      team: optText(body, "team"),
+      supervisor: optText(body, "supervisor"),
+      skill: optText(body, "skill"),
+      payType: optText(body, "pay_type", "payType"),
+      active,
+    })
+    .returning()) as WorkerRow[];
+
+  return reply.code(201).send(workerWire(worker!));
+}
+
+// ---------------------------------------------------------------------------
+// POST /labor/attendance — record a worker's day (labor.jsx AttendanceForm)
+// ---------------------------------------------------------------------------
+// Body (opaque Entity): { worker_id, day, ot?, status?, cc_id? }. Gated
+// finance.create; worker_id + day required; worker_id must be THIS tenant's
+// (scoped select → 400). status defaults 'full' and must be full/half/absent
+// (→ 400). day_fraction is SERVER-DERIVED from status ({full:1, half:0.5,
+// absent:0}) — never a client value. Returns 201.
+async function createLaborAttendance(
+  db: TenantDb,
+  request: FastifyRequest,
+  body: Record<string, unknown>,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  if (!(await requireFinanceCreate(request, reply))) return reply;
+
+  const workerId = str(pick(body, "worker_id", "workerId")).trim();
+  if (!workerId) return badRequest(reply, "worker_id is required");
+  const day = str(pick(body, "day")).trim();
+  if (!day) return badRequest(reply, "day is required");
+
+  const status = has(body, "status")
+    ? str(pick(body, "status")).trim() || "full"
+    : "full";
+  if (!ATTENDANCE_STATUSES.has(status)) {
+    return badRequest(reply, "status must be one of full, half, absent");
+  }
+  const otRaw = toNum(pick(body, "ot"));
+  const ot = otRaw != null && otRaw > 0 ? otRaw : 0;
+  const ccId = str(pick(body, "cc_id", "ccId")).trim() || null;
+
+  // worker must belong to THIS tenant (scoped select — no cross-tenant leak).
+  const [worker] = (await db.select(
+    workers,
+    eq(workers.id, workerId),
+  )) as WorkerRow[];
+  if (!worker) return badRequest(reply, "worker not found in this tenant");
+
+  const [attendance] = (await db
+    .insert(attendances, {
+      workerId,
+      day,
+      ot: ot.toFixed(2),
+      // SERVER-DERIVED from status — the client never supplies day_fraction.
+      status,
+      dayFraction: DAY_FRACTION[status]!,
+      ccId,
+    })
+    .returning()) as AttendanceRow[];
+
+  return reply.code(201).send(attendanceWire(attendance!));
+}
+
+// ---------------------------------------------------------------------------
+// POST /labor/payroll — run a worker's payroll for a period (labor.jsx Payroll)
+// ---------------------------------------------------------------------------
+// Body (opaque Entity): { worker_id, period, cc_id? }. Gated finance.create;
+// worker_id + period required; worker_id tenant-scoped (→ 400); period is a
+// 'YYYY-MM' key (→ 400 otherwise). amount is SERVER-COMPUTED (money=SERVER, B-140
+// RG-3) — a client `amount` in the body is IGNORED. It sums, over the worker's
+// attendance rows whose `day` falls in the period, day_rate × day_fraction +
+// ot × (day_rate/8) × 1.5 (day_rate from the worker; day_fraction + ot per row),
+// round2'd. No attendance in the period → amount 0 (honest). Returns 201.
+async function createLaborPayroll(
+  db: TenantDb,
+  request: FastifyRequest,
+  body: Record<string, unknown>,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  if (!(await requireFinanceCreate(request, reply))) return reply;
+
+  const workerId = str(pick(body, "worker_id", "workerId")).trim();
+  if (!workerId) return badRequest(reply, "worker_id is required");
+  const period = str(pick(body, "period")).trim();
+  if (!period) return badRequest(reply, "period is required");
+  if (!/^\d{4}-\d{2}$/.test(period)) {
+    return badRequest(reply, "period must be a YYYY-MM key");
+  }
+  const ccId = str(pick(body, "cc_id", "ccId")).trim() || null;
+
+  // worker must belong to THIS tenant (scoped select → 400 for a foreign id).
+  const [worker] = (await db.select(
+    workers,
+    eq(workers.id, workerId),
+  )) as WorkerRow[];
+  if (!worker) return badRequest(reply, "worker not found in this tenant");
+
+  // amount = SERVER-COMPUTED (money=SERVER · B-140 RG-3): sum the worker's
+  // in-period attendance of day_rate × day_fraction + ot × (day_rate/8) × 1.5.
+  const dayRate = num(worker.dayRate);
+  const hourlyRate = dayRate / HOURS_PER_DAY;
+  const periodRows = (
+    (await db.select(
+      attendances,
+      eq(attendances.workerId, workerId),
+    )) as AttendanceRow[]
+  ).filter((a) => String(a.day).slice(0, 7) === period);
+
+  let total = 0;
+  for (const a of periodRows) {
+    total += dayRate * num(a.dayFraction) + num(a.ot) * hourlyRate * OT_MULTIPLIER;
+  }
+  const amount = round2(total); // 0 when there is no attendance in the period.
+
+  const [payroll] = (await db
+    .insert(payrolls, {
+      workerId,
+      period,
+      amount: moneyStr(amount),
+      currencyCode: "THB",
+      ccId,
+    })
+    .returning()) as PayrollRow[];
+
+  return reply.code(201).send(payrollWire(payroll!));
+}
+
+// ---------------------------------------------------------------------------
+// POST /labor/payroll/{id}/post — post a payroll run to the GL (labor.jsx)
+// ---------------------------------------------------------------------------
+// Gated finance.approve (posting locks money). Loads the payroll (scoped → 404).
+// Balanced double entry: Dr 1140 WIP-labor / Cr 1020 bank = the STORED amount
+// (money=SERVER — never a re-trusted client value), carrying the payroll's cc_id on
+// both legs. IDEMPOTENT + race-safe: source_doc `payroll:<id>` is unique under the
+// jv_source_doc_uq index (0037) — a pre-check + the 23505 catch both map a
+// double-post to 409. A missing 1140/1020 in the tenant COA → honest 409 (never
+// invents an account). Returns 200 ActionOk { id, jv_no, amount }.
+async function postLaborPayroll(
+  db: TenantDb,
+  request: FastifyRequest,
+  payrollId: string,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  // 1. authz — posting a payroll locks money to the GL → finance.approve.
+  if (!(await requireFinanceApprove(request, reply))) return reply;
+
+  // 2. tenant door — the payroll must belong to THIS tenant (scoped → 404).
+  const [payroll] = (await db.select(
+    payrolls,
+    eq(payrolls.id, payrollId),
+  )) as PayrollRow[];
+  if (!payroll) return notFound(reply, `payroll ${payrollId} not found`);
+
+  // 3. money — the JV posts the STORED amount (money=SERVER). A zero run has
+  // nothing to post (honest 409, never a degenerate 0/0 JV).
+  const amount = round2(num(payroll.amount));
+  if (amount <= 0) {
+    return conflict(reply, "payroll has no amount to post");
+  }
+
+  // 4. idempotency pre-check — a JV already carrying this source_doc → 409 (the
+  // 23505 catch below is the mandatory race backstop).
+  const sourceDoc = `payroll:${payrollId}`;
+  const priorJv = (await db.select(
+    jvs,
+    eq(jvs.sourceDoc, sourceDoc),
+  )) as JvRow[];
+  if (priorJv.length > 0) {
+    return conflict(reply, `payroll ${payrollId} already posted`);
+  }
+
+  // 5. accounts — resolve 1140 WIP-labor + 1020 bank in THIS tenant's COA; a
+  // missing code is an honest 409 (never post against an invented account · C-177).
+  const acctIds = await resolveAccountIds(db, [WIP_LABOR, ACCT.bank]);
+  const wipLaborId = acctIds.get(WIP_LABOR);
+  const bankId = acctIds.get(ACCT.bank);
+  if (!wipLaborId || !bankId) {
+    return conflict(
+      reply,
+      "the tenant chart of accounts is missing a required posting account (WIP-labor / bank)",
+    );
+  }
+
+  const jvNo = await allocJvNo(db);
+  const jvId = randomUUID();
+  const currencyCode = payroll.currencyCode ?? "THB";
+  const ccId = payroll.ccId;
+  // Balanced double entry: Dr 1140 WIP-labor / Cr 1020 bank = amount, cc on both.
+  const lineRows: (typeof jvLines.$inferInsert)[] = [
+    { jvId, accountId: wipLaborId, dr: moneyStr(amount), cr: moneyStr(0), currencyCode, ccId },
+    { jvId, accountId: bankId, dr: moneyStr(0), cr: moneyStr(amount), currencyCode, ccId },
+  ];
+
+  // ONE transaction (mirror ar.ts approveCn + retention.ts release): the jv header
+  // + its lines are all-or-nothing. insertThrough re-proves this tenant owns the
+  // just-created parent jv (jv_line has no company_id).
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(jvs, {
+          id: jvId,
+          no: jvNo,
+          sourceDoc,
+          memo: `payroll ${payroll.period}`,
+        })
+        .returning();
+      await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+    });
+  } catch (err) {
+    // A concurrent/duplicate post trips the 0037 source_doc UNIQUE index — map it
+    // to the same 409 as the pre-check (never a 500, never a double post).
+    if (isUniqueViolation(err)) {
+      return conflict(reply, `payroll ${payrollId} already posted`);
+    }
+    throw err;
+  }
+
+  return reply.code(200).send({ id: payrollId, jv_no: jvNo, amount });
+}
+
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
+
+/** Register the labor read + write routes on the given (/api/v1-prefixed) scope. */
+export function registerLaborRoute(app: FastifyInstance): void {
+  const withTenantList =
+    (run: (db: TenantDb) => Promise<Record<string, unknown>[]>) =>
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const db = request.db;
+      if (!db) return unauthenticated(reply);
+      return reply.code(200).send(listEnvelope(await run(db)));
+    };
+
+  const body = (request: FastifyRequest): Record<string, unknown> =>
+    (request.body ?? {}) as Record<string, unknown>;
+
+  app.get("/labor/workers", withTenantList(listWorkers));
+  app.get("/labor/attendance", withTenantList(listAttendance));
+  app.get("/labor/payroll", withTenantList(listPayroll));
+
+  app.post("/labor/workers", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return createLaborWorker(db, request, body(request), reply);
+  });
+
+  app.post("/labor/attendance", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return createLaborAttendance(db, request, body(request), reply);
+  });
+
+  app.post("/labor/payroll", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return createLaborPayroll(db, request, body(request), reply);
+  });
+
+  app.post("/labor/payroll/:id/post", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    const { id } = request.params as { id: string };
+    return postLaborPayroll(db, request, id, reply);
+  });
+}

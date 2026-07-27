@@ -665,7 +665,7 @@ export function AIQuantityTakeoff() {
                       {done ? <Icon name="check" size={15} /> : <Icon name={s.icon} size={14} />}
                     </div>
                     <span style={{ fontSize: 12.5, fontWeight: 500 }}>{t(s.labelKey)}</span>
-                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: done ? "var(--ok)" : "var(--brand)" }}>
+                    <span style={{ marginInlineStart: "auto", fontSize: 11, fontWeight: 700, color: done ? "var(--ok)" : "var(--brand)" }}>
                       {done ? t("boq.repStatusDone") : t("boq.aiqProcActive")}
                     </span>
                   </div>
@@ -752,7 +752,7 @@ function QtoReview({
             {fill(t("boq.aiqLowConfBadge"), { n: String(low) })}
           </span>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+        <div style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
           <Btn kind="soft" size="sm" icon="filter" onClick={() => ctx.notify(t("boq.aiqSuggestSpecToast"))}>
             {t("boq.aiqSuggestSpec")}
           </Btn>
@@ -768,14 +768,14 @@ function QtoReview({
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(160)}>{t("boq.aiqThElement")}</th>
-                  <th style={th(90)}>{tp(P("thCode"))}</th>
-                  <th style={th()}>{t("nav.boq.list" as DictKey)}</th>
-                  <th style={th(60)}>{tp(P("thUnit"))}</th>
-                  <th style={th(90, "right")}>{t("boq.aiqThQty")}</th>
-                  <th style={th(80)}>{tp(P("thCat"))}</th>
-                  <th style={th(70)}>{t("boq.aiqThAi")}</th>
-                  <th style={th(40)} />
+                  <th scope="col" style={th(160)}>{t("boq.aiqThElement")}</th>
+                  <th scope="col" style={th(90)}>{tp(P("thCode"))}</th>
+                  <th scope="col" style={th()}>{t("nav.boq.list" as DictKey)}</th>
+                  <th scope="col" style={th(60)}>{tp(P("thUnit"))}</th>
+                  <th scope="col" style={th(90, "right")}>{t("boq.aiqThQty")}</th>
+                  <th scope="col" style={th(80)}>{tp(P("thCat"))}</th>
+                  <th scope="col" style={th(70)}>{t("boq.aiqThAi")}</th>
+                  <th scope="col" style={th(40)} />
                 </tr>
               </thead>
               <tbody>
@@ -969,7 +969,7 @@ function QtoSummary({ jobId, rows }: { jobId: string | null; rows: QtoRow[] }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
         <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>
           {t("boq.aiqKpiValue")}
-          <b className="num" style={{ fontSize: 17, color: "var(--brand)", marginLeft: 8 }}>
+          <b className="num" style={{ fontSize: 17, color: "var(--brand)", marginInlineStart: 8 }}>
             {has ? `${formatMoney(total)} ${BAHT}` : DASH}
           </b>
         </div>

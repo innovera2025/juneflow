@@ -175,7 +175,7 @@ function NotifyRow({ label, who, on }: { label: string; who: string; on: boolean
             height: 14,
             borderRadius: 999,
             background: "#fff",
-            marginLeft: on ? 12 : 0,
+            marginInlineStart: on ? 12 : 0,
             transition: "all .15s",
           }}
         />
@@ -605,7 +605,7 @@ export function BOQApproval() {
                         </span>
                       </button>
                     ))}
-                    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-3)" }}>
+                    <span style={{ marginInlineStart: "auto", fontSize: 11, color: "var(--text-3)" }}>
                       {t("boq.aprCompareVer")
                         .replace("{vA}", prevVersionLabel(selected.version) || DASH)
                         .replace("{dateA}", DASH)
@@ -617,13 +617,13 @@ export function BOQApproval() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                     <thead>
                       <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                        <th style={th(54)}>{tp(P("thType"))}</th>
-                        <th style={th(110)}>{tp(P("thCode"))}</th>
-                        <th style={th()}>{t("boq.edCatMaterial")}</th>
-                        <th style={th(130)}>{t("boq.aprThEdit")}</th>
-                        <th style={th(110, true)}>{t("boq.aprThOldVal")}</th>
-                        <th style={th(110, true)}>{t("boq.aprThNewVal")}</th>
-                        <th style={th(130, true)}>{t("boq.aprThDeltaVal")}</th>
+                        <th scope="col" style={th(54)}>{tp(P("thType"))}</th>
+                        <th scope="col" style={th(110)}>{tp(P("thCode"))}</th>
+                        <th scope="col" style={th()}>{t("boq.edCatMaterial")}</th>
+                        <th scope="col" style={th(130)}>{t("boq.aprThEdit")}</th>
+                        <th scope="col" style={th(110, true)}>{t("boq.aprThOldVal")}</th>
+                        <th scope="col" style={th(110, true)}>{t("boq.aprThNewVal")}</th>
+                        <th scope="col" style={th(130, true)}>{t("boq.aprThDeltaVal")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -752,7 +752,7 @@ export function BOQApproval() {
                       }}
                     >
                       <div style={{ fontSize: 11, color: "var(--text-3)" }}>
-                        <Icon name="info" size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
+                        <Icon name="info" size={12} style={{ verticalAlign: "middle", marginInlineEnd: 4 }} />
                         {escalateParts[0]}
                         <b>{t("boq.aprTier4")}</b>
                         {escalateParts[1] ?? ""}

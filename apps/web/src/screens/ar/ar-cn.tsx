@@ -228,7 +228,7 @@ function openExportModal(ctx: ShellCtx, s: ExportStrings): void {
               borderRadius: 10,
               background: "var(--surface)",
               cursor: "pointer",
-              textAlign: "left",
+              textAlign: "start",
               fontFamily: "inherit",
             }}
           >
@@ -407,15 +407,15 @@ export function ARCreditNote() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(120)}>{t("ar.cn.thNo")}</th>
-                <th style={th()}>{t("ar.fldCustomer")}</th>
-                <th style={th(130)}>{t("ar.cn.thRef")}</th>
-                <th style={th(180)}>{t("subcon.colReason")}</th>
-                <th style={th(120, true)}>{t("ar.cn.thAmount")}</th>
-                <th style={th(100, true)}>{t("ar.cn.thVat")}</th>
-                <th style={th(100)}>{t("subcon.colDate")}</th>
-                <th style={th(110)}>{t("common.status")}</th>
-                <th style={th(110)} />
+                <th scope="col" style={th(120)}>{t("ar.cn.thNo")}</th>
+                <th scope="col" style={th()}>{t("ar.fldCustomer")}</th>
+                <th scope="col" style={th(130)}>{t("ar.cn.thRef")}</th>
+                <th scope="col" style={th(180)}>{t("subcon.colReason")}</th>
+                <th scope="col" style={th(120, true)}>{t("ar.cn.thAmount")}</th>
+                <th scope="col" style={th(100, true)}>{t("ar.cn.thVat")}</th>
+                <th scope="col" style={th(100)}>{t("subcon.colDate")}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(110)} />
               </tr>
             </thead>
             <tbody>

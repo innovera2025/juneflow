@@ -274,16 +274,16 @@ export function BOQArchive() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ color: "var(--text-3)", background: "var(--surface-2)" }}>
-                  <th style={th(30)} />
-                  <th style={th(140)}>{t("boq.arcThCodeBoq")}</th>
-                  <th style={th()}>{tp(A("thDetails"))}</th>
-                  <th style={th(80)}>{t("boq.arcThVersion")}</th>
-                  <th style={th(130, true)}>{tp(A("thValue"))}</th>
-                  <th style={th(140)}>{t("boq.arcThApprover")}</th>
-                  <th style={th(140)}>{t("boq.arcThApproveDate")}</th>
-                  <th style={th(110)}>{t("common.status")}</th>
-                  <th style={th(100)}>{t("boq.arcThFileRevise")}</th>
-                  <th style={th(90, true)} />
+                  <th scope="col" style={th(30)} />
+                  <th scope="col" style={th(140)}>{t("boq.arcThCodeBoq")}</th>
+                  <th scope="col" style={th()}>{tp(A("thDetails"))}</th>
+                  <th scope="col" style={th(80)}>{t("boq.arcThVersion")}</th>
+                  <th scope="col" style={th(130, true)}>{tp(A("thValue"))}</th>
+                  <th scope="col" style={th(140)}>{t("boq.arcThApprover")}</th>
+                  <th scope="col" style={th(140)}>{t("boq.arcThApproveDate")}</th>
+                  <th scope="col" style={th(110)}>{t("common.status")}</th>
+                  <th scope="col" style={th(100)}>{t("boq.arcThFileRevise")}</th>
+                  <th scope="col" style={th(90, true)} />
                 </tr>
               </thead>
               <tbody>
@@ -356,7 +356,7 @@ export function BOQArchive() {
                       </td>
                       {/* WIRE GAP 2: no attachments table + no revise-history log — both counts em-dash. */}
                       <td style={{ ...td, color: "var(--text-2)", fontSize: 11.5 }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 8 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginInlineEnd: 8 }}>
                           <Icon name="paperclip" size={12} color="var(--text-3)" />—
                         </span>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>

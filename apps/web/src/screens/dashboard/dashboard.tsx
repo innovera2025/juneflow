@@ -380,7 +380,7 @@ export function Dashboard() {
                   `(name ?? "")`): a null/missing name yields "" instead of a crash (B-087). */}
               {activePhase ? ` · ${(activePhase.name ?? "").split(" · ")[0]}` : ""}
               {` · ${fill(t("dashboard.tplAsOf"), { date: formatThaiShort(asOfDate), time: asOfTime })}`}
-              <span style={{ color: "var(--text-3)", marginLeft: 8 }}>
+              <span style={{ color: "var(--text-3)", marginInlineStart: 8 }}>
                 {` · ${t("dashboard.syncSource")} `}
                 <span style={{ color: "var(--ok)" }}>{t("dashboard.syncOnline")}</span>
               </span>

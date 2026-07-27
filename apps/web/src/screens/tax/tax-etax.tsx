@@ -289,7 +289,7 @@ export function TaxETax() {
                 borderRadius: 10,
                 background: "var(--surface)",
                 cursor: "pointer",
-                textAlign: "left",
+                textAlign: "start",
                 fontFamily: "inherit",
               }}
             >
@@ -432,14 +432,14 @@ export function TaxETax() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(150)}>{t("tax.vat.colInvoiceNo")}</th>
-                <th style={th()}>{t("tax.etax.colCustomerTaxId")}</th>
-                <th style={th(200)}>{t("pm.unitItems")}</th>
-                <th style={th(120, true)}>{t("subcon.colValueBaht")}</th>
-                <th style={th(90, true)}>{t("ar.invoice.thVat")}</th>
-                <th style={th(90)}>{t("subcon.colDate")}</th>
-                <th style={th(150)}>{t("tax.etax.colStatus")}</th>
-                <th style={th(100)} />
+                <th scope="col" style={th(150)}>{t("tax.vat.colInvoiceNo")}</th>
+                <th scope="col" style={th()}>{t("tax.etax.colCustomerTaxId")}</th>
+                <th scope="col" style={th(200)}>{t("pm.unitItems")}</th>
+                <th scope="col" style={th(120, true)}>{t("subcon.colValueBaht")}</th>
+                <th scope="col" style={th(90, true)}>{t("ar.invoice.thVat")}</th>
+                <th scope="col" style={th(90)}>{t("subcon.colDate")}</th>
+                <th scope="col" style={th(150)}>{t("tax.etax.colStatus")}</th>
+                <th scope="col" style={th(100)} />
               </tr>
             </thead>
             <tbody>

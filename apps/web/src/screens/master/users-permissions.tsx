@@ -66,7 +66,7 @@ const EM_DASH = "\u2014";
 /** Table header cell style — ported verbatim from ds.jsx th() (214-219). */
 function th(width?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -330,7 +330,7 @@ export function UsersPermissions() {
               >
                 <thead>
                   <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                    <th style={th()}>{t("users.moduleCol")}</th>
+                    <th scope="col" style={th()}>{t("users.moduleCol")}</th>
                     {permCols.map((p, i) => (
                       <th key={i} style={{ ...th(80), textAlign: "center" }}>
                         {p}
@@ -377,7 +377,7 @@ export function UsersPermissions() {
                   <Icon
                     name="info"
                     size={12}
-                    style={{ verticalAlign: "middle", marginRight: 4 }}
+                    style={{ verticalAlign: "middle", marginInlineEnd: 4 }}
                   />
                   {t("users.matrixHint")}
                 </div>

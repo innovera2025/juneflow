@@ -204,13 +204,13 @@ export function FADepreciation() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(100)}>{t("pm.colCode")}</th>
-                <th style={th()}>{t("fa.colName")}</th>
-                <th style={th(110)}>{t("fa.colMethod")}</th>
-                <th style={th(120, true)}>{t("fa.depr.colBroughtFwd")}</th>
-                <th style={th(110, true)}>{t("fa.depr.colMonthDepr")}</th>
-                <th style={th(120, true)}>{t("fa.depr.colRemain")}</th>
-                <th style={th(140)}>{t("fa.depr.colCcPosting")}</th>
+                <th scope="col" style={th(100)}>{t("pm.colCode")}</th>
+                <th scope="col" style={th()}>{t("fa.colName")}</th>
+                <th scope="col" style={th(110)}>{t("fa.colMethod")}</th>
+                <th scope="col" style={th(120, true)}>{t("fa.depr.colBroughtFwd")}</th>
+                <th scope="col" style={th(110, true)}>{t("fa.depr.colMonthDepr")}</th>
+                <th scope="col" style={th(120, true)}>{t("fa.depr.colRemain")}</th>
+                <th scope="col" style={th(140)}>{t("fa.depr.colCcPosting")}</th>
               </tr>
             </thead>
             <tbody>

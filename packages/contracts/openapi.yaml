@@ -2947,6 +2947,232 @@ paths:
           $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /labor/payroll/{id}/post:
+    post:
+      tags: [finance]
+      summary: Post a payroll run to GL (Dr 1140 WIP-labor / Cr bank + cc_id) — server money (B-140)
+      operationId: postLaborPayroll
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /inventory/items:
+    get:
+      tags: [finance]
+      summary: List inventory items (Item Master)        # [read]
+      operationId: listInventoryItems
+      parameters:
+        - $ref: "#/components/parameters/Filter"          # ?filter — code/name search, cat, warehouse, stock-status
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"       # rows: standard-cost price + currency_code, on-hand stock, status
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create inventory item                      # [write] plain create (no money txn — price is a stored standard cost)
+      operationId: createInventoryItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /inventory/items/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [finance]
+      summary: Get inventory item detail                  # [read]
+      operationId: getInventoryItem
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- WAREHOUSES (inventory.jsx InventoryStock cards L113 / WarehouseAddForm L490) -
+  /inventory/warehouses:
+    get:
+      tags: [finance]
+      summary: List warehouses (Stock screen cards)       # [read] item-count / value / alerts / util are derived rollups
+      operationId: listWarehouses
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      summary: Create warehouse                           # [write] plain create (identity only — name/location/owner)
+      operationId: createWarehouse
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # --- STOCK (per-warehouse balance · inventory.jsx InventoryStock table L163) -----
+  /inventory/stock:
+    get:
+      tags: [finance]
+      summary: List per-warehouse stock balances          # [read] one row per (item,warehouse) from stock_ledger (B2); qty + value=qty x standard-cost + currency_code + status
+      operationId: listStockBalances
+      parameters:
+        - name: warehouse
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter balances to one warehouse (Stock screen drills a warehouse card -> its item balances).
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # --- TRANSFERS (inventory.jsx InventoryTransfer L213 / TransferAddForm L524) -----
+  /inventory/transfers:
+    get:
+      tags: [finance]
+      summary: List stock transfers                       # [read] value + currency_code server-owned; status pending/approved
+      operationId: listStockTransfers
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      # [write] * MONEY/TXN: header.value = server Sum(qty x item.price[standard-cost]) + currency_code; persists stock_transfer + transfer_line (B3);
+      #                      status=pending; NO stock movement + NO JV on create (movement deferred to /approve).
+      summary: Create stock transfer (pending)
+      operationId: createStockTransfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /inventory/transfers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [finance]
+      summary: Get stock transfer detail (+ lines)        # [read] header + transfer_line rows
+      operationId: getStockTransfer
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /inventory/transfers/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [finance]
+      # [write] * MONEY/TXN: B4 atomic dual-warehouse move (B-097 door, ONE tx) — per line decrement stock_ledger(from_wh) + increment stock_ledger(to_wh),
+      #                      then status pending->approved. B6: any from-wh line going negative rolls back the WHOLE tx -> 409 (no partial move).
+      #                      POSTING: none — internal relocation at standard-cost, no P&L; pure stock_ledger dual-write (no JV, no cost-to-BOQ).
+      summary: Approve stock transfer — atomic dual-warehouse move (action endpoint)
+      description: >-
+        Status changes go through action endpoints only (api-contract.md).
+        Approve moves stock from -> to in a single transaction (B4); negative
+        stock aborts the whole move with 409 (B6).
+      operationId: approveStockTransfer
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"          # NOTE: Conflict response is NEW — see COMPONENT ADDENDUM below
+
+  # --- ISSUES (inventory.jsx InventoryIssue L269 / IssueAddForm L590) --------------
+  /inventory/issues:
+    get:
+      tags: [finance]
+      summary: List material issues                       # [read] value + currency_code server-owned; status pending/approved
+      operationId: listMaterialIssues
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [finance]
+      # [write] * MONEY/TXN: header.value = server Sum(qty x item.price[standard-cost]) + currency_code; persists material_issue + issue_line (B3).
+      #                      B-097 atomic tx: decrement stock_ledger(from_wh) per line; B6 negative-stock -> 409 rollback of whole issue.
+      #                      POSTING (B5, GR->AP class, server money): cost-to-BOQ — Dr project WIP/BOQ material cost, Cr inventory asset (standard-cost).
+      summary: Create material issue (posts + cuts stock)
+      operationId: createMaterialIssue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"          # NOTE: Conflict response is NEW — see COMPONENT ADDENDUM below
+  /inventory/issues/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [finance]
+      summary: Get material issue detail (+ lines)        # [read] header + issue_line rows
+      operationId: getMaterialIssue
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+# =============================================================================
   /opex/budgets:
     get:
       tags: [finance]
@@ -3947,6 +4173,14 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/QuotaExceededError"
+    Conflict:
+      description: >-
+        State conflict — the action cannot apply against current state (e.g.
+        negative stock on transfer-approve / issue post, B-141 B6).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     EntityOk:
       description: Resource (tenant-scoped by company_id from JWT).
       content:

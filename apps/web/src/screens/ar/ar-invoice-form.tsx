@@ -204,19 +204,19 @@ export function ARInvoiceForm({ onClose }: ARInvoiceFormProps) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ color: "var(--text-3)" }}>
-              <th style={{ textAlign: "left", padding: "0 8px 6px 0", fontSize: 10.5, fontWeight: 600 }}>
+              <th scope="col" style={{ textAlign: "start", padding: "0 8px 6px 0", fontSize: 10.5, fontWeight: 600 }}>
                 {t("subcon.colDetail")}
               </th>
-              <th style={{ textAlign: "right", padding: "0 8px 6px", fontSize: 10.5, fontWeight: 600, width: 90 }}>
+              <th scope="col" style={{ textAlign: "right", padding: "0 8px 6px", fontSize: 10.5, fontWeight: 600, width: 90 }}>
                 {t("boq.edFldQty")}
               </th>
-              <th style={{ textAlign: "right", padding: "0 8px 6px", fontSize: 10.5, fontWeight: 600, width: 130 }}>
+              <th scope="col" style={{ textAlign: "right", padding: "0 8px 6px", fontSize: 10.5, fontWeight: 600, width: 130 }}>
                 {t("boq.edFldPriceUnit")}
               </th>
-              <th style={{ textAlign: "right", padding: "0 0 6px 8px", fontSize: 10.5, fontWeight: 600, width: 120 }}>
+              <th scope="col" style={{ textAlign: "right", padding: "0 0 6px 8px", fontSize: 10.5, fontWeight: 600, width: 120 }}>
                 {t("subcon.colValue")}
               </th>
-              <th style={{ width: 34 }} />
+              <th scope="col" style={{ width: 34 }} />
             </tr>
           </thead>
           <tbody>

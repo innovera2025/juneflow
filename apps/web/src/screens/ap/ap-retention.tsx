@@ -320,13 +320,13 @@ export function APRetention() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th()}>{t("ap.retention.thContractVendor")}</th>
-                <th style={th(120, true)}>{t("ap.retention.thWithheldCum")}</th>
-                <th style={th(110, true)}>{t("ap.retention.thReturned")}</th>
-                <th style={th(120, true)}>{t("ap.retention.thOutstanding")}</th>
-                <th style={th(140)}>{t("ap.retention.thDueDate")}</th>
-                <th style={th(140)}>{t("common.status")}</th>
-                <th style={th(120)} />
+                <th scope="col" style={th()}>{t("ap.retention.thContractVendor")}</th>
+                <th scope="col" style={th(120, true)}>{t("ap.retention.thWithheldCum")}</th>
+                <th scope="col" style={th(110, true)}>{t("ap.retention.thReturned")}</th>
+                <th scope="col" style={th(120, true)}>{t("ap.retention.thOutstanding")}</th>
+                <th scope="col" style={th(140)}>{t("ap.retention.thDueDate")}</th>
+                <th scope="col" style={th(140)}>{t("common.status")}</th>
+                <th scope="col" style={th(120)} />
               </tr>
             </thead>
             <tbody>

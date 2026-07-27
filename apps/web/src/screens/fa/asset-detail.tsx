@@ -187,11 +187,11 @@ export function AssetDetail({ asset, onClose }: AssetDetailProps) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-              <th style={th(50)}>{t("fa.detail.colYearNo")}</th>
-              <th style={th(undefined, true)}>{t("fa.detail.colDepr")}</th>
-              <th style={th(undefined, true)}>{t("fa.detail.colCum")}</th>
-              <th style={th(undefined, true)}>{t("fa.colBook")}</th>
-              <th style={th(80)}>{t("common.status")}</th>
+              <th scope="col" style={th(50)}>{t("fa.detail.colYearNo")}</th>
+              <th scope="col" style={th(undefined, true)}>{t("fa.detail.colDepr")}</th>
+              <th scope="col" style={th(undefined, true)}>{t("fa.detail.colCum")}</th>
+              <th scope="col" style={th(undefined, true)}>{t("fa.colBook")}</th>
+              <th scope="col" style={th(80)}>{t("common.status")}</th>
             </tr>
           </thead>
           <tbody>
@@ -276,7 +276,7 @@ export function AssetDetail({ asset, onClose }: AssetDetailProps) {
               name="check"
               size={12}
               color="var(--ok)"
-              style={{ verticalAlign: "middle", marginRight: 4 }}
+              style={{ verticalAlign: "middle", marginInlineEnd: 4 }}
             />
             {t("fa.detail.historyNone").replace("{date}", asset.acquiredDate)}
           </>

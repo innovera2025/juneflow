@@ -148,11 +148,11 @@ export function JVCreateForm({ onClose }: { onClose: () => void }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ color: "var(--text-3)" }}>
-              <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 600 }}>{tp(P("lineHeaderAccount"))}</th>
-              <th style={{ textAlign: "left", padding: "6px 8px", width: 150, fontWeight: 600 }}>{tp(P("filterCC"))}</th>
-              <th style={{ textAlign: "right", padding: "6px 8px", width: 120, fontWeight: 600 }}>{tp(P("lineHeaderDr"))}</th>
-              <th style={{ textAlign: "right", padding: "6px 8px", width: 120, fontWeight: 600 }}>{tp(P("lineHeaderCr"))}</th>
-              <th style={{ width: 30 }} />
+              <th scope="col" style={{ textAlign: "start", padding: "6px 8px", fontWeight: 600 }}>{tp(P("lineHeaderAccount"))}</th>
+              <th scope="col" style={{ textAlign: "start", padding: "6px 8px", width: 150, fontWeight: 600 }}>{tp(P("filterCC"))}</th>
+              <th scope="col" style={{ textAlign: "right", padding: "6px 8px", width: 120, fontWeight: 600 }}>{tp(P("lineHeaderDr"))}</th>
+              <th scope="col" style={{ textAlign: "right", padding: "6px 8px", width: 120, fontWeight: 600 }}>{tp(P("lineHeaderCr"))}</th>
+              <th scope="col" style={{ width: 30 }} />
             </tr>
           </thead>
           <tbody>

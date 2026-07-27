@@ -417,7 +417,7 @@ export function SubconAccept() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <Icon name="trend" size={16} color="var(--brand)" />
             <span style={{ fontSize: 13.5, fontWeight: 700 }}>{t("subcon.progressRefTitle")}</span>
-            <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
+            <span style={{ marginInlineStart: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
               {projectName || DASH}
             </span>
           </div>
@@ -463,7 +463,7 @@ export function SubconAccept() {
             <span style={{ fontSize: 13.5, fontWeight: 700 }}>
               {t(method === "unit" ? "subcon.progressByUnit" : "subcon.progressByDistance")}
             </span>
-            <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }} className="num">
+            <span style={{ marginInlineStart: "auto", fontSize: 11.5, color: "var(--text-3)" }} className="num">
               {DASH}
             </span>
           </div>
@@ -502,19 +502,19 @@ export function SubconAccept() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(50)}>{t("subcon.colPeriod")}</th>
-                <th style={th()}>{t("subcon.colDetail")}</th>
-                <th style={th(110, true)}>
+                <th scope="col" style={th(50)}>{t("subcon.colPeriod")}</th>
+                <th scope="col" style={th()}>{t("subcon.colDetail")}</th>
+                <th scope="col" style={th(110, true)}>
                   {method === "distance" || method === "unit"
                     ? t("subcon.colQty")
                     : method === "percent"
                       ? PERCENT_SIGN
                       : t("subcon.colMilestone")}
                 </th>
-                <th style={th(120, true)}>{t("subcon.colValueBaht")}</th>
-                <th style={th(120)}>{t("subcon.colDoc")}</th>
-                <th style={th(130)}>{t("common.status")}</th>
-                <th style={th(110, true)}>{t("subcon.colAccept")}</th>
+                <th scope="col" style={th(120, true)}>{t("subcon.colValueBaht")}</th>
+                <th scope="col" style={th(120)}>{t("subcon.colDoc")}</th>
+                <th scope="col" style={th(130)}>{t("common.status")}</th>
+                <th scope="col" style={th(110, true)}>{t("subcon.colAccept")}</th>
               </tr>
             </thead>
             <tbody>
@@ -619,7 +619,7 @@ export function SubconAccept() {
           <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
             {t("subcon.fileCount").replace("{n}", DASH)}
           </span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <div style={{ marginInlineStart: "auto", display: "flex", gap: 6 }}>
             <Btn
               kind="ghost"
               size="sm"

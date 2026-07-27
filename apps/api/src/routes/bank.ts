@@ -532,6 +532,10 @@ async function matchLine(
 
   // Set matched=true + the chosen FK (the other two stay null). updateThrough
   // re-proves this tenant owns the line's statement before writing the row.
+  // B-149 optimistic guard: fold the unmatched pre-state into the WHERE so a
+  // concurrent match of the SAME line matches 0 rows here → 409 (the migration-0028
+  // unique index covers the FK double-link across lines; this closes the same-line
+  // double-flip the JS pre-check above cannot).
   const [updated] = (await db.updateThrough(
     bankStatementLines,
     bankStatements,
@@ -543,10 +547,13 @@ async function matchLine(
       chequeId: target.field === "chequeId" ? target.id : null,
       rvId: target.field === "rvId" ? target.id : null,
     },
-    eq(bankStatementLines.id, lineId),
+    and(eq(bankStatementLines.id, lineId), eq(bankStatementLines.matched, false)),
   )) as BankStatementLineRow[];
+  if (!updated) {
+    return conflict(reply, "line is already matched");
+  }
 
-  return reply.code(200).send(matchLineWire(updated!));
+  return reply.code(200).send(matchLineWire(updated));
 }
 
 /** The wire field name for a match target (for the fail-closed 400 message). */
@@ -987,11 +994,21 @@ async function reconcileBank(
     return conflict(reply, `period ${period} is already reconciled (locked)`);
   }
 
-  // Lock every statement in the period (idempotent for any already-locked one),
-  // scoped to this tenant — a foreign statement in the same period is untouched.
-  await db
-    .update(bankStatements, { locked: true }, eq(bankStatements.period, period))
-    .returning();
+  // Lock every UNLOCKED statement in the period, scoped to this tenant — a foreign
+  // statement in the same period is untouched. B-149 optimistic guard: fold the
+  // unlocked pre-state into the WHERE — a concurrent reconcile that already locked
+  // the whole period matches 0 rows here → 409 (consistent with the all-locked
+  // pre-check above; the concurrent window can no longer both-succeed).
+  const locked = (await db
+    .update(
+      bankStatements,
+      { locked: true },
+      and(eq(bankStatements.period, period), eq(bankStatements.locked, false)),
+    )
+    .returning()) as BankStatementRow[];
+  if (locked.length === 0) {
+    return conflict(reply, `period ${period} is already reconciled (locked)`);
+  }
 
   // Honest matched_pct across the period's lines (Σ matched / Σ lines). Lines are
   // scoped THROUGH their statement (no company_id column of their own).

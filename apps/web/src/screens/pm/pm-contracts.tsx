@@ -238,7 +238,7 @@ export function PMContracts() {
                 borderRadius: 10,
                 background: "var(--surface)",
                 cursor: "pointer",
-                textAlign: "left",
+                textAlign: "start",
                 fontFamily: "inherit",
               }}
             >
@@ -309,15 +309,15 @@ export function PMContracts() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(150)}>{t("pm.colContract")}</th>
-                <th style={th()}>{t("pm.colProject")}</th>
-                <th style={th(180)}>{t("pm.rowCustomer")}</th>
-                <th style={th(180)}>{t("pm.rowContractType")}</th>
-                <th style={th(140)}>{t("pm.rowSlaResponse")}</th>
-                <th style={th(110, "center")}>{t("pm.fieldVisitsPerYear")}</th>
-                <th style={th(140, "right")}>{t("pm.colTotalValue")}</th>
-                <th style={th(120, "right")}>{t("pm.rowEnd")}</th>
-                <th style={th(130)}>{t("common.status")}</th>
+                <th scope="col" style={th(150)}>{t("pm.colContract")}</th>
+                <th scope="col" style={th()}>{t("pm.colProject")}</th>
+                <th scope="col" style={th(180)}>{t("pm.rowCustomer")}</th>
+                <th scope="col" style={th(180)}>{t("pm.rowContractType")}</th>
+                <th scope="col" style={th(140)}>{t("pm.rowSlaResponse")}</th>
+                <th scope="col" style={th(110, "center")}>{t("pm.fieldVisitsPerYear")}</th>
+                <th scope="col" style={th(140, "right")}>{t("pm.colTotalValue")}</th>
+                <th scope="col" style={th(120, "right")}>{t("pm.rowEnd")}</th>
+                <th scope="col" style={th(130)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

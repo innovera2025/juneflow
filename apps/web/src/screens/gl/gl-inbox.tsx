@@ -541,20 +541,20 @@ export function GLPostingInbox() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(28)}>
+                <th scope="col" style={th(28)}>
                   <input
                     type="checkbox"
                     checked={allPendingChecked}
                     onChange={(e) => toggleAllPending(e.target.checked)}
                   />
                 </th>
-                <th style={th(100)}>{t("gl.inbox.colSource")}</th>
-                <th style={th(140)}>{t("gl.inbox.colDocNo")}</th>
-                <th style={th()}>{t("gl.inbox.colDesc")}</th>
-                <th style={th(130, true)}>{t("subcon.colValueBaht")}</th>
-                <th style={th(140)}>{t("gl.inbox.colCreatedBy")}</th>
-                <th style={th(120)}>{t("gl.inbox.colTime")}</th>
-                <th style={th(130)}>{t("gl.inbox.colStatusJv")}</th>
+                <th scope="col" style={th(100)}>{t("gl.inbox.colSource")}</th>
+                <th scope="col" style={th(140)}>{t("gl.inbox.colDocNo")}</th>
+                <th scope="col" style={th()}>{t("gl.inbox.colDesc")}</th>
+                <th scope="col" style={th(130, true)}>{t("subcon.colValueBaht")}</th>
+                <th scope="col" style={th(140)}>{t("gl.inbox.colCreatedBy")}</th>
+                <th scope="col" style={th(120)}>{t("gl.inbox.colTime")}</th>
+                <th scope="col" style={th(130)}>{t("gl.inbox.colStatusJv")}</th>
               </tr>
             </thead>
             <tbody>

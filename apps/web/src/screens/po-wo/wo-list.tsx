@@ -396,13 +396,13 @@ export function WOList() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th()}>{t("wo.list.colNo")}</th>
-                  <th style={th()}>{tp(P("thSubcon"))}</th>
-                  <th style={th()}>{tp(P("thScope"))}</th>
-                  <th style={th(130, true)}>{tp(P("thValue"))}</th>
-                  <th style={th(140)}>{t("dashboard.progressTitleDefault")}</th>
-                  <th style={th(100)}>{RETENTION_HEADER}</th>
-                  <th style={th(100)}>{t("common.status")}</th>
+                  <th scope="col" style={th()}>{t("wo.list.colNo")}</th>
+                  <th scope="col" style={th()}>{tp(P("thSubcon"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thScope"))}</th>
+                  <th scope="col" style={th(130, true)}>{tp(P("thValue"))}</th>
+                  <th scope="col" style={th(140)}>{t("dashboard.progressTitleDefault")}</th>
+                  <th scope="col" style={th(100)}>{RETENTION_HEADER}</th>
+                  <th scope="col" style={th(100)}>{t("common.status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -528,7 +528,7 @@ export function WOList() {
                   kind="ghost"
                   size="sm"
                   icon="flag"
-                  style={{ marginLeft: "auto", color: "var(--ok)" }}
+                  style={{ marginInlineStart: "auto", color: "var(--ok)" }}
                   onClick={() => confirmClose(selectedRow)}
                 >
                   {tp(P("tabClosedContract"))}

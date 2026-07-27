@@ -59,7 +59,7 @@ function fieldStyle(): CSSProperties {
 /** Table header cell style - ported verbatim from ds.jsx th() (214-219). */
 function th(width?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "8px 10px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -173,7 +173,7 @@ export function RoleAddForm({ ctx, onClose }: RoleAddFormProps) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
           <thead style={{ position: "sticky", top: 0, background: "var(--surface-2)" }}>
             <tr style={{ color: "var(--text-3)" }}>
-              <th style={th()}>{t("users.moduleCol")}</th>
+              <th scope="col" style={th()}>{t("users.moduleCol")}</th>
               {permCols.map((p, i) => (
                 <th key={i} style={{ ...th(70), textAlign: "center" }}>
                   {p}

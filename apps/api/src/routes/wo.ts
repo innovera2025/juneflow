@@ -39,7 +39,7 @@
 // (flows.html MATRIX "WO ใบสั่งจ้าง"): หน.จัดซื้อ every WO; ผจก.โครงการ > 1,000,000;
 // MD > 5,000,000 (THB, strict >). Amount = the WO's stored `value`.
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   wos,
   prs,
@@ -377,9 +377,20 @@ export function registerWoRoute(app: FastifyInstance): void {
       wos,
       WO_HOPS,
       { status: "approved", approvalStep: requiredTierCount(amount) },
-      eq(wos.id, id),
+      and(eq(wos.id, id), eq(wos.status, "pending")),
+      // B-149 optimistic guard — the pending pre-state re-applied to the FINAL
+      // UPDATE (updateThroughChain resolves then updates in two round-trips, so a
+      // guard only in the resolve `where` above would NOT be atomic). A concurrent
+      // approve/reject that already moved this WO re-matches 0 rows here → 409.
+      eq(wos.status, "pending"),
     );
-    return reply.code(200).send(woWire(updated!));
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a pending WO can be approved",
+      });
+    }
+    return reply.code(200).send(woWire(updated));
   });
 
   // POST /wo/:id/reject — pending → rejected. reason REQUIRED (rejectWo {reason});
@@ -430,8 +441,17 @@ export function registerWoRoute(app: FastifyInstance): void {
       wos,
       WO_HOPS,
       { status: "rejected" },
-      eq(wos.id, id),
+      and(eq(wos.id, id), eq(wos.status, "pending")),
+      // B-149 atomic guard on the FINAL UPDATE — a concurrent approve+reject can't
+      // leave a money-approved WO flipped to rejected (loser re-matches 0 rows → 409).
+      eq(wos.status, "pending"),
     );
-    return reply.code(200).send(woWire(updated!));
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a pending WO can be rejected",
+      });
+    }
+    return reply.code(200).send(woWire(updated));
   });
 }
