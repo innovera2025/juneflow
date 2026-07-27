@@ -264,6 +264,8 @@ export function MasterCompany() {
                       <button
                         type="button"
                         onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}
+                        aria-label={t("common.more")}
+                        aria-haspopup="menu"
                         style={{
                           width: 28,
                           height: 28,
@@ -288,7 +290,7 @@ export function MasterCompany() {
                             style={{
                               position: "absolute",
                               top: 32,
-                              right: 0,
+                              insetInlineEnd: 0,
                               zIndex: 30,
                               width: 150,
                               background: "var(--surface)",

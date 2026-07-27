@@ -396,6 +396,8 @@ function ItemRow({
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
+            aria-label={t("common.more")}
+            aria-haspopup="menu"
             style={{
               width: 24,
               height: 24,
@@ -418,7 +420,7 @@ function ItemRow({
               style={{
                 position: "absolute",
                 top: 30,
-                right: 6,
+                insetInlineEnd: 6,
                 zIndex: 30,
                 width: 140,
                 background: "var(--surface)",
@@ -593,7 +595,7 @@ function ItemFormModal({
               className="num"
               style={{ ...fieldStyle(), paddingInlineEnd: 24 }}
             />
-            <span style={{ position: "absolute", right: 10, top: 9, fontSize: 12, color: "var(--text-3)" }}>{BAHT}</span>
+            <span style={{ position: "absolute", insetInlineEnd: 10, top: 9, fontSize: 12, color: "var(--text-3)" }}>{BAHT}</span>
           </div>
         </Field>
       </div>
@@ -1133,7 +1135,7 @@ export function BOQEditor() {
                                     style={{
                                       position: "absolute",
                                       top: 30,
-                                      right: 8,
+                                      insetInlineEnd: 8,
                                       zIndex: 30,
                                       width: 150,
                                       background: "var(--surface)",

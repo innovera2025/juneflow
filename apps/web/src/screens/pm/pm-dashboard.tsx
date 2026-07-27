@@ -250,8 +250,8 @@ function PMCalendar({
                     style={{
                       position: "absolute",
                       bottom: 4,
-                      left: 5,
-                      right: 5,
+                      insetInlineStart: 5,
+                      insetInlineEnd: 5,
                       height: 3,
                       borderRadius: 2,
                       background: c.fg,

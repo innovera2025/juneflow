@@ -458,6 +458,8 @@ export function BOQList() {
                           <button
                             type="button"
                             onClick={() => setMenuFor(menuFor === d.id ? null : d.id)}
+                            aria-label={t("common.more")}
+                            aria-haspopup="menu"
                             style={{
                               width: 28,
                               height: 28,
@@ -483,7 +485,7 @@ export function BOQList() {
                               style={{
                                 position: "absolute",
                                 top: 36,
-                                right: 8,
+                                insetInlineEnd: 8,
                                 zIndex: 30,
                                 width: 168,
                                 background: "var(--surface)",

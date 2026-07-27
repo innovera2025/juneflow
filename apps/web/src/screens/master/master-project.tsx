@@ -130,7 +130,7 @@ function ScopePill({
             style={{
               position: "absolute",
               top: 42,
-              left: 0,
+              insetInlineStart: 0,
               zIndex: 30,
               minWidth: 200,
               background: "var(--surface)",

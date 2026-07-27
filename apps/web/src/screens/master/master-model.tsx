@@ -161,7 +161,7 @@ export function MasterModel() {
                     style={{
                       position: "absolute",
                       top: 10,
-                      right: 10,
+                      insetInlineEnd: 10,
                       fontSize: 10,
                       fontWeight: 700,
                       padding: "2px 8px",
@@ -177,7 +177,7 @@ export function MasterModel() {
                     style={{
                       position: "absolute",
                       top: 10,
-                      left: 10,
+                      insetInlineStart: 10,
                       fontSize: 12,
                       fontWeight: 700,
                       padding: "3px 10px",
