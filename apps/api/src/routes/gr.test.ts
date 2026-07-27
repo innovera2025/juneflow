@@ -65,11 +65,14 @@ interface StubOpts {
   inserted?: Inserted[];
   updated?: Updated[];
   updateBase?: Record<string, unknown>;
+  // When true, an UPDATE … RETURNING yields 0 rows — models a B-156 optimistic guard
+  // whose folded pre-state matched nothing (a concurrent flip / already-advanced doc).
+  updateEmpty?: boolean;
 }
 
 /** Base Db stub: canned rows per table (join-aware); capture of write ops. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false } = opts;
   const rowsFor = (table: unknown, joins: unknown[]): unknown[] => {
     // Most specific first: a [table, requiredJoin] key whose join is present.
     for (const [key, r] of rows) {
@@ -116,7 +119,7 @@ function stubDb(opts: StubOpts): Db {
         where: (where: SQL) => ({
           returning: () => {
             updated.push({ table, set, where });
-            return Promise.resolve([{ ...updateBase, ...set }]);
+            return Promise.resolve(updateEmpty ? [] : [{ ...updateBase, ...set }]);
           },
         }),
       }),
@@ -729,6 +732,40 @@ describe("POST /api/v1/gr — partial vs full receipt", () => {
     expect(close!.set.status).toBe("closed");
   });
 
+  it("full receipt is idempotent when a CONCURRENT GR already closed the PO: the guarded auto-close (…AND status='approved') matches 0 rows → fire-and-forget no-op, no error, still 201 (B-156)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]], // ordered 1000
+            [grs, [gr("new-0", { poId: PO, received: 1000 })]], // cumulative 1000 → full
+          ],
+          updated,
+          updateBase: poRow("approved"),
+          // The other racer already flipped the PO approved→closed; this close's
+          // guard (…AND status='approved') therefore matches nothing.
+          updateEmpty: true,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, lines: [{ qty_ok: 1000 }] },
+    });
+    // The receipt still succeeds — a 0-row close is a harmless idempotent no-op,
+    // never a thrown error, so full receipt never double-closes.
+    expect(res.statusCode).toBe(201);
+    expect(res.json().partial).toBe(false);
+    const close = updated.find((u) => u.table === pos);
+    expect(close).toBeTruthy(); // the close WAS attempted (guarded), it simply matched 0 rows
+    expect(close!.set.status).toBe("closed");
+  });
+
   it("cumulative received sums across prior GRs (cancelled ones excluded)", async () => {
     const res = await (
       await buildTestApp({
@@ -856,6 +893,32 @@ describe("GR return/cancel state machine", () => {
     ).inject({ method: "POST", url: "/api/v1/gr/g0/cancel" });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  it("return: 409 via the B-156 optimistic guard on a CONCURRENT flip (reads 'received' → passes the JS pre-check, but the guarded UPDATE …AND status='received' matches 0 rows)", async () => {
+    // updateEmpty models a concurrent return/cancel that already advanced the GR
+    // between the pre-check read and the guarded flip → the atomic 0-row backstop.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[grs, [gr("g0", { poId: PO, status: "received" })]]], updateEmpty: true }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr/g0/return" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/only a received GR can be returned/);
+  });
+
+  it("cancel: 409 via the B-156 optimistic guard on a CONCURRENT flip (0-row guarded UPDATE)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[grs, [gr("g1", { woId: WO, status: "received" })]]], updateEmpty: true }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr/g1/cancel" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/only a received GR can be cancelled/);
   });
 
   it("return/cancel: 404 for a GR outside the tenant", async () => {

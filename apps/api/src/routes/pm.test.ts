@@ -65,10 +65,14 @@ interface StubOpts {
   inserted?: Inserted[];
   updated?: Updated[];
   updateBase?: Record<string, unknown>;
+  // When true, an UPDATE … RETURNING yields 0 rows — models a guarded optimistic
+  // UPDATE whose pre-state predicate matched nothing (B-156 decide-once: the quote
+  // was already decided → down_payment/decide guard → 409).
+  updateEmpty?: boolean;
 }
 
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false } = opts;
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
@@ -111,7 +115,7 @@ function stubDb(opts: StubOpts): Db {
         where: (where: SQL) => ({
           returning: () => {
             updated.push({ table, set, where });
-            return Promise.resolve([{ ...updateBase, ...set }]);
+            return Promise.resolve(updateEmpty ? [] : [{ ...updateBase, ...set }]);
           },
         }),
       }),
@@ -1338,6 +1342,40 @@ describe("POST /api/v1/pm/quotes/:id/decide", () => {
     expect(res.json().decision).toBe("approve");
     const write = updated.find((u) => u.table === pmQuotes)!;
     expect(write.set).toEqual({ decision: "approve" });
+  });
+
+  it("409s an ALREADY-DECIDED quote (B-156/B-166 decide-once · isNull(decision) guard matched 0 rows)", async () => {
+    // updateEmpty models the guarded UPDATE … WHERE decision IS NULL matching nothing
+    // (the quote is already decided). The quote still resolves via the exists-select
+    // → 409 INVALID_STATE (distinguished from a foreign/unknown id → 404).
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, [quoteRow()]]], updateEmpty: true }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { decision: "approve" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/already decided/);
+  });
+
+  it("404s a quote not in this tenant (guard 0 rows + no exists row → NOT_FOUND, not 409)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[pmQuotes, []]] }), // no quote resolves through the tenant chain
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/pm/quotes/${QUOTE}/decide`,
+      payload: { decision: "approve" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("NOT_FOUND");
   });
 
   it("maps the contract boolean approve=false to a reject decision", async () => {
