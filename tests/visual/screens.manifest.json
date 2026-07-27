@@ -252,6 +252,24 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "sales-crm",
+      "route": "sales.crm",
+      "ref": "app-baseline/sales-crm.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "land-bank",
+      "route": "land.bank",
+      "ref": "app-baseline/land-bank.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
