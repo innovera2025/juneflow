@@ -53,7 +53,7 @@
 // (plugins/audit-log.ts) — never hand-written here. A failed guard (401/400/404)
 // returns >= 400, so the hook does not log it (no false trail).
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import {
   checklistTemplates,
   pmAssets,
@@ -927,16 +927,27 @@ export function registerPmRoute(app: FastifyInstance): void {
     // updateThroughChain resolves the quote's ownership THROUGH the 4-hop chain
     // (company_id anchored on the project root) and updates strictly the resolved
     // id — a foreign id resolves to nothing → 404 (never written).
+    // B-156: decide-once — fold `decision IS NULL` into the FINAL update (5th guard
+    // arg) so a repeat/concurrent decide of the same quote re-matches 0 rows and
+    // cannot overwrite the recorded decision (atomic; no TOCTOU). On 0 rows, a scoped
+    // re-select distinguishes a foreign/unknown id (404) from an already-decided one (409).
     const [updated] = await db.updateThroughChain(
       pmQuotes,
       QUOTE_HOPS,
       { decision },
       eq(pmQuotes.id, id),
+      isNull(pmQuotes.decision),
     );
     if (!updated) {
+      const [exists] = await db.selectThrough(pmQuotes, QUOTE_HOPS, eq(pmQuotes.id, id));
+      if (!exists) {
+        return reply
+          .code(404)
+          .send({ code: "NOT_FOUND", message: `PM quote ${id} not found` });
+      }
       return reply
-        .code(404)
-        .send({ code: "NOT_FOUND", message: `PM quote ${id} not found` });
+        .code(409)
+        .send({ code: "INVALID_STATE", message: `PM quote ${id} is already decided` });
     }
 
     // B-108c: notify the customer of the decision over LINE — a NO-OP stub.
