@@ -678,9 +678,11 @@ describe("POST /api/v1/sales/bookings", () => {
     expect(cr.cr).toBe("100000.00");
     expect(lines.reduce((s, l) => s + Number(l.dr), 0)).toBe(lines.reduce((s, l) => s + Number(l.cr), 0));
 
-    // source_doc keyed to the (fresh) sales_unit id.
+    // source_doc keyed to the STABLE project_node unit id (booking:<unitId>), NOT the
+    // fresh per-row salesUnitId — this is what makes two concurrent first-bookings of
+    // the same unit collide on the jv_source_doc_uq index (the race fix).
     const jvIns = inserted.find((i) => i.table === jvs)!.values as Record<string, unknown>;
-    expect(String(jvIns.sourceDoc)).toMatch(/^booking:/);
+    expect(String(jvIns.sourceDoc)).toBe("booking:node-1");
 
     // The unit was created stage=booked with the booking amount.
     const unitIns = inserted.find((i) => i.table === salesUnits)!.values as Record<string, unknown>;
@@ -710,7 +712,7 @@ describe("POST /api/v1/sales/bookings", () => {
         db: bookDb({
           inserted,
           units: [unit("su-1", { unitId: "node-1" })], // exists but no booking yet
-          jv: [{ id: "jv-prior", companyId: COMPANY, sourceDoc: "booking:su-1" }],
+          jv: [{ id: "jv-prior", companyId: COMPANY, sourceDoc: "booking:node-1" }],
         }),
       })
     ).inject({ method: "POST", url: "/api/v1/sales/bookings", payload: { unit_id: "node-1", amount: 100000 } });
@@ -718,7 +720,12 @@ describe("POST /api/v1/sales/bookings", () => {
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
   });
 
-  it("409s a concurrent double-book (23505 on the source_doc index → idempotent)", async () => {
+  // Honest scope: with a stubbed Db this can only prove the 23505→409 ERROR-MAPPING,
+  // not the concurrency GUARANTEE. The real first-booking race (two concurrent first
+  // bookings of the same unit → exactly one 201 + one 409, one sales_unit, one JV) is
+  // proven live on a real pg — see the throwaway race proof in the P3-BE-02 journal
+  // entry (the booking:<unitId> key + one-tx rollback close it).
+  it("maps a 23505 from the source_doc index to 409 (concurrent-duplicate error-mapping)", async () => {
     const base = bookDb({ units: [] });
     const db = {
       ...(base as unknown as Record<string, unknown>),

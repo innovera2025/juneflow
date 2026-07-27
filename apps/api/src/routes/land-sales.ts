@@ -524,8 +524,11 @@ async function createSalesContract(
 // Resolves the sales_unit for (company, unit_id): a row already carrying a booking
 // → 409 (already booked). The received booking amount is a legitimate client value
 // (validated finite > 0); the server posts Dr 1020 bank / Cr 2040 advance-received =
-// amount, keyed source_doc `booking:<salesUnitId>`. Unit write + JV are ONE
-// transaction; a concurrent duplicate trips 23505 → 409.
+// amount, keyed source_doc `booking:<unitId>` (the STABLE project_node id — NOT the
+// per-row salesUnitId, which is fresh per first booking). Unit write + JV are ONE
+// transaction: two CONCURRENT first-bookings of the same unit compute the same
+// source_doc, so the jv_source_doc_uq unique index lets one commit and the other
+// trips 23505 → the loser's whole tx rolls back (no second unit, no second JV) → 409.
 async function createSalesBooking(
   db: TenantDb,
   body: Record<string, unknown>,
@@ -548,8 +551,14 @@ async function createSalesBooking(
   }
   const salesUnitId = existing?.id ?? randomUUID();
 
-  // Idempotency pre-check: a booking JV already carrying this source_doc → 409.
-  const sourceDoc = `booking:${salesUnitId}`;
+  // Idempotency + RACE key: source_doc = booking:<unitId> — the STABLE project_node
+  // id, NOT the per-row salesUnitId (which is a fresh randomUUID on a first booking).
+  // Two concurrent first-bookings of the same unit therefore compute the SAME
+  // source_doc → the jv_source_doc_uq unique index lets exactly one commit; the
+  // loser's jv insert trips 23505 and, because the sales_unit insert + jv are ONE
+  // transaction (below), the loser's whole tx rolls back → no second unit, no second
+  // JV (fixes the gate-4.5 new-unit double-post race). The pre-check is the fast path.
+  const sourceDoc = `booking:${unitId}`;
   const priorJv = (await db.select(jvs, eq(jvs.sourceDoc, sourceDoc))) as JvRow[];
   if (priorJv.length > 0) return conflict(reply, `unit ${unitId} is already booked`);
 
@@ -601,7 +610,7 @@ async function createSalesBooking(
           .returning()) as SalesUnitRow[];
         unit = u!;
       }
-      await tx.insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `sales-booking ${salesUnitId}` }).returning();
+      await tx.insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `sales-booking ${unitId}` }).returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
       return unit;
     });
