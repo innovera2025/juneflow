@@ -83,6 +83,7 @@ import { ARInvoice } from "./screens/ar/ar-invoice";
 import { SalesCRM } from "./screens/sales/sales-crm";
 import { LandBank } from "./screens/land/land-bank";
 import { LandSurvey } from "./screens/land/land-survey";
+import { LandDueDiligence } from "./screens/land/land-dd";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -97,6 +98,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   exec: ExecDashboard,
   "land.bank": LandBank,
   "land.survey": LandSurvey,
+  "land.dd": LandDueDiligence,
   "boq.overview": BOQOverview,
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
