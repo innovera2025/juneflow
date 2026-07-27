@@ -358,6 +358,15 @@ export class TenantDb {
     // Optional to match selectThrough() (which this delegates to for the ownership
     // proof) — an and()/or()-composed predicate needs no cast at the call site.
     where?: SQL,
+    // B-149 optimistic-lock predicate on the TARGET table's OWN columns, re-applied
+    // to the FINAL update — NOT just the resolve SELECT. The resolve→update is two
+    // round-trips, so a status guard placed only in `where` (the SELECT) does NOT
+    // close a concurrent race: under READ COMMITTED the loser's UPDATE re-checks
+    // (EPQ) only `id IN (ids)` and still matches → a duplicate commit. Folding the
+    // guard into the UPDATE's own WHERE makes the flip atomic — the loser re-matches
+    // `id IN (ids) AND <guard>` against the committed row and gets 0 rows. MUST
+    // reference only `table`'s own columns (the final UPDATE carries no joins).
+    guard?: SQL,
   ): Promise<T["$inferSelect"][]> {
     const idCol = (table as PgTable & { id?: PgColumn }).id;
     if (!idCol) {
@@ -373,10 +382,11 @@ export class TenantDb {
     }[];
     const ids = scoped.map((r) => r.id);
     if (ids.length === 0) return [];
+    const idScope = inArray(idCol, ids as never[]);
     const updated = await this.#db
       .update(table)
       .set(set as PgUpdateSetSource<T>)
-      .where(inArray(idCol, ids as never[]))
+      .where(guard ? (and(idScope, guard) as SQL) : idScope)
       .returning();
     return updated as T["$inferSelect"][];
   }

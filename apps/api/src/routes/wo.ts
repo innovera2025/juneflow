@@ -377,9 +377,12 @@ export function registerWoRoute(app: FastifyInstance): void {
       wos,
       WO_HOPS,
       { status: "approved", approvalStep: requiredTierCount(amount) },
-      // B-149 optimistic guard: fold the pending pre-state into the WHERE so a
-      // concurrent approve/reject that already moved this WO updates 0 rows → 409.
       and(eq(wos.id, id), eq(wos.status, "pending")),
+      // B-149 optimistic guard — the pending pre-state re-applied to the FINAL
+      // UPDATE (updateThroughChain resolves then updates in two round-trips, so a
+      // guard only in the resolve `where` above would NOT be atomic). A concurrent
+      // approve/reject that already moved this WO re-matches 0 rows here → 409.
+      eq(wos.status, "pending"),
     );
     if (!updated) {
       return reply.code(409).send({
@@ -438,9 +441,10 @@ export function registerWoRoute(app: FastifyInstance): void {
       wos,
       WO_HOPS,
       { status: "rejected" },
-      // B-149: same guard — a concurrent approve+reject can't leave a money-
-      // approved WO flipped to rejected (0 rows → 409).
       and(eq(wos.id, id), eq(wos.status, "pending")),
+      // B-149 atomic guard on the FINAL UPDATE — a concurrent approve+reject can't
+      // leave a money-approved WO flipped to rejected (loser re-matches 0 rows → 409).
+      eq(wos.status, "pending"),
     );
     if (!updated) {
       return reply.code(409).send({
