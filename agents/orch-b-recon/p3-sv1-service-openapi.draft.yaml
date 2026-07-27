@@ -1,0 +1,313 @@
+# =============================================================================
+# p3-sv1-service-openapi.draft.yaml  —  B-159 SV-1 SACRED sales.service round
+# =============================================================================
+# STATUS: references-only draft (orch-B recon). NOT applied to sacred files by
+#   orch-B. orch-A/C files + implements the real sacred round under
+#   SACRED_OVERRIDE=wei-approved:B-159 (authorization RECORDED BLOCKERS.md:174).
+#   orch-B verifies the applied round is additive (0 removed).
+#
+# PROVENANCE / CITATIONS
+#   - Wei ruling  : BLOCKERS.md:174 (B-159) — SV-1 AUTHORIZE SACRED (2026-07-27,
+#                   Wei=ก): declare GET/POST /sales/service + status action ops
+#                   (received->scheduled->fixing->fixed->closed) · SV-2 warranty
+#                   derive sales_unit.transfer_at + 12mo · SV-3 action-ops-not-PUT ·
+#                   SV-5 cross-link pm_workorder. i18n service.* ready (B-153, 75
+#                   keys). Wave-2.
+#   - Screen      : pototype/sales-service.jsx — AfterSalesService list (L22),
+#                   SVC_STATUS vocabulary (L14-20), PRIO_COLOR (L13), TicketDetail
+#                   modal + status timeline + action buttons (L192-277),
+#                   NewTicketForm create (L279-312). The FOUR status transitions are
+#                   the TicketDetail action buttons L269-273; the create is
+#                   NewTicketForm submit L280/308; SV-5 cross-link is L267.
+#   - Schema      : packages/db/src/schema/extensions.ts — serviceTickets
+#                   (service_ticket, L339): no, unit_id->project_node,
+#                   customer_id->customer, channel, category, title, priority,
+#                   status, assignee_user_id->user, opened_date, scheduled_date,
+#                   warranty(boolean). SV-2 basis = salesUnits.transferAt
+#                   (sales_unit.transfer_at, misc.ts L96). SV-5 target = pmWorkOrders
+#                   (pm_workorder, pm.ts L168). NO new column / table this round.
+#   - STYLE mirror: apps/api/src/routes/labor.ts + openapi.yaml §finance-inventory
+#                   (listInventoryItems/…/approveStockTransfer, openapi.yaml
+#                   L2962-3173) — Entity-opaque: list -> EntityList, create ->
+#                   EntityCreated, detail -> EntityOk, action -> ActionOk, flat 401
+#                   fail-closed, 409 Conflict on invalid state transition. The
+#                   status-flip guard mirrors approveStockTransfer's B-149 optimistic
+#                   guard (inventory.ts L908-920).
+#
+# INVARIANTS (hold on every op below — one shared op-set for orch-A + orch-B)
+#   - Tenant-scoped: service_ticket carries company_id; the scoped TenantDb door is
+#     company-scoped by construction. No resolved tenant -> flat 401
+#     ({code:UNAUTHENTICATED} — mirror labor.ts unauthenticated()).
+#   - Entity-opaque: every row/body is the opaque Entity (snake_case wire of the
+#     REAL service_ticket columns — C10, no fabrication). No hand-written model.
+#   - STATUS MACHINE via ACTION-OPS-NOT-PUT (SV-3, api-contract.md): the ONLY status
+#     path is received ->[schedule]-> scheduled ->[start]-> fixing ->[fix]-> fixed
+#     ->[close]-> closed. There is NO PUT /sales/service/{id} status write. `closed`
+#     is terminal (prototype L273 disabled button). Each action is valid ONLY from
+#     its predecessor state -> 409 Conflict otherwise (see MUTATION NOTES).
+#   - WARRANTY = DERIVED, NOT STORED (SV-2): the displayed "Warranty คงเหลือ N เดือน"
+#     is computed at read from sales_unit.transfer_at + 12 months — NOT a persisted
+#     column (NewTicketForm field is readOnly, hint "คำนวณจากวันโอน" · L289). The
+#     existing service_ticket.warranty boolean is only a covered/expired flag; the
+#     months-remaining number is a read-time derivation. NO new column/table.
+#   - MONEY = NONE: a service ticket posts NO money. service_ticket has no money
+#     column; the "ราคาประเมิน" mention (L261) is free-text inside a progress-note
+#     textarea, never persisted or posted. So NO currency_code, no value field, no
+#     JV. (Contrast the inventory round, which does post cost-to-BOQ.)
+#   - ADDITIVE-ONLY: reuses existing components (Entity, EntityList, EntityOk,
+#     EntityCreated, ActionOk, IdPath, Filter, Page, Unauthorized, NotFound,
+#     Conflict). The Conflict response ALREADY EXISTS (openapi.yaml L4176, added by
+#     the B-141 inventory round) — this round REUSES it, adds NO new component.
+#     Tag: [land-sales] (mirrors the existing /sales/* + /land/* ops). No new tag.
+#
+# OP INDEX (7 ops · 2 [read] / 5 [write])
+#   1  GET  /sales/service                    [read]   ticket list (list screen L22)
+#   2  GET  /sales/service/{id}               [read]   ticket detail (TicketDetail L192)
+#   3  POST /sales/service                     [write]  create + assign ticket (NewTicketForm L279)
+#   4  POST /sales/service/{id}/schedule       [write]* received  -> scheduled (มอบหมายช่าง L269)
+#   5  POST /sales/service/{id}/start          [write]* scheduled -> fixing    (เริ่มซ่อม   L270)
+#   6  POST /sales/service/{id}/fix            [write]* fixing    -> fixed     (ซ่อมเสร็จ   L271)
+#   7  POST /sales/service/{id}/close          [write]* fixed     -> closed    (ปิดงาน      L272)
+#   ( * = the 4 status action-ops — each guarded to its predecessor state, see
+#     MUTATION NOTES. NOTE: B-159 estimated "~4-6 ops"; the faithful 1:1 itemization
+#     of the prototype is 7 = 3 core + the 4 distinct status buttons L269-272.)
+#
+#   Deliberately NOT declared (faithful to the prototype — no invented ops):
+#     - NO PUT status write (SV-3 forbids it — action-ops only).
+#     - "สร้างใบงานช่าง (PM)" (L267) is NOT a /sales/service op — it is the SV-5
+#       cross-module create of a pm_workorder (belongs to the pm.wo surface, not
+#       this tag). Handler note only (see MUTATION NOTES).
+#     - "รายงาน Warranty" (L46), "แนบรูป" (L266), "ตั้งค่า LINE OA" (L184) are
+#       notify-only mock buttons (no server mutation) — no ops.
+#     - technician-workload / category / KPI panels (L52-56, L127-171) are DERIVED
+#       read rollups over service_ticket — served inside the list read, no own op.
+# =============================================================================
+
+paths:
+  # --- SERVICE TICKETS (sales-service.jsx AfterSalesService L22 / TicketDetail L192) -
+  /sales/service:
+    get:
+      tags: [land-sales]
+      summary: List after-sales service tickets              # [read]
+      description: >-
+        Tenant-scoped ticket register (sales-service.jsx list L22). Rows are the
+        opaque service_ticket columns (no, unit, customer, channel, category,
+        title, priority, status, assignee, opened_date, scheduled_date) PLUS the
+        derived warranty-months-remaining (SV-2, read-time from
+        sales_unit.transfer_at + 12mo). The tab filters (active/all/high/closed)
+        and the technician/category/KPI panels are FE-side over this same list.
+      operationId: listServiceTickets
+      parameters:
+        - $ref: "#/components/parameters/Filter"              # ?filter — SR-no / unit / customer / status / priority / channel
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      # [write] plain create (NO money — a service ticket posts no cost). Body is the
+      #   opaque Entity: { unit_id, customer_id?, channel, category, title, priority,
+      #   assignee_user_id?, scheduled_date?, note? }. status defaults 'received'
+      #   (SV-3 start state). `no` (SR-YYYY-####) is server-allocated (running-doc).
+      #   `warranty` months is DERIVED, never a client input.
+      summary: Create service ticket (รับเรื่อง + มอบหมาย)
+      operationId: createServiceTicket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /sales/service/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [land-sales]
+      summary: Get service ticket detail                      # [read] header + derived warranty-months + status-step; history is derived
+      operationId: getServiceTicket
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- STATUS MACHINE (SV-3 · action-ops-not-PUT · TicketDetail buttons L269-272) ---
+  /sales/service/{id}/schedule:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: received -> scheduled ("มอบหมายช่าง" L269 — assign a
+      #   technician + set the appointment). B-149 guard: valid ONLY from 'received'
+      #   -> 409 otherwise. Optional body {assignee_user_id?, scheduled_date?}.
+      summary: Assign + schedule a service ticket — received -> scheduled (action endpoint)
+      description: >-
+        Status changes go through action endpoints only (api-contract.md, SV-3).
+        Valid only when the ticket is currently 'received'; the pre-state is folded
+        into the UPDATE WHERE (B-149) so a concurrent flip 409s.
+      operationId: scheduleServiceTicket
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"             # invalid transition (not 'received') — REUSES existing component (L4176)
+  /sales/service/{id}/start:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: scheduled -> fixing ("เริ่มซ่อม" L270). B-149 guard: valid
+      #   ONLY from 'scheduled' -> 409 otherwise.
+      summary: Start the repair — scheduled -> fixing (action endpoint)
+      operationId: startServiceTicket
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /sales/service/{id}/fix:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: fixing -> fixed ("ซ่อมเสร็จ · รอลูกค้ายืนยัน" L271). B-149
+      #   guard: valid ONLY from 'fixing' -> 409 otherwise.
+      summary: Mark repair complete — fixing -> fixed (action endpoint)
+      operationId: fixServiceTicket
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /sales/service/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: fixed -> closed ("ปิดงาน + ส่งแบบประเมิน" L272 — closes the
+      #   ticket + triggers the customer satisfaction survey). B-149 guard: valid
+      #   ONLY from 'fixed' -> 409 otherwise. 'closed' is TERMINAL (L273 disabled).
+      #   Optional body {rating?} — the closed-row ★ rating (L116) if captured here.
+      summary: Close a service ticket + send survey — fixed -> closed (action endpoint)
+      operationId: closeServiceTicket
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+# =============================================================================
+# MUTATION / HANDLER NOTES (semantics orch-A/C implements; orch-B verifies)
+# =============================================================================
+# STATUS-TRANSITION GUARDS (SV-3 · the 4 * ops · B-149 merged optimistic-guard)
+#   The status machine is strictly linear: received -> scheduled -> fixing ->
+#   fixed -> closed. Each action is valid ONLY from its immediate predecessor;
+#   any other current state -> 409 Conflict ({code:INVALID_STATE}).
+#
+#   Implement each flip with the MERGED B-149 optimistic-guard pattern (proven in
+#   inventory.ts approveStockTransfer L908-920, and ap/bank/boq/po/pr/subcon):
+#   FOLD THE PRE-STATE INTO THE UPDATE WHERE, never read-then-write:
+#
+#     UPDATE service_ticket
+#        SET status = '<next>'
+#      WHERE id = $id
+#        AND company_id = $tenant          -- (the scoped TenantDb door force-binds this)
+#        AND status = '<predecessor>'      -- the guard: predecessor pre-state
+#     RETURNING *;
+#     -- 0 rows updated  -> the ticket was not in <predecessor> (already advanced,
+#     --                    concurrent flip, or wrong state) -> 409 Conflict.
+#     -- 1 row  updated  -> 200 ActionOk { id, status:'<next>' }.
+#
+#   Per op:
+#     schedule : predecessor 'received'  -> 'scheduled'  (optional assignee_user_id +
+#                scheduled_date set in the SAME UPDATE)
+#     start    : predecessor 'scheduled' -> 'fixing'
+#     fix      : predecessor 'fixing'    -> 'fixed'
+#     close    : predecessor 'fixed'     -> 'closed'     (terminal; optional rating)
+#   This is race-safe (no TOCTOU) and folds a missing/foreign id into the 0-row
+#   path — a not-found id also matches 0 rows; if orch-A wants a distinct 404 vs
+#   409, do a scoped existence select first, then the guarded UPDATE (mirror the
+#   inventory.ts StaleStateError -> conflict() shape).
+#
+#   FINANCIAL AUTHZ: a service ticket posts NO money, so these are NOT finance
+#   mutations — do NOT gate them on finance.create/finance.approve (that would be
+#   inventing policy). Gate on the resolved tenant + (if a sales/service perm-module
+#   exists in the matrix) its create/update perm; else tenant-scope only. Reads gate
+#   on the resolved tenant. AuditLog fires automatically (middleware) on 2xx.
+#
+# SV-2  WARRANTY DERIVATION (derived-not-stored · NO new column/table)
+#   The displayed "Warranty คงเหลือ N เดือน" (list badge + TicketDetail L236 +
+#   NewTicketForm readOnly L289) is COMPUTED at read time, never persisted:
+#     warranty_months_remaining = max(0, 12 - months_elapsed_since(transfer_at))
+#   where transfer_at comes from the sold unit's sales_unit row. Join chain:
+#     service_ticket.unit_id -> project_node  <-  sales_unit.unit_id
+#       (both FK project_node; match on unit_id within the tenant)
+#     read sales_unit.transfer_at (misc.ts L96) -> add 12 months -> remaining vs now.
+#   No transfer_at / no sales_unit row -> null/"—" (honest, not an error). The
+#   existing service_ticket.warranty boolean stays a covered/expired flag ONLY; do
+#   NOT add a warranty_expiry or warranty_months column (SV-2 ruling: derive).
+#   Serialize the derived number onto the wire alongside the opaque columns.
+#
+# SV-5  pm_workorder CROSS-LINK ("สร้างใบงานช่าง (PM)" · L267 — handler note, NOT an op here)
+#   The TicketDetail "สร้างใบงานช่าง (PM)" button creates a CM/PM work order FROM the
+#   ticket and navigates to pm.wo (L267: notify "สร้างใบงานช่าง CM-PM จาก {no}" +
+#   ctx.navigate("pm.wo")). This is a CROSS-MODULE create of a pm_workorder
+#   (pm.ts pmWorkOrders L168) — it belongs to the pm.wo write surface, NOT the
+#   /sales/service tag, so it is NOT declared as a /sales/service op in this round.
+#   When the pm.wo create op is wired, seed the new pm_workorder from the ticket
+#   (unit/asset, title, category, assignee) and record the ticket linkage. Until
+#   then it is an honest FE-only navigate. Flag for orch-A: confirm whether the pm
+#   round already exposes a pm_workorder create op to target, else file a follow-up.
+#
+# COMPONENT NOTE (fully additive — ZERO new components)
+#   Every $ref above already exists in openapi.yaml today (verified): Entity,
+#   EntityList, EntityOk, EntityCreated, ActionOk, IdPath, Filter, Page,
+#   Unauthorized, NotFound, and Conflict (L4176 — added by the B-141 inventory
+#   round; this round REUSES it for the invalid-transition 409). Nothing to add,
+#   nothing to remove/rename. The `land-sales` tag already exists (L70). So the SV-1
+#   round is a pure paths-block append — orch-A inserts these 7 path items into the
+#   §Land/Sales block (after /sales/units/{id}/transfer, openapi.yaml L3509) and
+#   registers the service route in app.ts.
+#
+#   TAG DISCRETION: this draft tags [land-sales] to mirror the sibling /sales/* +
+#   /land/* ops. orch-A may consolidate under a different existing tag if it prefers
+#   (precedent: the B-141 inventory round shipped under [finance], not the draft's
+#   suggested [inventory]) — the op shapes are unaffected.
+# =============================================================================
