@@ -82,6 +82,7 @@ import { FAAdjust } from "./screens/fa/fa-adjust";
 import { ARInvoice } from "./screens/ar/ar-invoice";
 import { SalesCRM } from "./screens/sales/sales-crm";
 import { SalesProcess } from "./screens/sales/sales-process";
+import { SalesDown } from "./screens/sales/sales-down";
 import { LandBank } from "./screens/land/land-bank";
 import { LandSurvey } from "./screens/land/land-survey";
 import { LandDueDiligence } from "./screens/land/land-dd";
@@ -156,6 +157,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "ar.invoice": ARInvoice,
   "sales.crm": SalesCRM,
   "sales.process": SalesProcess,
+  "sales.down": SalesDown,
 };
 
 const rootRoute = createRootRoute({
