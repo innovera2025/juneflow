@@ -27,7 +27,7 @@
 // documented in gl-posting.ts (no seed posted-marker → all docs read PENDING).
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   accountingPeriods,
   costCenters,
@@ -835,14 +835,24 @@ async function closeGlPeriod(
       return conflict(reply, `period ${period} is already closed (locked)`);
     }
     // Lock-only (Wei C-176 #6): flip locked; closing entries are deferred.
+    // B-149 optimistic guard: fold the unlocked pre-state into the WHERE — a
+    // concurrent close that already locked this period matches 0 rows → 409
+    // (consistent with the `existing.locked` pre-check above).
     const [updated] = (await db
-      .update(accountingPeriods, { locked: true }, eq(accountingPeriods.id, existing.id))
+      .update(
+        accountingPeriods,
+        { locked: true },
+        and(eq(accountingPeriods.id, existing.id), eq(accountingPeriods.locked, false)),
+      )
       .returning()) as AccountingPeriodRow[];
+    if (!updated) {
+      return conflict(reply, `period ${period} is already closed (locked)`);
+    }
     return reply.code(200).send({
       period,
       locked: true,
       created: false,
-      id: updated?.id ?? existing.id,
+      id: updated.id,
     });
   }
 

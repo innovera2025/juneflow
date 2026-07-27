@@ -43,7 +43,7 @@
 // ผจก.โครงการ step cannot be persisted per-doc: boq_doc has no approval_step
 // column (only `pr` does) — flagged as a schema gap, NOT worked around here.
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   boqDocs,
   boqVersionHistory,
@@ -113,6 +113,19 @@ const PR_BUCKETS = [
   { cats: new Set(["M"]), type: "material" as const, prefix: "PR" },
   { cats: new Set(["S", "L"]), type: "subcon" as const, prefix: "PR-S" },
 ];
+
+/**
+ * B-149 optimistic-lock miss: a guarded status flip matched 0 rows because a
+ * concurrent submit/approve/revise already moved the BOQ out of its expected
+ * pre-state. Thrown inside the approve/revise transaction so the status flip and
+ * its version-history row roll back together → mapped to 409.
+ */
+class StaleStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StaleStateError";
+  }
+}
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -816,15 +829,23 @@ export function registerBoqRoute(app: FastifyInstance): void {
       });
     }
 
+    // B-149 optimistic guard: fold the submittable pre-state into the WHERE so a
+    // concurrent submit/approve that already moved this BOQ matches 0 rows → 409.
     const [updated] = await db.updateThrough(
       boqDocs,
       projects,
       boqDocs.projectId,
       doc.projectId,
       { status: "pending" },
-      eq(boqDocs.id, id),
+      and(eq(boqDocs.id, id), inArray(boqDocs.status, ["draft", "revise"])),
     );
-    return reply.code(200).send(await docWireWithTotal(db, updated!));
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a draft or revise BOQ can be submitted",
+      });
+    }
+    return reply.code(200).send(await docWireWithTotal(db, updated));
   });
 
   // POST /boq/:id/approve — pending → approved (LOCK). Requires MD-tier authority
@@ -872,34 +893,47 @@ export function registerBoqRoute(app: FastifyInstance): void {
     // without its archive log entry (the archive's Revise-history + version-diff
     // render from that row; a partial write would show an approval with no
     // history). The tx wrapper carries the same company_id.
-    const updated = await db.transaction(async (tx) => {
-      const [updated] = await tx.updateThrough(
-        boqDocs,
-        projects,
-        boqDocs.projectId,
-        doc.projectId,
-        // Stamp the archive approver + timestamp so the archive screen reads real
-        // rows (audit_log cannot source these — its entity is a route template).
-        { status: "approved", approvedBy: approver?.id ?? null, approvedAt },
-        eq(boqDocs.id, id),
-      );
-      await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
-        {
-          docId: id,
-          version: doc.version,
-          action: "approve",
-          by: approver?.id ?? null,
-          at: approvedAt,
-          delta: null,
-          note: null,
-        },
-      ]);
-      return updated;
-    });
+    try {
+      const updated = await db.transaction(async (tx) => {
+        // B-149 optimistic guard: only a pending BOQ can be approved — a concurrent
+        // approve that already locked it matches 0 rows here → throw (roll back the
+        // flip + its version-history row) → 409.
+        const [updated] = await tx.updateThrough(
+          boqDocs,
+          projects,
+          boqDocs.projectId,
+          doc.projectId,
+          // Stamp the archive approver + timestamp so the archive screen reads real
+          // rows (audit_log cannot source these — its entity is a route template).
+          { status: "approved", approvedBy: approver?.id ?? null, approvedAt },
+          and(eq(boqDocs.id, id), eq(boqDocs.status, "pending")),
+        );
+        if (!updated) {
+          throw new StaleStateError("only a pending BOQ can be approved");
+        }
+        await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
+          {
+            docId: id,
+            version: doc.version,
+            action: "approve",
+            by: approver?.id ?? null,
+            at: approvedAt,
+            delta: null,
+            note: null,
+          },
+        ]);
+        return updated;
+      });
 
-    return reply
-      .code(200)
-      .send(await docWireWithTotal(db, updated!, approver?.name ?? null));
+      return reply
+        .code(200)
+        .send(await docWireWithTotal(db, updated, approver?.name ?? null));
+    } catch (err) {
+      if (err instanceof StaleStateError) {
+        return reply.code(409).send({ code: "INVALID_STATE", message: err.message });
+      }
+      throw err;
+    }
   });
 
   // POST /boq/:id/revise — approved → revise, version += 1 (a new editable
@@ -948,31 +982,44 @@ export function registerBoqRoute(app: FastifyInstance): void {
     // B-097: version bump + its version-history row are ONE revise — write them
     // atomically so the archive timeline can never show a revised doc whose new
     // version has no matching history entry (mirrors /approve).
-    const updated = await db.transaction(async (tx) => {
-      const [updated] = await tx.updateThrough(
-        boqDocs,
-        projects,
-        boqDocs.projectId,
-        doc.projectId,
-        { status: "revise", version: newVersion },
-        eq(boqDocs.id, id),
-      );
-      // version = the freshly bumped version so it never collides with this
-      // doc's approve-history keys (B-085 fix 1; previously only /approve logged).
-      await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
-        {
-          docId: id,
-          version: newVersion,
-          action: "revise",
-          by: reviser?.id ?? null,
-          at: revisedAt,
-          delta: null,
-          note: null,
-        },
-      ]);
-      return updated;
-    });
+    try {
+      const updated = await db.transaction(async (tx) => {
+        // B-149 optimistic guard: only an approved BOQ can be revised — a concurrent
+        // revise that already re-opened it matches 0 rows here → throw (roll back the
+        // version bump + its history row) → 409.
+        const [updated] = await tx.updateThrough(
+          boqDocs,
+          projects,
+          boqDocs.projectId,
+          doc.projectId,
+          { status: "revise", version: newVersion },
+          and(eq(boqDocs.id, id), eq(boqDocs.status, "approved")),
+        );
+        if (!updated) {
+          throw new StaleStateError("only an approved BOQ can be revised");
+        }
+        // version = the freshly bumped version so it never collides with this
+        // doc's approve-history keys (B-085 fix 1; previously only /approve logged).
+        await tx.insertThrough(boqVersionHistory, projects, doc.projectId, [
+          {
+            docId: id,
+            version: newVersion,
+            action: "revise",
+            by: reviser?.id ?? null,
+            at: revisedAt,
+            delta: null,
+            note: null,
+          },
+        ]);
+        return updated;
+      });
 
-    return reply.code(200).send(await docWireWithTotal(db, updated!));
+      return reply.code(200).send(await docWireWithTotal(db, updated));
+    } catch (err) {
+      if (err instanceof StaleStateError) {
+        return reply.code(409).send({ code: "INVALID_STATE", message: err.message });
+      }
+      throw err;
+    }
   });
 }

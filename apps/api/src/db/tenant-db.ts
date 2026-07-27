@@ -301,7 +301,10 @@ export class TenantDb {
     parentFk: PgColumn,
     parentId: string,
     set: Partial<T["$inferInsert"]>,
-    where: SQL,
+    // Optional to match selectThrough()'s where?: SQL — a caller composing the
+    // predicate with and()/or() (which return SQL | undefined) needs no cast. The
+    // impl below AND-s it into the parent-FK scope, which tolerates undefined.
+    where?: SQL,
   ): Promise<T["$inferSelect"][]> {
     const parentPk = (parent as PgTable & { id?: PgColumn }).id;
     if (!parentPk) {
@@ -352,7 +355,9 @@ export class TenantDb {
     table: T,
     hops: readonly { fk: PgColumn; parent: PgTable }[],
     set: Partial<T["$inferInsert"]>,
-    where: SQL,
+    // Optional to match selectThrough() (which this delegates to for the ownership
+    // proof) — an and()/or()-composed predicate needs no cast at the call site.
+    where?: SQL,
   ): Promise<T["$inferSelect"][]> {
     const idCol = (table as PgTable & { id?: PgColumn }).id;
     if (!idCol) {

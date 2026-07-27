@@ -45,7 +45,7 @@
 // Fail-closed: an unattributable caller, or one lacking the perm, is denied 403.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   costCenters,
   faAdjustments,
@@ -530,6 +530,18 @@ async function listAdjustments(db: TenantDb): Promise<Record<string, unknown>[]>
 // (or a zero carrying amount → no ledger effect) records the write-off with the
 // GL posting DEFERRED (jvId=null) rather than a fabricated / degenerate zero JV.
 // Returns ActionOk {id, asset_id, kind:'write_off', amount: book_value, jv_no}.
+/**
+ * B-149 optimistic-lock miss: the guarded status flip matched 0 rows because a
+ * concurrent call already moved the asset out of its 'active' pre-state. Thrown
+ * inside the write-off transaction so the whole post rolls back → mapped to 409.
+ */
+class StaleStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StaleStateError";
+  }
+}
+
 async function writeOff(
   db: TenantDb,
   body: Record<string, unknown>,
@@ -558,11 +570,26 @@ async function writeOff(
   const adjustmentId = randomUUID();
   const jvId = randomUUID();
 
-  const jvNo = await db.transaction(async (tx): Promise<string | null> => {
-    // Take the asset out of service.
-    await tx
-      .update(fixedAssets, { status: "written_off" }, eq(fixedAssets.id, assetId))
+  let jvNo: string | null;
+  try {
+    jvNo = await db.transaction(async (tx): Promise<string | null> => {
+    // Take the asset out of service. B-149 optimistic guard: only an 'active'
+    // asset can be written off — a concurrent write-off that already flipped it
+    // matches 0 rows here → roll back (no duplicate adjustment/JV) → 409. The
+    // source_doc fa:<adjustmentId> is a FRESH uuid per call, so the unique index
+    // does NOT block a double-write-off; this guard is what does.
+    const flipped = await tx
+      .update(
+        fixedAssets,
+        { status: "written_off" },
+        and(eq(fixedAssets.id, assetId), eq(fixedAssets.status, "active")),
+      )
       .returning();
+    if (flipped.length === 0) {
+      throw new StaleStateError(
+        `fixed asset ${assetId} is not active (already written off or disposed)`,
+      );
+    }
     // Record the adjustment FIRST so the JV's source_doc can reference it.
     await tx
       .insert(faAdjustments, {
@@ -597,7 +624,13 @@ async function writeOff(
       .update(faAdjustments, { jvId }, eq(faAdjustments.id, adjustmentId))
       .returning();
     return no;
-  });
+    });
+  } catch (err) {
+    if (err instanceof StaleStateError) {
+      return reply.code(409).send({ code: "INVALID_STATE", message: err.message });
+    }
+    throw err;
+  }
 
   return reply.code(200).send({
     id: adjustmentId,
