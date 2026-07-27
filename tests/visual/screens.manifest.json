@@ -288,6 +288,42 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "sales-process",
+      "route": "sales.process",
+      "ref": "app-baseline/sales-process.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "sales-down",
+      "route": "sales.down",
+      "ref": "app-baseline/sales-down.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "sales-loan",
+      "route": "sales.loan",
+      "ref": "app-baseline/sales-loan.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "sales-service",
+      "route": "sales.service",
+      "ref": "app-baseline/sales-service.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
