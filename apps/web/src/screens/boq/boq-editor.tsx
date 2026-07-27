@@ -48,7 +48,7 @@
  * Tokens back every colour (rule 6); the CAT chip hexes are prototype-verbatim (B-037(a)).
  */
 import { useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { DictKey, NavKey, PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
@@ -164,6 +164,33 @@ const menuItem: CSSProperties = {
   borderRadius: 5,
   fontWeight: 500,
 };
+
+/**
+ * Keyboard semantics for an ARIA menuitem (a11y FIX-5): Enter/Space runs the same action as
+ * the item's onClick, ArrowUp/ArrowDown roves focus across sibling menuitems (clamped at the
+ * ends), and Escape closes the menu. Visual/DOM unchanged — the item stays a <div>.
+ */
+function onMenuItemKeyDown(
+  e: ReactKeyboardEvent<HTMLDivElement>,
+  activate: () => void,
+  close: () => void,
+) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    activate();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = Array.from(
+      e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const i = items.indexOf(e.currentTarget);
+    const next = e.key === "ArrowDown" ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+    items[next]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    close();
+  }
+}
 
 /** Native-input style (new-boq-form fieldStyle). */
 function fieldStyle(bad = false): CSSProperties {
@@ -398,6 +425,7 @@ function ItemRow({
             onClick={() => setMenuOpen((o) => !o)}
             aria-label={t("common.more")}
             aria-haspopup="menu"
+            aria-expanded={menuOpen}
             style={{
               width: 24,
               height: 24,
@@ -417,6 +445,7 @@ function ItemRow({
           <>
             <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
             <div
+              role="menu"
               style={{
                 position: "absolute",
                 top: 30,
@@ -433,25 +462,57 @@ function ItemRow({
               }}
             >
               {/* WIRE GAP 4: no update endpoint — edit is a deferred stub. */}
-              <div onClick={() => setMenuOpen(false)} style={menuItem}>
+              <div
+                role="menuitem"
+                tabIndex={0}
+                onClick={() => setMenuOpen(false)}
+                onKeyDown={(e) =>
+                  onMenuItemKeyDown(e, () => setMenuOpen(false), () => setMenuOpen(false))
+                }
+                style={menuItem}
+              >
                 <Icon name="edit" size={12} /> {t("common.edit")}
               </div>
               {/* Duplicate = a REAL create (POST /boq/{id}/items with a -COPY code). */}
               <div
+                role="menuitem"
+                tabIndex={0}
                 onClick={() => {
                   setMenuOpen(false);
                   onDup();
                 }}
+                onKeyDown={(e) =>
+                  onMenuItemKeyDown(
+                    e,
+                    () => {
+                      setMenuOpen(false);
+                      onDup();
+                    },
+                    () => setMenuOpen(false),
+                  )
+                }
                 style={menuItem}
               >
                 <Icon name="plus" size={12} /> {tp(S("duplicate"))}
               </div>
               {/* WIRE GAP 4: no delete endpoint — deferred stub. */}
               <div
+                role="menuitem"
+                tabIndex={0}
                 onClick={() => {
                   setMenuOpen(false);
                   onDel();
                 }}
+                onKeyDown={(e) =>
+                  onMenuItemKeyDown(
+                    e,
+                    () => {
+                      setMenuOpen(false);
+                      onDel();
+                    },
+                    () => setMenuOpen(false),
+                  )
+                }
                 style={{ ...menuItem, color: "var(--danger)" }}
               >
                 <Icon name="x" size={12} color="var(--danger)" /> {tp(S("deleteItem"))}

@@ -28,7 +28,7 @@
  * literal sits in this source.
  */
 import { useMemo, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import type { NavKey, PhraseKey } from "@juneflow/i18n";
 import type { components } from "@juneflow/contracts";
 import { useI18n } from "../../i18n";
@@ -71,6 +71,33 @@ function th(w?: number): CSSProperties {
 
 /** Table body cell style, ported from ds.jsx td() (L220). */
 const td: CSSProperties = { padding: "14px", verticalAlign: "middle" };
+
+/**
+ * Keyboard semantics for an ARIA menuitem (a11y FIX-5): Enter/Space runs the same action as
+ * the item's onClick, ArrowUp/ArrowDown roves focus across sibling menuitems (clamped at the
+ * ends), and Escape closes the menu. Visual/DOM unchanged — the item stays a <div>.
+ */
+function onMenuItemKeyDown(
+  e: ReactKeyboardEvent<HTMLDivElement>,
+  activate: () => void,
+  close: () => void,
+) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    activate();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = Array.from(
+      e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const i = items.indexOf(e.currentTarget);
+    const next = e.key === "ArrowDown" ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+    items[next]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    close();
+  }
+}
 
 /** Tag, ported 1:1 from ds.jsx Tag() (L273-280). color-mix + white are prototype-verbatim. */
 function Tag({ children, tone = "var(--text-2)" }: { children: ReactNode; tone?: string }) {
@@ -491,6 +518,7 @@ export function MasterVendor() {
                           onClick={() => setMenuFor(menuFor === v.id ? null : v.id)}
                           aria-label={t("common.more")}
                           aria-haspopup="menu"
+                          aria-expanded={menuFor === v.id}
                           style={{
                             width: 28,
                             height: 28,
@@ -512,6 +540,7 @@ export function MasterVendor() {
                               style={{ position: "fixed", inset: 0, zIndex: 20 }}
                             />
                             <div
+                              role="menu"
                               style={{
                                 position: "absolute",
                                 top: 32,
@@ -526,10 +555,22 @@ export function MasterVendor() {
                               }}
                             >
                               <div
+                                role="menuitem"
+                                tabIndex={0}
                                 onClick={() => {
                                   setMenuFor(null);
                                   openForm(v);
                                 }}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(
+                                    e,
+                                    () => {
+                                      setMenuFor(null);
+                                      openForm(v);
+                                    },
+                                    () => setMenuFor(null),
+                                  )
+                                }
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -543,10 +584,22 @@ export function MasterVendor() {
                                 <Icon name="edit" size={13} color="var(--text-2)" /> {t("common.edit")}
                               </div>
                               <div
+                                role="menuitem"
+                                tabIndex={0}
                                 onClick={() => {
                                   setMenuFor(null);
                                   ctx.notify(t("vendor.notifyHistory").replace("{name}", v.name));
                                 }}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(
+                                    e,
+                                    () => {
+                                      setMenuFor(null);
+                                      ctx.notify(t("vendor.notifyHistory").replace("{name}", v.name));
+                                    },
+                                    () => setMenuFor(null),
+                                  )
+                                }
                                 style={{
                                   display: "flex",
                                   alignItems: "center",

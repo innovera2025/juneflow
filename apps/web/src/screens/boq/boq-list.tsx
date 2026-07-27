@@ -31,7 +31,7 @@
  * (rule 6); the status dot hexes are prototype-verbatim (B-037(a), in boq-rows.ts).
  */
 import { useMemo, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import type { NavKey, PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
@@ -177,6 +177,33 @@ const menuItem: CSSProperties = {
   cursor: "pointer",
   fontSize: 12,
 };
+
+/**
+ * Keyboard semantics for an ARIA menuitem (a11y FIX-5): Enter/Space runs the same action as
+ * the item's onClick, ArrowUp/ArrowDown roves focus across sibling menuitems (clamped at the
+ * ends), and Escape closes the menu. Visual/DOM unchanged — the item stays a <div>.
+ */
+function onMenuItemKeyDown(
+  e: ReactKeyboardEvent<HTMLDivElement>,
+  activate: () => void,
+  close: () => void,
+) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    activate();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = Array.from(
+      e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const i = items.indexOf(e.currentTarget);
+    const next = e.key === "ArrowDown" ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+    items[next]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    close();
+  }
+}
 
 export function BOQList() {
   const { t, tn, tp } = useI18n();
@@ -460,6 +487,7 @@ export function BOQList() {
                             onClick={() => setMenuFor(menuFor === d.id ? null : d.id)}
                             aria-label={t("common.more")}
                             aria-haspopup="menu"
+                            aria-expanded={menuFor === d.id}
                             style={{
                               width: 28,
                               height: 28,
@@ -482,6 +510,7 @@ export function BOQList() {
                               style={{ position: "fixed", inset: 0, zIndex: 20 }}
                             />
                             <div
+                              role="menu"
                               style={{
                                 position: "absolute",
                                 top: 36,
@@ -497,24 +526,57 @@ export function BOQList() {
                               }}
                             >
                               <div
+                                role="menuitem"
+                                tabIndex={0}
                                 onClick={() => {
                                   setMenuFor(null);
                                   openEditor(d);
                                 }}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(
+                                    e,
+                                    () => {
+                                      setMenuFor(null);
+                                      openEditor(d);
+                                    },
+                                    () => setMenuFor(null),
+                                  )
+                                }
                                 style={menuItem}
                               >
                                 <Icon name="edit" size={12} color="var(--text-2)" /> {t("boq.listEditInEditor")}
                               </div>
                               {/* Duplicate / print / delete — deferred stubs (no /boq endpoint yet). */}
-                              <div onClick={() => setMenuFor(null)} style={menuItem}>
+                              <div
+                                role="menuitem"
+                                tabIndex={0}
+                                onClick={() => setMenuFor(null)}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(e, () => setMenuFor(null), () => setMenuFor(null))
+                                }
+                                style={menuItem}
+                              >
                                 <Icon name="copy" size={12} color="var(--text-2)" /> {tp(P("duplicate"))}
                               </div>
-                              <div onClick={() => setMenuFor(null)} style={menuItem}>
+                              <div
+                                role="menuitem"
+                                tabIndex={0}
+                                onClick={() => setMenuFor(null)}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(e, () => setMenuFor(null), () => setMenuFor(null))
+                                }
+                                style={menuItem}
+                              >
                                 <Icon name="print" size={12} color="var(--text-2)" /> {t("common.print")}
                               </div>
                               <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
                               <div
+                                role="menuitem"
+                                tabIndex={0}
                                 onClick={() => setMenuFor(null)}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(e, () => setMenuFor(null), () => setMenuFor(null))
+                                }
                                 style={{ ...menuItem, color: "var(--danger)" }}
                               >
                                 <Icon name="x" size={12} color="var(--danger)" /> {t("common.delete")}

@@ -18,6 +18,7 @@
  * real `id`. Toasts (ctx.notify) fire from the dict TEMPLATES with {name}/{code} interpolated.
  */
 import { useMemo, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
@@ -41,6 +42,33 @@ import {
 } from "./use-org-units";
 import { OrgAddForm, type OrgPreset } from "./org-add-form";
 import orgStrings from "./org-strings.json" with { type: "json" };
+
+/**
+ * Keyboard semantics for an ARIA menuitem (a11y FIX-5): Enter/Space runs the same action as
+ * the item's onClick, ArrowUp/ArrowDown roves focus across sibling menuitems (clamped at the
+ * ends), and Escape closes the menu. Visual/DOM unchanged — the item stays a <div>.
+ */
+function onMenuItemKeyDown(
+  e: ReactKeyboardEvent<HTMLDivElement>,
+  activate: () => void,
+  close: () => void,
+) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    activate();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = Array.from(
+      e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const i = items.indexOf(e.currentTarget);
+    const next = e.key === "ArrowDown" ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+    items[next]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    close();
+  }
+}
 
 export function MasterCompany() {
   const { t, tn, tp } = useI18n();
@@ -266,6 +294,7 @@ export function MasterCompany() {
                         onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}
                         aria-label={t("common.more")}
                         aria-haspopup="menu"
+                        aria-expanded={menuFor === r.id}
                         style={{
                           width: 28,
                           height: 28,
@@ -287,6 +316,7 @@ export function MasterCompany() {
                             style={{ position: "fixed", inset: 0, zIndex: 20 }}
                           />
                           <div
+                            role="menu"
                             style={{
                               position: "absolute",
                               top: 32,
@@ -301,10 +331,22 @@ export function MasterCompany() {
                             }}
                           >
                             <div
+                              role="menuitem"
+                              tabIndex={0}
                               onClick={() => {
                                 setMenuFor(null);
                                 openAdd(r);
                               }}
+                              onKeyDown={(e) =>
+                                onMenuItemKeyDown(
+                                  e,
+                                  () => {
+                                    setMenuFor(null);
+                                    openAdd(r);
+                                  },
+                                  () => setMenuFor(null),
+                                )
+                              }
                               style={{
                                 display: "flex",
                                 alignItems: "center",
@@ -319,10 +361,22 @@ export function MasterCompany() {
                             </div>
                             {r.level !== 0 && (
                               <div
+                                role="menuitem"
+                                tabIndex={0}
                                 onClick={() => {
                                   setMenuFor(null);
                                   openAdd({ level: 1, parent_id: r.id });
                                 }}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(
+                                    e,
+                                    () => {
+                                      setMenuFor(null);
+                                      openAdd({ level: 1, parent_id: r.id });
+                                    },
+                                    () => setMenuFor(null),
+                                  )
+                                }
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -338,7 +392,12 @@ export function MasterCompany() {
                             )}
                             <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
                             <div
+                              role="menuitem"
+                              tabIndex={0}
                               onClick={() => removeRow(r)}
+                              onKeyDown={(e) =>
+                                onMenuItemKeyDown(e, () => removeRow(r), () => setMenuFor(null))
+                              }
                               style={{
                                 display: "flex",
                                 alignItems: "center",
