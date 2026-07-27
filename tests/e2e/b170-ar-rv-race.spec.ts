@@ -19,8 +19,9 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 const LIVE = Boolean(process.env.E2E_LIVE);
 const liveDescribe = LIVE ? test.describe : test.describe.skip;
 
-/** Concurrent fan-out — N simultaneous full-amount receipts of one invoice. */
-const N = 3;
+/** Concurrent fan-out — N simultaneous full-amount receipts of one invoice. High N
+ * widens the odds that ≥2 read priorRvs before either commits (the TOCTOU window). */
+const N = 15;
 
 /** Rows out of a B-014 list envelope ({data}) — defensive over {items}/bare array. */
 function rowsOf(body: Record<string, unknown>): Array<Record<string, unknown>> {
