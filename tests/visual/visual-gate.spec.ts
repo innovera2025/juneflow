@@ -371,7 +371,12 @@ test.describe("visual gate · capture mode (real screens vs reference)", () => {
       // flight then, so the shot captures skeleton/loading frames and the gate
       // flakes 13-16% against a settled baseline. networkidle + a fixed settle
       // makes capture-vs-baseline deterministic (both sides settled).
-      await page.goto(`${baseURL}/#/${entry.route}`, { waitUntil: "networkidle" });
+      // B-155: browser-path nav (NOT hash). The app uses browser history
+      // (createRouter default), so `/#/${route}` was ignored → pathname "/" →
+      // indexRoute redirect → /dashboard → EVERY screen captured the dashboard
+      // (all 28 baselines were dashboards · gate was a no-op). nginx SPA-fallback
+      // (apps/web/Dockerfile try_files → index.html) serves the deep-link.
+      await page.goto(`${baseURL}/${entry.route}`, { waitUntil: "networkidle" });
       await page.waitForTimeout(1500);
       const shot = await page.screenshot({ fullPage: false });
       const candidate =
