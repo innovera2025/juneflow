@@ -1667,6 +1667,7 @@ async function seed(): Promise<void> {
         LEADS.map((l, i) => ({
           id: det(`lead:${i}`), companyId: CO1, name: l.name, phone: l.phone,
           source: l.source, interest: l.interest, stage: l.stage, hot: l.hot,
+          warmth: l.hot ? "hot" : "warm", // SA-1 3-state (seed maps hot bool → warmth)
           lastContactAt: null, note: l.note, ownerUserId: det(`user:${i % 12}`), days: l.days,
         })),
       );
