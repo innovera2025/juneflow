@@ -835,13 +835,16 @@ export function registerSubconRoute(app: FastifyInstance): void {
         eq(workPeriods.contractId, resolved.contract.id),
       );
       const warning = progressWarning(resolved.period, siblings);
-      // B-149 optimistic guard: fold the inspectable pre-state into the WHERE so a
-      // concurrent pass/reject that already moved this period matches 0 rows → 409.
+      // B-149 optimistic guard: the inspectable pre-state re-applied to the FINAL
+      // UPDATE (5th arg) — updateThroughChain resolves then updates in two round-
+      // trips, so a guard only in the resolve `where` (4th arg) would NOT be atomic.
+      // A concurrent pass/reject that already moved this period re-matches 0 rows → 409.
       const [period] = await db.updateThroughChain(
         workPeriods,
         PERIOD_HOPS,
         { status: "passed" },
         and(eq(workPeriods.id, id), inArray(workPeriods.status, ["delivered", "inspecting"])),
+        inArray(workPeriods.status, ["delivered", "inspecting"]),
       );
       if (!period) {
         return reply.code(409).send({
@@ -878,14 +881,16 @@ export function registerSubconRoute(app: FastifyInstance): void {
     // Defect List (the defects hang off the acceptance).
     try {
       const { period, createdDefects } = await db.transaction(async (tx) => {
-        // B-149 optimistic guard: fold the inspectable pre-state into the WHERE so a
-        // concurrent pass/reject that already moved this period matches 0 rows → throw
-        // (roll back the reject + its defects) → 409.
+        // B-149 optimistic guard: the inspectable pre-state re-applied to the FINAL
+        // UPDATE (5th arg, not just the resolve `where`) so it is atomic. A concurrent
+        // pass/reject that already moved this period re-matches 0 rows → throw (roll
+        // back the reject + its defects) → 409.
         const [period] = await tx.updateThroughChain(
           workPeriods,
           PERIOD_HOPS,
           { status: "rejected" },
           and(eq(workPeriods.id, id), inArray(workPeriods.status, ["delivered", "inspecting"])),
+          inArray(workPeriods.status, ["delivered", "inspecting"]),
         );
         if (!period) {
           throw new StaleStateError("only a delivered work period can be inspected");
@@ -1000,16 +1005,21 @@ export function registerSubconRoute(app: FastifyInstance): void {
             scope: `งวด ${period.seq}`,
           })
           .returning();
-        // B-149 optimistic guard: fold the passed pre-state into the WHERE. Two
-        // concurrent approve-payments both pass the JS pre-check above, but only one
-        // can flip passed→paid — the loser matches 0 rows here → throw, rolling back
-        // this call's AP billing + retention (no double payment). No unique index
-        // covers this post, so THIS guard is the sole race backstop.
+        // B-149 optimistic guard — the passed pre-state re-applied to the FINAL
+        // UPDATE (5th arg). CRITICAL: updateThroughChain resolves (SELECT) then updates
+        // in two round-trips, so the guard MUST be on the UPDATE itself, not only the
+        // resolve `where` — otherwise under READ COMMITTED the loser's UPDATE re-checks
+        // only `id IN (ids)` (EPQ), still matches the now-`paid` row, and commits a
+        // SECOND ap_billing (double payment). With the guard on the UPDATE the loser
+        // re-matches `id AND status='passed'` → 0 rows → throw → rolls back this call's
+        // AP billing + retention. No unique index covers this post; THIS is the sole
+        // race backstop.
         const [advanced] = await tx.updateThroughChain(
           workPeriods,
           PERIOD_HOPS,
           { status: "paid" },
           and(eq(workPeriods.id, id), eq(workPeriods.status, "passed")),
+          eq(workPeriods.status, "passed"),
         );
         if (!advanced) {
           throw new StaleStateError(
