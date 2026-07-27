@@ -3528,6 +3528,153 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   # ================= DMS / Notifications / Audit / Reports ==================
+  /sales/service:
+    get:
+      tags: [land-sales]
+      summary: List after-sales service tickets              # [read]
+      description: >-
+        Tenant-scoped ticket register (sales-service.jsx list L22). Rows are the
+        opaque service_ticket columns (no, unit, customer, channel, category,
+        title, priority, status, assignee, opened_date, scheduled_date) PLUS the
+        derived warranty-months-remaining (SV-2, read-time from
+        sales_unit.transfer_at + 12mo). The tab filters (active/all/high/closed)
+        and the technician/category/KPI panels are FE-side over this same list.
+      operationId: listServiceTickets
+      parameters:
+        - $ref: "#/components/parameters/Filter"              # ?filter — SR-no / unit / customer / status / priority / channel
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [land-sales]
+      # [write] plain create (NO money — a service ticket posts no cost). Body is the
+      #   opaque Entity: { unit_id, customer_id?, channel, category, title, priority,
+      #   assignee_user_id?, scheduled_date?, note? }. status defaults 'received'
+      #   (SV-3 start state). `no` (SR-YYYY-####) is server-allocated (running-doc).
+      #   `warranty` months is DERIVED, never a client input.
+      summary: Create service ticket (รับเรื่อง + มอบหมาย)
+      operationId: createServiceTicket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /sales/service/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [land-sales]
+      summary: Get service ticket detail                      # [read] header + derived warranty-months + status-step; history is derived
+      operationId: getServiceTicket
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # --- STATUS MACHINE (SV-3 · action-ops-not-PUT · TicketDetail buttons L269-272) ---
+  /sales/service/{id}/schedule:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: received -> scheduled ("มอบหมายช่าง" L269 — assign a
+      #   technician + set the appointment). B-149 guard: valid ONLY from 'received'
+      #   -> 409 otherwise. Optional body {assignee_user_id?, scheduled_date?}.
+      summary: Assign + schedule a service ticket — received -> scheduled (action endpoint)
+      description: >-
+        Status changes go through action endpoints only (api-contract.md, SV-3).
+        Valid only when the ticket is currently 'received'; the pre-state is folded
+        into the UPDATE WHERE (B-149) so a concurrent flip 409s.
+      operationId: scheduleServiceTicket
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"             # invalid transition (not 'received') — REUSES existing component (L4176)
+  /sales/service/{id}/start:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: scheduled -> fixing ("เริ่มซ่อม" L270). B-149 guard: valid
+      #   ONLY from 'scheduled' -> 409 otherwise.
+      summary: Start the repair — scheduled -> fixing (action endpoint)
+      operationId: startServiceTicket
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /sales/service/{id}/fix:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: fixing -> fixed ("ซ่อมเสร็จ · รอลูกค้ายืนยัน" L271). B-149
+      #   guard: valid ONLY from 'fixing' -> 409 otherwise.
+      summary: Mark repair complete — fixing -> fixed (action endpoint)
+      operationId: fixServiceTicket
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /sales/service/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [land-sales]
+      # [write] * STATUS: fixed -> closed ("ปิดงาน + ส่งแบบประเมิน" L272 — closes the
+      #   ticket + triggers the customer satisfaction survey). B-149 guard: valid
+      #   ONLY from 'fixed' -> 409 otherwise. 'closed' is TERMINAL (L273 disabled).
+      #   Optional body {rating?} — the closed-row ★ rating (L116) if captured here.
+      summary: Close a service ticket + send survey — fixed -> closed (action endpoint)
+      operationId: closeServiceTicket
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /counts:
     get:
       tags: [dms]

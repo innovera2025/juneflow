@@ -97,8 +97,18 @@ const ROUTES = [
       deviceScaleFactor: 1,
     });
     const page = await ctx.newPage();
-    await page.goto(`http://localhost:${port}/#/${route}`, { waitUntil: "networkidle" }).catch(() => {});
+    // B-155: browser-path nav (NOT hash) — app uses browser history; hash was
+    // ignored → every route redirected to /dashboard. nginx SPA-fallback serves it.
+    await page.goto(`http://localhost:${port}/${route}`, { waitUntil: "networkidle" }).catch(() => {});
     await page.waitForTimeout(1500);
+    // B-155 safety: refuse to save a dashboard for a non-dashboard route.
+    const body = await page.textContent("body").catch(() => "");
+    const looksDashboard = body.includes("งบประมาณ vs ใช้จริง") || body.includes("เอกสารรออนุมัติ");
+    if (route !== "dashboard" && looksDashboard) {
+      console.error(`  SKIP ${name} (${route}) — rendered DASHBOARD (nav/route bug) · NOT saved`);
+      await ctx.close();
+      continue;
+    }
     await page.screenshot({ path: `${baseDir}/${name}.png`, fullPage: false });
     await ctx.close();
     console.log(`  captured ${name} (${route})`);

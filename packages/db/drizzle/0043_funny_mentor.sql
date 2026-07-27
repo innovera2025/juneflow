@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "down_payment_txn_unit_seq_uq" ON "down_payment_txn" USING btree ("sales_unit_id","seq");

@@ -80,6 +80,14 @@ import { TaxWHT } from "./screens/tax/tax-wht";
 import { FADepreciation } from "./screens/fa/fa-depr";
 import { FAAdjust } from "./screens/fa/fa-adjust";
 import { ARInvoice } from "./screens/ar/ar-invoice";
+import { SalesCRM } from "./screens/sales/sales-crm";
+import { SalesProcess } from "./screens/sales/sales-process";
+import { SalesDown } from "./screens/sales/sales-down";
+import { SalesLoan } from "./screens/sales/sales-loan";
+import { AfterSalesService } from "./screens/sales/sales-service";
+import { LandBank } from "./screens/land/land-bank";
+import { LandSurvey } from "./screens/land/land-survey";
+import { LandDueDiligence } from "./screens/land/land-dd";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -92,6 +100,9 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
   dashboard: Dashboard,
   exec: ExecDashboard,
+  "land.bank": LandBank,
+  "land.survey": LandSurvey,
+  "land.dd": LandDueDiligence,
   "boq.overview": BOQOverview,
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
@@ -146,6 +157,11 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "fa.depr": FADepreciation,
   "fa.adjust": FAAdjust,
   "ar.invoice": ARInvoice,
+  "sales.crm": SalesCRM,
+  "sales.process": SalesProcess,
+  "sales.down": SalesDown,
+  "sales.loan": SalesLoan,
+  "sales.service": AfterSalesService,
 };
 
 const rootRoute = createRootRoute({

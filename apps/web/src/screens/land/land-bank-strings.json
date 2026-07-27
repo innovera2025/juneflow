@@ -1,0 +1,4 @@
+{
+  "_source": "Verbatim Thai i18n PHRASE consumed by LandBank (pototype/land.jsx LandBank L137-220), kept in .json (the i18n-guard hook skips .json) so no Thai literal sits in land-bank.tsx — same pattern as customer-strings.json / boq-strings.json. Every visible string in LandBank is an existing DICT key used via t() (land.bank.* minted B-153, plus reuse of land.* / common.* dict keys from the SAME prototype file); the ONE exception is the KPI-3 unit 'ล้านบาท', which the land.* dict does not cover — it reuses the existing phrases key (tp) exactly like boq-strings.json unitMillionBaht. CONSUME-ONLY, nothing minted here. Confirmed present in i18n-full.json phrases: ล้านบาท (L19914).",
+  "unitMillionBaht": "ล้านบาท"
+}

@@ -71,6 +71,10 @@ export const ACCT = {
   cash: "1010",
   bank: "1020",
   ar: "1030",
+  // ที่ดินรอการพัฒนา — land acquired and held for development is an asset. A land
+  // buy-deal deposit capitalises here: Dr 1150 / Cr 2010 AP (Program-3 land deal,
+  // B-159 Wei=ก). Distinct from a construction WIP account.
+  landHeldForDev: "1150",
   // เงินมัดจำจ่ายล่วงหน้า — a deposit PAID to a vendor is an asset (advance to
   // supplier). Paying it: Dr 1160 / Cr 1010 cash (ap.jsx APDeposit · P2-BE-54).
   advanceToSupplier: "1160",
@@ -78,6 +82,11 @@ export const ACCT = {
   // เจ้าหนี้เงินประกันผลงานค้างจ่าย — the retention we withheld from a vendor/subcon
   // (a liability). Releasing it back pays the vendor: Dr 2030 / Cr 1020 (P2-BE-53).
   retentionPayable: "2030",
+  // เงินมัดจำ/เงินจองรับล่วงหน้า — an advance/booking RECEIVED from a buyer is a
+  // liability (unearned). A sales booking / down-payment receipt posts Dr 1020
+  // bank / Cr 2040 advance-received (Program-3 sales, B-161 Wei=ก). NOT the AR
+  // credit (1030) POSTING_MAP.rv uses — a booking has no invoice behind it yet.
+  advanceReceived: "2040",
   vatOutput: "2050",
   revenue: "4010",
   materials: "5020",
