@@ -193,7 +193,7 @@ export function SubconContractForm({ onClose, existingNos }: SubconContractFormP
                   borderRadius: 9,
                   cursor: "pointer",
                   fontFamily: "inherit",
-                  textAlign: "left",
+                  textAlign: "start",
                   border: `1.5px solid ${on ? m.tone : "var(--border)"}`,
                   background: on ? `color-mix(in srgb, ${m.tone} 8%, white)` : "var(--surface)",
                 }}

@@ -290,14 +290,14 @@ export function BankCheque() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(120)}>{tp(P("thNo"))}</th>
-                <th style={th(140)}>{tp(P("thBank"))}</th>
-                <th style={th()}>{tp(P("thPayee"))}</th>
-                <th style={th(130)}>{tp(P("thRef"))}</th>
-                <th style={th(130, true)}>{tp(P("thAmount"))}</th>
-                <th style={th(110)}>{tp(P("thDate"))}</th>
-                <th style={th(110)}>{t("common.status")}</th>
-                <th style={th(36)} />
+                <th scope="col" style={th(120)}>{tp(P("thNo"))}</th>
+                <th scope="col" style={th(140)}>{tp(P("thBank"))}</th>
+                <th scope="col" style={th()}>{tp(P("thPayee"))}</th>
+                <th scope="col" style={th(130)}>{tp(P("thRef"))}</th>
+                <th scope="col" style={th(130, true)}>{tp(P("thAmount"))}</th>
+                <th scope="col" style={th(110)}>{tp(P("thDate"))}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(36)} />
               </tr>
             </thead>
             <tbody>

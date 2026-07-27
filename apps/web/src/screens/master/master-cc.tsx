@@ -47,7 +47,7 @@ import ccStrings from "./cc-strings.json" with { type: "json" };
 /** Table header cell style, ported from ds.jsx th() (L214-219). */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -153,13 +153,13 @@ export function MasterCC() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th()}>{t("cc.thCode")}</th>
-                <th style={th()}>{t("cc.fldName")}</th>
-                <th style={th(140)}>{t("cc.fldType")}</th>
-                <th style={th(180)}>{t("cc.thLink")}</th>
-                <th style={th(110)}>{t("cc.thOwner")}</th>
-                <th style={{ ...th(140), textAlign: "right" }}>{t("cc.thBudget")}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th()}>{t("cc.thCode")}</th>
+                <th scope="col" style={th()}>{t("cc.fldName")}</th>
+                <th scope="col" style={th(140)}>{t("cc.fldType")}</th>
+                <th scope="col" style={th(180)}>{t("cc.thLink")}</th>
+                <th scope="col" style={th(110)}>{t("cc.thOwner")}</th>
+                <th scope="col" style={{ ...th(140), textAlign: "right" }}>{t("cc.thBudget")}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             {/* Empty tbody when the catalogue is empty = the table's empty state (no

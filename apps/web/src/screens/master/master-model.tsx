@@ -161,7 +161,7 @@ export function MasterModel() {
                     style={{
                       position: "absolute",
                       top: 10,
-                      right: 10,
+                      insetInlineEnd: 10,
                       fontSize: 10,
                       fontWeight: 700,
                       padding: "2px 8px",
@@ -177,7 +177,7 @@ export function MasterModel() {
                     style={{
                       position: "absolute",
                       top: 10,
-                      left: 10,
+                      insetInlineStart: 10,
                       fontSize: 12,
                       fontWeight: 700,
                       padding: "3px 10px",
@@ -234,11 +234,11 @@ export function MasterModel() {
                     </Btn>
                     {/* Edit action — no onClick in the prototype (master.jsx:569); a
                         render-only dead button. No PATCH /models exists (B-050). */}
-                    <Btn kind="ghost" size="sm" icon="edit" />
+                    <Btn kind="ghost" size="sm" icon="edit" label={t("common.edit")} />
                     <span
                       className="num"
                       style={{
-                        marginLeft: "auto",
+                        marginInlineStart: "auto",
                         fontSize: 10.5,
                         color: "var(--text-3)",
                         alignSelf: "center",

@@ -27,7 +27,7 @@ function ConfirmDialog({ cfg, onClose }: { cfg: ModalCfg; onClose: () => void })
       size={cfg.size ?? "sm"}
       onClose={onClose}
       footer={
-        <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+        <div style={{ display: "flex", gap: 8, marginInlineStart: "auto" }}>
           <Btn kind="outline" size="md" onClick={onClose}>
             {t("common.cancel")}
           </Btn>

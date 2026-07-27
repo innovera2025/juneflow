@@ -222,7 +222,7 @@ function ApprovalSteps({ step, total, status }: { step: number; total: number; s
       ))}
       <span
         className="num"
-        style={{ fontSize: 10.5, color: "var(--text-3)", marginLeft: 6, fontWeight: 600 }}
+        style={{ fontSize: 10.5, color: "var(--text-3)", marginInlineStart: 6, fontWeight: 600 }}
       >
         {approvalStepLabel(step, total, status)}
       </span>
@@ -487,7 +487,7 @@ export function PRList() {
               border: "none",
               background: "none",
               fontWeight: 600,
-              marginLeft: "auto",
+              marginInlineStart: "auto",
               cursor: "pointer",
             }}
           >
@@ -516,18 +516,18 @@ export function PRList() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(36)}>
+                  <th scope="col" style={th(36)}>
                     <input type="checkbox" />
                   </th>
-                  <th style={th()}>{tp(P("thPrNo"))}</th>
-                  <th style={th()}>{tp(P("filterType"))}</th>
-                  <th style={th()}>{tp(P("thDetail"))}</th>
-                  <th style={th()}>{tp(P("thPosition"))}</th>
-                  <th style={th(undefined, true)}>{tp(P("thAmount"))}</th>
-                  <th style={th()}>{tp(P("thRequester"))}</th>
-                  <th style={th()}>{tp(P("thStatusStep"))}</th>
-                  <th style={th()}>{tp(P("thDate"))}</th>
-                  <th style={th(36)} />
+                  <th scope="col" style={th()}>{tp(P("thPrNo"))}</th>
+                  <th scope="col" style={th()}>{tp(P("filterType"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thDetail"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thPosition"))}</th>
+                  <th scope="col" style={th(undefined, true)}>{tp(P("thAmount"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thRequester"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thStatusStep"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thDate"))}</th>
+                  <th scope="col" style={th(36)} />
                 </tr>
               </thead>
               {/* Empty tbody when the (filtered) catalogue is empty = the table's empty state

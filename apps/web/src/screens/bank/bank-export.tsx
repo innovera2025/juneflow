@@ -292,12 +292,12 @@ export function BankExport() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(28)} />
-                  <th style={th(130)}>{tp(P("thPv"))}</th>
-                  <th style={th()}>{tp(P("thPayee"))}</th>
-                  <th style={th(140)}>{tp(P("thAccount"))}</th>
-                  <th style={th(110)}>{tp(P("thBank"))}</th>
-                  <th style={th(120, true)}>{tp(P("thAmount"))}</th>
+                  <th scope="col" style={th(28)} />
+                  <th scope="col" style={th(130)}>{tp(P("thPv"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thPayee"))}</th>
+                  <th scope="col" style={th(140)}>{tp(P("thAccount"))}</th>
+                  <th scope="col" style={th(110)}>{tp(P("thBank"))}</th>
+                  <th scope="col" style={th(120, true)}>{tp(P("thAmount"))}</th>
                 </tr>
               </thead>
               <tbody>

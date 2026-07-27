@@ -440,12 +440,12 @@ export function GRList() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, borderRight: "1px solid var(--border)" }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th()}>{t("gr.list.colNo")}</th>
-                  <th style={th()}>{t("gr.list.colRef")}</th>
-                  <th style={th()}>{t("gr.list.colItemVendor")}</th>
-                  <th style={th(110)}>{t("gr.list.colReceivedOrdered")}</th>
-                  <th style={th(120, true)}>{tp(P("thValue"))}</th>
-                  <th style={th()}>{tp(P("thDate"))}</th>
+                  <th scope="col" style={th()}>{t("gr.list.colNo")}</th>
+                  <th scope="col" style={th()}>{t("gr.list.colRef")}</th>
+                  <th scope="col" style={th()}>{t("gr.list.colItemVendor")}</th>
+                  <th scope="col" style={th(110)}>{t("gr.list.colReceivedOrdered")}</th>
+                  <th scope="col" style={th(120, true)}>{tp(P("thValue"))}</th>
+                  <th scope="col" style={th()}>{tp(P("thDate"))}</th>
                 </tr>
               </thead>
               <tbody>
@@ -479,7 +479,7 @@ export function GRList() {
                               style={{
                                 fontSize: 9.5,
                                 fontWeight: 700,
-                                marginRight: 5,
+                                marginInlineEnd: 5,
                                 padding: "1px 4px",
                                 borderRadius: 3,
                                 background: kind === "PO" ? "var(--brand-soft)" : "var(--accent-soft)",
@@ -590,7 +590,7 @@ export function GRList() {
                       kind="ghost"
                       size="sm"
                       icon="x"
-                      style={{ color: "var(--danger)", marginLeft: "auto" }}
+                      style={{ color: "var(--danger)", marginInlineStart: "auto" }}
                       onClick={() => confirmCancel(selectedRow)}
                     >
                       {t("common.cancel")}
@@ -604,14 +604,14 @@ export function GRList() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th()}>{tp(P("thNo"))}</th>
-                <th style={th()}>{t("gr.list.colRefGr")}</th>
-                <th style={th()}>{tp(P("vendor"))}</th>
-                <th style={th()}>{tp(P("thReason"))}</th>
-                <th style={th(80, true)}>{tp(P("thQty"))}</th>
-                <th style={th(120, true)}>{tp(P("thValue"))}</th>
-                <th style={th()}>{tp(P("thDate"))}</th>
-                <th style={th(100)}>{t("common.status")}</th>
+                <th scope="col" style={th()}>{tp(P("thNo"))}</th>
+                <th scope="col" style={th()}>{t("gr.list.colRefGr")}</th>
+                <th scope="col" style={th()}>{tp(P("vendor"))}</th>
+                <th scope="col" style={th()}>{tp(P("thReason"))}</th>
+                <th scope="col" style={th(80, true)}>{tp(P("thQty"))}</th>
+                <th scope="col" style={th(120, true)}>{tp(P("thValue"))}</th>
+                <th scope="col" style={th()}>{tp(P("thDate"))}</th>
+                <th scope="col" style={th(100)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

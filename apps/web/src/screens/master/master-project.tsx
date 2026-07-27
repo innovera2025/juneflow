@@ -106,7 +106,7 @@ function ScopePill({
           color: "var(--text)",
         }}
       >
-        <div style={{ lineHeight: 1.1, flex: 1, textAlign: "left", minWidth: 0 }}>
+        <div style={{ lineHeight: 1.1, flex: 1, textAlign: "start", minWidth: 0 }}>
           <div style={{ fontSize: 9.5, color: "var(--text-3)", fontWeight: 600 }}>{label}</div>
           <div
             style={{
@@ -130,7 +130,7 @@ function ScopePill({
             style={{
               position: "absolute",
               top: 42,
-              left: 0,
+              insetInlineStart: 0,
               zIndex: 30,
               minWidth: 200,
               background: "var(--surface)",
@@ -401,7 +401,7 @@ export function MasterProject() {
                         {t("project.unitViewBtn")}
                       </Btn>
                       {/* Edit action — no-op in the prototype (icon-only ghost button). */}
-                      <Btn kind="ghost" size="sm" icon="edit" />
+                      <Btn kind="ghost" size="sm" icon="edit" label={t("common.edit")} />
                     </div>
                   </div>
 

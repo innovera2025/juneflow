@@ -48,7 +48,7 @@
  * Tokens back every colour (rule 6); the CAT chip hexes are prototype-verbatim (B-037(a)).
  */
 import { useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { DictKey, NavKey, PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
@@ -165,6 +165,33 @@ const menuItem: CSSProperties = {
   fontWeight: 500,
 };
 
+/**
+ * Keyboard semantics for an ARIA menuitem (a11y FIX-5): Enter/Space runs the same action as
+ * the item's onClick, ArrowUp/ArrowDown roves focus across sibling menuitems (clamped at the
+ * ends), and Escape closes the menu. Visual/DOM unchanged — the item stays a <div>.
+ */
+function onMenuItemKeyDown(
+  e: ReactKeyboardEvent<HTMLDivElement>,
+  activate: () => void,
+  close: () => void,
+) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    activate();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = Array.from(
+      e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const i = items.indexOf(e.currentTarget);
+    const next = e.key === "ArrowDown" ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+    items[next]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    close();
+  }
+}
+
 /** Native-input style (new-boq-form fieldStyle). */
 function fieldStyle(bad = false): CSSProperties {
   return {
@@ -213,7 +240,7 @@ function BudgetControlBar({
         <Icon name="pie" size={16} color="var(--brand)" />
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>{t("boq.edCbsTitle")}</div>
         <span style={{ fontSize: 11, color: "var(--text-3)" }}>{t("boq.edCbsSubtitle")}</span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 16, fontSize: 11.5 }}>
+        <div style={{ marginInlineStart: "auto", display: "flex", gap: 16, fontSize: 11.5 }}>
           {totals.map(([l, v, c]) => (
             <span key={l} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
               <span style={{ color: "var(--text-3)", fontSize: 10 }}>{l}</span>
@@ -353,7 +380,7 @@ function ItemRow({
           <span
             className="num"
             style={{
-              marginLeft: 8,
+              marginInlineStart: 8,
               fontSize: 10,
               fontWeight: 700,
               padding: "1px 6px",
@@ -396,6 +423,9 @@ function ItemRow({
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
+            aria-label={t("common.more")}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             style={{
               width: 24,
               height: 24,
@@ -415,10 +445,11 @@ function ItemRow({
           <>
             <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
             <div
+              role="menu"
               style={{
                 position: "absolute",
                 top: 30,
-                right: 6,
+                insetInlineEnd: 6,
                 zIndex: 30,
                 width: 140,
                 background: "var(--surface)",
@@ -427,29 +458,61 @@ function ItemRow({
                 borderRadius: 8,
                 padding: 4,
                 boxShadow: "0 8px 24px rgba(15,23,42,0.18)",
-                textAlign: "left",
+                textAlign: "start",
               }}
             >
               {/* WIRE GAP 4: no update endpoint — edit is a deferred stub. */}
-              <div onClick={() => setMenuOpen(false)} style={menuItem}>
+              <div
+                role="menuitem"
+                tabIndex={0}
+                onClick={() => setMenuOpen(false)}
+                onKeyDown={(e) =>
+                  onMenuItemKeyDown(e, () => setMenuOpen(false), () => setMenuOpen(false))
+                }
+                style={menuItem}
+              >
                 <Icon name="edit" size={12} /> {t("common.edit")}
               </div>
               {/* Duplicate = a REAL create (POST /boq/{id}/items with a -COPY code). */}
               <div
+                role="menuitem"
+                tabIndex={0}
                 onClick={() => {
                   setMenuOpen(false);
                   onDup();
                 }}
+                onKeyDown={(e) =>
+                  onMenuItemKeyDown(
+                    e,
+                    () => {
+                      setMenuOpen(false);
+                      onDup();
+                    },
+                    () => setMenuOpen(false),
+                  )
+                }
                 style={menuItem}
               >
                 <Icon name="plus" size={12} /> {tp(S("duplicate"))}
               </div>
               {/* WIRE GAP 4: no delete endpoint — deferred stub. */}
               <div
+                role="menuitem"
+                tabIndex={0}
                 onClick={() => {
                   setMenuOpen(false);
                   onDel();
                 }}
+                onKeyDown={(e) =>
+                  onMenuItemKeyDown(
+                    e,
+                    () => {
+                      setMenuOpen(false);
+                      onDel();
+                    },
+                    () => setMenuOpen(false),
+                  )
+                }
                 style={{ ...menuItem, color: "var(--danger)" }}
               >
                 <Icon name="x" size={12} color="var(--danger)" /> {tp(S("deleteItem"))}
@@ -591,9 +654,9 @@ function ItemFormModal({
               value={priceStr}
               onChange={(e) => setPriceStr(e.target.value)}
               className="num"
-              style={{ ...fieldStyle(), paddingRight: 24 }}
+              style={{ ...fieldStyle(), paddingInlineEnd: 24 }}
             />
-            <span style={{ position: "absolute", right: 10, top: 9, fontSize: 12, color: "var(--text-3)" }}>{BAHT}</span>
+            <span style={{ position: "absolute", insetInlineEnd: 10, top: 9, fontSize: 12, color: "var(--text-3)" }}>{BAHT}</span>
           </div>
         </Field>
       </div>
@@ -1133,7 +1196,7 @@ export function BOQEditor() {
                                     style={{
                                       position: "absolute",
                                       top: 30,
-                                      right: 8,
+                                      insetInlineEnd: 8,
                                       zIndex: 30,
                                       width: 150,
                                       background: "var(--surface)",
@@ -1192,7 +1255,7 @@ export function BOQEditor() {
                       >
                         <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
                           {activeGroup?.name ?? "—"}
-                          <span style={{ color: "var(--text-3)", fontWeight: 500, marginLeft: 6 }}>· {activeRows.length}</span>
+                          <span style={{ color: "var(--text-3)", fontWeight: 500, marginInlineStart: 6 }}>· {activeRows.length}</span>
                         </div>
                         <div
                           style={{
@@ -1248,7 +1311,7 @@ export function BOQEditor() {
                             );
                           })}
                         </div>
-                        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
+                        <div style={{ marginInlineStart: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
                           {readOnly ? (
                             <span
                               style={{
@@ -1324,19 +1387,19 @@ export function BOQEditor() {
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                           <thead style={{ position: "sticky", top: 0, background: "var(--surface-2)" }}>
                             <tr style={{ color: "var(--text-3)" }}>
-                              <th style={th(28)}>
+                              <th scope="col" style={th(28)}>
                                 <input type="checkbox" checked={allDisplayedSelected} onChange={toggleAll} />
                               </th>
-                              <th style={th(100)}>{tp(S("thCode"))}</th>
-                              <th style={th(54)}>{tp(S("thType"))}</th>
-                              <th style={th()}>{t("boq.edThMaterialItem")}</th>
-                              <th style={th()}>{tp(S("thDetail"))}</th>
-                              <th style={th(130)}>{t("boq.edThCostName")}</th>
-                              <th style={th(80, true)}>{t("boq.edThQty")}</th>
-                              <th style={th(70)}>{t("boq.edThUnitEn")}</th>
-                              <th style={th(110, true)}>{t("boq.edThPriceUnit")}</th>
-                              <th style={th(120, true)}>{t("boq.edThTotal")}</th>
-                              <th style={th(36)} />
+                              <th scope="col" style={th(100)}>{tp(S("thCode"))}</th>
+                              <th scope="col" style={th(54)}>{tp(S("thType"))}</th>
+                              <th scope="col" style={th()}>{t("boq.edThMaterialItem")}</th>
+                              <th scope="col" style={th()}>{tp(S("thDetail"))}</th>
+                              <th scope="col" style={th(130)}>{t("boq.edThCostName")}</th>
+                              <th scope="col" style={th(80, true)}>{t("boq.edThQty")}</th>
+                              <th scope="col" style={th(70)}>{t("boq.edThUnitEn")}</th>
+                              <th scope="col" style={th(110, true)}>{t("boq.edThPriceUnit")}</th>
+                              <th scope="col" style={th(120, true)}>{t("boq.edThTotal")}</th>
+                              <th scope="col" style={th(36)} />
                             </tr>
                           </thead>
                           <tbody>
@@ -1519,7 +1582,7 @@ function EmptyState({
                 flexDirection: "column",
                 alignItems: "flex-start",
                 gap: 6,
-                textAlign: "left",
+                textAlign: "start",
                 padding: "16px 16px",
                 borderRadius: 10,
                 cursor: "pointer",

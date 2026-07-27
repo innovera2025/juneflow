@@ -170,7 +170,7 @@ export function ProjectSwitcher() {
                 <Icon name={isExp ? "chevD" : "chevR"} size={13} color="var(--text-3)" />
               </div>
               {isExp && (
-                <div style={{ paddingLeft: 32, paddingBottom: 6 }}>
+                <div style={{ paddingInlineStart: 32, paddingBottom: 6 }}>
                   {phases.map((ph) => {
                     const isCur = p.id === projTweak && ph.id === phaseTweak;
                     return (
@@ -265,7 +265,7 @@ export function ProjectSwitcher() {
         >
           {active?.short}
         </div>
-        <div style={{ lineHeight: 1.1, textAlign: "left" }}>
+        <div style={{ lineHeight: 1.1, textAlign: "start" }}>
           <div style={{ fontSize: 9.5, color: "var(--text-3)", fontWeight: 500 }}>{ct("projEyebrow")}</div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>
             {active
@@ -276,7 +276,7 @@ export function ProjectSwitcher() {
           </div>
         </div>
         {active && (
-          <div style={{ marginLeft: 2 }}>
+          <div style={{ marginInlineStart: 2 }}>
             <TypeBadge type={active.type} size="sm" showName={false} />
           </div>
         )}

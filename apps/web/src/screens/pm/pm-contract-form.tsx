@@ -174,7 +174,7 @@ export function PMContractForm({ onClose }: PMContractFormProps) {
                   background: on ? "var(--brand-soft)" : "var(--surface)",
                   borderRadius: 9,
                   cursor: "pointer",
-                  textAlign: "left",
+                  textAlign: "start",
                   fontFamily: "inherit",
                 }}
               >

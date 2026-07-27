@@ -28,7 +28,7 @@
  * literal sits in this source.
  */
 import { useMemo, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import type { NavKey, PhraseKey } from "@juneflow/i18n";
 import type { components } from "@juneflow/contracts";
 import { useI18n } from "../../i18n";
@@ -58,7 +58,7 @@ type Entity = components["schemas"]["Entity"];
 /** Table header cell style, ported from ds.jsx th() (L214-219). */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -71,6 +71,33 @@ function th(w?: number): CSSProperties {
 
 /** Table body cell style, ported from ds.jsx td() (L220). */
 const td: CSSProperties = { padding: "14px", verticalAlign: "middle" };
+
+/**
+ * Keyboard semantics for an ARIA menuitem (a11y FIX-5): Enter/Space runs the same action as
+ * the item's onClick, ArrowUp/ArrowDown roves focus across sibling menuitems (clamped at the
+ * ends), and Escape closes the menu. Visual/DOM unchanged — the item stays a <div>.
+ */
+function onMenuItemKeyDown(
+  e: ReactKeyboardEvent<HTMLDivElement>,
+  activate: () => void,
+  close: () => void,
+) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    activate();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = Array.from(
+      e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    );
+    const i = items.indexOf(e.currentTarget);
+    const next = e.key === "ArrowDown" ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+    items[next]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    close();
+  }
+}
 
 /** Tag, ported 1:1 from ds.jsx Tag() (L273-280). color-mix + white are prototype-verbatim. */
 function Tag({ children, tone = "var(--text-2)" }: { children: ReactNode; tone?: string }) {
@@ -379,7 +406,7 @@ export function MasterVendor() {
                   }}
                 >
                   {tab.label}
-                  <span className="num" style={{ marginLeft: 5, opacity: 0.8 }}>
+                  <span className="num" style={{ marginInlineStart: 5, opacity: 0.8 }}>
                     {tab.count}
                   </span>
                 </button>
@@ -396,7 +423,7 @@ export function MasterVendor() {
               border: "1px solid var(--border)",
               borderRadius: 7,
               background: "var(--surface)",
-              marginLeft: "auto",
+              marginInlineStart: "auto",
             }}
           >
             <Icon name="search" size={13} color="var(--text-3)" />
@@ -437,14 +464,14 @@ export function MasterVendor() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(90)}>{tp(vendorStrings.thCode as PhraseKey)}</th>
-                  <th style={th()}>{t("vendor.thName")}</th>
-                  <th style={th(100)}>{tp(vendorStrings.thType as PhraseKey)}</th>
-                  <th style={th(130)}>{t("vendor.thTaxId")}</th>
-                  <th style={th(110)}>{t("vendor.thTerm")}</th>
-                  <th style={{ ...th(120), textAlign: "right" }}>{t("vendor.thSpend")}</th>
-                  <th style={th(90)}>{t("common.status")}</th>
-                  <th style={th(50)} />
+                  <th scope="col" style={th(90)}>{tp(vendorStrings.thCode as PhraseKey)}</th>
+                  <th scope="col" style={th()}>{t("vendor.thName")}</th>
+                  <th scope="col" style={th(100)}>{tp(vendorStrings.thType as PhraseKey)}</th>
+                  <th scope="col" style={th(130)}>{t("vendor.thTaxId")}</th>
+                  <th scope="col" style={th(110)}>{t("vendor.thTerm")}</th>
+                  <th scope="col" style={{ ...th(120), textAlign: "right" }}>{t("vendor.thSpend")}</th>
+                  <th scope="col" style={th(90)}>{t("common.status")}</th>
+                  <th scope="col" style={th(50)} />
                 </tr>
               </thead>
               {/* Empty tbody when the catalogue is empty = the table's empty state (no invented
@@ -489,6 +516,9 @@ export function MasterVendor() {
                         <button
                           type="button"
                           onClick={() => setMenuFor(menuFor === v.id ? null : v.id)}
+                          aria-label={t("common.more")}
+                          aria-haspopup="menu"
+                          aria-expanded={menuFor === v.id}
                           style={{
                             width: 28,
                             height: 28,
@@ -510,10 +540,11 @@ export function MasterVendor() {
                               style={{ position: "fixed", inset: 0, zIndex: 20 }}
                             />
                             <div
+                              role="menu"
                               style={{
                                 position: "absolute",
                                 top: 32,
-                                right: 8,
+                                insetInlineEnd: 8,
                                 zIndex: 30,
                                 width: 140,
                                 background: "var(--surface)",
@@ -524,10 +555,22 @@ export function MasterVendor() {
                               }}
                             >
                               <div
+                                role="menuitem"
+                                tabIndex={0}
                                 onClick={() => {
                                   setMenuFor(null);
                                   openForm(v);
                                 }}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(
+                                    e,
+                                    () => {
+                                      setMenuFor(null);
+                                      openForm(v);
+                                    },
+                                    () => setMenuFor(null),
+                                  )
+                                }
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -541,10 +584,22 @@ export function MasterVendor() {
                                 <Icon name="edit" size={13} color="var(--text-2)" /> {t("common.edit")}
                               </div>
                               <div
+                                role="menuitem"
+                                tabIndex={0}
                                 onClick={() => {
                                   setMenuFor(null);
                                   ctx.notify(t("vendor.notifyHistory").replace("{name}", v.name));
                                 }}
+                                onKeyDown={(e) =>
+                                  onMenuItemKeyDown(
+                                    e,
+                                    () => {
+                                      setMenuFor(null);
+                                      ctx.notify(t("vendor.notifyHistory").replace("{name}", v.name));
+                                    },
+                                    () => setMenuFor(null),
+                                  )
+                                }
                                 style={{
                                   display: "flex",
                                   alignItems: "center",

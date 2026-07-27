@@ -147,7 +147,7 @@ function StmtSection({
           key={r.code || `${i}`}
           style={{ display: "grid", gridTemplateColumns: STMT_COLS, padding: "8px 14px", fontSize: 12.5, borderBottom: "1px solid var(--border)" }}
         >
-          <span style={{ paddingLeft: 18, fontWeight: 400, color: "var(--text-2)" }}>{r.label || DASH}</span>
+          <span style={{ paddingInlineStart: 18, fontWeight: 400, color: "var(--text-2)" }}>{r.label || DASH}</span>
           <span className="num" style={{ textAlign: "right", color: r.amount < 0 ? "var(--danger)" : "var(--text)", fontWeight: 600 }}>
             {formatMoney(Math.abs(r.amount))}
           </span>

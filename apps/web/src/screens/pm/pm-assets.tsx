@@ -69,7 +69,7 @@ const DASH = "—";
 /** Table header cell style (ds.jsx th()). */
 function th(w?: number): CSSProperties {
   return {
-    textAlign: "left",
+    textAlign: "start",
     padding: "12px 14px",
     fontSize: 10.5,
     fontWeight: 600,
@@ -137,7 +137,7 @@ function KindFilter({
         borderRadius: 7,
       }}
     >
-      <div style={{ lineHeight: 1.1, flex: 1, textAlign: "left", minWidth: 0 }}>
+      <div style={{ lineHeight: 1.1, flex: 1, textAlign: "start", minWidth: 0 }}>
         <div style={{ fontSize: 9.5, color: "var(--text-3)", fontWeight: 600 }}>{hint}</div>
         <select
           value={value}
@@ -237,7 +237,7 @@ export function PMAssets() {
                 borderRadius: 10,
                 background: "var(--surface)",
                 cursor: "pointer",
-                textAlign: "left",
+                textAlign: "start",
                 fontFamily: "inherit",
               }}
             >
@@ -383,7 +383,7 @@ export function PMAssets() {
             onChange={setKind}
             kinds={kinds}
           />
-          <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
+          <span style={{ marginInlineStart: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
             {t("pm.countUnit").replace("{n}", String(filtered.length))}
           </span>
         </div>
@@ -408,15 +408,15 @@ export function PMAssets() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                  <th style={th(110)}>{t("pm.colCode")}</th>
-                  <th style={th()}>{t("pm.colName")}</th>
-                  <th style={th(120)}>{t("pm.colKind")}</th>
-                  <th style={th(150)}>{t("pm.colSite")}</th>
-                  <th style={th(100)}>{t("pm.colCycle")}</th>
-                  <th style={th(100)}>{t("pm.colLastPm")}</th>
-                  <th style={th(100)}>{t("pm.colNextPm")}</th>
-                  <th style={th(120)}>{t("common.status")}</th>
-                  <th style={th(120)}>{t("pm.colContract")}</th>
+                  <th scope="col" style={th(110)}>{t("pm.colCode")}</th>
+                  <th scope="col" style={th()}>{t("pm.colName")}</th>
+                  <th scope="col" style={th(120)}>{t("pm.colKind")}</th>
+                  <th scope="col" style={th(150)}>{t("pm.colSite")}</th>
+                  <th scope="col" style={th(100)}>{t("pm.colCycle")}</th>
+                  <th scope="col" style={th(100)}>{t("pm.colLastPm")}</th>
+                  <th scope="col" style={th(100)}>{t("pm.colNextPm")}</th>
+                  <th scope="col" style={th(120)}>{t("common.status")}</th>
+                  <th scope="col" style={th(120)}>{t("pm.colContract")}</th>
                 </tr>
               </thead>
               <tbody>

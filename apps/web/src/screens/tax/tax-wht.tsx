@@ -402,8 +402,8 @@ function PND53Form({ report, form, onClose }: { report: WhtReport; form: WhtForm
               </th>
             </tr>
             <tr>
-              <th style={{ width: 100 }}>{t("vendor.thTaxId")}</th>
-              <th style={{ width: 36 }}>{t("tax.form.branchUnit")}</th>
+              <th scope="col" style={{ width: 100 }}>{t("vendor.thTaxId")}</th>
+              <th scope="col" style={{ width: 36 }}>{t("tax.form.branchUnit")}</th>
             </tr>
           </thead>
           <tbody>
@@ -550,15 +550,15 @@ export function TaxWHT() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
           <thead>
             <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-              <th style={th(80)}>{t("tax.wht.colForm")}</th>
-              <th style={th(130)}>{t("tax.wht.colPvNo")}</th>
-              <th style={th(140)}>{t("vendor.thTaxId")}</th>
-              <th style={th()}>{t("tax.wht.colPayee")}</th>
-              <th style={th(130)}>{t("tax.wht.colIncomeType")}</th>
-              <th style={th(110, true)}>{t("tax.wht.colAmount")}</th>
-              <th style={th(70, true)}>{t("tax.wht.colRate")}</th>
-              <th style={th(110, true)}>{t("tax.wht.colWht")}</th>
-              <th style={th(110)}>{t("tax.wht.colCert")}</th>
+              <th scope="col" style={th(80)}>{t("tax.wht.colForm")}</th>
+              <th scope="col" style={th(130)}>{t("tax.wht.colPvNo")}</th>
+              <th scope="col" style={th(140)}>{t("vendor.thTaxId")}</th>
+              <th scope="col" style={th()}>{t("tax.wht.colPayee")}</th>
+              <th scope="col" style={th(130)}>{t("tax.wht.colIncomeType")}</th>
+              <th scope="col" style={th(110, true)}>{t("tax.wht.colAmount")}</th>
+              <th scope="col" style={th(70, true)}>{t("tax.wht.colRate")}</th>
+              <th scope="col" style={th(110, true)}>{t("tax.wht.colWht")}</th>
+              <th scope="col" style={th(110)}>{t("tax.wht.colCert")}</th>
             </tr>
           </thead>
           <tbody>

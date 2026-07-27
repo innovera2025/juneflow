@@ -317,19 +317,19 @@ export function APBilling() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(28)}>
+                <th scope="col" style={th(28)}>
                   {/* Uncontrolled + non-functional (prototype parity, ap.jsx L61). */}
                   <input type="checkbox" readOnly />
                 </th>
-                <th style={th(130)}>{tp(P("thNo"))}</th>
-                <th style={th()}>{tp(P("thVendor"))}</th>
-                <th style={th(130)}>{tp(P("thRef"))}</th>
-                <th style={th(110, true)}>{tp(P("thAmount"))}</th>
-                <th style={th(90, true)}>{tp(P("thVat"))}</th>
-                <th style={th(90, true)}>{tp(P("thWht"))}</th>
-                <th style={th(90, true)}>{tp(P("thRetention"))}</th>
-                <th style={th(110)}>{tp(P("thDue"))}</th>
-                <th style={th(100)}>{t("common.status")}</th>
+                <th scope="col" style={th(130)}>{tp(P("thNo"))}</th>
+                <th scope="col" style={th()}>{tp(P("thVendor"))}</th>
+                <th scope="col" style={th(130)}>{tp(P("thRef"))}</th>
+                <th scope="col" style={th(110, true)}>{tp(P("thAmount"))}</th>
+                <th scope="col" style={th(90, true)}>{tp(P("thVat"))}</th>
+                <th scope="col" style={th(90, true)}>{tp(P("thWht"))}</th>
+                <th scope="col" style={th(90, true)}>{tp(P("thRetention"))}</th>
+                <th scope="col" style={th(110)}>{tp(P("thDue"))}</th>
+                <th scope="col" style={th(100)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>

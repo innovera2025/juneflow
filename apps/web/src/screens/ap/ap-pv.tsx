@@ -277,15 +277,15 @@ export function APPaymentVoucher() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                <th style={th(130)}>{tp(P("thNo"))}</th>
-                <th style={th()}>{tp(P("thPayee"))}</th>
-                <th style={th(130)}>{tp(P("thRef"))}</th>
-                <th style={th(110)}>{tp(P("thMethod"))}</th>
-                <th style={th(120)}>{tp(P("thCheque"))}</th>
-                <th style={th(120, true)}>{tp(P("thAmount"))}</th>
-                <th style={th(90, true)}>{tp(P("thWht"))}</th>
-                <th style={th(110, true)}>{tp(P("thNet"))}</th>
-                <th style={th(110)}>{t("common.status")}</th>
+                <th scope="col" style={th(130)}>{tp(P("thNo"))}</th>
+                <th scope="col" style={th()}>{tp(P("thPayee"))}</th>
+                <th scope="col" style={th(130)}>{tp(P("thRef"))}</th>
+                <th scope="col" style={th(110)}>{tp(P("thMethod"))}</th>
+                <th scope="col" style={th(120)}>{tp(P("thCheque"))}</th>
+                <th scope="col" style={th(120, true)}>{tp(P("thAmount"))}</th>
+                <th scope="col" style={th(90, true)}>{tp(P("thWht"))}</th>
+                <th scope="col" style={th(110, true)}>{tp(P("thNet"))}</th>
+                <th scope="col" style={th(110)}>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>
