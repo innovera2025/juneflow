@@ -24,6 +24,7 @@ import {
   landPlots,
   leads,
   loanApplications,
+  projectNodes,
   roles,
   salesUnits,
   users,
@@ -603,7 +604,7 @@ describe("POST /api/v1/sales/contracts", () => {
 // ===========================================================================
 describe("POST /api/v1/sales/bookings", () => {
   const bookDb = (
-    o: { units?: unknown[]; jv?: RowSource; coa?: unknown[]; inserted?: Inserted[]; financeCreate?: boolean } = {},
+    o: { units?: unknown[]; jv?: RowSource; coa?: unknown[]; node?: unknown[]; inserted?: Inserted[]; financeCreate?: boolean } = {},
   ) =>
     stubDb({
       rows: [
@@ -612,6 +613,9 @@ describe("POST /api/v1/sales/bookings", () => {
         [salesUnits, o.units ?? []],
         [jvs, o.jv ?? jvSource],
         [glAccounts, o.coa ?? COA_ROWS],
+        // B-169: a NEW booking scopes the project_node THROUGH its project (in-tenant
+        // check). Default = the unit resolves; pass node:[] to model a foreign node.
+        [projectNodes, o.node ?? [{ id: "node-1", projectId: "proj-1" }]],
       ],
       inserted: o.inserted,
     });
@@ -696,6 +700,22 @@ describe("POST /api/v1/sales/bookings", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().message).toMatch(/already booked/);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // no double post
+  });
+
+  it("404s a new booking on a project_node NOT in this tenant (B-169 · fail-closed · no money posted)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // no existing sales_unit AND the project_node resolves to nothing through the
+        // tenant chain (a foreign node id) → 404 before any write.
+        db: bookDb({ inserted, units: [], node: [] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/sales/bookings", payload: { unit_id: "foreign-node", amount: 100000 } });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().message).toMatch(/not found in this tenant/);
+    expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // fail-closed, no post
+    expect(inserted.find((i) => i.table === salesUnits)).toBeUndefined(); // no unit created
   });
 
   it("409s (idempotent) when a booking JV already carries the source_doc", async () => {

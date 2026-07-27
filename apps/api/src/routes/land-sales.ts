@@ -49,6 +49,8 @@ import {
   leadStage,
   leads,
   loanApplications,
+  projectNodes,
+  projects,
   salesUnits,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
@@ -546,6 +548,20 @@ async function createSalesBooking(
   const [existing] = (await db.select(salesUnits, eq(salesUnits.unitId, unitId))) as SalesUnitRow[];
   if (existing && existing.booking != null) {
     return conflict(reply, `unit ${unitId} is already booked`);
+  }
+  // B-169: a NEW booking creates a sales_unit for this project_node — verify the node
+  // belongs to THIS tenant first. project_node has no company_id (FK-existence alone
+  // does not prove tenancy), so scope it THROUGH its project root; a foreign node id
+  // resolves to nothing → 404 (it would otherwise be booked in the caller's own books).
+  if (!existing) {
+    const inTenant = await db.selectThrough(
+      projectNodes,
+      [{ fk: projectNodes.projectId, parent: projects }],
+      eq(projectNodes.id, unitId),
+    );
+    if (inTenant.length === 0) {
+      return notFound(reply, `unit ${unitId} not found in this tenant`);
+    }
   }
   const salesUnitId = existing?.id ?? randomUUID();
 

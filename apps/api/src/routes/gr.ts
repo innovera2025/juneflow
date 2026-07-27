@@ -448,12 +448,16 @@ export function registerGrRoute(app: FastifyInstance): void {
       .reduce((sum, g) => sum + Number(g.received), 0);
     const full = ordered > 0 && receivedTotal >= ordered;
     if (full) {
+      // B-156: auto-close is an idempotent side-effect — guard on the receivable
+      // 'approved' pre-state (5th arg) so two concurrent fully-receiving GRs close
+      // the PO/WO exactly once (the loser matches 0 rows → harmless no-op, no error).
       if (poId) {
         await db.updateThroughChain(
           pos,
           PO_HOPS,
           { status: "closed" },
           eq(pos.id, poId),
+          eq(pos.status, "approved"),
         );
       } else {
         await db.updateThroughChain(
@@ -461,6 +465,7 @@ export function registerGrRoute(app: FastifyInstance): void {
           WO_HOPS,
           { status: "closed" },
           eq(wos.id, woId),
+          eq(wos.status, "approved"),
         );
       }
     }
@@ -496,17 +501,27 @@ export function registerGrRoute(app: FastifyInstance): void {
       });
     }
     const hops = found.poId ? GR_PO_HOPS : GR_WO_HOPS;
+    // B-156: fold the 'received' pre-state into the FINAL update (5th guard arg) so a
+    // concurrent return/cancel of the same GR re-matches 0 rows → 409 (atomic; the
+    // updateThroughChain resolve-then-update is otherwise a TOCTOU).
     const [updated] = await db.updateThroughChain(
       grs,
       hops,
       { status: "returned" },
       eq(grs.id, id),
+      eq(grs.status, "received"),
     );
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a received GR can be returned",
+      });
+    }
     const [vendor, items] = await Promise.all([
-      grVendorName(db, updated!),
-      grItemsFor(db, updated!),
+      grVendorName(db, updated),
+      grItemsFor(db, updated),
     ]);
-    return reply.code(200).send(grWire(updated!, { vendor, items }));
+    return reply.code(200).send(grWire(updated, { vendor, items }));
   });
 
   // POST /gr/:id/cancel — received → cancelled (gr.jsx "ยกเลิก"). Only a received
@@ -532,16 +547,24 @@ export function registerGrRoute(app: FastifyInstance): void {
       });
     }
     const hops = found.poId ? GR_PO_HOPS : GR_WO_HOPS;
+    // B-156: 'received' pre-state folded into the FINAL update (atomic guard).
     const [updated] = await db.updateThroughChain(
       grs,
       hops,
       { status: "cancelled" },
       eq(grs.id, id),
+      eq(grs.status, "received"),
     );
+    if (!updated) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "only a received GR can be cancelled",
+      });
+    }
     const [vendor, items] = await Promise.all([
-      grVendorName(db, updated!),
-      grItemsFor(db, updated!),
+      grVendorName(db, updated),
+      grItemsFor(db, updated),
     ]);
-    return reply.code(200).send(grWire(updated!, { vendor, items }));
+    return reply.code(200).send(grWire(updated, { vendor, items }));
   });
 }
