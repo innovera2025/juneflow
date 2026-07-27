@@ -372,25 +372,18 @@ describe("GET /api/v1/sales/bookings & /contracts", () => {
 });
 
 describe("GET /api/v1/sales/downs", () => {
-  it("flattens each unit's down instalments into one row per instalment", async () => {
+  it("lists every instalment from the authoritative down_payment_txn (B-167 · unit_id resolved · no jsonb)", async () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: stubDb({
           rows: [
-            [
-              salesUnits,
-              [
-                unit("su-1", {
-                  unitId: "node-1",
-                  down: [
-                    { seq: 1, amount: 50000, paid_at: "2026-05-01" },
-                    { seq: 2, amount: 50000, paid_at: "2026-06-01" },
-                  ],
-                }),
-                unit("su-2"), // no down → contributes no rows
-              ],
-            ],
+            // authoritative source — down_payment_txn, NOT the sales_unit.down jsonb.
+            [downPaymentTxns, [
+              { id: "d1", companyId: COMPANY, salesUnitId: "su-1", seq: 1, amount: "50000.00", currencyCode: "THB", paidAt: "2026-05-01", createdAt: D1 },
+              { id: "d2", companyId: COMPANY, salesUnitId: "su-1", seq: 2, amount: "50000.00", currencyCode: "THB", paidAt: "2026-06-01", createdAt: D0 },
+            ]],
+            [salesUnits, [unit("su-1", { unitId: "node-1" })]], // for unit_id resolution
           ],
         }),
       })
@@ -786,60 +779,60 @@ describe("POST /api/v1/sales/downs", () => {
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // no money posted on a denied down
   });
 
-  it("appends a down instalment (seq = down_payment_txn count + 1, in-tx) + posts a BALANCED Dr 1020 / Cr 2040 JV keyed down:<id>:<seq>", async () => {
+  it("records a down instalment keyed on the client instalment_no (B-167) + posts a BALANCED Dr 1020 / Cr 2040 JV keyed down:<id>:<instalment_no>", async () => {
     const inserted: Inserted[] = [];
-    const updated: Updated[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        // B-165: seq comes from the in-tx down_payment_txn count (1 prior row → seq 2),
-        // NOT the jsonb length; the unit's jsonb mirror already has instalment 1.
-        db: downDb({
-          inserted,
-          updated,
-          units: [unit("su-1", { unitId: "node-1", down: [{ seq: 1, amount: 50000 }] })],
-          dpt: [{ id: "dpt-1", companyId: COMPANY, salesUnitId: "su-1", seq: 1 }],
-        }),
+        db: downDb({ inserted, units: [unit("su-1", { unitId: "node-1" })] }),
       })
     ).inject({
       method: "POST",
       url: "/api/v1/sales/downs",
-      payload: { sales_unit_id: "su-1", amount: 50000, paid_at: "2026-07-01" },
+      // B-167: the client SELECTS the instalment number ("งวดที่ 8 จาก 10") → the stable
+      // seq. No count+1 — instalment_no IS the key.
+      payload: { sales_unit_id: "su-1", amount: 50000, paid_at: "2026-07-01", instalment_no: 8 },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
+    expect(body).toMatchObject({ sales_unit_id: "su-1", unit_id: "node-1", seq: 8, amount: 50000, paid_at: "2026-07-01" });
     expect(body.jv_no).toMatch(/^JV-\d{4}-\d{4}$/);
-    // seq = in-tx dpt count (1) + 1 = 2; the new down entry is appended to the jsonb.
-    expect(body.down).toHaveLength(2);
-    expect(body.down[1]).toMatchObject({ seq: 2, amount: 50000, paid_at: "2026-07-01" });
-    // a down_payment_txn row was inserted (the dedup source of truth).
-    expect(inserted.find((i) => i.table === downPaymentTxns)).toBeDefined();
-
+    // the authoritative down_payment_txn row is inserted at the client seq 8.
+    const dptIns = inserted.find((i) => i.table === downPaymentTxns)!.values as Record<string, unknown>;
+    expect(dptIns.seq).toBe(8);
     // Balanced Dr 1020 / Cr 2040 = 50,000.
     const lines = inserted.find((i) => i.table === jvLines)!.values as Record<string, unknown>[];
     const dr = lines.find((l) => l.accountId === ACC_BANK)!;
     const cr = lines.find((l) => l.accountId === ACC_ADV)!;
     expect(dr.dr).toBe("50000.00");
     expect(cr.cr).toBe("50000.00");
-    // per-instalment idempotency key.
+    // source_doc keyed on the client instalment_no (the stable dedup key).
     const jvIns = inserted.find((i) => i.table === jvs)!.values as Record<string, unknown>;
-    expect(jvIns.sourceDoc).toBe("down:su-1:2");
-    // the unit's down array is persisted.
-    const upd = updated.find((u) => u.table === salesUnits)!;
-    expect((upd.set.down as unknown[]).length).toBe(2);
+    expect(jvIns.sourceDoc).toBe("down:su-1:8");
+    // B-167: no jsonb mirror write (down_payment_txn is authoritative).
+    expect(inserted.find((i) => i.table === salesUnits)).toBeUndefined();
   });
 
   it("400s a non-positive received amount", async () => {
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: downDb() })
-    ).inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "su-1", amount: -1 } });
+    ).inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "su-1", amount: -1, instalment_no: 1 } });
     expect(res.statusCode).toBe(400);
+  });
+
+  it("400s a missing or non-positive-integer instalment_no (B-167 natural key required)", async () => {
+    const app0 = await buildTestApp({ resolveTenant: async () => SESSION, db: downDb() });
+    const noNo = await app0.inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "su-1", amount: 50000 } });
+    expect(noNo.statusCode).toBe(400);
+    expect(noNo.json().message).toMatch(/instalment_no/);
+    const badNo = await app0.inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "su-1", amount: 50000, instalment_no: 1.5 } });
+    expect(badNo.statusCode).toBe(400);
   });
 
   it("404s when the sales unit is not in this tenant", async () => {
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: downDb({ units: [] }) })
-    ).inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "nope", amount: 50000 } });
+    ).inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "nope", amount: 50000, instalment_no: 1 } });
     expect(res.statusCode).toBe(404);
   });
 
@@ -860,9 +853,9 @@ describe("POST /api/v1/sales/downs", () => {
     } as unknown as typeof base;
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db })
-    ).inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "su-1", amount: 50000 } });
+    ).inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "su-1", amount: 50000, instalment_no: 1 } });
     expect(res.statusCode).toBe(409);
-    expect(res.json().message).toMatch(/concurrent or duplicate/);
+    expect(res.json().message).toMatch(/already recorded/);
   });
 });
 

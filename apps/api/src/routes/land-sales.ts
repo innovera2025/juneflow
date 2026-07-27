@@ -306,26 +306,22 @@ async function listContracts(db: TenantDb): Promise<Record<string, unknown>[]> {
     .map(unitWire);
 }
 
-// GET /sales/downs — every unit's down-payment instalments flattened to one row per
-// instalment (sales_unit.down jsonb array), newest unit first.
+// GET /sales/downs — every down-payment instalment, one row each. B-167: reads the
+// AUTHORITATIVE down_payment_txn table (NOT the sales_unit.down jsonb mirror, whose
+// wholesale-overwrite lost updates under concurrency — audit-confirmed). unit_id is
+// resolved via a single sales_unit fetch (Map · no N+1). Newest instalment first.
 async function listDowns(db: TenantDb): Promise<Record<string, unknown>[]> {
-  const rows = (await db.select(salesUnits)) as SalesUnitRow[];
-  const out: Record<string, unknown>[] = [];
-  for (const u of [...rows].sort(byCreatedDesc)) {
-    const downs = Array.isArray(u.down) ? u.down : [];
-    for (const raw of downs) {
-      const d = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-      out.push({
-        sales_unit_id: u.id,
-        unit_id: u.unitId,
-        seq: d.seq ?? null,
-        amount: num(d.amount),
-        paid_at: d.paid_at ?? d.paidAt ?? null,
-        currency_code: u.currencyCode,
-      });
-    }
-  }
-  return out;
+  const txns = (await db.select(downPaymentTxns)) as DownPaymentTxnRow[];
+  const units = (await db.select(salesUnits)) as SalesUnitRow[];
+  const unitById = new Map(units.map((u) => [u.id, u]));
+  return [...txns].sort(byCreatedDesc).map((t) => ({
+    sales_unit_id: t.salesUnitId,
+    unit_id: unitById.get(t.salesUnitId)?.unitId ?? null,
+    seq: t.seq,
+    amount: num(t.amount),
+    paid_at: t.paidAt,
+    currency_code: t.currencyCode,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -628,12 +624,20 @@ async function createSalesBooking(
 }
 
 // POST /sales/downs — record one down-payment instalment + its receipt JV
-// (sales-process.jsx SalesDown). Load the sales_unit by id (404). The received
-// amount (validated finite > 0) posts Dr 1020 bank / Cr 2040 advance-received =
-// amount, keyed source_doc `down:<salesUnitId>:<seq>`. B-165: seq + the
-// down_payment_txn row + the JV + the jsonb mirror are ALL written in ONE tx with
-// the seq computed in-tx against down_payment_txn (unique(sales_unit_id, seq)) so
-// concurrent first-downs collide → 409 (no double-post). Does NOT generate a schedule.
+// (sales-process.jsx SalesDown / DownPaymentReceiveForm — the "งวดที่ N จาก total"
+// selector). Load the sales_unit by id (404). The received amount (validated finite
+// > 0) posts Dr 1020 bank / Cr 2040 advance-received = amount, keyed source_doc
+// `down:<salesUnitId>:<instalment_no>`.
+//
+// B-167 (Wei=ข-ขยาย · NATURAL KEY): the client SELECTS the instalment number and sends
+// it as `instalment_no` — a STABLE per-instalment key. down_payment_txn's
+// unique(sales_unit_id, seq=instalment_no) then makes two concurrent submits of the
+// SAME instalment collide → 23505 → 409 (exactly one recorded). This replaces the
+// B-165 in-tx count+1, which still ESCAPED under partial serialization (b163 live
+// [201,409,201]: a late reader saw the committed prior row → count+1 → a distinct seq
+// → a duplicate). A count is not a stable key; the client-chosen instalment number is.
+// down_payment_txn is the AUTHORITATIVE store (GET /sales/downs derives from it — no
+// jsonb mirror, closing the separate jsonb lost-update the audit confirmed).
 async function createSalesDown(
   db: TenantDb,
   body: Record<string, unknown>,
@@ -649,10 +653,18 @@ async function createSalesDown(
     return badRequest(reply, "amount (down received) is required and must be greater than zero");
   }
 
+  // The client-selected instalment number is the stable idempotency key (B-167). A
+  // positive integer is required; the upper bound (plan_total) is a batch-2 down-plan
+  // model (there is no plan_total column today — B-161).
+  const seqRaw = toNum(pick(body, "instalment_no", "installment_no", "instalmentNo", "seq"));
+  if (seqRaw == null || seqRaw < 1 || !Number.isInteger(seqRaw)) {
+    return badRequest(reply, "instalment_no is required and must be a positive integer");
+  }
+  const seq = seqRaw;
+
   const [unit] = (await db.select(salesUnits, eq(salesUnits.id, salesUnitId))) as SalesUnitRow[];
   if (!unit) return notFound(reply, `sales unit ${salesUnitId} not found`);
 
-  const existingDown = Array.isArray(unit.down) ? unit.down : [];
   const paidAt =
     str(pick(body, "paid_at", "paidAt")).trim() || new Date().toISOString().slice(0, 10);
 
@@ -669,6 +681,7 @@ async function createSalesDown(
   const jvNo = await allocJvNo(db);
   const jvId = randomUUID();
   const currencyCode = unit.currencyCode ?? "THB";
+  const sourceDoc = `down:${salesUnitId}:${seq}`;
   const lineRows: (typeof jvLines.$inferInsert)[] = [
     { jvId, accountId: bankId, dr: moneyStr(amt), cr: moneyStr(0), currencyCode },
     { jvId, accountId: advanceId, dr: moneyStr(0), cr: moneyStr(amt), currencyCode },
@@ -677,49 +690,34 @@ async function createSalesDown(
     return conflict(reply, "internal: down journal entry does not balance");
   }
 
-  // B-165 (money double-post fix): the seq + ALL writes happen INSIDE the tx. seq =
-  // (in-tx count of this unit's down_payment_txn rows) + 1 — two concurrent first-
-  // downs both read the same committed count (an uncommitted insert is invisible
-  // under READ COMMITTED) → both compute seq=1 → the down_payment_txn_unit_seq_uq
-  // unique index lets exactly one win; the loser's insert trips 23505 → its whole tx
-  // rolls back → 409 (no duplicate instalment, no duplicate receipt JV). The prior
-  // code read seq = down.length+1 OUTSIDE the tx, so concurrent first-downs saw
-  // distinct committed lengths → distinct seqs → both committed (b163 live-E2E
-  // [201,201] double-post). This wires down_payment_txn (SA-5/B-161b) as the guard.
   try {
-    const newDown = await db.transaction(async (tx) => {
-      const priorTxns = (await tx.select(
-        downPaymentTxns,
-        eq(downPaymentTxns.salesUnitId, salesUnitId),
-      )) as DownPaymentTxnRow[];
-      const seq = priorTxns.length + 1;
-      const sourceDoc = `down:${salesUnitId}:${seq}`;
-      // the instalment row — the unique(sales_unit_id, seq) dedup point (SA-5).
+    // The instalment row (down_payment_txn = authoritative) + the balanced receipt JV
+    // in ONE tx. unique(sales_unit_id, seq) on the CLIENT instalment_no is the dedup
+    // point: a concurrent/duplicate submit of the same instalment trips 23505 → the
+    // whole tx rolls back → 409 (no duplicate instalment, no duplicate receipt JV).
+    await db.transaction(async (tx) => {
       await tx
-        .insert(downPaymentTxns, {
-          salesUnitId,
-          seq,
-          amount: moneyStr(amt),
-          currencyCode,
-          paidAt,
-        })
+        .insert(downPaymentTxns, { salesUnitId, seq, amount: moneyStr(amt), currencyCode, paidAt })
         .returning();
-      // the balanced receipt JV (source_doc down:<unit>:<seq> — a second unique guard).
       await tx
         .insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `sales-down ${salesUnitId}:${seq}` })
         .returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
-      // jsonb mirror so the existing GET /sales/downs read (listDowns) is unchanged.
-      const nd = [...existingDown, { seq, amount: round2(amt), paid_at: paidAt }];
-      await tx.update(salesUnits, { down: nd }, eq(salesUnits.id, salesUnitId)).returning();
-      return nd;
     });
-    return reply.code(201).send({ ...unitWire({ ...unit, down: newDown }), jv_no: jvNo });
+    return reply.code(201).send({
+      sales_unit_id: salesUnitId,
+      unit_id: unit.unitId,
+      seq,
+      amount: round2(amt),
+      paid_at: paidAt,
+      currency_code: currencyCode,
+      jv_no: jvNo,
+    });
   } catch (err) {
     if (isUniqueViolation(err)) {
       return reply.code(409).send({
         code: "INVALID_STATE",
-        message: `a concurrent or duplicate down instalment for unit ${salesUnitId} was rejected`,
+        message: `down instalment ${seq} for unit ${salesUnitId} is already recorded`,
       });
     }
     throw err;
