@@ -8,9 +8,10 @@
  * size/footer). ConfirmDialog and other modal kinds land with the screens that
  * need them (the app-shell host, P0-WEB-05).
  */
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Icon, type IconName } from "./icon";
+import { useI18n } from "../i18n";
 
 type ModalSize = "sm" | "md" | "lg" | "xl" | "full";
 
@@ -45,6 +46,8 @@ export function Modal({
   onClose,
   children,
 }: ModalProps) {
+  const { t } = useI18n();
+  const titleId = useId();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose?.();
@@ -70,6 +73,9 @@ export function Modal({
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: WIDTHS[size],
@@ -113,7 +119,7 @@ export function Modal({
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
               {title && (
-                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+                <div id={titleId} style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
                   {title}
                 </div>
               )}
@@ -126,6 +132,7 @@ export function Modal({
             <button
               type="button"
               onClick={onClose}
+              aria-label={t("common.close")}
               style={{
                 width: 30,
                 height: 30,
