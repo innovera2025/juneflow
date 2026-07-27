@@ -17,6 +17,7 @@ import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  downPaymentTxns,
   glAccounts,
   jvLines,
   jvs,
@@ -756,7 +757,7 @@ describe("POST /api/v1/sales/bookings", () => {
 
 describe("POST /api/v1/sales/downs", () => {
   const downDb = (
-    o: { units?: unknown[]; jv?: RowSource; inserted?: Inserted[]; updated?: Updated[]; financeCreate?: boolean } = {},
+    o: { units?: unknown[]; jv?: RowSource; dpt?: unknown[]; inserted?: Inserted[]; updated?: Updated[]; financeCreate?: boolean } = {},
   ) =>
     stubDb({
       rows: [
@@ -764,6 +765,8 @@ describe("POST /api/v1/sales/downs", () => {
         [roles, [roleRow(o.financeCreate ?? true)]],
         [salesUnits, o.units ?? [unit("su-1", { unitId: "node-1", down: [] })]],
         [jvs, o.jv ?? jvSource],
+        // B-165: the in-tx count of this unit's down_payment_txn rows drives seq.
+        [downPaymentTxns, o.dpt ?? []],
         [glAccounts, COA_ROWS],
       ],
       inserted: o.inserted,
@@ -783,13 +786,20 @@ describe("POST /api/v1/sales/downs", () => {
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // no money posted on a denied down
   });
 
-  it("appends a down instalment (seq = len+1) + posts a BALANCED Dr 1020 / Cr 2040 JV keyed down:<id>:<seq>", async () => {
+  it("appends a down instalment (seq = down_payment_txn count + 1, in-tx) + posts a BALANCED Dr 1020 / Cr 2040 JV keyed down:<id>:<seq>", async () => {
     const inserted: Inserted[] = [];
     const updated: Updated[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: downDb({ inserted, updated, units: [unit("su-1", { unitId: "node-1", down: [{ seq: 1, amount: 50000 }] })] }),
+        // B-165: seq comes from the in-tx down_payment_txn count (1 prior row → seq 2),
+        // NOT the jsonb length; the unit's jsonb mirror already has instalment 1.
+        db: downDb({
+          inserted,
+          updated,
+          units: [unit("su-1", { unitId: "node-1", down: [{ seq: 1, amount: 50000 }] })],
+          dpt: [{ id: "dpt-1", companyId: COMPANY, salesUnitId: "su-1", seq: 1 }],
+        }),
       })
     ).inject({
       method: "POST",
@@ -799,9 +809,11 @@ describe("POST /api/v1/sales/downs", () => {
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.jv_no).toMatch(/^JV-\d{4}-\d{4}$/);
-    // seq = existing (1) + 1 = 2; the new down entry is appended.
+    // seq = in-tx dpt count (1) + 1 = 2; the new down entry is appended to the jsonb.
     expect(body.down).toHaveLength(2);
     expect(body.down[1]).toMatchObject({ seq: 2, amount: 50000, paid_at: "2026-07-01" });
+    // a down_payment_txn row was inserted (the dedup source of truth).
+    expect(inserted.find((i) => i.table === downPaymentTxns)).toBeDefined();
 
     // Balanced Dr 1020 / Cr 2040 = 50,000.
     const lines = inserted.find((i) => i.table === jvLines)!.values as Record<string, unknown>[];
@@ -831,20 +843,26 @@ describe("POST /api/v1/sales/downs", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("409s (idempotent) when the instalment's JV already exists", async () => {
-    const inserted: Inserted[] = [];
+  // B-165: idempotency/dedup is now enforced by the down_payment_txn_unit_seq_uq
+  // unique index (+ the jv source_doc index) INSIDE the tx — a concurrent/duplicate
+  // first-down trips 23505 → 409. The stub can only prove the error-MAPPING (it echoes
+  // rows regardless of the unique); the real concurrency guarantee is the committed
+  // live E2E (tests/e2e/b163-booking-race.spec.ts DOWN variant → 1×201 + rest 409).
+  it("maps a 23505 from the unique index to 409 (concurrent/duplicate down)", async () => {
+    const base = downDb({ units: [unit("su-1", { unitId: "node-1", down: [] })] });
+    const db = {
+      ...(base as unknown as Record<string, unknown>),
+      transaction: async () => {
+        const e = new Error("duplicate key") as Error & { code: string };
+        e.code = "23505";
+        throw e;
+      },
+    } as unknown as typeof base;
     const res = await (
-      await buildTestApp({
-        resolveTenant: async () => SESSION,
-        db: downDb({
-          inserted,
-          units: [unit("su-1", { unitId: "node-1", down: [] })], // len 0 → seq 1
-          jv: [{ id: "jv-prior", companyId: COMPANY, sourceDoc: "down:su-1:1" }],
-        }),
-      })
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
     ).inject({ method: "POST", url: "/api/v1/sales/downs", payload: { sales_unit_id: "su-1", amount: 50000 } });
     expect(res.statusCode).toBe(409);
-    expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
+    expect(res.json().message).toMatch(/concurrent or duplicate/);
   });
 });
 
