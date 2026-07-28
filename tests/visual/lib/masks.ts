@@ -36,6 +36,28 @@ export const MASK_REGISTRY: Record<string, MaskRegion> = {
       "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures",
   },
 
+  // B-186 / B-160 / B-120(ข) — live wall-clock mask for the sub.mine (SubMine) "days
+  // until renewal" warn strip. sub-mine.tsx:167 computes daysLeft(me.renewAt, new Date()):
+  // renewAt is a FIXED seed date (2026-12-31) but `new Date()` (now) advances daily, so the
+  // rendered day-count decrements every day and the number's digit-count reflows the trailing
+  // Thai text — a naked baseline would flake tomorrow. This is EXACTLY the class B-120(ข)
+  // pre-authorised ("clock-relative seed may need masks later if a screen proves time-sensitive")
+  // and B-160 addressed (body-level relative-time masks) — NOT silencing a real regression.
+  //
+  // Rect measured LIVE from the warn-strip element (b.num's closest <div>, the only <b class=
+  // "num"> on the screen) at 1600x1000, deviceScaleFactor 1: bbox x295.0 y513.25 w493.66 h37.0
+  // (text "เหลืออีก 156 วันก่อนต่ออายุ"). Mask x293 y511 w498 h42 wraps it with a ~2px AA margin
+  // and stays clear of the DetailRows above (y<511) and the renew/cancel buttons below (y>553) —
+  // it covers ONLY the drifting strip, no neighbouring element (PLAN.md §0 minimal-mask).
+  "sub-mine-daysleft-b186": {
+    x: 293,
+    y: 511,
+    width: 498,
+    height: 42,
+    reason:
+      "B-186 first-time G5 app-baseline (sub.mine) — the daysLeft warn strip is a live wall-clock element (daysLeft(renewAt, new Date()) decrements daily); masking this class is pre-authorised by B-120(ข) live-time-widget ruling + B-160 body relative-time follow-up. Covers only the measured strip bbox (x295 y513 w494 h37), not neighbouring content",
+  },
+
   // B-044(ก) — Wei ruling 2026-07-13: the port's t("app.name") th =
   // "ระบบงานก่อสร้าง" is CORRECT; all ~128 reference images carry an older
   // logo lockup (lowercase "juneflow" wordmark + English "Construction ERP"

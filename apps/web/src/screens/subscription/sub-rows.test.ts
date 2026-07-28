@@ -19,6 +19,11 @@ import {
   planCtaKind,
   toInvoiceRow,
   invoiceBadge,
+  toSubscriptionMe,
+  daysLeft,
+  usagePct,
+  usagePctTone,
+  subStatusBadge,
   type PlanRow,
 } from "./sub-rows";
 
@@ -179,5 +184,99 @@ describe("toInvoiceRow / invoiceBadge", () => {
     expect(invoiceBadge("pending")).toEqual({ tone: "pending", labelKind: "raw" });
     expect(invoiceBadge("overdue")).toEqual({ tone: "rejected", labelKind: "raw" });
     expect(invoiceBadge("weird")).toEqual({ tone: "draft", labelKind: "raw" });
+  });
+});
+
+describe("toSubscriptionMe", () => {
+  it("narrows the enriched /subscription/me object (package reuses toPlanRow)", () => {
+    expect(
+      toSubscriptionMe({
+        id: "sub0",
+        package_id: "M",
+        cycle: "yearly",
+        status: "active",
+        renew_at: "2026-12-31T00:00:00Z",
+        started_at: "2026-01-01T00:00:00Z",
+        package: {
+          id: "M",
+          size: "M",
+          name: "Professional",
+          price_m: "7900.00",
+          price_y: "79000.00",
+          currency_code: "THB",
+          limits: { projects: 10, users: 25, storage_gb: 100, ai_per_month: 50 },
+          menus: ["dashboard", "boq"],
+        },
+        usage: { projects: 3, users: 8, storage: 0, ai: 4 },
+      }),
+    ).toEqual({
+      id: "sub0",
+      packageId: "M",
+      cycle: "yearly",
+      status: "active",
+      renewAt: "2026-12-31T00:00:00Z",
+      startedAt: "2026-01-01T00:00:00Z",
+      package: {
+        id: "M",
+        size: "M",
+        name: "Professional",
+        priceM: 7900,
+        priceY: 79000,
+        currencyCode: "THB",
+        projects: 10,
+        users: 25,
+        storageGb: 100,
+        aiPerMonth: 50,
+        menus: ["dashboard", "boq"],
+      },
+      usage: { projects: 3, users: 8, storage: 0, ai: 4 },
+    });
+  });
+
+  it("keeps a null package null and defaults an absent usage to zeros (never fabricates)", () => {
+    const me = toSubscriptionMe({ id: "s", package_id: "x", cycle: "monthly", status: "trial", package: null });
+    expect(me.package).toBeNull();
+    expect(me.usage).toEqual({ projects: 0, users: 0, storage: 0, ai: 0 });
+    expect(me.renewAt).toBe("");
+    expect(me.startedAt).toBe("");
+  });
+});
+
+describe("daysLeft", () => {
+  it("counts whole days until renewal (rounded up), null when absent/invalid", () => {
+    expect(daysLeft("2026-12-31T00:00:00Z", new Date("2026-12-01T00:00:00Z"))).toBe(30);
+    expect(daysLeft("2026-07-02T12:00:00Z", new Date("2026-07-01T00:00:00Z"))).toBe(2);
+    expect(daysLeft("", new Date("2026-07-01T00:00:00Z"))).toBeNull();
+    expect(daysLeft("not-a-date", new Date("2026-07-01T00:00:00Z"))).toBeNull();
+  });
+
+  it("reads a past renewal as negative, faithfully (not clamped)", () => {
+    expect(daysLeft("2026-06-01T00:00:00Z", new Date("2026-06-11T00:00:00Z"))).toBe(-10);
+  });
+});
+
+describe("usagePct / usagePctTone", () => {
+  it("computes the fill percent, unlimited teasing 12% and a 0/<=0 cap guarding to 0", () => {
+    expect(usagePct(3, 10)).toBe(30);
+    expect(usagePct(9, 10)).toBe(90);
+    expect(usagePct(5, -1)).toBe(12); // unlimited -> fixed 12% teaser
+    expect(usagePct(5, 0)).toBe(0); // divide-by-zero guard
+  });
+
+  it("tones by threshold (>=90 danger, >=75 warn, else ok)", () => {
+    expect(usagePctTone(95)).toBe("danger");
+    expect(usagePctTone(90)).toBe("danger");
+    expect(usagePctTone(80)).toBe("warn");
+    expect(usagePctTone(75)).toBe("warn");
+    expect(usagePctTone(30)).toBe("ok");
+  });
+});
+
+describe("subStatusBadge", () => {
+  it("maps active/trial to the keyed approved badge, else a raw defensive tone", () => {
+    expect(subStatusBadge("active")).toEqual({ tone: "approved", labelKind: "active" });
+    expect(subStatusBadge("trial")).toEqual({ tone: "approved", labelKind: "active" });
+    expect(subStatusBadge("overdue")).toEqual({ tone: "draft", labelKind: "raw" });
+    expect(subStatusBadge("cancelled")).toEqual({ tone: "draft", labelKind: "raw" });
   });
 });

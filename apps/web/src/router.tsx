@@ -98,6 +98,8 @@ import { SubBilling } from "./screens/subscription/sub-billing";
 import { AdminSubscribers } from "./screens/admin/admin-subs";
 import { AdminPlans } from "./screens/admin/admin-plans";
 import { AdminInvoices } from "./screens/admin/admin-invoices";
+import { SubMine } from "./screens/subscription/sub-mine";
+import { LineOAPreview } from "./screens/line/line-oa";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -182,6 +184,8 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "admin.subs": AdminSubscribers,
   "admin.plans": AdminPlans,
   "admin.invoices": AdminInvoices,
+  "sub.mine": SubMine,
+  line: LineOAPreview,
 };
 
 const rootRoute = createRootRoute({
