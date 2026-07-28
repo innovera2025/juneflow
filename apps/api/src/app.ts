@@ -43,6 +43,7 @@ import { registerVendorsRoute } from "./routes/vendors.js";
 import { registerUsersRoute } from "./routes/users.js";
 import { registerRolesRoute } from "./routes/roles.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerSubscriptionRoutes } from "./routes/subscription.js";
 import { registerOrgUnitsRoute } from "./routes/org-units.js";
 import { registerProjectNodesRoute } from "./routes/project-nodes.js";
 import { registerBoqRoute } from "./routes/boq.js";
@@ -189,6 +190,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerUsersRoute(v1);
       registerRolesRoute(v1);
       registerAdminRoutes(v1, { platformDb });
+      registerSubscriptionRoutes(v1);
       registerOrgUnitsRoute(v1);
       registerProjectNodesRoute(v1);
       registerBoqRoute(v1);
