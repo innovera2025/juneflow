@@ -16,7 +16,7 @@
 // (authUser.email → tenant `user` row → `role`), so it is tenant-scoped
 // throughout. Resolution is fail-closed: an unattributable caller (no session /
 // no dictionary row / no role) has no perms and is denied.
-import type { FastifyRequest } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import type { RolePerms, RolePermFlags } from "@juneflow/db/schema";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
 
@@ -48,6 +48,14 @@ export interface CallerAuthz {
   approvalLevel: number;
   /** The caller's stored perms matrix (empty when the user has no role). */
   perms: RolePerms;
+  /**
+   * B-176 (Phase-6): true only for a Juneflow-staff platform owner (the server-set
+   * is_platform_admin flag on the caller's OWN user row — read via the normal
+   * tenant-scoped request.db, no cross-tenant door needed for the gate itself).
+   * Default false, so a fresh/unmigrated user or a plain tenant member is never an
+   * owner. Gate cross-tenant /admin/* reads on this via ownerOnly().
+   */
+  isPlatformAdmin: boolean;
 }
 
 /**
@@ -69,7 +77,33 @@ export async function loadCaller(
     roleId: user.roleId,
     approvalLevel: role?.approvalLevel ?? 0,
     perms: role?.perms ?? {},
+    // Strict boolean: only an explicit true (server-set flag) is an owner.
+    isPlatformAdmin: user.isPlatformAdmin === true,
   };
+}
+
+/**
+ * Platform-owner gate (B-178) — the ONLY thing standing between a tenant bearer
+ * and cross-tenant platform data. Every /admin/* handler MUST call this FIRST
+ * and bail on null. Fail-closed by construction: loadCaller() returns null for
+ * an unattributable caller (no session / no dictionary row), and the strict
+ * `!== true` (mirroring permAllowed's `=== true`) denies a null caller, an absent
+ * flag, false, and any non-boolean-true value — ONLY a literal
+ * isPlatformAdmin === true proceeds. The gate lives in the handler, not in
+ * tenant-scope (which only 401s a MISSING tenant — a valid tenant bearer passes
+ * it and would otherwise reach /admin/*), so a missing gate on ANY handler is a
+ * cross-tenant leak.
+ */
+export async function ownerOnly(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<CallerAuthz | null> {
+  const caller = await loadCaller(request);
+  if (caller?.isPlatformAdmin !== true) {
+    reply.code(403).send({ code: "FORBIDDEN", message: "requires platform admin" });
+    return null;
+  }
+  return caller;
 }
 
 /** Does the (possibly absent) perms matrix carry perms[module][right]? Fail-closed false. */

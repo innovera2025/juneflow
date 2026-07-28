@@ -88,6 +88,16 @@ import { AfterSalesService } from "./screens/sales/sales-service";
 import { LandBank } from "./screens/land/land-bank";
 import { LandSurvey } from "./screens/land/land-survey";
 import { LandDueDiligence } from "./screens/land/land-dd";
+import { SolarMonitoring } from "./screens/solar/solar-monitor";
+import { SolarPPA } from "./screens/solar/solar-ppa";
+import { SolarROI } from "./screens/solar/solar-roi";
+import { SolarPermit } from "./screens/solar/solar-permit";
+import { SolarWarranty } from "./screens/solar/solar-warranty";
+import { SubPlans } from "./screens/subscription/sub-plans";
+import { SubBilling } from "./screens/subscription/sub-billing";
+import { AdminSubscribers } from "./screens/admin/admin-subs";
+import { AdminPlans } from "./screens/admin/admin-plans";
+import { AdminInvoices } from "./screens/admin/admin-invoices";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -162,6 +172,16 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "sales.down": SalesDown,
   "sales.loan": SalesLoan,
   "sales.service": AfterSalesService,
+  "solar.monitor": SolarMonitoring,
+  "solar.ppa": SolarPPA,
+  "solar.roi": SolarROI,
+  "solar.permit": SolarPermit,
+  "solar.warranty": SolarWarranty,
+  "sub.plans": SubPlans,
+  "sub.billing": SubBilling,
+  "admin.subs": AdminSubscribers,
+  "admin.plans": AdminPlans,
+  "admin.invoices": AdminInvoices,
 };
 
 const rootRoute = createRootRoute({

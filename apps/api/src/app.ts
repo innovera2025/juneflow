@@ -14,6 +14,7 @@
 //   compose healthcheck probe (infra/docker-compose.yml pins it).
 import Fastify, { type FastifyInstance } from "fastify";
 import type { Db } from "@juneflow/db/client";
+import { PlatformDb } from "./db/platform-db.js";
 import {
   registerTenantScope,
   DEFAULT_PUBLIC_PATHS,
@@ -41,6 +42,8 @@ import { registerModelsRoute } from "./routes/models.js";
 import { registerVendorsRoute } from "./routes/vendors.js";
 import { registerUsersRoute } from "./routes/users.js";
 import { registerRolesRoute } from "./routes/roles.js";
+import { registerAdminRoutes } from "./routes/admin.js";
+import { registerSubscriptionRoutes } from "./routes/subscription.js";
 import { registerOrgUnitsRoute } from "./routes/org-units.js";
 import { registerProjectNodesRoute } from "./routes/project-nodes.js";
 import { registerBoqRoute } from "./routes/boq.js";
@@ -70,6 +73,7 @@ import { registerLaborRoute } from "./routes/labor.js";
 import { registerInventoryRoute } from "./routes/inventory.js";
 import { registerLandSalesRoute } from "./routes/land-sales.js";
 import { registerSalesServiceRoute } from "./routes/sales-service.js";
+import { registerSolarRoute } from "./routes/solar.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -164,6 +168,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // Compose healthcheck probe (root — not part of the contract surface).
   app.get("/health", async () => ({ ok: true }));
 
+  // B-177: the ONE guarded cross-tenant read door for platform-owner /admin/*.
+  // Constructed ONCE over the un-scoped base handle and injected ONLY into the
+  // owner-gated admin routes — NEVER attached to `request` (request.db stays a
+  // company-scoped TenantDb for every tenant handler).
+  const platformDb = new PlatformDb(deps.db);
+
   // Contract routes under the contract server prefix /api/v1.
   await app.register(
     async (v1) => {
@@ -179,6 +189,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerVendorsRoute(v1);
       registerUsersRoute(v1);
       registerRolesRoute(v1);
+      registerAdminRoutes(v1, { platformDb });
+      registerSubscriptionRoutes(v1);
       registerOrgUnitsRoute(v1);
       registerProjectNodesRoute(v1);
       registerBoqRoute(v1);
@@ -208,6 +220,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerInventoryRoute(v1);
       registerLandSalesRoute(v1);
       registerSalesServiceRoute(v1);
+      registerSolarRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,

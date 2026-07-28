@@ -36,15 +36,41 @@ async function buildApp(): Promise<{ app: FastifyInstance; records: AuditRecord[
   app.put("/projects/:id", async () => ({ ok: true }));
   app.delete("/projects/:id", async () => ({ ok: true }));
   app.post("/projects/fail", async (_req, reply) => reply.code(400).send({ bad: true }));
+  // B-183: an owner-gated cross-tenant admin READ (a 2xx here means an owner);
+  // and a 403 admin read (a denied non-owner) must NOT be logged.
+  app.get("/admin/subscribers", async () => ({ ok: true }));
+  app.get("/admin/denied", async (_req, reply) => reply.code(403).send({ bad: true }));
   await app.ready();
   return { app, records };
 }
 
-describe("reads are never audited", () => {
-  it("writes no record for a GET", async () => {
+describe("reads are never audited (except owner cross-tenant /admin/*)", () => {
+  it("writes no record for a normal tenant GET", async () => {
     const { app, records } = await buildApp();
     const res = await app.inject({ method: "GET", url: "/projects" });
     expect(res.statusCode).toBe(200);
+    expect(records).toHaveLength(0);
+  });
+
+  it("B-183: audits a successful owner /admin/* GET as action=read (who·what·when)", async () => {
+    const { app, records } = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/admin/subscribers" });
+    expect(res.statusCode).toBe(200);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      companyId: COMPANY,
+      userId: "user-1",
+      action: "read",
+      entity: "/admin/subscribers",
+    });
+    expect(records[0]!.after).toBeUndefined(); // a read carries no mutation body
+    expect(records[0]!.at).toBeInstanceOf(Date);
+  });
+
+  it("does NOT audit a DENIED (403) admin read — only a non-owner reaches it", async () => {
+    const { app, records } = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/admin/denied" });
+    expect(res.statusCode).toBe(403);
     expect(records).toHaveLength(0);
   });
 });

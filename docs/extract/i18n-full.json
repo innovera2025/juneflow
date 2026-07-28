@@ -18682,6 +18682,2040 @@
       "en": "อ้างอิงสัญญา {contract} · Site {site}",
       "zh": "อ้างอิงสัญญา {contract} · Site {site}",
       "ar": "อ้างอิงสัญญา {contract} · Site {site}"
+    },
+    "solar.monitor.crumbModule": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.monitor.crumbScreen": {
+      "th": "Monitoring · O&M",
+      "en": "Monitoring · O&M",
+      "zh": "Monitoring · O&M",
+      "ar": "Monitoring · O&M"
+    },
+    "solar.monitor.title": {
+      "th": "Monitoring · O&M",
+      "en": "Monitoring · O&M",
+      "zh": "Monitoring · O&M",
+      "ar": "Monitoring · O&M"
+    },
+    "solar.monitor.subtitle": {
+      "th": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)",
+      "en": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)",
+      "zh": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)",
+      "ar": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)"
+    },
+    "solar.monitor.actionExport": {
+      "th": "Export",
+      "en": "Export",
+      "zh": "Export",
+      "ar": "Export"
+    },
+    "solar.monitor.toastExport": {
+      "th": "Export รายงานการผลิตไฟ",
+      "en": "Export รายงานการผลิตไฟ",
+      "zh": "Export รายงานการผลิตไฟ",
+      "ar": "Export รายงานการผลิตไฟ"
+    },
+    "solar.monitor.actionNewTicket": {
+      "th": "เปิดใบงาน O&M",
+      "en": "เปิดใบงาน O&M",
+      "zh": "เปิดใบงาน O&M",
+      "ar": "เปิดใบงาน O&M"
+    },
+    "solar.monitor.kpiOutputLabel": {
+      "th": "กำลังผลิตขณะนี้",
+      "en": "กำลังผลิตขณะนี้",
+      "zh": "กำลังผลิตขณะนี้",
+      "ar": "กำลังผลิตขณะนี้"
+    },
+    "solar.monitor.kpiOutputUnit": {
+      "th": "MW",
+      "en": "MW",
+      "zh": "MW",
+      "ar": "MW"
+    },
+    "solar.monitor.kpiOutputSub": {
+      "th": "จากกำลังติดตั้ง {mw} MW",
+      "en": "จากกำลังติดตั้ง {mw} MW",
+      "zh": "จากกำลังติดตั้ง {mw} MW",
+      "ar": "จากกำลังติดตั้ง {mw} MW"
+    },
+    "solar.monitor.kpiPrLabel": {
+      "th": "Performance Ratio",
+      "en": "Performance Ratio",
+      "zh": "Performance Ratio",
+      "ar": "Performance Ratio"
+    },
+    "solar.monitor.kpiPrUnit": {
+      "th": "%",
+      "en": "%",
+      "zh": "%",
+      "ar": "%"
+    },
+    "solar.monitor.kpiPrSub": {
+      "th": "เป้าหมาย ≥ 80%",
+      "en": "เป้าหมาย ≥ 80%",
+      "zh": "เป้าหมาย ≥ 80%",
+      "ar": "เป้าหมาย ≥ 80%"
+    },
+    "solar.monitor.kpiEnergyLabel": {
+      "th": "พลังงานวันนี้",
+      "en": "พลังงานวันนี้",
+      "zh": "พลังงานวันนี้",
+      "ar": "พลังงานวันนี้"
+    },
+    "solar.monitor.kpiEnergyUnit": {
+      "th": "MWh",
+      "en": "MWh",
+      "zh": "MWh",
+      "ar": "MWh"
+    },
+    "solar.monitor.kpiEnergySub": {
+      "th": "+6% เทียบเมื่อวาน",
+      "en": "+6% เทียบเมื่อวาน",
+      "zh": "+6% เทียบเมื่อวาน",
+      "ar": "+6% เทียบเมื่อวาน"
+    },
+    "solar.monitor.kpiFaultLabel": {
+      "th": "อินเวอร์เตอร์ผิดปกติ",
+      "en": "อินเวอร์เตอร์ผิดปกติ",
+      "zh": "อินเวอร์เตอร์ผิดปกติ",
+      "ar": "อินเวอร์เตอร์ผิดปกติ"
+    },
+    "solar.monitor.kpiFaultUnit": {
+      "th": "/ 16",
+      "en": "/ 16",
+      "zh": "/ 16",
+      "ar": "/ 16"
+    },
+    "solar.monitor.kpiFaultSub": {
+      "th": "1 offline · 1 derating",
+      "en": "1 offline · 1 derating",
+      "zh": "1 offline · 1 derating",
+      "ar": "1 offline · 1 derating"
+    },
+    "solar.monitor.invTableTitle": {
+      "th": "สถานะอินเวอร์เตอร์ (Real-time)",
+      "en": "สถานะอินเวอร์เตอร์ (Real-time)",
+      "zh": "สถานะอินเวอร์เตอร์ (Real-time)",
+      "ar": "สถานะอินเวอร์เตอร์ (Real-time)"
+    },
+    "solar.monitor.colInverter": {
+      "th": "Inverter",
+      "en": "Inverter",
+      "zh": "Inverter",
+      "ar": "Inverter"
+    },
+    "solar.monitor.colZone": {
+      "th": "โซน/Array",
+      "en": "โซน/Array",
+      "zh": "โซน/Array",
+      "ar": "โซน/Array"
+    },
+    "solar.monitor.colOutput": {
+      "th": "กำลังผลิต",
+      "en": "กำลังผลิต",
+      "zh": "กำลังผลิต",
+      "ar": "กำลังผลิต"
+    },
+    "solar.monitor.colPerformance": {
+      "th": "Performance",
+      "en": "Performance",
+      "zh": "Performance",
+      "ar": "Performance"
+    },
+    "solar.monitor.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "solar.monitor.cellOutputUnit": {
+      "th": "kW",
+      "en": "kW",
+      "zh": "kW",
+      "ar": "kW"
+    },
+    "solar.monitor.statusOk": {
+      "th": "ปกติ",
+      "en": "ปกติ",
+      "zh": "ปกติ",
+      "ar": "ปกติ"
+    },
+    "solar.monitor.statusDerating": {
+      "th": "Derating",
+      "en": "Derating",
+      "zh": "Derating",
+      "ar": "Derating"
+    },
+    "solar.monitor.statusOffline": {
+      "th": "Offline",
+      "en": "Offline",
+      "zh": "Offline",
+      "ar": "Offline"
+    },
+    "solar.monitor.omCardTitle": {
+      "th": "ใบงาน O&M",
+      "en": "ใบงาน O&M",
+      "zh": "ใบงาน O&M",
+      "ar": "ใบงาน O&M"
+    },
+    "solar.ppa.breadcrumbEnergy": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.ppa.breadcrumbSelf": {
+      "th": "ขายไฟ / PPA",
+      "en": "ขายไฟ / PPA",
+      "zh": "ขายไฟ / PPA",
+      "ar": "ขายไฟ / PPA"
+    },
+    "solar.ppa.title": {
+      "th": "ขายไฟ / PPA",
+      "en": "ขายไฟ / PPA",
+      "zh": "ขายไฟ / PPA",
+      "ar": "ขายไฟ / PPA"
+    },
+    "solar.ppa.subtitle": {
+      "th": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน",
+      "en": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน",
+      "zh": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน",
+      "ar": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน"
+    },
+    "solar.ppa.actionCreateInvoice": {
+      "th": "ออกใบแจ้งหนี้ค่าไฟ",
+      "en": "ออกใบแจ้งหนี้ค่าไฟ",
+      "zh": "ออกใบแจ้งหนี้ค่าไฟ",
+      "ar": "ออกใบแจ้งหนี้ค่าไฟ"
+    },
+    "solar.ppa.kpiCounterpartyLabel": {
+      "th": "คู่สัญญา PPA",
+      "en": "คู่สัญญา PPA",
+      "zh": "คู่สัญญา PPA",
+      "ar": "คู่สัญญา PPA"
+    },
+    "solar.ppa.kpiCounterpartyValue": {
+      "th": "กฟภ.",
+      "en": "กฟภ.",
+      "zh": "กฟภ.",
+      "ar": "กฟภ."
+    },
+    "solar.ppa.kpiCounterpartySub": {
+      "th": "สัญญา Non-Firm 20 ปี",
+      "en": "สัญญา Non-Firm 20 ปี",
+      "zh": "สัญญา Non-Firm 20 ปี",
+      "ar": "สัญญา Non-Firm 20 ปี"
+    },
+    "solar.ppa.kpiFitLabel": {
+      "th": "อัตรารับซื้อ (FiT)",
+      "en": "อัตรารับซื้อ (FiT)",
+      "zh": "อัตรารับซื้อ (FiT)",
+      "ar": "อัตรารับซื้อ (FiT)"
+    },
+    "solar.ppa.kpiFitValue": {
+      "th": "4.12",
+      "en": "4.12",
+      "zh": "4.12",
+      "ar": "4.12"
+    },
+    "solar.ppa.kpiFitUnit": {
+      "th": "฿/kWh",
+      "en": "฿/kWh",
+      "zh": "฿/kWh",
+      "ar": "฿/kWh"
+    },
+    "solar.ppa.kpiFitSub": {
+      "th": "คงที่ตามสัญญา",
+      "en": "คงที่ตามสัญญา",
+      "zh": "คงที่ตามสัญญา",
+      "ar": "คงที่ตามสัญญา"
+    },
+    "solar.ppa.kpiYtdLabel": {
+      "th": "รายได้ค่าไฟ YTD",
+      "en": "รายได้ค่าไฟ YTD",
+      "zh": "รายได้ค่าไฟ YTD",
+      "ar": "รายได้ค่าไฟ YTD"
+    },
+    "solar.ppa.kpiYtdUnit": {
+      "th": "ล้านบาท",
+      "en": "ล้านบาท",
+      "zh": "ล้านบาท",
+      "ar": "ล้านบาท"
+    },
+    "solar.ppa.kpiYtdSub": {
+      "th": "ม.ค.–พ.ค. 2569",
+      "en": "ม.ค.–พ.ค. 2569",
+      "zh": "ม.ค.–พ.ค. 2569",
+      "ar": "ม.ค.–พ.ค. 2569"
+    },
+    "solar.ppa.kpiCodLabel": {
+      "th": "COD",
+      "en": "COD",
+      "zh": "COD",
+      "ar": "COD"
+    },
+    "solar.ppa.kpiCodValue": {
+      "th": "15 ธ.ค. 68",
+      "en": "15 ธ.ค. 68",
+      "zh": "15 ธ.ค. 68",
+      "ar": "15 ธ.ค. 68"
+    },
+    "solar.ppa.kpiCodSub": {
+      "th": "เริ่มจ่ายไฟเชิงพาณิชย์",
+      "en": "เริ่มจ่ายไฟเชิงพาณิชย์",
+      "zh": "เริ่มจ่ายไฟเชิงพาณิชย์",
+      "ar": "เริ่มจ่ายไฟเชิงพาณิชย์"
+    },
+    "solar.ppa.tableTitle": {
+      "th": "การวางบิลค่าไฟรายเดือน",
+      "en": "การวางบิลค่าไฟรายเดือน",
+      "zh": "การวางบิลค่าไฟรายเดือน",
+      "ar": "การวางบิลค่าไฟรายเดือน"
+    },
+    "solar.ppa.colMonth": {
+      "th": "งวดเดือน",
+      "en": "งวดเดือน",
+      "zh": "งวดเดือน",
+      "ar": "งวดเดือน"
+    },
+    "solar.ppa.colMwh": {
+      "th": "หน่วยขาย (MWh)",
+      "en": "หน่วยขาย (MWh)",
+      "zh": "หน่วยขาย (MWh)",
+      "ar": "หน่วยขาย (MWh)"
+    },
+    "solar.ppa.colRate": {
+      "th": "อัตรา (฿/kWh)",
+      "en": "อัตรา (฿/kWh)",
+      "zh": "อัตรา (฿/kWh)",
+      "ar": "อัตรา (฿/kWh)"
+    },
+    "solar.ppa.colAmount": {
+      "th": "มูลค่า (฿)",
+      "en": "มูลค่า (฿)",
+      "zh": "มูลค่า (฿)",
+      "ar": "มูลค่า (฿)"
+    },
+    "solar.ppa.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "solar.ppa.footYtd": {
+      "th": "รวม YTD",
+      "en": "รวม YTD",
+      "zh": "รวม YTD",
+      "ar": "รวม YTD"
+    },
+    "solar.roi.breadcrumbEpc": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.roi.breadcrumbSelf": {
+      "th": "ROI & ผลตอบแทน",
+      "en": "ROI & ผลตอบแทน",
+      "zh": "ROI & ผลตอบแทน",
+      "ar": "ROI & ผลตอบแทน"
+    },
+    "solar.roi.title": {
+      "th": "ROI & ผลตอบแทนการลงทุน",
+      "en": "ROI & ผลตอบแทนการลงทุน",
+      "zh": "ROI & ผลตอบแทนการลงทุน",
+      "ar": "ROI & ผลตอบแทนการลงทุน"
+    },
+    "solar.roi.subtitle": {
+      "th": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน",
+      "en": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน",
+      "zh": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน",
+      "ar": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน"
+    },
+    "solar.roi.actionExportModel": {
+      "th": "Export Model",
+      "en": "Export Model",
+      "zh": "Export Model",
+      "ar": "Export Model"
+    },
+    "solar.roi.toastExportModel": {
+      "th": "Export Financial Model",
+      "en": "Export Financial Model",
+      "zh": "Export Financial Model",
+      "ar": "Export Financial Model"
+    },
+    "solar.roi.kpiCapexLabel": {
+      "th": "เงินลงทุน (CAPEX)",
+      "en": "เงินลงทุน (CAPEX)",
+      "zh": "เงินลงทุน (CAPEX)",
+      "ar": "เงินลงทุน (CAPEX)"
+    },
+    "solar.roi.kpiCapexUnit": {
+      "th": "ล้านบาท",
+      "en": "ล้านบาท",
+      "zh": "ล้านบาท",
+      "ar": "ล้านบาท"
+    },
+    "solar.roi.kpiCapexSub": {
+      "th": "8 MW · 31฿/Wp",
+      "en": "8 MW · 31฿/Wp",
+      "zh": "8 MW · 31฿/Wp",
+      "ar": "8 MW · 31฿/Wp"
+    },
+    "solar.roi.kpiNetCashflowLabel": {
+      "th": "กระแสเงินสดสุทธิ/ปี",
+      "en": "กระแสเงินสดสุทธิ/ปี",
+      "zh": "กระแสเงินสดสุทธิ/ปี",
+      "ar": "กระแสเงินสดสุทธิ/ปี"
+    },
+    "solar.roi.kpiNetCashflowUnit": {
+      "th": "ล้านบาท",
+      "en": "ล้านบาท",
+      "zh": "ล้านบาท",
+      "ar": "ล้านบาท"
+    },
+    "solar.roi.kpiNetCashflowSub": {
+      "th": "รายได้ − OPEX",
+      "en": "รายได้ − OPEX",
+      "zh": "รายได้ − OPEX",
+      "ar": "รายได้ − OPEX"
+    },
+    "solar.roi.kpiPaybackLabel": {
+      "th": "จุดคืนทุน (Payback)",
+      "en": "จุดคืนทุน (Payback)",
+      "zh": "จุดคืนทุน (Payback)",
+      "ar": "จุดคืนทุน (Payback)"
+    },
+    "solar.roi.kpiPaybackUnit": {
+      "th": "ปี",
+      "en": "ปี",
+      "zh": "ปี",
+      "ar": "ปี"
+    },
+    "solar.roi.kpiPaybackSub": {
+      "th": "แบบไม่คิดลด",
+      "en": "แบบไม่คิดลด",
+      "zh": "แบบไม่คิดลด",
+      "ar": "แบบไม่คิดลด"
+    },
+    "solar.roi.kpiIrrLabel": {
+      "th": "IRR (20 ปี)",
+      "en": "IRR (20 ปี)",
+      "zh": "IRR (20 ปี)",
+      "ar": "IRR (20 ปี)"
+    },
+    "solar.roi.kpiIrrUnit": {
+      "th": "%",
+      "en": "%",
+      "zh": "%",
+      "ar": "%"
+    },
+    "solar.roi.kpiIrrSub": {
+      "th": "NPV @ 6% = +312 ลบ.",
+      "en": "NPV @ 6% = +312 ลบ.",
+      "zh": "NPV @ 6% = +312 ลบ.",
+      "ar": "NPV @ 6% = +312 ลบ."
+    },
+    "solar.roi.tableTitle": {
+      "th": "กระแสเงินสดสะสม (Cumulative Cashflow)",
+      "en": "กระแสเงินสดสะสม (Cumulative Cashflow)",
+      "zh": "กระแสเงินสดสะสม (Cumulative Cashflow)",
+      "ar": "กระแสเงินสดสะสม (Cumulative Cashflow)"
+    },
+    "solar.roi.colYear": {
+      "th": "ปีที่",
+      "en": "ปีที่",
+      "zh": "ปีที่",
+      "ar": "ปีที่"
+    },
+    "solar.roi.colRevenue": {
+      "th": "รายได้ (ลบ.)",
+      "en": "รายได้ (ลบ.)",
+      "zh": "รายได้ (ลบ.)",
+      "ar": "รายได้ (ลบ.)"
+    },
+    "solar.roi.colOpex": {
+      "th": "OPEX (ลบ.)",
+      "en": "OPEX (ลบ.)",
+      "zh": "OPEX (ลบ.)",
+      "ar": "OPEX (ลบ.)"
+    },
+    "solar.roi.colCumulative": {
+      "th": "เงินสดสะสม (ลบ.)",
+      "en": "เงินสดสะสม (ลบ.)",
+      "zh": "เงินสดสะสม (ลบ.)",
+      "ar": "เงินสดสะสม (ลบ.)"
+    },
+    "solar.roi.rowYearPrefix": {
+      "th": "ปี",
+      "en": "ปี",
+      "zh": "ปี",
+      "ar": "ปี"
+    },
+    "solar.permit.breadcrumbRoot": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.permit.breadcrumbSelf": {
+      "th": "ขออนุญาต (PEA/MEA/COD)",
+      "en": "ขออนุญาต (PEA/MEA/COD)",
+      "zh": "ขออนุญาต (PEA/MEA/COD)",
+      "ar": "ขออนุญาต (PEA/MEA/COD)"
+    },
+    "solar.permit.title": {
+      "th": "การขออนุญาต · ใบอนุญาต",
+      "en": "การขออนุญาต · ใบอนุญาต",
+      "zh": "การขออนุญาต · ใบอนุญาต",
+      "ar": "การขออนุญาต · ใบอนุญาต"
+    },
+    "solar.permit.subtitle": {
+      "th": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า",
+      "en": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า",
+      "zh": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า",
+      "ar": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า"
+    },
+    "solar.permit.addBtn": {
+      "th": "เพิ่มใบอนุญาต",
+      "en": "เพิ่มใบอนุญาต",
+      "zh": "เพิ่มใบอนุญาต",
+      "ar": "เพิ่มใบอนุญาต"
+    },
+    "solar.permit.kpiAllLabel": {
+      "th": "ใบอนุญาตทั้งหมด",
+      "en": "ใบอนุญาตทั้งหมด",
+      "zh": "ใบอนุญาตทั้งหมด",
+      "ar": "ใบอนุญาตทั้งหมด"
+    },
+    "solar.permit.kpiUnitItems": {
+      "th": "รายการ",
+      "en": "รายการ",
+      "zh": "รายการ",
+      "ar": "รายการ"
+    },
+    "solar.permit.kpiAllSub": {
+      "th": "5 อนุมัติ · 1 รอผล",
+      "en": "5 อนุมัติ · 1 รอผล",
+      "zh": "5 อนุมัติ · 1 รอผล",
+      "ar": "5 อนุมัติ · 1 รอผล"
+    },
+    "solar.permit.kpiCodLabel": {
+      "th": "สถานะ COD",
+      "en": "สถานะ COD",
+      "zh": "สถานะ COD",
+      "ar": "สถานะ COD"
+    },
+    "solar.permit.kpiCodValue": {
+      "th": "ผ่านแล้ว",
+      "en": "ผ่านแล้ว",
+      "zh": "ผ่านแล้ว",
+      "ar": "ผ่านแล้ว"
+    },
+    "solar.permit.kpiCodSub": {
+      "th": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68",
+      "en": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68",
+      "zh": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68",
+      "ar": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68"
+    },
+    "solar.permit.kpiPendingLabel": {
+      "th": "รอดำเนินการ",
+      "en": "รอดำเนินการ",
+      "zh": "รอดำเนินการ",
+      "ar": "รอดำเนินการ"
+    },
+    "solar.permit.kpiPendingSub": {
+      "th": "อ.6 — รอผลตรวจ",
+      "en": "อ.6 — รอผลตรวจ",
+      "zh": "อ.6 — รอผลตรวจ",
+      "ar": "อ.6 — รอผลตรวจ"
+    },
+    "solar.permit.stepsHeader": {
+      "th": "ขั้นตอนการขออนุญาต",
+      "en": "ขั้นตอนการขออนุญาต",
+      "zh": "ขั้นตอนการขออนุญาต",
+      "ar": "ขั้นตอนการขออนุญาต"
+    },
+    "solar.permit.statusApproved": {
+      "th": "อนุมัติแล้ว",
+      "en": "อนุมัติแล้ว",
+      "zh": "อนุมัติแล้ว",
+      "ar": "อนุมัติแล้ว"
+    },
+    "solar.permit.statusPending": {
+      "th": "รอผล",
+      "en": "รอผล",
+      "zh": "รอผล",
+      "ar": "รอผล"
+    },
+    "solar.permit.stepMeta": {
+      "th": "{org} · {date}",
+      "en": "{org} · {date}",
+      "zh": "{org} · {date}",
+      "ar": "{org} · {date}"
+    },
+    "solar.warranty.breadcrumbSection": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.warranty.breadcrumbPage": {
+      "th": "Warranty / รับประกัน",
+      "en": "Warranty / รับประกัน",
+      "zh": "Warranty / รับประกัน",
+      "ar": "Warranty / รับประกัน"
+    },
+    "solar.warranty.title": {
+      "th": "Warranty / การรับประกันอุปกรณ์",
+      "en": "Warranty / การรับประกันอุปกรณ์",
+      "zh": "Warranty / การรับประกันอุปกรณ์",
+      "ar": "Warranty / การรับประกันอุปกรณ์"
+    },
+    "solar.warranty.subtitle": {
+      "th": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)",
+      "en": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)",
+      "zh": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)",
+      "ar": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)"
+    },
+    "solar.warranty.actionAdd": {
+      "th": "เพิ่มรายการ",
+      "en": "เพิ่มรายการ",
+      "zh": "เพิ่มรายการ",
+      "ar": "เพิ่มรายการ"
+    },
+    "solar.warranty.colItem": {
+      "th": "อุปกรณ์",
+      "en": "อุปกรณ์",
+      "zh": "อุปกรณ์",
+      "ar": "อุปกรณ์"
+    },
+    "solar.warranty.colBrand": {
+      "th": "ยี่ห้อ / รุ่น",
+      "en": "ยี่ห้อ / รุ่น",
+      "zh": "ยี่ห้อ / รุ่น",
+      "ar": "ยี่ห้อ / รุ่น"
+    },
+    "solar.warranty.colQty": {
+      "th": "จำนวน",
+      "en": "จำนวน",
+      "zh": "จำนวน",
+      "ar": "จำนวน"
+    },
+    "solar.warranty.colPerf": {
+      "th": "รับประกันสมรรถนะ",
+      "en": "รับประกันสมรรถนะ",
+      "zh": "รับประกันสมรรถนะ",
+      "ar": "รับประกันสมรรถนะ"
+    },
+    "solar.warranty.colProd": {
+      "th": "รับประกันสินค้า",
+      "en": "รับประกันสินค้า",
+      "zh": "รับประกันสินค้า",
+      "ar": "รับประกันสินค้า"
+    },
+    "solar.warranty.colExpiry": {
+      "th": "หมดอายุ",
+      "en": "หมดอายุ",
+      "zh": "หมดอายุ",
+      "ar": "หมดอายุ"
+    },
+    "solar.warranty.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "solar.warranty.statusActive": {
+      "th": "คุ้มครอง",
+      "en": "คุ้มครอง",
+      "zh": "คุ้มครอง",
+      "ar": "คุ้มครอง"
+    },
+    "solar.warranty.statusExpiring": {
+      "th": "ใกล้หมดอายุ",
+      "en": "ใกล้หมดอายุ",
+      "zh": "ใกล้หมดอายุ",
+      "ar": "ใกล้หมดอายุ"
+    },
+    "sub.mine.breadcrumbAccount": {
+      "th": "บัญชีการใช้งาน",
+      "en": "บัญชีการใช้งาน",
+      "zh": "บัญชีการใช้งาน",
+      "ar": "บัญชีการใช้งาน"
+    },
+    "sub.mine.breadcrumbMyPkg": {
+      "th": "แพ็กเกจของฉัน",
+      "en": "แพ็กเกจของฉัน",
+      "zh": "แพ็กเกจของฉัน",
+      "ar": "แพ็กเกจของฉัน"
+    },
+    "sub.mine.title": {
+      "th": "แพ็กเกจของฉัน · My Subscription",
+      "en": "แพ็กเกจของฉัน · My Subscription",
+      "zh": "แพ็กเกจของฉัน · My Subscription",
+      "ar": "แพ็กเกจของฉัน · My Subscription"
+    },
+    "sub.mine.subtitle": {
+      "th": "ดูแพ็กเกจที่สมัคร โควต้าการใช้งาน และจัดการการต่ออายุ/อัปเกรด",
+      "en": "ดูแพ็กเกจที่สมัคร โควต้าการใช้งาน และจัดการการต่ออายุ/อัปเกรด",
+      "zh": "ดูแพ็กเกจที่สมัคร โควต้าการใช้งาน และจัดการการต่ออายุ/อัปเกรด",
+      "ar": "ดูแพ็กเกจที่สมัคร โควต้าการใช้งาน และจัดการการต่ออายุ/อัปเกรด"
+    },
+    "sub.mine.actionBillHistory": {
+      "th": "ประวัติบิล",
+      "en": "ประวัติบิล",
+      "zh": "ประวัติบิล",
+      "ar": "ประวัติบิล"
+    },
+    "sub.mine.actionUpgrade": {
+      "th": "อัปเกรดแพ็กเกจ",
+      "en": "อัปเกรดแพ็กเกจ",
+      "zh": "อัปเกรดแพ็กเกจ",
+      "ar": "อัปเกรดแพ็กเกจ"
+    },
+    "sub.mine.currentPkgLabel": {
+      "th": "แพ็กเกจปัจจุบัน",
+      "en": "แพ็กเกจปัจจุบัน",
+      "zh": "แพ็กเกจปัจจุบัน",
+      "ar": "แพ็กเกจปัจจุบัน"
+    },
+    "sub.mine.statusActive": {
+      "th": "ใช้งาน",
+      "en": "ใช้งาน",
+      "zh": "ใช้งาน",
+      "ar": "ใช้งาน"
+    },
+    "sub.mine.priceYearlySuffix": {
+      "th": "฿/ปี (ประหยัด 2 เดือน)",
+      "en": "฿/ปี (ประหยัด 2 เดือน)",
+      "zh": "฿/ปี (ประหยัด 2 เดือน)",
+      "ar": "฿/ปี (ประหยัด 2 เดือน)"
+    },
+    "sub.mine.rowBillingCycle": {
+      "th": "รอบบิล",
+      "en": "รอบบิล",
+      "zh": "รอบบิล",
+      "ar": "รอบบิล"
+    },
+    "sub.mine.valYearly": {
+      "th": "รายปี",
+      "en": "รายปี",
+      "zh": "รายปี",
+      "ar": "รายปี"
+    },
+    "sub.mine.rowContractStart": {
+      "th": "เริ่มสัญญา",
+      "en": "เริ่มสัญญา",
+      "zh": "เริ่มสัญญา",
+      "ar": "เริ่มสัญญา"
+    },
+    "sub.mine.rowNextRenew": {
+      "th": "ต่ออายุถัดไป",
+      "en": "ต่ออายุถัดไป",
+      "zh": "ต่ออายุถัดไป",
+      "ar": "ต่ออายุถัดไป"
+    },
+    "sub.mine.rowPaymentMethod": {
+      "th": "วิธีชำระ",
+      "en": "วิธีชำระ",
+      "zh": "วิธีชำระ",
+      "ar": "วิธีชำระ"
+    },
+    "sub.mine.valPaymentMethod": {
+      "th": "โอน / บัตรเครดิต",
+      "en": "โอน / บัตรเครดิต",
+      "zh": "โอน / บัตรเครดิต",
+      "ar": "โอน / บัตรเครดิต"
+    },
+    "sub.mine.daysLeftBeforeRenew": {
+      "th": "เหลืออีก {daysLeft} วันก่อนต่ออายุ",
+      "en": "เหลืออีก {daysLeft} วันก่อนต่ออายุ",
+      "zh": "เหลืออีก {daysLeft} วันก่อนต่ออายุ",
+      "ar": "เหลืออีก {daysLeft} วันก่อนต่ออายุ"
+    },
+    "sub.mine.btnRenew": {
+      "th": "ต่ออายุ",
+      "en": "ต่ออายุ",
+      "zh": "ต่ออายุ",
+      "ar": "ต่ออายุ"
+    },
+    "sub.mine.btnCancel": {
+      "th": "ยกเลิก",
+      "en": "ยกเลิก",
+      "zh": "ยกเลิก",
+      "ar": "ยกเลิก"
+    },
+    "sub.mine.toastRenew": {
+      "th": "ต่ออายุแพ็กเกจ Professional (รายปี)",
+      "en": "ต่ออายุแพ็กเกจ Professional (รายปี)",
+      "zh": "ต่ออายุแพ็กเกจ Professional (รายปี)",
+      "ar": "ต่ออายุแพ็กเกจ Professional (รายปี)"
+    },
+    "sub.mine.toastCancel": {
+      "th": "ติดต่อทีมขายเพื่อยกเลิก/ดาวน์เกรด",
+      "en": "ติดต่อทีมขายเพื่อยกเลิก/ดาวน์เกรด",
+      "zh": "ติดต่อทีมขายเพื่อยกเลิก/ดาวน์เกรด",
+      "ar": "ติดต่อทีมขายเพื่อยกเลิก/ดาวน์เกรด"
+    },
+    "sub.mine.usageHeader": {
+      "th": "โควต้า & พื้นที่การใช้งาน",
+      "en": "โควต้า & พื้นที่การใช้งาน",
+      "zh": "โควต้า & พื้นที่การใช้งาน",
+      "ar": "โควต้า & พื้นที่การใช้งาน"
+    },
+    "sub.mine.usageUpdatedAt": {
+      "th": "อัปเดตล่าสุด วันนี้ 09:42",
+      "en": "อัปเดตล่าสุด วันนี้ 09:42",
+      "zh": "อัปเดตล่าสุด วันนี้ 09:42",
+      "ar": "อัปเดตล่าสุด วันนี้ 09:42"
+    },
+    "sub.mine.rowProjects": {
+      "th": "โครงการ",
+      "en": "โครงการ",
+      "zh": "โครงการ",
+      "ar": "โครงการ"
+    },
+    "sub.mine.rowUsers": {
+      "th": "ผู้ใช้ (Seats)",
+      "en": "ผู้ใช้ (Seats)",
+      "zh": "ผู้ใช้ (Seats)",
+      "ar": "ผู้ใช้ (Seats)"
+    },
+    "sub.mine.rowStorage": {
+      "th": "พื้นที่จัดเก็บ (CAD/BIM/เอกสาร)",
+      "en": "พื้นที่จัดเก็บ (CAD/BIM/เอกสาร)",
+      "zh": "พื้นที่จัดเก็บ (CAD/BIM/เอกสาร)",
+      "ar": "พื้นที่จัดเก็บ (CAD/BIM/เอกสาร)"
+    },
+    "sub.mine.rowAi": {
+      "th": "AI ถอด BOQ (เครดิต/เดือน)",
+      "en": "AI ถอด BOQ (เครดิต/เดือน)",
+      "zh": "AI ถอด BOQ (เครดิต/เดือน)",
+      "ar": "AI ถอด BOQ (เครดิต/เดือน)"
+    },
+    "sub.mine.unitProjects": {
+      "th": "โครงการ",
+      "en": "โครงการ",
+      "zh": "โครงการ",
+      "ar": "โครงการ"
+    },
+    "sub.mine.unitUsers": {
+      "th": "คน",
+      "en": "คน",
+      "zh": "คน",
+      "ar": "คน"
+    },
+    "sub.mine.unitStorage": {
+      "th": "GB",
+      "en": "GB",
+      "zh": "GB",
+      "ar": "GB"
+    },
+    "sub.mine.unitAi": {
+      "th": "ครั้ง",
+      "en": "ครั้ง",
+      "zh": "ครั้ง",
+      "ar": "ครั้ง"
+    },
+    "sub.common.unlimited": {
+      "th": "ไม่จำกัด",
+      "en": "ไม่จำกัด",
+      "zh": "ไม่จำกัด",
+      "ar": "ไม่จำกัด"
+    },
+    "sub.mine.usageUsedPct": {
+      "th": "ใช้ไป {pct}%",
+      "en": "ใช้ไป {pct}%",
+      "zh": "ใช้ไป {pct}%",
+      "ar": "ใช้ไป {pct}%"
+    },
+    "sub.common.dotSep": {
+      "th": "·",
+      "en": "·",
+      "zh": "·",
+      "ar": "·"
+    },
+    "sub.mine.usageWarnNearFull": {
+      "th": "ใกล้เต็มโควต้า แนะนำอัปเกรด",
+      "en": "ใกล้เต็มโควต้า แนะนำอัปเกรด",
+      "zh": "ใกล้เต็มโควต้า แนะนำอัปเกรด",
+      "ar": "ใกล้เต็มโควต้า แนะนำอัปเกรด"
+    },
+    "sub.mine.usageWarnCaution": {
+      "th": "ควรเฝ้าระวัง",
+      "en": "ควรเฝ้าระวัง",
+      "zh": "ควรเฝ้าระวัง",
+      "ar": "ควรเฝ้าระวัง"
+    },
+    "sub.mine.modulesHeader": {
+      "th": "โมดูลที่เปิดใช้ในแพ็กเกจนี้",
+      "en": "โมดูลที่เปิดใช้ในแพ็กเกจนี้",
+      "zh": "โมดูลที่เปิดใช้ในแพ็กเกจนี้",
+      "ar": "โมดูลที่เปิดใช้ในแพ็กเกจนี้"
+    },
+    "sub.mine.upgradeInfoLine": {
+      "th": "ต้องการโมดูลเพิ่ม (AI QTO / Solar EPC) — อัปเกรดเป็น Enterprise",
+      "en": "ต้องการโมดูลเพิ่ม (AI QTO / Solar EPC) — อัปเกรดเป็น Enterprise",
+      "zh": "ต้องการโมดูลเพิ่ม (AI QTO / Solar EPC) — อัปเกรดเป็น Enterprise",
+      "ar": "ต้องการโมดูลเพิ่ม (AI QTO / Solar EPC) — อัปเกรดเป็น Enterprise"
+    },
+    "sub.common.crumbAccount": {
+      "th": "บัญชีการใช้งาน",
+      "en": "บัญชีการใช้งาน",
+      "zh": "บัญชีการใช้งาน",
+      "ar": "บัญชีการใช้งาน"
+    },
+    "sub.plans.crumb": {
+      "th": "แพ็กเกจ & ราคา",
+      "en": "แพ็กเกจ & ราคา",
+      "zh": "แพ็กเกจ & ราคา",
+      "ar": "แพ็กเกจ & ราคา"
+    },
+    "sub.plans.title": {
+      "th": "แพ็กเกจ & ราคา · Plans",
+      "en": "แพ็กเกจ & ราคา · Plans",
+      "zh": "แพ็กเกจ & ราคา · Plans",
+      "ar": "แพ็กเกจ & ราคา · Plans"
+    },
+    "sub.plans.subtitle": {
+      "th": "เลือกแพ็กเกจที่เหมาะกับขนาดทีมและจำนวนโครงการ — เปลี่ยนได้ทุกเมื่อ",
+      "en": "เลือกแพ็กเกจที่เหมาะกับขนาดทีมและจำนวนโครงการ — เปลี่ยนได้ทุกเมื่อ",
+      "zh": "เลือกแพ็กเกจที่เหมาะกับขนาดทีมและจำนวนโครงการ — เปลี่ยนได้ทุกเมื่อ",
+      "ar": "เลือกแพ็กเกจที่เหมาะกับขนาดทีมและจำนวนโครงการ — เปลี่ยนได้ทุกเมื่อ"
+    },
+    "sub.plans.cycleMonthly": {
+      "th": "รายเดือน",
+      "en": "รายเดือน",
+      "zh": "รายเดือน",
+      "ar": "รายเดือน"
+    },
+    "sub.plans.cycleYearly": {
+      "th": "รายปี · ลด 2 เดือน",
+      "en": "รายปี · ลด 2 เดือน",
+      "zh": "รายปี · ลด 2 เดือน",
+      "ar": "รายปี · ลด 2 เดือน"
+    },
+    "sub.plans.signupBtn": {
+      "th": "สมัครใช้งานใหม่",
+      "en": "สมัครใช้งานใหม่",
+      "zh": "สมัครใช้งานใหม่",
+      "ar": "สมัครใช้งานใหม่"
+    },
+    "sub.plans.popularBadge": {
+      "th": "ยอดนิยม",
+      "en": "ยอดนิยม",
+      "zh": "ยอดนิยม",
+      "ar": "ยอดนิยม"
+    },
+    "sub.plans.contactSales": {
+      "th": "ติดต่อทีมขาย",
+      "en": "ติดต่อทีมขาย",
+      "zh": "ติดต่อทีมขาย",
+      "ar": "ติดต่อทีมขาย"
+    },
+    "sub.plans.bahtPer": {
+      "th": "฿/",
+      "en": "฿/",
+      "zh": "฿/",
+      "ar": "฿/"
+    },
+    "sub.plans.perYear": {
+      "th": "ปี",
+      "en": "ปี",
+      "zh": "ปี",
+      "ar": "ปี"
+    },
+    "sub.plans.perMonth": {
+      "th": "เดือน",
+      "en": "เดือน",
+      "zh": "เดือน",
+      "ar": "เดือน"
+    },
+    "sub.plans.currentBtn": {
+      "th": "แพ็กเกจปัจจุบัน",
+      "en": "แพ็กเกจปัจจุบัน",
+      "zh": "แพ็กเกจปัจจุบัน",
+      "ar": "แพ็กเกจปัจจุบัน"
+    },
+    "sub.plans.downgradeBtn": {
+      "th": "ดาวน์เกรด",
+      "en": "ดาวน์เกรด",
+      "zh": "ดาวน์เกรด",
+      "ar": "ดาวน์เกรด"
+    },
+    "sub.plans.upgradeBtn": {
+      "th": "อัปเกรด",
+      "en": "อัปเกรด",
+      "zh": "อัปเกรด",
+      "ar": "อัปเกรด"
+    },
+    "sub.plans.changeToPrefix": {
+      "th": "เปลี่ยนเป็น",
+      "en": "เปลี่ยนเป็น",
+      "zh": "เปลี่ยนเป็น",
+      "ar": "เปลี่ยนเป็น"
+    },
+    "sub.plans.modalSubtitleContact": {
+      "th": "ทีมขายจะติดต่อกลับ",
+      "en": "ทีมขายจะติดต่อกลับ",
+      "zh": "ทีมขายจะติดต่อกลับ",
+      "ar": "ทีมขายจะติดต่อกลับ"
+    },
+    "sub.plans.modalBodyPrefix": {
+      "th": "ยืนยันเปลี่ยนแพ็กเกจเป็น ",
+      "en": "ยืนยันเปลี่ยนแพ็กเกจเป็น ",
+      "zh": "ยืนยันเปลี่ยนแพ็กเกจเป็น ",
+      "ar": "ยืนยันเปลี่ยนแพ็กเกจเป็น "
+    },
+    "sub.plans.modalBodySuffix": {
+      "th": "? โควต้าและโมดูลจะปรับทันที คิดค่าส่วนต่างตามสัดส่วนวันที่เหลือ",
+      "en": "? โควต้าและโมดูลจะปรับทันที คิดค่าส่วนต่างตามสัดส่วนวันที่เหลือ",
+      "zh": "? โควต้าและโมดูลจะปรับทันที คิดค่าส่วนต่างตามสัดส่วนวันที่เหลือ",
+      "ar": "? โควต้าและโมดูลจะปรับทันที คิดค่าส่วนต่างตามสัดส่วนวันที่เหลือ"
+    },
+    "sub.common.cancel": {
+      "th": "ยกเลิก",
+      "en": "ยกเลิก",
+      "zh": "ยกเลิก",
+      "ar": "ยกเลิก"
+    },
+    "sub.common.confirm": {
+      "th": "ยืนยัน",
+      "en": "ยืนยัน",
+      "zh": "ยืนยัน",
+      "ar": "ยืนยัน"
+    },
+    "sub.plans.toastEnterprise": {
+      "th": "ส่งคำขอ Enterprise · ทีมขายติดต่อกลับใน 1 วัน",
+      "en": "ส่งคำขอ Enterprise · ทีมขายติดต่อกลับใน 1 วัน",
+      "zh": "ส่งคำขอ Enterprise · ทีมขายติดต่อกลับใน 1 วัน",
+      "ar": "ส่งคำขอ Enterprise · ทีมขายติดต่อกลับใน 1 วัน"
+    },
+    "sub.plans.toastChangedSuffix": {
+      "th": "แล้ว",
+      "en": "แล้ว",
+      "zh": "แล้ว",
+      "ar": "แล้ว"
+    },
+    "sub.plans.featProjects": {
+      "th": "โครงการ",
+      "en": "โครงการ",
+      "zh": "โครงการ",
+      "ar": "โครงการ"
+    },
+    "sub.plans.featUsers": {
+      "th": "ผู้ใช้ (Seats)",
+      "en": "ผู้ใช้ (Seats)",
+      "zh": "ผู้ใช้ (Seats)",
+      "ar": "ผู้ใช้ (Seats)"
+    },
+    "sub.plans.featStorage": {
+      "th": "พื้นที่จัดเก็บ",
+      "en": "พื้นที่จัดเก็บ",
+      "zh": "พื้นที่จัดเก็บ",
+      "ar": "พื้นที่จัดเก็บ"
+    },
+    "sub.plans.featAi": {
+      "th": "AI ถอด BOQ",
+      "en": "AI ถอด BOQ",
+      "zh": "AI ถอด BOQ",
+      "ar": "AI ถอด BOQ"
+    },
+    "sub.plans.unitGb": {
+      "th": "GB",
+      "en": "GB",
+      "zh": "GB",
+      "ar": "GB"
+    },
+    "sub.plans.unitAiPerMonth": {
+      "th": "ครั้ง/ด.",
+      "en": "ครั้ง/ด.",
+      "zh": "ครั้ง/ด.",
+      "ar": "ครั้ง/ด."
+    },
+    "sub.common.breadcrumbAccount": {
+      "th": "บัญชีการใช้งาน",
+      "en": "บัญชีการใช้งาน",
+      "zh": "บัญชีการใช้งาน",
+      "ar": "บัญชีการใช้งาน"
+    },
+    "sub.billing.breadcrumb": {
+      "th": "บิล & ใบเสร็จ",
+      "en": "บิล & ใบเสร็จ",
+      "zh": "บิล & ใบเสร็จ",
+      "ar": "บิล & ใบเสร็จ"
+    },
+    "sub.billing.title": {
+      "th": "บิล & ใบเสร็จ · Billing",
+      "en": "บิล & ใบเสร็จ · Billing",
+      "zh": "บิล & ใบเสร็จ · Billing",
+      "ar": "บิล & ใบเสร็จ · Billing"
+    },
+    "sub.billing.subtitle": {
+      "th": "ประวัติการชำระค่าบริการและดาวน์โหลดใบเสร็จ/ใบกำกับภาษี",
+      "en": "ประวัติการชำระค่าบริการและดาวน์โหลดใบเสร็จ/ใบกำกับภาษี",
+      "zh": "ประวัติการชำระค่าบริการและดาวน์โหลดใบเสร็จ/ใบกำกับภาษี",
+      "ar": "ประวัติการชำระค่าบริการและดาวน์โหลดใบเสร็จ/ใบกำกับภาษี"
+    },
+    "sub.billing.colNo": {
+      "th": "เลขที่",
+      "en": "เลขที่",
+      "zh": "เลขที่",
+      "ar": "เลขที่"
+    },
+    "sub.billing.colDate": {
+      "th": "วันที่",
+      "en": "วันที่",
+      "zh": "วันที่",
+      "ar": "วันที่"
+    },
+    "sub.billing.colDesc": {
+      "th": "รายการ",
+      "en": "รายการ",
+      "zh": "รายการ",
+      "ar": "รายการ"
+    },
+    "sub.billing.colAmount": {
+      "th": "จำนวน (฿)",
+      "en": "จำนวน (฿)",
+      "zh": "จำนวน (฿)",
+      "ar": "จำนวน (฿)"
+    },
+    "sub.billing.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "sub.billing.statusPaid": {
+      "th": "ชำระแล้ว",
+      "en": "ชำระแล้ว",
+      "zh": "ชำระแล้ว",
+      "ar": "ชำระแล้ว"
+    },
+    "sub.billing.receiptBtn": {
+      "th": "ใบเสร็จ",
+      "en": "ใบเสร็จ",
+      "zh": "ใบเสร็จ",
+      "ar": "ใบเสร็จ"
+    },
+    "sub.billing.downloadToast": {
+      "th": "ดาวน์โหลดใบเสร็จ",
+      "en": "ดาวน์โหลดใบเสร็จ",
+      "zh": "ดาวน์โหลดใบเสร็จ",
+      "ar": "ดาวน์โหลดใบเสร็จ"
+    },
+    "admin.overview.breadcrumbOwner": {
+      "th": "ผู้ดูแลแพลตฟอร์ม",
+      "en": "ผู้ดูแลแพลตฟอร์ม",
+      "zh": "ผู้ดูแลแพลตฟอร์ม",
+      "ar": "ผู้ดูแลแพลตฟอร์ม"
+    },
+    "admin.overview.breadcrumbRevenue": {
+      "th": "ภาพรวมรายได้",
+      "en": "ภาพรวมรายได้",
+      "zh": "ภาพรวมรายได้",
+      "ar": "ภาพรวมรายได้"
+    },
+    "admin.overview.title": {
+      "th": "ภาพรวมแพลตฟอร์ม · Platform Overview",
+      "en": "ภาพรวมแพลตฟอร์ม · Platform Overview",
+      "zh": "ภาพรวมแพลตฟอร์ม · Platform Overview",
+      "ar": "ภาพรวมแพลตฟอร์ม · Platform Overview"
+    },
+    "admin.overview.subtitle": {
+      "th": "สรุปรายได้ Subscription, ผู้สมัคร และอัตราการเติบโต — สำหรับเจ้าของแพลตฟอร์ม",
+      "en": "สรุปรายได้ Subscription, ผู้สมัคร และอัตราการเติบโต — สำหรับเจ้าของแพลตฟอร์ม",
+      "zh": "สรุปรายได้ Subscription, ผู้สมัคร และอัตราการเติบโต — สำหรับเจ้าของแพลตฟอร์ม",
+      "ar": "สรุปรายได้ Subscription, ผู้สมัคร และอัตราการเติบโต — สำหรับเจ้าของแพลตฟอร์ม"
+    },
+    "admin.overview.exportBtn": {
+      "th": "ส่งออก",
+      "en": "ส่งออก",
+      "zh": "ส่งออก",
+      "ar": "ส่งออก"
+    },
+    "admin.overview.exportToast": {
+      "th": "ส่งออกรายงานรายได้ (PDF)",
+      "en": "ส่งออกรายงานรายได้ (PDF)",
+      "zh": "ส่งออกรายงานรายได้ (PDF)",
+      "ar": "ส่งออกรายงานรายได้ (PDF)"
+    },
+    "admin.overview.kpiMrrLabel": {
+      "th": "MRR (รายได้ต่อเดือน)",
+      "en": "MRR (รายได้ต่อเดือน)",
+      "zh": "MRR (รายได้ต่อเดือน)",
+      "ar": "MRR (รายได้ต่อเดือน)"
+    },
+    "admin.overview.kpiMrrUnit": {
+      "th": "฿",
+      "en": "฿",
+      "zh": "฿",
+      "ar": "฿"
+    },
+    "admin.overview.kpiArrLabel": {
+      "th": "ARR (รายได้ต่อปี)",
+      "en": "ARR (รายได้ต่อปี)",
+      "zh": "ARR (รายได้ต่อปี)",
+      "ar": "ARR (รายได้ต่อปี)"
+    },
+    "admin.overview.kpiArrUnit": {
+      "th": "ลบ.",
+      "en": "ลบ.",
+      "zh": "ลบ.",
+      "ar": "ลบ."
+    },
+    "admin.overview.kpiArrSub": {
+      "th": "ประมาณการ",
+      "en": "ประมาณการ",
+      "zh": "ประมาณการ",
+      "ar": "ประมาณการ"
+    },
+    "admin.overview.kpiActiveLabel": {
+      "th": "ผู้สมัครใช้งาน",
+      "en": "ผู้สมัครใช้งาน",
+      "zh": "ผู้สมัครใช้งาน",
+      "ar": "ผู้สมัครใช้งาน"
+    },
+    "admin.common.rai": {
+      "th": "ราย",
+      "en": "ราย",
+      "zh": "ราย",
+      "ar": "ราย"
+    },
+    "admin.overview.kpiActiveSub": {
+      "th": "จากทั้งหมด {n}",
+      "en": "จากทั้งหมด {n}",
+      "zh": "จากทั้งหมด {n}",
+      "ar": "จากทั้งหมด {n}"
+    },
+    "admin.overview.kpiTrialLabel": {
+      "th": "ทดลองใช้ (Trial)",
+      "en": "ทดลองใช้ (Trial)",
+      "zh": "ทดลองใช้ (Trial)",
+      "ar": "ทดลองใช้ (Trial)"
+    },
+    "admin.overview.kpiTrialSub": {
+      "th": "รอแปลงเป็นลูกค้า",
+      "en": "รอแปลงเป็นลูกค้า",
+      "zh": "รอแปลงเป็นลูกค้า",
+      "ar": "รอแปลงเป็นลูกค้า"
+    },
+    "admin.overview.kpiChurnLabel": {
+      "th": "Churn Rate",
+      "en": "Churn Rate",
+      "zh": "Churn Rate",
+      "ar": "Churn Rate"
+    },
+    "admin.overview.kpiChurnUnit": {
+      "th": "%",
+      "en": "%",
+      "zh": "%",
+      "ar": "%"
+    },
+    "admin.overview.kpiChurnSub": {
+      "th": "ต่ำกว่าเกณฑ์ 5%",
+      "en": "ต่ำกว่าเกณฑ์ 5%",
+      "zh": "ต่ำกว่าเกณฑ์ 5%",
+      "ar": "ต่ำกว่าเกณฑ์ 5%"
+    },
+    "admin.overview.chartSubscribersTitle": {
+      "th": "ผู้สมัครสะสมรายเดือน",
+      "en": "ผู้สมัครสะสมรายเดือน",
+      "zh": "ผู้สมัครสะสมรายเดือน",
+      "ar": "ผู้สมัครสะสมรายเดือน"
+    },
+    "admin.overview.chartPackagesTitle": {
+      "th": "สัดส่วนตามแพ็กเกจ",
+      "en": "สัดส่วนตามแพ็กเกจ",
+      "zh": "สัดส่วนตามแพ็กเกจ",
+      "ar": "สัดส่วนตามแพ็กเกจ"
+    },
+    "admin.common.breadcrumbRoot": {
+      "th": "ผู้ดูแลแพลตฟอร์ม",
+      "en": "ผู้ดูแลแพลตฟอร์ม",
+      "zh": "ผู้ดูแลแพลตฟอร์ม",
+      "ar": "ผู้ดูแลแพลตฟอร์ม"
+    },
+    "admin.subs.breadcrumb": {
+      "th": "จัดการผู้สมัคร",
+      "en": "จัดการผู้สมัคร",
+      "zh": "จัดการผู้สมัคร",
+      "ar": "จัดการผู้สมัคร"
+    },
+    "admin.subs.title": {
+      "th": "จัดการผู้สมัคร · Subscribers",
+      "en": "จัดการผู้สมัคร · Subscribers",
+      "zh": "จัดการผู้สมัคร · Subscribers",
+      "ar": "จัดการผู้สมัคร · Subscribers"
+    },
+    "admin.subs.subtitle": {
+      "th": "ผู้สมัครทั้งหมด {count} ราย — ดูการใช้งานจริง ปรับแพ็กเกจ และจัดการสถานะ",
+      "en": "ผู้สมัครทั้งหมด {count} ราย — ดูการใช้งานจริง ปรับแพ็กเกจ และจัดการสถานะ",
+      "zh": "ผู้สมัครทั้งหมด {count} ราย — ดูการใช้งานจริง ปรับแพ็กเกจ และจัดการสถานะ",
+      "ar": "ผู้สมัครทั้งหมด {count} ราย — ดูการใช้งานจริง ปรับแพ็กเกจ และจัดการสถานะ"
+    },
+    "admin.common.export": {
+      "th": "ส่งออก",
+      "en": "ส่งออก",
+      "zh": "ส่งออก",
+      "ar": "ส่งออก"
+    },
+    "admin.subs.exportToast": {
+      "th": "ส่งออกรายชื่อผู้สมัคร (CSV)",
+      "en": "ส่งออกรายชื่อผู้สมัคร (CSV)",
+      "zh": "ส่งออกรายชื่อผู้สมัคร (CSV)",
+      "ar": "ส่งออกรายชื่อผู้สมัคร (CSV)"
+    },
+    "admin.subs.detailSubtitle": {
+      "th": "{id} · จัดการแพ็กเกจ สิทธิ์ และผู้ใช้งาน",
+      "en": "{id} · จัดการแพ็กเกจ สิทธิ์ และผู้ใช้งาน",
+      "zh": "{id} · จัดการแพ็กเกจ สิทธิ์ และผู้ใช้งาน",
+      "ar": "{id} · จัดการแพ็กเกจ สิทธิ์ และผู้ใช้งาน"
+    },
+    "admin.subs.searchPlaceholder": {
+      "th": "ค้นหาองค์กร / รหัส...",
+      "en": "ค้นหาองค์กร / รหัส...",
+      "zh": "ค้นหาองค์กร / รหัส...",
+      "ar": "ค้นหาองค์กร / รหัส..."
+    },
+    "admin.subs.pkgLabel": {
+      "th": "แพ็กเกจ",
+      "en": "แพ็กเกจ",
+      "zh": "แพ็กเกจ",
+      "ar": "แพ็กเกจ"
+    },
+    "admin.subs.filterPkgAll": {
+      "th": "ทุกแพ็กเกจ",
+      "en": "ทุกแพ็กเกจ",
+      "zh": "ทุกแพ็กเกจ",
+      "ar": "ทุกแพ็กเกจ"
+    },
+    "admin.subs.statusLabel": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "admin.subs.filterStatusAll": {
+      "th": "ทั้งหมด",
+      "en": "ทั้งหมด",
+      "zh": "ทั้งหมด",
+      "ar": "ทั้งหมด"
+    },
+    "admin.subs.statusActive": {
+      "th": "ใช้งาน",
+      "en": "ใช้งาน",
+      "zh": "ใช้งาน",
+      "ar": "ใช้งาน"
+    },
+    "admin.subs.statusTrial": {
+      "th": "ทดลองใช้",
+      "en": "ทดลองใช้",
+      "zh": "ทดลองใช้",
+      "ar": "ทดลองใช้"
+    },
+    "admin.subs.statusOverdue": {
+      "th": "ค้างชำระ",
+      "en": "ค้างชำระ",
+      "zh": "ค้างชำระ",
+      "ar": "ค้างชำระ"
+    },
+    "admin.subs.statusCancelled": {
+      "th": "ยกเลิก",
+      "en": "ยกเลิก",
+      "zh": "ยกเลิก",
+      "ar": "ยกเลิก"
+    },
+    "admin.subs.rowCount": {
+      "th": "{count} ราย",
+      "en": "{count} ราย",
+      "zh": "{count} ราย",
+      "ar": "{count} ราย"
+    },
+    "admin.subs.colOrg": {
+      "th": "องค์กร",
+      "en": "องค์กร",
+      "zh": "องค์กร",
+      "ar": "องค์กร"
+    },
+    "admin.subs.projectsLabel": {
+      "th": "โครงการ",
+      "en": "โครงการ",
+      "zh": "โครงการ",
+      "ar": "โครงการ"
+    },
+    "admin.subs.usersLabel": {
+      "th": "ผู้ใช้",
+      "en": "ผู้ใช้",
+      "zh": "ผู้ใช้",
+      "ar": "ผู้ใช้"
+    },
+    "admin.subs.colMrr": {
+      "th": "MRR (฿)",
+      "en": "MRR (฿)",
+      "zh": "MRR (฿)",
+      "ar": "MRR (฿)"
+    },
+    "admin.subs.colRenew": {
+      "th": "ต่ออายุ",
+      "en": "ต่ออายุ",
+      "zh": "ต่ออายุ",
+      "ar": "ต่ออายุ"
+    },
+    "admin.common.emptyDash": {
+      "th": "—",
+      "en": "—",
+      "zh": "—",
+      "ar": "—"
+    },
+    "admin.subs.saveToast": {
+      "th": "บันทึก · {org}: แพ็กเกจ {pkg} · ผู้ใช้สูงสุด {seats}",
+      "en": "บันทึก · {org}: แพ็กเกจ {pkg} · ผู้ใช้สูงสุด {seats}",
+      "zh": "บันทึก · {org}: แพ็กเกจ {pkg} · ผู้ใช้สูงสุด {seats}",
+      "ar": "บันทึก · {org}: แพ็กเกจ {pkg} · ผู้ใช้สูงสุด {seats}"
+    },
+    "admin.subs.resetPwTitle": {
+      "th": "รีเซ็ตรหัสผ่าน",
+      "en": "รีเซ็ตรหัสผ่าน",
+      "zh": "รีเซ็ตรหัสผ่าน",
+      "ar": "รีเซ็ตรหัสผ่าน"
+    },
+    "admin.subs.resetPwBody": {
+      "th": "ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่ {email}? ผู้ใช้ต้องตั้งรหัสใหม่ในการเข้าใช้ครั้งถัดไป",
+      "en": "ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่ {email}? ผู้ใช้ต้องตั้งรหัสใหม่ในการเข้าใช้ครั้งถัดไป",
+      "zh": "ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่ {email}? ผู้ใช้ต้องตั้งรหัสใหม่ในการเข้าใช้ครั้งถัดไป",
+      "ar": "ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่ {email}? ผู้ใช้ต้องตั้งรหัสใหม่ในการเข้าใช้ครั้งถัดไป"
+    },
+    "admin.common.cancel": {
+      "th": "ยกเลิก",
+      "en": "ยกเลิก",
+      "zh": "ยกเลิก",
+      "ar": "ยกเลิก"
+    },
+    "admin.subs.resetPwSend": {
+      "th": "ส่งลิงก์รีเซ็ต",
+      "en": "ส่งลิงก์รีเซ็ต",
+      "zh": "ส่งลิงก์รีเซ็ต",
+      "ar": "ส่งลิงก์รีเซ็ต"
+    },
+    "admin.subs.resetPwToast": {
+      "th": "ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ {email} แล้ว",
+      "en": "ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ {email} แล้ว",
+      "zh": "ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ {email} แล้ว",
+      "ar": "ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ {email} แล้ว"
+    },
+    "admin.subs.cycleYearly": {
+      "th": "รายปี",
+      "en": "รายปี",
+      "zh": "รายปี",
+      "ar": "รายปี"
+    },
+    "admin.subs.cycleMonthly": {
+      "th": "รายเดือน",
+      "en": "รายเดือน",
+      "zh": "รายเดือน",
+      "ar": "รายเดือน"
+    },
+    "admin.subs.summaryMrr": {
+      "th": "MRR {mrr} ฿",
+      "en": "MRR {mrr} ฿",
+      "zh": "MRR {mrr} ฿",
+      "ar": "MRR {mrr} ฿"
+    },
+    "admin.subs.summaryUsage": {
+      "th": "ผู้ใช้ {active}/{seats} · โครงการ {projects}/{maxProjects}",
+      "en": "ผู้ใช้ {active}/{seats} · โครงการ {projects}/{maxProjects}",
+      "zh": "ผู้ใช้ {active}/{seats} · โครงการ {projects}/{maxProjects}",
+      "ar": "ผู้ใช้ {active}/{seats} · โครงการ {projects}/{maxProjects}"
+    },
+    "admin.common.infinity": {
+      "th": "∞",
+      "en": "∞",
+      "zh": "∞",
+      "ar": "∞"
+    },
+    "admin.common.unlimited": {
+      "th": "ไม่จำกัด",
+      "en": "ไม่จำกัด",
+      "zh": "ไม่จำกัด",
+      "ar": "ไม่จำกัด"
+    },
+    "admin.subs.tabControl": {
+      "th": "ควบคุมแพ็กเกจ & สิทธิ์",
+      "en": "ควบคุมแพ็กเกจ & สิทธิ์",
+      "zh": "ควบคุมแพ็กเกจ & สิทธิ์",
+      "ar": "ควบคุมแพ็กเกจ & สิทธิ์"
+    },
+    "admin.subs.tabUsers": {
+      "th": "ผู้ใช้งาน ({count})",
+      "en": "ผู้ใช้งาน ({count})",
+      "zh": "ผู้ใช้งาน ({count})",
+      "ar": "ผู้ใช้งาน ({count})"
+    },
+    "admin.subs.fieldPkg": {
+      "th": "แพ็กเกจที่ใช้",
+      "en": "แพ็กเกจที่ใช้",
+      "zh": "แพ็กเกจที่ใช้",
+      "ar": "แพ็กเกจที่ใช้"
+    },
+    "admin.subs.fieldSeats": {
+      "th": "จำนวนผู้ใช้สูงสุด (Seats)",
+      "en": "จำนวนผู้ใช้สูงสุด (Seats)",
+      "zh": "จำนวนผู้ใช้สูงสุด (Seats)",
+      "ar": "จำนวนผู้ใช้สูงสุด (Seats)"
+    },
+    "admin.subs.seatsHintUnlimited": {
+      "th": "แพ็กเกจนี้ไม่จำกัดผู้ใช้",
+      "en": "แพ็กเกจนี้ไม่จำกัดผู้ใช้",
+      "zh": "แพ็กเกจนี้ไม่จำกัดผู้ใช้",
+      "ar": "แพ็กเกจนี้ไม่จำกัดผู้ใช้"
+    },
+    "admin.subs.seatsHintMax": {
+      "th": "แพ็กเกจกำหนดสูงสุด {n}",
+      "en": "แพ็กเกจกำหนดสูงสุด {n}",
+      "zh": "แพ็กเกจกำหนดสูงสุด {n}",
+      "ar": "แพ็กเกจกำหนดสูงสุด {n}"
+    },
+    "admin.subs.seatUnit": {
+      "th": "คน",
+      "en": "คน",
+      "zh": "คน",
+      "ar": "คน"
+    },
+    "admin.subs.quotaTitle": {
+      "th": "โควต้าตามแพ็กเกจ {pkg}",
+      "en": "โควต้าตามแพ็กเกจ {pkg}",
+      "zh": "โควต้าตามแพ็กเกจ {pkg}",
+      "ar": "โควต้าตามแพ็กเกจ {pkg}"
+    },
+    "admin.subs.quotaStorageLabel": {
+      "th": "พื้นที่",
+      "en": "พื้นที่",
+      "zh": "พื้นที่",
+      "ar": "พื้นที่"
+    },
+    "admin.subs.quotaAiLabel": {
+      "th": "AI",
+      "en": "AI",
+      "zh": "AI",
+      "ar": "AI"
+    },
+    "admin.subs.quotaStorageUnit": {
+      "th": "GB",
+      "en": "GB",
+      "zh": "GB",
+      "ar": "GB"
+    },
+    "admin.subs.quotaAiUnit": {
+      "th": "/ด.",
+      "en": "/ด.",
+      "zh": "/ด.",
+      "ar": "/ด."
+    },
+    "admin.subs.overSeatWarn": {
+      "th": "ผู้ใช้ที่ใช้งานจริง ({count}) เกินจำนวน Seats ที่ตั้งไว้ — เพิ่ม Seats หรืออัปเกรดแพ็กเกจ",
+      "en": "ผู้ใช้ที่ใช้งานจริง ({count}) เกินจำนวน Seats ที่ตั้งไว้ — เพิ่ม Seats หรืออัปเกรดแพ็กเกจ",
+      "zh": "ผู้ใช้ที่ใช้งานจริง ({count}) เกินจำนวน Seats ที่ตั้งไว้ — เพิ่ม Seats หรืออัปเกรดแพ็กเกจ",
+      "ar": "ผู้ใช้ที่ใช้งานจริง ({count}) เกินจำนวน Seats ที่ตั้งไว้ — เพิ่ม Seats หรืออัปเกรดแพ็กเกจ"
+    },
+    "admin.subs.suspendBtn": {
+      "th": "ระงับการใช้งาน",
+      "en": "ระงับการใช้งาน",
+      "zh": "ระงับการใช้งาน",
+      "ar": "ระงับการใช้งาน"
+    },
+    "admin.subs.suspendToast": {
+      "th": "ระงับการใช้งาน · {org}",
+      "en": "ระงับการใช้งาน · {org}",
+      "zh": "ระงับการใช้งาน · {org}",
+      "ar": "ระงับการใช้งาน · {org}"
+    },
+    "admin.subs.activateBtn": {
+      "th": "เปิดใช้งาน",
+      "en": "เปิดใช้งาน",
+      "zh": "เปิดใช้งาน",
+      "ar": "เปิดใช้งาน"
+    },
+    "admin.subs.activateToast": {
+      "th": "เปิดใช้งาน · {org}",
+      "en": "เปิดใช้งาน · {org}",
+      "zh": "เปิดใช้งาน · {org}",
+      "ar": "เปิดใช้งาน · {org}"
+    },
+    "admin.subs.saveSettingsBtn": {
+      "th": "บันทึกการตั้งค่า",
+      "en": "บันทึกการตั้งค่า",
+      "zh": "บันทึกการตั้งค่า",
+      "ar": "บันทึกการตั้งค่า"
+    },
+    "admin.subs.usersSummary": {
+      "th": "ผู้ใช้ทั้งหมด {total} คน · ใช้งาน {active} · พักงาน {suspended}",
+      "en": "ผู้ใช้ทั้งหมด {total} คน · ใช้งาน {active} · พักงาน {suspended}",
+      "zh": "ผู้ใช้ทั้งหมด {total} คน · ใช้งาน {active} · พักงาน {suspended}",
+      "ar": "ผู้ใช้ทั้งหมด {total} คน · ใช้งาน {active} · พักงาน {suspended}"
+    },
+    "admin.subs.inviteBtn": {
+      "th": "เชิญผู้ใช้",
+      "en": "เชิญผู้ใช้",
+      "zh": "เชิญผู้ใช้",
+      "ar": "เชิญผู้ใช้"
+    },
+    "admin.subs.colName": {
+      "th": "ชื่อ–สกุล",
+      "en": "ชื่อ–สกุล",
+      "zh": "ชื่อ–สกุล",
+      "ar": "ชื่อ–สกุล"
+    },
+    "admin.subs.colRole": {
+      "th": "บทบาท",
+      "en": "บทบาท",
+      "zh": "บทบาท",
+      "ar": "บทบาท"
+    },
+    "admin.subs.colLastLogin": {
+      "th": "เข้าใช้ล่าสุด",
+      "en": "เข้าใช้ล่าสุด",
+      "zh": "เข้าใช้ล่าสุด",
+      "ar": "เข้าใช้ล่าสุด"
+    },
+    "admin.subs.colManage": {
+      "th": "จัดการ",
+      "en": "จัดการ",
+      "zh": "จัดการ",
+      "ar": "จัดการ"
+    },
+    "admin.subs.userStatusBlocked": {
+      "th": "ถูกบล็อก",
+      "en": "ถูกบล็อก",
+      "zh": "ถูกบล็อก",
+      "ar": "ถูกบล็อก"
+    },
+    "admin.subs.userStatusInactive": {
+      "th": "พักงาน",
+      "en": "พักงาน",
+      "zh": "พักงาน",
+      "ar": "พักงาน"
+    },
+    "admin.subs.resetBtn": {
+      "th": "รีเซ็ต",
+      "en": "รีเซ็ต",
+      "zh": "รีเซ็ต",
+      "ar": "รีเซ็ต"
+    },
+    "admin.subs.unblockBtn": {
+      "th": "ปลดบล็อก",
+      "en": "ปลดบล็อก",
+      "zh": "ปลดบล็อก",
+      "ar": "ปลดบล็อก"
+    },
+    "admin.subs.blockBtn": {
+      "th": "บล็อก",
+      "en": "บล็อก",
+      "zh": "บล็อก",
+      "ar": "บล็อก"
+    },
+    "admin.subs.unblockToast": {
+      "th": "ปลดบล็อก {name}",
+      "en": "ปลดบล็อก {name}",
+      "zh": "ปลดบล็อก {name}",
+      "ar": "ปลดบล็อก {name}"
+    },
+    "admin.subs.blockToast": {
+      "th": "บล็อก {name} แล้ว",
+      "en": "บล็อก {name} แล้ว",
+      "zh": "บล็อก {name} แล้ว",
+      "ar": "บล็อก {name} แล้ว"
+    },
+    "admin.common.close": {
+      "th": "ปิด",
+      "en": "ปิด",
+      "zh": "ปิด",
+      "ar": "ปิด"
+    },
+    "admin.common.crumbPlatform": {
+      "th": "ผู้ดูแลแพลตฟอร์ม",
+      "en": "ผู้ดูแลแพลตฟอร์ม",
+      "zh": "ผู้ดูแลแพลตฟอร์ม",
+      "ar": "ผู้ดูแลแพลตฟอร์ม"
+    },
+    "admin.plans.crumb": {
+      "th": "จัดการแพ็กเกจ",
+      "en": "จัดการแพ็กเกจ",
+      "zh": "จัดการแพ็กเกจ",
+      "ar": "จัดการแพ็กเกจ"
+    },
+    "admin.plans.title": {
+      "th": "จัดการแพ็กเกจ & ราคา · Plan Management",
+      "en": "จัดการแพ็กเกจ & ราคา · Plan Management",
+      "zh": "จัดการแพ็กเกจ & ราคา · Plan Management",
+      "ar": "จัดการแพ็กเกจ & ราคา · Plan Management"
+    },
+    "admin.plans.subtitle": {
+      "th": "กำหนดแพ็กเกจ S · M · L · Full — ตั้งราคา โควต้า และเลือกเองว่าปล่อยเมนูไหนบ้างให้แต่ละแพ็กเกจ",
+      "en": "กำหนดแพ็กเกจ S · M · L · Full — ตั้งราคา โควต้า และเลือกเองว่าปล่อยเมนูไหนบ้างให้แต่ละแพ็กเกจ",
+      "zh": "กำหนดแพ็กเกจ S · M · L · Full — ตั้งราคา โควต้า และเลือกเองว่าปล่อยเมนูไหนบ้างให้แต่ละแพ็กเกจ",
+      "ar": "กำหนดแพ็กเกจ S · M · L · Full — ตั้งราคา โควต้า และเลือกเองว่าปล่อยเมนูไหนบ้างให้แต่ละแพ็กเกจ"
+    },
+    "admin.plans.createBtn": {
+      "th": "สร้างแพ็กเกจ",
+      "en": "สร้างแพ็กเกจ",
+      "zh": "สร้างแพ็กเกจ",
+      "ar": "สร้างแพ็กเกจ"
+    },
+    "admin.plans.popularTag": {
+      "th": "ยอดนิยม",
+      "en": "ยอดนิยม",
+      "zh": "ยอดนิยม",
+      "ar": "ยอดนิยม"
+    },
+    "admin.plans.editBtn": {
+      "th": "แก้ไข",
+      "en": "แก้ไข",
+      "zh": "แก้ไข",
+      "ar": "แก้ไข"
+    },
+    "admin.plans.priceContact": {
+      "th": "ติดต่อทีมขาย",
+      "en": "ติดต่อทีมขาย",
+      "zh": "ติดต่อทีมขาย",
+      "ar": "ติดต่อทีมขาย"
+    },
+    "admin.plans.priceMonthUnit": {
+      "th": "฿/ด.",
+      "en": "฿/ด.",
+      "zh": "฿/ด.",
+      "ar": "฿/ด."
+    },
+    "admin.plans.priceYearUnit": {
+      "th": "฿/ปี",
+      "en": "฿/ปี",
+      "zh": "฿/ปี",
+      "ar": "฿/ปี"
+    },
+    "admin.plans.limitProjectsUsers": {
+      "th": "โครงการ / ผู้ใช้",
+      "en": "โครงการ / ผู้ใช้",
+      "zh": "โครงการ / ผู้ใช้",
+      "ar": "โครงการ / ผู้ใช้"
+    },
+    "admin.plans.limitStorage": {
+      "th": "พื้นที่",
+      "en": "พื้นที่",
+      "zh": "พื้นที่",
+      "ar": "พื้นที่"
+    },
+    "admin.plans.storageUnit": {
+      "th": "GB",
+      "en": "GB",
+      "zh": "GB",
+      "ar": "GB"
+    },
+    "admin.plans.limitAi": {
+      "th": "AI ถอด BOQ",
+      "en": "AI ถอด BOQ",
+      "zh": "AI ถอด BOQ",
+      "ar": "AI ถอด BOQ"
+    },
+    "admin.plans.unlimited": {
+      "th": "ไม่จำกัด",
+      "en": "ไม่จำกัด",
+      "zh": "ไม่จำกัด",
+      "ar": "ไม่จำกัด"
+    },
+    "admin.plans.perMonthUnit": {
+      "th": "/ด.",
+      "en": "/ด.",
+      "zh": "/ด.",
+      "ar": "/ด."
+    },
+    "admin.plans.menusReleased": {
+      "th": "เมนูที่ปล่อย",
+      "en": "เมนูที่ปล่อย",
+      "zh": "เมนูที่ปล่อย",
+      "ar": "เมนูที่ปล่อย"
+    },
+    "admin.plans.subscribersLabel": {
+      "th": "ผู้สมัคร:",
+      "en": "ผู้สมัคร:",
+      "zh": "ผู้สมัคร:",
+      "ar": "ผู้สมัคร:"
+    },
+    "admin.plans.subscribersUnit": {
+      "th": "ราย",
+      "en": "ราย",
+      "zh": "ราย",
+      "ar": "ราย"
+    },
+    "admin.plans.builderTitleEdit": {
+      "th": "แก้ไขแพ็กเกจ",
+      "en": "แก้ไขแพ็กเกจ",
+      "zh": "แก้ไขแพ็กเกจ",
+      "ar": "แก้ไขแพ็กเกจ"
+    },
+    "admin.plans.builderTitleNew": {
+      "th": "สร้างแพ็กเกจใหม่",
+      "en": "สร้างแพ็กเกจใหม่",
+      "zh": "สร้างแพ็กเกจใหม่",
+      "ar": "สร้างแพ็กเกจใหม่"
+    },
+    "admin.plans.builderSubtitle": {
+      "th": "ตั้งชื่อ ราคา โควต้า และเลือกเมนูที่ปล่อยให้แพ็กเกจนี้ใช้งาน",
+      "en": "ตั้งชื่อ ราคา โควต้า และเลือกเมนูที่ปล่อยให้แพ็กเกจนี้ใช้งาน",
+      "zh": "ตั้งชื่อ ราคา โควต้า และเลือกเมนูที่ปล่อยให้แพ็กเกจนี้ใช้งาน",
+      "ar": "ตั้งชื่อ ราคา โควต้า และเลือกเมนูที่ปล่อยให้แพ็กเกจนี้ใช้งาน"
+    },
+    "admin.plans.presetS": {
+      "th": "Small · เริ่มต้น",
+      "en": "Small · เริ่มต้น",
+      "zh": "Small · เริ่มต้น",
+      "ar": "Small · เริ่มต้น"
+    },
+    "admin.plans.presetM": {
+      "th": "Medium · มาตรฐาน",
+      "en": "Medium · มาตรฐาน",
+      "zh": "Medium · มาตรฐาน",
+      "ar": "Medium · มาตรฐาน"
+    },
+    "admin.plans.presetL": {
+      "th": "Large · ธุรกิจ",
+      "en": "Large · ธุรกิจ",
+      "zh": "Large · ธุรกิจ",
+      "ar": "Large · ธุรกิจ"
+    },
+    "admin.plans.presetFull": {
+      "th": "Full · ทุกเมนู",
+      "en": "Full · ทุกเมนู",
+      "zh": "Full · ทุกเมนู",
+      "ar": "Full · ทุกเมนู"
+    },
+    "admin.plans.menuUnit": {
+      "th": "เมนู",
+      "en": "เมนู",
+      "zh": "เมนู",
+      "ar": "เมนู"
+    },
+    "admin.plans.fieldName": {
+      "th": "ชื่อแพ็กเกจ",
+      "en": "ชื่อแพ็กเกจ",
+      "zh": "ชื่อแพ็กเกจ",
+      "ar": "ชื่อแพ็กเกจ"
+    },
+    "admin.plans.fieldPrice": {
+      "th": "ราคา ฿/เดือน",
+      "en": "ราคา ฿/เดือน",
+      "zh": "ราคา ฿/เดือน",
+      "ar": "ราคา ฿/เดือน"
+    },
+    "admin.plans.fieldProjects": {
+      "th": "โครงการ",
+      "en": "โครงการ",
+      "zh": "โครงการ",
+      "ar": "โครงการ"
+    },
+    "admin.plans.fieldUsers": {
+      "th": "ผู้ใช้",
+      "en": "ผู้ใช้",
+      "zh": "ผู้ใช้",
+      "ar": "ผู้ใช้"
+    },
+    "admin.plans.fieldStorage": {
+      "th": "พื้นที่ (GB)",
+      "en": "พื้นที่ (GB)",
+      "zh": "พื้นที่ (GB)",
+      "ar": "พื้นที่ (GB)"
+    },
+    "admin.plans.fieldAi": {
+      "th": "AI/เดือน",
+      "en": "AI/เดือน",
+      "zh": "AI/เดือน",
+      "ar": "AI/เดือน"
+    },
+    "admin.plans.namePlaceholder": {
+      "th": "เช่น Business",
+      "en": "เช่น Business",
+      "zh": "เช่น Business",
+      "ar": "เช่น Business"
+    },
+    "admin.plans.contactCheckbox": {
+      "th": "ราคาแบบ “ติดต่อทีมขาย” (Enterprise) · ใส่ -1 = ไม่จำกัดโควต้า",
+      "en": "ราคาแบบ “ติดต่อทีมขาย” (Enterprise) · ใส่ -1 = ไม่จำกัดโควต้า",
+      "zh": "ราคาแบบ “ติดต่อทีมขาย” (Enterprise) · ใส่ -1 = ไม่จำกัดโควต้า",
+      "ar": "ราคาแบบ “ติดต่อทีมขาย” (Enterprise) · ใส่ -1 = ไม่จำกัดโควต้า"
+    },
+    "admin.plans.menuTreeHeading": {
+      "th": "เมนูที่ปล่อยให้ใช้งาน",
+      "en": "เมนูที่ปล่อยให้ใช้งาน",
+      "zh": "เมนูที่ปล่อยให้ใช้งาน",
+      "ar": "เมนูที่ปล่อยให้ใช้งาน"
+    },
+    "admin.plans.menuHiddenNote": {
+      "th": "เมนูที่ไม่ได้เลือกจะถูกซ่อนจาก sidebar ของลูกค้าแพ็กเกจนี้",
+      "en": "เมนูที่ไม่ได้เลือกจะถูกซ่อนจาก sidebar ของลูกค้าแพ็กเกจนี้",
+      "zh": "เมนูที่ไม่ได้เลือกจะถูกซ่อนจาก sidebar ของลูกค้าแพ็กเกจนี้",
+      "ar": "เมนูที่ไม่ได้เลือกจะถูกซ่อนจาก sidebar ของลูกค้าแพ็กเกจนี้"
+    },
+    "admin.plans.cancelBtn": {
+      "th": "ยกเลิก",
+      "en": "ยกเลิก",
+      "zh": "ยกเลิก",
+      "ar": "ยกเลิก"
+    },
+    "admin.plans.saveBtn": {
+      "th": "บันทึกแพ็กเกจ",
+      "en": "บันทึกแพ็กเกจ",
+      "zh": "บันทึกแพ็กเกจ",
+      "ar": "บันทึกแพ็กเกจ"
+    },
+    "admin.plans.needMenuToast": {
+      "th": "ต้องเลือกอย่างน้อย 1 เมนู",
+      "en": "ต้องเลือกอย่างน้อย 1 เมนู",
+      "zh": "ต้องเลือกอย่างน้อย 1 เมนู",
+      "ar": "ต้องเลือกอย่างน้อย 1 เมนู"
+    },
+    "admin.plans.savedToast": {
+      "th": "{action} “{name}” · ปล่อย {count}/{total} เมนู",
+      "en": "{action} “{name}” · ปล่อย {count}/{total} เมนู",
+      "zh": "{action} “{name}” · ปล่อย {count}/{total} เมนู",
+      "ar": "{action} “{name}” · ปล่อย {count}/{total} เมนู"
+    },
+    "admin.invoices.breadcrumb": {
+      "th": "ใบแจ้งหนี้",
+      "en": "ใบแจ้งหนี้",
+      "zh": "ใบแจ้งหนี้",
+      "ar": "ใบแจ้งหนี้"
+    },
+    "admin.invoices.title": {
+      "th": "ใบแจ้งหนี้ & รายได้ · Invoices",
+      "en": "ใบแจ้งหนี้ & รายได้ · Invoices",
+      "zh": "ใบแจ้งหนี้ & รายได้ · Invoices",
+      "ar": "ใบแจ้งหนี้ & รายได้ · Invoices"
+    },
+    "admin.invoices.subtitle": {
+      "th": "ใบแจ้งหนี้ค่าบริการของผู้สมัครทุกราย และยอดค้างชำระ",
+      "en": "ใบแจ้งหนี้ค่าบริการของผู้สมัครทุกราย และยอดค้างชำระ",
+      "zh": "ใบแจ้งหนี้ค่าบริการของผู้สมัครทุกราย และยอดค้างชำระ",
+      "ar": "ใบแจ้งหนี้ค่าบริการของผู้สมัครทุกราย และยอดค้างชำระ"
+    },
+    "admin.invoices.exportAction": {
+      "th": "ส่งออก",
+      "en": "ส่งออก",
+      "zh": "ส่งออก",
+      "ar": "ส่งออก"
+    },
+    "admin.invoices.exportToast": {
+      "th": "ส่งออกใบแจ้งหนี้ทั้งหมด",
+      "en": "ส่งออกใบแจ้งหนี้ทั้งหมด",
+      "zh": "ส่งออกใบแจ้งหนี้ทั้งหมด",
+      "ar": "ส่งออกใบแจ้งหนี้ทั้งหมด"
+    },
+    "admin.invoices.kpiBilledLabel": {
+      "th": "ออกบิลรอบนี้",
+      "en": "ออกบิลรอบนี้",
+      "zh": "ออกบิลรอบนี้",
+      "ar": "ออกบิลรอบนี้"
+    },
+    "admin.invoices.statusPaid": {
+      "th": "ชำระแล้ว",
+      "en": "ชำระแล้ว",
+      "zh": "ชำระแล้ว",
+      "ar": "ชำระแล้ว"
+    },
+    "admin.invoices.statusPending": {
+      "th": "รอชำระ",
+      "en": "รอชำระ",
+      "zh": "รอชำระ",
+      "ar": "รอชำระ"
+    },
+    "admin.invoices.statusOverdue": {
+      "th": "ค้างชำระ",
+      "en": "ค้างชำระ",
+      "zh": "ค้างชำระ",
+      "ar": "ค้างชำระ"
+    },
+    "admin.invoices.kpiSheetSuffix": {
+      "th": "{n} ใบ",
+      "en": "{n} ใบ",
+      "zh": "{n} ใบ",
+      "ar": "{n} ใบ"
+    },
+    "admin.invoices.colNo": {
+      "th": "เลขที่",
+      "en": "เลขที่",
+      "zh": "เลขที่",
+      "ar": "เลขที่"
+    },
+    "admin.invoices.colOrg": {
+      "th": "องค์กร",
+      "en": "องค์กร",
+      "zh": "องค์กร",
+      "ar": "องค์กร"
+    },
+    "admin.invoices.colDate": {
+      "th": "วันที่",
+      "en": "วันที่",
+      "zh": "วันที่",
+      "ar": "วันที่"
+    },
+    "admin.invoices.colAmount": {
+      "th": "จำนวน (฿)",
+      "en": "จำนวน (฿)",
+      "zh": "จำนวน (฿)",
+      "ar": "จำนวน (฿)"
+    },
+    "admin.invoices.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "admin.invoices.dunAction": {
+      "th": "ทวงถาม",
+      "en": "ทวงถาม",
+      "zh": "ทวงถาม",
+      "ar": "ทวงถาม"
+    },
+    "admin.invoices.viewAction": {
+      "th": "ดู",
+      "en": "ดู",
+      "zh": "ดู",
+      "ar": "ดู"
+    },
+    "admin.invoices.downloadToast": {
+      "th": "ดาวน์โหลด {no}",
+      "en": "ดาวน์โหลด {no}",
+      "zh": "ดาวน์โหลด {no}",
+      "ar": "ดาวน์โหลด {no}"
+    },
+    "admin.invoices.notifyTitle": {
+      "th": "ส่งแจ้งเตือนลูกค้า",
+      "en": "ส่งแจ้งเตือนลูกค้า",
+      "zh": "ส่งแจ้งเตือนลูกค้า",
+      "ar": "ส่งแจ้งเตือนลูกค้า"
+    },
+    "admin.invoices.notifyMessage": {
+      "th": "ส่งอีเมล + แจ้งเตือนในระบบถึง {org} เรื่องแพ็กเกจใกล้หมดอายุ/ค้างชำระ พร้อมลิงก์ต่ออายุ",
+      "en": "ส่งอีเมล + แจ้งเตือนในระบบถึง {org} เรื่องแพ็กเกจใกล้หมดอายุ/ค้างชำระ พร้อมลิงก์ต่ออายุ",
+      "zh": "ส่งอีเมล + แจ้งเตือนในระบบถึง {org} เรื่องแพ็กเกจใกล้หมดอายุ/ค้างชำระ พร้อมลิงก์ต่ออายุ",
+      "ar": "ส่งอีเมล + แจ้งเตือนในระบบถึง {org} เรื่องแพ็กเกจใกล้หมดอายุ/ค้างชำระ พร้อมลิงก์ต่ออายุ"
+    },
+    "admin.invoices.notifyConfirm": {
+      "th": "ส่งแจ้งเตือน",
+      "en": "ส่งแจ้งเตือน",
+      "zh": "ส่งแจ้งเตือน",
+      "ar": "ส่งแจ้งเตือน"
+    },
+    "admin.invoices.notifyToast": {
+      "th": "ส่งแจ้งเตือน {org} แล้ว · บันทึกใน Audit Log",
+      "en": "ส่งแจ้งเตือน {org} แล้ว · บันทึกใน Audit Log",
+      "zh": "ส่งแจ้งเตือน {org} แล้ว · บันทึกใน Audit Log",
+      "ar": "ส่งแจ้งเตือน {org} แล้ว · บันทึกใน Audit Log"
     }
   },
   "nav_i18n": {
