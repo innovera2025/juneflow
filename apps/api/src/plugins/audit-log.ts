@@ -30,6 +30,12 @@ import { auditLogs } from "@juneflow/db";
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// B-183 (Phase-6): the /admin/* surface is the platform-owner cross-tenant door.
+// A successful GET there is an owner reading across tenants (a non-owner is 403 →
+// not logged), which Wei ruled must be audited. Matches `admin` as a path segment
+// (with or without the /api/v1 prefix), never a substring like /badmin/.
+const ADMIN_PATH = /(?:^|\/)admin(?:\/|$)/;
+
 /** Logical action derived from the HTTP method of a mutating request. */
 const METHOD_ACTION: Record<string, string> = {
   POST: "create",
@@ -93,21 +99,29 @@ export async function registerAuditLog(
   app.addHook(
     "onResponse",
     async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!MUTATING_METHODS.has(request.method)) return;
-      // Only successful mutations actually changed state.
+      const routePath = request.routeOptions?.url ?? request.url;
+      const path = routePath.split("?", 1)[0]!;
+      const isMutation = MUTATING_METHODS.has(request.method);
+      // B-183: also audit a platform owner's cross-tenant /admin/* READ — the ONLY
+      // read logged. Only an owner reaches a 2xx there (a non-owner 403 is filtered
+      // by the statusCode gate below), so a successful /admin/* GET is exactly an
+      // owner cross-tenant access — who (resolveUserId) · what (entity) · when (at).
+      const isOwnerRead = request.method === "GET" && ADMIN_PATH.test(path);
+      if (!isMutation && !isOwnerRead) return;
+      // Only successful requests changed/accessed state; a 4xx/5xx did not.
       if (reply.statusCode >= 400) return;
-      // Without a tenant there is no mutation to attribute (tenant-scope would
-      // already have rejected it); fail safe by not writing an orphan row.
+      // Without a tenant there is nothing to attribute (tenant-scope would already
+      // have rejected it); fail safe by not writing an orphan row.
       const companyId = request.tenant?.companyId;
       if (!companyId) return;
 
-      const routePath = request.routeOptions?.url ?? request.url;
       const record: AuditRecord = {
         companyId,
         userId: await resolveUserId(request),
-        action: resolveAction(request.method, routePath),
-        entity: routePath.split("?", 1)[0]!,
-        after: request.body ?? undefined,
+        action: isOwnerRead ? "read" : resolveAction(request.method, routePath),
+        entity: path,
+        // A read has no mutation body; a mutation records its intent as `after`.
+        after: isMutation ? (request.body ?? undefined) : undefined,
         ip: request.ip ?? null,
         at: new Date(),
       };

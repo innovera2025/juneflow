@@ -275,6 +275,25 @@ describe("owner reads (is_platform_admin=true) — cross-tenant via PlatformDb",
     expect(res.statusCode).toBe(200);
     expect(res.json().data[0]).toMatchObject({ id: "inv-1", amount: 7900, currency_code: "THB", status: "paid" });
   });
+
+  it("B-183: a successful owner /admin/* read fires an audit record (action=read · who)", async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]], [packages, [pkg("pkg-1")]]] }),
+        auditSink: (r) => {
+          records.push(r as unknown as Record<string, unknown>);
+        },
+      })
+    ).inject({ method: "GET", url: "/api/v1/admin/packages" });
+    expect(res.statusCode).toBe(200);
+    // The cross-tenant owner read is logged end-to-end (route + audit hook + user).
+    expect(records).toHaveLength(1);
+    expect(records[0]!.action).toBe("read");
+    expect(String(records[0]!.entity)).toContain("admin/packages");
+    expect(records[0]!.userId).toBe("u-0"); // the owner's dictionary user id
+  });
 });
 
 // ===========================================================================

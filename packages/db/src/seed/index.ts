@@ -1010,6 +1010,12 @@ async function seed(): Promise<void> {
             ? det("role:finmgr")
             : det(`role:${at(ROLE_DEFS, i).key}`),
           status: (u.status === "active" ? "active" : "blocked") as "active" | "blocked",
+          // B-176 (Phase-6, Wei=ข): the Director user:1 (วิภา · APPROVER_IDX) doubles
+          // as the platform owner — the ONLY seeded is_platform_admin=true user, who
+          // may cross tenant boundaries through the guarded /admin/* door. Every other
+          // seeded member stays false (default). No standalone Juneflow-staff user
+          // exists (users.company_id is NOT NULL — the demo has one owner).
+          isPlatformAdmin: i === APPROVER_IDX,
         })),
       );
 
