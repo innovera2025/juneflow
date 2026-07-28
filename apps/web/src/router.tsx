@@ -93,6 +93,11 @@ import { SolarPPA } from "./screens/solar/solar-ppa";
 import { SolarROI } from "./screens/solar/solar-roi";
 import { SolarPermit } from "./screens/solar/solar-permit";
 import { SolarWarranty } from "./screens/solar/solar-warranty";
+import { SubPlans } from "./screens/subscription/sub-plans";
+import { SubBilling } from "./screens/subscription/sub-billing";
+import { AdminSubscribers } from "./screens/admin/admin-subs";
+import { AdminPlans } from "./screens/admin/admin-plans";
+import { AdminInvoices } from "./screens/admin/admin-invoices";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -172,6 +177,11 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "solar.roi": SolarROI,
   "solar.permit": SolarPermit,
   "solar.warranty": SolarWarranty,
+  "sub.plans": SubPlans,
+  "sub.billing": SubBilling,
+  "admin.subs": AdminSubscribers,
+  "admin.plans": AdminPlans,
+  "admin.invoices": AdminInvoices,
 };
 
 const rootRoute = createRootRoute({
