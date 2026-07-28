@@ -20,6 +20,7 @@ import {
   pgEnum,
   pgTable,
   index,
+  boolean,
   text,
   uuid,
   integer,
@@ -311,6 +312,11 @@ export const users = pgTable(
     name: text("name").notNull(),
     roleId: uuid("role_id").references(() => roles.id, { onDelete: "set null" }),
     status: userStatus("status").notNull().default("active"),
+    // B-176 (Phase-6, Wei=a): the platform-owner flag — a Juneflow-staff super-admin
+    // who may cross tenant boundaries through the guarded PlatformDb door to read all
+    // tenants' admin data. Server-set only (default false; never client-writable — no
+    // invite/edit/update body may set it), so a fresh/unmigrated user is never an owner.
+    isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
     // B-051 (P1-BE-09): the user's org unit (master.jsx:1025). Nullable — the
     // seeded T-1001 members (subscription-admin.jsx) carry no department, and it
     // is only required on the invite form, not by any tenant-scope rule.
