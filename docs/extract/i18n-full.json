@@ -20716,6 +20716,264 @@
       "en": "ส่งแจ้งเตือน {org} แล้ว · บันทึกใน Audit Log",
       "zh": "ส่งแจ้งเตือน {org} แล้ว · บันทึกใน Audit Log",
       "ar": "ส่งแจ้งเตือน {org} แล้ว · บันทึกใน Audit Log"
+    },
+    "line.preview.crumbRoot": {
+      "th": "ระบบ",
+      "en": "ระบบ",
+      "zh": "ระบบ",
+      "ar": "ระบบ"
+    },
+    "line.preview.title": {
+      "th": "LINE OA · ลูกบ้าน",
+      "en": "LINE OA · ลูกบ้าน",
+      "zh": "LINE OA · ลูกบ้าน",
+      "ar": "LINE OA · ลูกบ้าน"
+    },
+    "line.preview.subtitle": {
+      "th": "ช่องทางลูกบ้านผ่าน LINE Official Account — แจ้งซ่อม · ติดตามสถานะ · ดูยอดชำระ · จองพื้นที่ส่วนกลาง · ติดต่อเซลส์",
+      "en": "ช่องทางลูกบ้านผ่าน LINE Official Account — แจ้งซ่อม · ติดตามสถานะ · ดูยอดชำระ · จองพื้นที่ส่วนกลาง · ติดต่อเซลส์",
+      "zh": "ช่องทางลูกบ้านผ่าน LINE Official Account — แจ้งซ่อม · ติดตามสถานะ · ดูยอดชำระ · จองพื้นที่ส่วนกลาง · ติดต่อเซลส์",
+      "ar": "ช่องทางลูกบ้านผ่าน LINE Official Account — แจ้งซ่อม · ติดตามสถานะ · ดูยอดชำระ · จองพื้นที่ส่วนกลาง · ติดต่อเซลส์"
+    },
+    "line.preview.qrBtn": {
+      "th": "QR Code",
+      "en": "QR Code",
+      "zh": "QR Code",
+      "ar": "QR Code"
+    },
+    "line.preview.settingsBtn": {
+      "th": "ตั้งค่า OA",
+      "en": "ตั้งค่า OA",
+      "zh": "ตั้งค่า OA",
+      "ar": "ตั้งค่า OA"
+    },
+    "line.preview.qrToast": {
+      "th": "แสดง QR Code ของ LINE OA · @juneflowservice",
+      "en": "แสดง QR Code ของ LINE OA · @juneflowservice",
+      "zh": "แสดง QR Code ของ LINE OA · @juneflowservice",
+      "ar": "แสดง QR Code ของ LINE OA · @juneflowservice"
+    },
+    "line.preview.settingsToast": {
+      "th": "เปิด LINE Developer Console",
+      "en": "เปิด LINE Developer Console",
+      "zh": "เปิด LINE Developer Console",
+      "ar": "เปิด LINE Developer Console"
+    },
+    "line.preview.screensCount": {
+      "th": "Screens · {count} หน้าจอ",
+      "en": "Screens · {count} หน้าจอ",
+      "zh": "Screens · {count} หน้าจอ",
+      "ar": "Screens · {count} หน้าจอ"
+    },
+    "line.preview.navHome": {
+      "th": "หน้าแชต + Rich Menu 6 ปุ่ม",
+      "en": "หน้าแชต + Rich Menu 6 ปุ่ม",
+      "zh": "หน้าแชต + Rich Menu 6 ปุ่ม",
+      "ar": "หน้าแชต + Rich Menu 6 ปุ่ม"
+    },
+    "line.preview.navBind": {
+      "th": "LINE Login + ผูกยูนิต",
+      "en": "LINE Login + ผูกยูนิต",
+      "zh": "LINE Login + ผูกยูนิต",
+      "ar": "LINE Login + ผูกยูนิต"
+    },
+    "line.preview.navLiffReport": {
+      "th": "LIFF · แจ้งซ่อม (ฟอร์มเต็ม)",
+      "en": "LIFF · แจ้งซ่อม (ฟอร์มเต็ม)",
+      "zh": "LIFF · แจ้งซ่อม (ฟอร์มเต็ม)",
+      "ar": "LIFF · แจ้งซ่อม (ฟอร์มเต็ม)"
+    },
+    "line.preview.navReport": {
+      "th": "แจ้งซ่อม + Chat Bot",
+      "en": "แจ้งซ่อม + Chat Bot",
+      "zh": "แจ้งซ่อม + Chat Bot",
+      "ar": "แจ้งซ่อม + Chat Bot"
+    },
+    "line.preview.navLiffTrack": {
+      "th": "LIFF · ติดตามสถานะ + รีวิว",
+      "en": "LIFF · ติดตามสถานะ + รีวิว",
+      "zh": "LIFF · ติดตามสถานะ + รีวิว",
+      "ar": "LIFF · ติดตามสถานะ + รีวิว"
+    },
+    "line.preview.navTrack": {
+      "th": "ติดตามสถานะ + Card",
+      "en": "ติดตามสถานะ + Card",
+      "zh": "ติดตามสถานะ + Card",
+      "ar": "ติดตามสถานะ + Card"
+    },
+    "line.preview.navPush": {
+      "th": "Flex Push · แจ้งเตือน",
+      "en": "Flex Push · แจ้งเตือน",
+      "zh": "Flex Push · แจ้งเตือน",
+      "ar": "Flex Push · แจ้งเตือน"
+    },
+    "line.preview.navWarranty": {
+      "th": "Warranty + เงื่อนไข",
+      "en": "Warranty + เงื่อนไข",
+      "zh": "Warranty + เงื่อนไข",
+      "ar": "Warranty + เงื่อนไข"
+    },
+    "line.preview.navPmPlan": {
+      "th": "PM · แผน + ประวัติ",
+      "en": "PM · แผน + ประวัติ",
+      "zh": "PM · แผน + ประวัติ",
+      "ar": "PM · แผน + ประวัติ"
+    },
+    "line.preview.navPmQuote": {
+      "th": "PM · อนุมัติใบเสนอราคา",
+      "en": "PM · อนุมัติใบเสนอราคา",
+      "zh": "PM · อนุมัติใบเสนอราคา",
+      "ar": "PM · อนุมัติใบเสนอราคา"
+    },
+    "line.preview.navPmCert": {
+      "th": "PM · ใบรับรองผล",
+      "en": "PM · ใบรับรองผล",
+      "zh": "PM · ใบรับรองผล",
+      "ar": "PM · ใบรับรองผล"
+    },
+    "line.preview.navPmContracts": {
+      "th": "PM · สัญญาบำรุงรักษา",
+      "en": "PM · สัญญาบำรุงรักษา",
+      "zh": "PM · สัญญาบำรุงรักษา",
+      "ar": "PM · สัญญาบำรุงรักษา"
+    },
+    "line.preview.navCommon": {
+      "th": "จองพื้นที่ส่วนกลาง",
+      "en": "จองพื้นที่ส่วนกลาง",
+      "zh": "จองพื้นที่ส่วนกลาง",
+      "ar": "จองพื้นที่ส่วนกลาง"
+    },
+    "line.preview.navPayment": {
+      "th": "ยอดชำระ + งวดดาวน์",
+      "en": "ยอดชำระ + งวดดาวน์",
+      "zh": "ยอดชำระ + งวดดาวน์",
+      "ar": "ยอดชำระ + งวดดาวน์"
+    },
+    "line.preview.navPromo": {
+      "th": "ข่าวสาร · โปรโมชั่น",
+      "en": "ข่าวสาร · โปรโมชั่น",
+      "zh": "ข่าวสาร · โปรโมชั่น",
+      "ar": "ข่าวสาร · โปรโมชั่น"
+    },
+    "line.preview.navSales": {
+      "th": "ติดต่อนิติบุคคล",
+      "en": "ติดต่อนิติบุคคล",
+      "zh": "ติดต่อนิติบุคคล",
+      "ar": "ติดต่อนิติบุคคล"
+    },
+    "line.preview.groupStart": {
+      "th": "เริ่มต้น",
+      "en": "เริ่มต้น",
+      "zh": "เริ่มต้น",
+      "ar": "เริ่มต้น"
+    },
+    "line.preview.groupRepair": {
+      "th": "แจ้งซ่อม",
+      "en": "แจ้งซ่อม",
+      "zh": "แจ้งซ่อม",
+      "ar": "แจ้งซ่อม"
+    },
+    "line.preview.groupNotify": {
+      "th": "แจ้งเตือน",
+      "en": "แจ้งเตือน",
+      "zh": "แจ้งเตือน",
+      "ar": "แจ้งเตือน"
+    },
+    "line.preview.groupService": {
+      "th": "บริการ",
+      "en": "บริการ",
+      "zh": "บริการ",
+      "ar": "บริการ"
+    },
+    "line.preview.groupPm": {
+      "th": "บำรุงรักษา (PM)",
+      "en": "บำรุงรักษา (PM)",
+      "zh": "บำรุงรักษา (PM)",
+      "ar": "บำรุงรักษา (PM)"
+    },
+    "line.preview.groupFinance": {
+      "th": "การเงิน",
+      "en": "การเงิน",
+      "zh": "การเงิน",
+      "ar": "การเงิน"
+    },
+    "line.preview.groupMarketing": {
+      "th": "การตลาด",
+      "en": "การตลาด",
+      "zh": "การตลาด",
+      "ar": "การตลาด"
+    },
+    "line.preview.groupContact": {
+      "th": "ติดต่อ",
+      "en": "ติดต่อ",
+      "zh": "ติดต่อ",
+      "ar": "ติดต่อ"
+    },
+    "line.preview.oaHandle": {
+      "th": "@juneflowservice",
+      "en": "@juneflowservice",
+      "zh": "@juneflowservice",
+      "ar": "@juneflowservice"
+    },
+    "line.preview.oaFollowers": {
+      "th": "248 ผู้ติดตาม · 92 active",
+      "en": "248 ผู้ติดตาม · 92 active",
+      "zh": "248 ผู้ติดตาม · 92 active",
+      "ar": "248 ผู้ติดตาม · 92 active"
+    },
+    "line.preview.statMsgValue": {
+      "th": "1.2k",
+      "en": "1.2k",
+      "zh": "1.2k",
+      "ar": "1.2k"
+    },
+    "line.preview.statMsgLabel": {
+      "th": "ข้อความ/เดือน",
+      "en": "ข้อความ/เดือน",
+      "zh": "ข้อความ/เดือน",
+      "ar": "ข้อความ/เดือน"
+    },
+    "line.preview.statReplyValue": {
+      "th": "5 นาที",
+      "en": "5 นาที",
+      "zh": "5 นาที",
+      "ar": "5 นาที"
+    },
+    "line.preview.statReplyLabel": {
+      "th": "ตอบเฉลี่ย",
+      "en": "ตอบเฉลี่ย",
+      "zh": "ตอบเฉลี่ย",
+      "ar": "ตอบเฉลี่ย"
+    },
+    "line.preview.featuresTitle": {
+      "th": "คุณสมบัติเด่น",
+      "en": "คุณสมบัติเด่น",
+      "zh": "คุณสมบัติเด่น",
+      "ar": "คุณสมบัติเด่น"
+    },
+    "line.preview.ctaEyebrow": {
+      "th": "LINE Official Account",
+      "en": "LINE Official Account",
+      "zh": "LINE Official Account",
+      "ar": "LINE Official Account"
+    },
+    "line.preview.ctaTitle": {
+      "th": "ตั้งค่า OA ระดับสูง",
+      "en": "ตั้งค่า OA ระดับสูง",
+      "zh": "ตั้งค่า OA ระดับสูง",
+      "ar": "ตั้งค่า OA ระดับสูง"
+    },
+    "line.preview.ctaBody": {
+      "th": "เชื่อมระบบ juneflow · ตั้ง Rich Menu · จัดการ Auto Reply",
+      "en": "เชื่อมระบบ juneflow · ตั้ง Rich Menu · จัดการ Auto Reply",
+      "zh": "เชื่อมระบบ juneflow · ตั้ง Rich Menu · จัดการ Auto Reply",
+      "ar": "เชื่อมระบบ juneflow · ตั้ง Rich Menu · จัดการ Auto Reply"
+    },
+    "line.preview.ctaBtn": {
+      "th": "เข้าตั้งค่า",
+      "en": "เข้าตั้งค่า",
+      "zh": "เข้าตั้งค่า",
+      "ar": "เข้าตั้งค่า"
     }
   },
   "nav_i18n": {

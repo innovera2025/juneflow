@@ -3390,6 +3390,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subscription/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the tenant's own current subscription (package + usage) */
+        get: operations["getSubscriptionMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8148,6 +8165,20 @@ export interface operations {
         responses: {
             200: components["responses"]["EntityList"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getSubscriptionMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
 }

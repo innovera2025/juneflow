@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { packages, platformInvoices } from "@juneflow/db";
+import { aiUsage, packages, platformInvoices, projects, subscriptions, users } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -97,6 +97,15 @@ const invoice = (id: string, extra: Record<string, unknown> = {}) =>
     createdAt: D0, updatedAt: D0, ...extra,
   }) as typeof platformInvoices.$inferSelect;
 
+const sub = (id: string, extra: Record<string, unknown> = {}) =>
+  ({
+    id, companyId: COMPANY, packageId: "pkg-1", cycle: "yearly", renewAt: D0, status: "active",
+    createdAt: D0, updatedAt: D0, ...extra,
+  }) as typeof subscriptions.$inferSelect;
+
+/** N blank rows for a count-only usage table (projects / users). */
+const blanks = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r-${i}` }));
+
 describe("GET /api/v1/subscription/plans", () => {
   it("401s flat without a session (fail closed)", async () => {
     const res = await (await buildTestApp()).inject({ method: "GET", url: "/api/v1/subscription/plans" });
@@ -114,6 +123,66 @@ describe("GET /api/v1/subscription/plans", () => {
     const body = res.json();
     expect(body.total).toBe(2);
     expect(body.data[0]).toMatchObject({ size: "M", price_m: 7900, currency_code: "THB" });
+  });
+});
+
+describe("GET /api/v1/subscription/me", () => {
+  it("401s flat without a session", async () => {
+    const res = await (await buildTestApp()).inject({ method: "GET", url: "/api/v1/subscription/me" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns the tenant's own subscription + package + live usage (sub.mine)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [subscriptions, [sub("sub-1", { cycle: "yearly", status: "active" })]],
+            [packages, [pkg("pkg-1")]],
+            [aiUsage, [{ used: 18 }]],
+            [projects, blanks(7)],
+            [users, blanks(12)],
+          ],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/subscription/me" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({ id: "sub-1", package_id: "pkg-1", cycle: "yearly", status: "active" });
+    expect(body.package).toMatchObject({ size: "M", name: "Medium", price_y: 79000, currency_code: "THB" });
+    // live usage vs the package limits — storage is the honest byte-accounting gap.
+    expect(body.usage).toEqual({ projects: 7, users: 12, storage: 0, ai: 18 });
+  });
+
+  it("prefers the active/trial subscription over a cancelled one", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [subscriptions, [sub("sub-old", { status: "cancelled" }), sub("sub-cur", { status: "active" })]],
+            [packages, [pkg("pkg-1")]],
+            [aiUsage, []],
+            [projects, []],
+            [users, []],
+          ],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/subscription/me" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe("sub-cur"); // the active one, not the cancelled first row
+    expect(res.json().usage.ai).toBe(0); // no ai_usage rows → 0, not invented
+  });
+
+  it("404s a tenant with no subscription", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[subscriptions, []]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/subscription/me" });
+    expect(res.statusCode).toBe(404);
   });
 });
 

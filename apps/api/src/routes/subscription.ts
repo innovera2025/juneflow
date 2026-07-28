@@ -4,12 +4,31 @@
 // (global) and ONLY its OWN platform invoices. Money on read (plan price, invoice
 // amount) but NO GL/JV — platform billing is standalone (B-179).
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { packages, platformInvoices, subscriptions } from "@juneflow/db/schema";
+import { eq } from "drizzle-orm";
+import {
+  aiUsage,
+  packages,
+  platformInvoices,
+  projects,
+  subscriptions,
+  users,
+} from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
 
 type PackageRow = typeof packages.$inferSelect;
 type PlatformInvoiceRow = typeof platformInvoices.$inferSelect;
+type SubscriptionRow = typeof subscriptions.$inferSelect;
+
+/** Current month key for ai_usage, UTC (PLAN.md §4: time is stored UTC). */
+function currentMonthUtc(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+/** Flat 404 NOT_FOUND. */
+function notFound(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(404).send({ code: "NOT_FOUND", message });
+}
 
 /** Flat 401 (fail closed) when no tenant was resolved onto the request. */
 function unauthenticated(reply: FastifyReply): FastifyReply {
@@ -59,6 +78,46 @@ function invoiceWire(i: PlatformInvoiceRow): Record<string, unknown> {
   };
 }
 
+// GET /subscription/me — the tenant's OWN current subscription (sub.mine · แพ็กเกจ
+// ของฉัน). Selects the tenant's subscription (active/trial preferred, else the
+// first), enriches it with its package (name/price/limits/menus) and live usage
+// (projects + user-seat counts + this month's AI credits). storage has no
+// byte-accounting yet → 0 (honest gap). Tenant-scoped throughout; NO GL (B-179).
+async function loadSubscriptionMe(db: TenantDb): Promise<Record<string, unknown> | null> {
+  const subs = (await db.select(subscriptions)) as SubscriptionRow[];
+  const sub = subs.find((s) => s.status === "active" || s.status === "trial") ?? subs[0];
+  if (!sub) return null;
+
+  const pkgRows = (await db.selectReference(
+    packages,
+    eq(packages.id, sub.packageId),
+  )) as PackageRow[];
+  const pkg = pkgRows[0] ?? null;
+
+  const usageRows = await db.select(aiUsage, eq(aiUsage.month, currentMonthUtc()));
+  const aiUsed = usageRows.reduce((sum, r) => sum + (r as { used: number }).used, 0);
+  const projectRows = await db.select(projects);
+  const userRows = await db.select(users);
+
+  return {
+    id: sub.id,
+    package_id: sub.packageId,
+    cycle: sub.cycle,
+    status: sub.status,
+    renew_at: sub.renewAt,
+    started_at: sub.createdAt,
+    package: pkg ? planWire(pkg) : null,
+    // Live usage vs the package limits (the sub.mine quota bars). storage is a
+    // known byte-accounting gap → 0, never a guessed value.
+    usage: {
+      projects: projectRows.length,
+      users: userRows.length,
+      storage: 0,
+      ai: aiUsed,
+    },
+  };
+}
+
 /** Register the tenant subscription reads on the /api/v1 scope. */
 export function registerSubscriptionRoutes(app: FastifyInstance): void {
   // GET /subscription/plans — the plan CATALOG (S/M/L/Full). Global reference
@@ -70,6 +129,15 @@ export function registerSubscriptionRoutes(app: FastifyInstance): void {
     if (!db) return unauthenticated(reply);
     const rows = (await db.selectReference(packages)) as PackageRow[];
     return reply.code(200).send(listEnvelope([...rows].sort(byCreatedDesc).map(planWire)));
+  });
+
+  // GET /subscription/me — the tenant's own current subscription for sub.mine.
+  app.get("/subscription/me", async (request: FastifyRequest, reply: FastifyReply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    const me = await loadSubscriptionMe(db);
+    if (!me) return notFound(reply, "this tenant has no subscription");
+    return reply.code(200).send(me);
   });
 
   // GET /subscription/invoices — the tenant's OWN platform (subscription-billing)

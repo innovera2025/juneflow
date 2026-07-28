@@ -4360,6 +4360,19 @@ paths:
           $ref: "#/components/responses/EntityList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /subscription/me:
+    get:
+      tags: [subscription]
+      summary: Get the tenant's own current subscription (package + usage)
+      operationId: getSubscriptionMe
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 
 components:
   securitySchemes:

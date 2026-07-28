@@ -971,6 +971,13 @@ async function seed(): Promise<void> {
         SUBSCRIBERS.map((s, i) => ({
           id: det(`sub:${i}`), companyId: det(`company:${s.key}`),
           packageId: det(`package:${s.pkg}`), cycle: at(SUB_CYCLES, i), status: at(SUB_STATUS, i),
+          // B-185 data-completeness: the SubMine screen ("ต่ออายุถัดไป" + daysLeft)
+          // needs a renewal date; the schema column defaulted null. Fixed, deterministic
+          // dates — a yearly sub renews at year-end, a monthly one at a month-end (the
+          // frontend derives daysLeft from renew_at vs now).
+          renewAt: at(SUB_CYCLES, i) === "yearly"
+            ? new Date("2026-12-31T00:00:00Z")
+            : new Date("2026-08-31T00:00:00Z"),
         })),
       );
 

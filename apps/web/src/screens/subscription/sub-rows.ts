@@ -226,3 +226,119 @@ export function invoiceBadge(status: string): { tone: BadgeTone; labelKind: "pai
       return { tone: "draft", labelKind: "raw" };
   }
 }
+
+/* --------------------------------------------------------------------------- */
+/* My Subscription (subscription.jsx SubMine, L41-129)                          */
+/* --------------------------------------------------------------------------- */
+
+/**
+ * Live usage counters from GET /subscription/me (server truth). The prototype hardcoded a
+ * mock { projects:7, users:12, storage:24, ai:18 }; here projects/users are LIVE row counts
+ * and storage is an honest 0 (no byte-accounting yet) — the screen renders these faithfully,
+ * never the mock numbers (Phase-6 seed reality).
+ */
+export interface SubscriptionUsage {
+  /** Projects in use (live count). */
+  projects: number;
+  /** User seats in use (live count). */
+  users: number;
+  /** Storage GB in use — a known byte-accounting gap on the server (honest 0). */
+  storage: number;
+  /** AI takeoff credits used this month. */
+  ai: number;
+}
+
+/**
+ * The tenant's own current subscription, narrowed from GET /subscription/me. `package` is
+ * the SAME planWire row the /subscription/plans catalogue returns (limit keys storage_gb /
+ * ai_per_month, C5), so it reuses toPlanRow; it is null when the tenant has no plan.
+ */
+export interface SubscriptionMe {
+  id: string;
+  packageId: string;
+  /** Billing-cycle code (yearly | monthly). */
+  cycle: string;
+  /** Subscription status code (active | trial | overdue | cancelled | ...). */
+  status: string;
+  /** ISO next-renewal timestamp ("" when absent). */
+  renewAt: string;
+  /** ISO contract-start timestamp ("" when absent). */
+  startedAt: string;
+  /** The subscribed package (planWire, narrowed) — null when the tenant has none. */
+  package: PlanRow | null;
+  /** Live usage vs the package quota. */
+  usage: SubscriptionUsage;
+}
+
+/** Narrow the opaque `usage` object (never fabricates — an absent field reads 0). */
+function toUsage(raw: unknown): SubscriptionUsage {
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return {
+    projects: num(r.projects),
+    users: num(r.users),
+    storage: num(r.storage),
+    ai: num(r.ai),
+  };
+}
+
+/** Narrow the opaque GET /subscription/me object to a typed SubscriptionMe. */
+export function toSubscriptionMe(raw: Record<string, unknown>): SubscriptionMe {
+  const pkg = raw.package;
+  return {
+    id: str(raw.id),
+    packageId: str(raw.package_id ?? raw.packageId),
+    cycle: str(raw.cycle),
+    status: str(raw.status),
+    renewAt: str(raw.renew_at ?? raw.renewAt),
+    startedAt: str(raw.started_at ?? raw.startedAt),
+    package: pkg && typeof pkg === "object" ? toPlanRow(pkg as Record<string, unknown>) : null,
+    usage: toUsage(raw.usage),
+  };
+}
+
+/**
+ * Whole days from `today` until `renewAt` (ISO). null when renewAt is absent/unparseable
+ * (-> the screen em-dashes the count). NOT clamped: a past renewal reads negative, faithfully.
+ * Rounded up so any remaining partial day still counts as a day left. Replaces the prototype's
+ * hardcoded MY_SUB.daysLeft (192).
+ */
+export function daysLeft(renewAt: string, today: Date): number | null {
+  if (!renewAt) return null;
+  const renew = new Date(renewAt);
+  if (Number.isNaN(renew.getTime())) return null;
+  const MS_PER_DAY = 86_400_000;
+  return Math.ceil((renew.getTime() - today.getTime()) / MS_PER_DAY);
+}
+
+/**
+ * Quota-bar fill percent (subscription.jsx L100): unlimited (-1) shows the prototype's fixed
+ * 12% teaser fill; otherwise round(used/cap*100). A non-positive finite cap yields 0
+ * (divide-by-zero guard; the prototype's seed always had a positive cap).
+ */
+export function usagePct(used: number, cap: number): number {
+  if (isUnlimited(cap)) return 12;
+  if (cap <= 0) return 0;
+  return Math.round((used / cap) * 100);
+}
+
+/** Usage-bar tone by percent (subscription.jsx pctTone L37): >=90 danger, >=75 warn, else ok. */
+export function usagePctTone(pct: number): "danger" | "warn" | "ok" {
+  return pct >= 90 ? "danger" : pct >= 75 ? "warn" : "ok";
+}
+
+/**
+ * Map a subscription status to the sub.mine hero badge. The prototype (subscription.jsx L67)
+ * always showed an "approved" badge for its active mock. active|trial -> the "approved" tone
+ * + the ONE sub.mine.statusActive key; any other status has no keyed label, so the screen
+ * renders the raw backend status code with a defensive (draft) tone (wire-reality "render the
+ * raw value" rule, mirroring invoiceBadge).
+ */
+export function subStatusBadge(status: string): { tone: BadgeTone; labelKind: "active" | "raw" } {
+  switch (status) {
+    case "active":
+    case "trial":
+      return { tone: "approved", labelKind: "active" };
+    default:
+      return { tone: "draft", labelKind: "raw" };
+  }
+}
