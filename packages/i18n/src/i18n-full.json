@@ -18682,6 +18682,666 @@
       "en": "อ้างอิงสัญญา {contract} · Site {site}",
       "zh": "อ้างอิงสัญญา {contract} · Site {site}",
       "ar": "อ้างอิงสัญญา {contract} · Site {site}"
+    },
+    "solar.monitor.crumbModule": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.monitor.crumbScreen": {
+      "th": "Monitoring · O&M",
+      "en": "Monitoring · O&M",
+      "zh": "Monitoring · O&M",
+      "ar": "Monitoring · O&M"
+    },
+    "solar.monitor.title": {
+      "th": "Monitoring · O&M",
+      "en": "Monitoring · O&M",
+      "zh": "Monitoring · O&M",
+      "ar": "Monitoring · O&M"
+    },
+    "solar.monitor.subtitle": {
+      "th": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)",
+      "en": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)",
+      "zh": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)",
+      "ar": "เฝ้าระวังการผลิตไฟฟ้ารายอินเวอร์เตอร์ และงานบำรุงรักษา (O&M)"
+    },
+    "solar.monitor.actionExport": {
+      "th": "Export",
+      "en": "Export",
+      "zh": "Export",
+      "ar": "Export"
+    },
+    "solar.monitor.toastExport": {
+      "th": "Export รายงานการผลิตไฟ",
+      "en": "Export รายงานการผลิตไฟ",
+      "zh": "Export รายงานการผลิตไฟ",
+      "ar": "Export รายงานการผลิตไฟ"
+    },
+    "solar.monitor.actionNewTicket": {
+      "th": "เปิดใบงาน O&M",
+      "en": "เปิดใบงาน O&M",
+      "zh": "เปิดใบงาน O&M",
+      "ar": "เปิดใบงาน O&M"
+    },
+    "solar.monitor.kpiOutputLabel": {
+      "th": "กำลังผลิตขณะนี้",
+      "en": "กำลังผลิตขณะนี้",
+      "zh": "กำลังผลิตขณะนี้",
+      "ar": "กำลังผลิตขณะนี้"
+    },
+    "solar.monitor.kpiOutputUnit": {
+      "th": "MW",
+      "en": "MW",
+      "zh": "MW",
+      "ar": "MW"
+    },
+    "solar.monitor.kpiOutputSub": {
+      "th": "จากกำลังติดตั้ง {mw} MW",
+      "en": "จากกำลังติดตั้ง {mw} MW",
+      "zh": "จากกำลังติดตั้ง {mw} MW",
+      "ar": "จากกำลังติดตั้ง {mw} MW"
+    },
+    "solar.monitor.kpiPrLabel": {
+      "th": "Performance Ratio",
+      "en": "Performance Ratio",
+      "zh": "Performance Ratio",
+      "ar": "Performance Ratio"
+    },
+    "solar.monitor.kpiPrUnit": {
+      "th": "%",
+      "en": "%",
+      "zh": "%",
+      "ar": "%"
+    },
+    "solar.monitor.kpiPrSub": {
+      "th": "เป้าหมาย ≥ 80%",
+      "en": "เป้าหมาย ≥ 80%",
+      "zh": "เป้าหมาย ≥ 80%",
+      "ar": "เป้าหมาย ≥ 80%"
+    },
+    "solar.monitor.kpiEnergyLabel": {
+      "th": "พลังงานวันนี้",
+      "en": "พลังงานวันนี้",
+      "zh": "พลังงานวันนี้",
+      "ar": "พลังงานวันนี้"
+    },
+    "solar.monitor.kpiEnergyUnit": {
+      "th": "MWh",
+      "en": "MWh",
+      "zh": "MWh",
+      "ar": "MWh"
+    },
+    "solar.monitor.kpiEnergySub": {
+      "th": "+6% เทียบเมื่อวาน",
+      "en": "+6% เทียบเมื่อวาน",
+      "zh": "+6% เทียบเมื่อวาน",
+      "ar": "+6% เทียบเมื่อวาน"
+    },
+    "solar.monitor.kpiFaultLabel": {
+      "th": "อินเวอร์เตอร์ผิดปกติ",
+      "en": "อินเวอร์เตอร์ผิดปกติ",
+      "zh": "อินเวอร์เตอร์ผิดปกติ",
+      "ar": "อินเวอร์เตอร์ผิดปกติ"
+    },
+    "solar.monitor.kpiFaultUnit": {
+      "th": "/ 16",
+      "en": "/ 16",
+      "zh": "/ 16",
+      "ar": "/ 16"
+    },
+    "solar.monitor.kpiFaultSub": {
+      "th": "1 offline · 1 derating",
+      "en": "1 offline · 1 derating",
+      "zh": "1 offline · 1 derating",
+      "ar": "1 offline · 1 derating"
+    },
+    "solar.monitor.invTableTitle": {
+      "th": "สถานะอินเวอร์เตอร์ (Real-time)",
+      "en": "สถานะอินเวอร์เตอร์ (Real-time)",
+      "zh": "สถานะอินเวอร์เตอร์ (Real-time)",
+      "ar": "สถานะอินเวอร์เตอร์ (Real-time)"
+    },
+    "solar.monitor.colInverter": {
+      "th": "Inverter",
+      "en": "Inverter",
+      "zh": "Inverter",
+      "ar": "Inverter"
+    },
+    "solar.monitor.colZone": {
+      "th": "โซน/Array",
+      "en": "โซน/Array",
+      "zh": "โซน/Array",
+      "ar": "โซน/Array"
+    },
+    "solar.monitor.colOutput": {
+      "th": "กำลังผลิต",
+      "en": "กำลังผลิต",
+      "zh": "กำลังผลิต",
+      "ar": "กำลังผลิต"
+    },
+    "solar.monitor.colPerformance": {
+      "th": "Performance",
+      "en": "Performance",
+      "zh": "Performance",
+      "ar": "Performance"
+    },
+    "solar.monitor.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "solar.monitor.cellOutputUnit": {
+      "th": "kW",
+      "en": "kW",
+      "zh": "kW",
+      "ar": "kW"
+    },
+    "solar.monitor.statusOk": {
+      "th": "ปกติ",
+      "en": "ปกติ",
+      "zh": "ปกติ",
+      "ar": "ปกติ"
+    },
+    "solar.monitor.statusDerating": {
+      "th": "Derating",
+      "en": "Derating",
+      "zh": "Derating",
+      "ar": "Derating"
+    },
+    "solar.monitor.statusOffline": {
+      "th": "Offline",
+      "en": "Offline",
+      "zh": "Offline",
+      "ar": "Offline"
+    },
+    "solar.monitor.omCardTitle": {
+      "th": "ใบงาน O&M",
+      "en": "ใบงาน O&M",
+      "zh": "ใบงาน O&M",
+      "ar": "ใบงาน O&M"
+    },
+    "solar.ppa.breadcrumbEnergy": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.ppa.breadcrumbSelf": {
+      "th": "ขายไฟ / PPA",
+      "en": "ขายไฟ / PPA",
+      "zh": "ขายไฟ / PPA",
+      "ar": "ขายไฟ / PPA"
+    },
+    "solar.ppa.title": {
+      "th": "ขายไฟ / PPA",
+      "en": "ขายไฟ / PPA",
+      "zh": "ขายไฟ / PPA",
+      "ar": "ขายไฟ / PPA"
+    },
+    "solar.ppa.subtitle": {
+      "th": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน",
+      "en": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน",
+      "zh": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน",
+      "ar": "สัญญาซื้อขายไฟ (Power Purchase Agreement) กับ กฟภ. และการวางบิลค่าไฟรายเดือน"
+    },
+    "solar.ppa.actionCreateInvoice": {
+      "th": "ออกใบแจ้งหนี้ค่าไฟ",
+      "en": "ออกใบแจ้งหนี้ค่าไฟ",
+      "zh": "ออกใบแจ้งหนี้ค่าไฟ",
+      "ar": "ออกใบแจ้งหนี้ค่าไฟ"
+    },
+    "solar.ppa.kpiCounterpartyLabel": {
+      "th": "คู่สัญญา PPA",
+      "en": "คู่สัญญา PPA",
+      "zh": "คู่สัญญา PPA",
+      "ar": "คู่สัญญา PPA"
+    },
+    "solar.ppa.kpiCounterpartyValue": {
+      "th": "กฟภ.",
+      "en": "กฟภ.",
+      "zh": "กฟภ.",
+      "ar": "กฟภ."
+    },
+    "solar.ppa.kpiCounterpartySub": {
+      "th": "สัญญา Non-Firm 20 ปี",
+      "en": "สัญญา Non-Firm 20 ปี",
+      "zh": "สัญญา Non-Firm 20 ปี",
+      "ar": "สัญญา Non-Firm 20 ปี"
+    },
+    "solar.ppa.kpiFitLabel": {
+      "th": "อัตรารับซื้อ (FiT)",
+      "en": "อัตรารับซื้อ (FiT)",
+      "zh": "อัตรารับซื้อ (FiT)",
+      "ar": "อัตรารับซื้อ (FiT)"
+    },
+    "solar.ppa.kpiFitValue": {
+      "th": "4.12",
+      "en": "4.12",
+      "zh": "4.12",
+      "ar": "4.12"
+    },
+    "solar.ppa.kpiFitUnit": {
+      "th": "฿/kWh",
+      "en": "฿/kWh",
+      "zh": "฿/kWh",
+      "ar": "฿/kWh"
+    },
+    "solar.ppa.kpiFitSub": {
+      "th": "คงที่ตามสัญญา",
+      "en": "คงที่ตามสัญญา",
+      "zh": "คงที่ตามสัญญา",
+      "ar": "คงที่ตามสัญญา"
+    },
+    "solar.ppa.kpiYtdLabel": {
+      "th": "รายได้ค่าไฟ YTD",
+      "en": "รายได้ค่าไฟ YTD",
+      "zh": "รายได้ค่าไฟ YTD",
+      "ar": "รายได้ค่าไฟ YTD"
+    },
+    "solar.ppa.kpiYtdUnit": {
+      "th": "ล้านบาท",
+      "en": "ล้านบาท",
+      "zh": "ล้านบาท",
+      "ar": "ล้านบาท"
+    },
+    "solar.ppa.kpiYtdSub": {
+      "th": "ม.ค.–พ.ค. 2569",
+      "en": "ม.ค.–พ.ค. 2569",
+      "zh": "ม.ค.–พ.ค. 2569",
+      "ar": "ม.ค.–พ.ค. 2569"
+    },
+    "solar.ppa.kpiCodLabel": {
+      "th": "COD",
+      "en": "COD",
+      "zh": "COD",
+      "ar": "COD"
+    },
+    "solar.ppa.kpiCodValue": {
+      "th": "15 ธ.ค. 68",
+      "en": "15 ธ.ค. 68",
+      "zh": "15 ธ.ค. 68",
+      "ar": "15 ธ.ค. 68"
+    },
+    "solar.ppa.kpiCodSub": {
+      "th": "เริ่มจ่ายไฟเชิงพาณิชย์",
+      "en": "เริ่มจ่ายไฟเชิงพาณิชย์",
+      "zh": "เริ่มจ่ายไฟเชิงพาณิชย์",
+      "ar": "เริ่มจ่ายไฟเชิงพาณิชย์"
+    },
+    "solar.ppa.tableTitle": {
+      "th": "การวางบิลค่าไฟรายเดือน",
+      "en": "การวางบิลค่าไฟรายเดือน",
+      "zh": "การวางบิลค่าไฟรายเดือน",
+      "ar": "การวางบิลค่าไฟรายเดือน"
+    },
+    "solar.ppa.colMonth": {
+      "th": "งวดเดือน",
+      "en": "งวดเดือน",
+      "zh": "งวดเดือน",
+      "ar": "งวดเดือน"
+    },
+    "solar.ppa.colMwh": {
+      "th": "หน่วยขาย (MWh)",
+      "en": "หน่วยขาย (MWh)",
+      "zh": "หน่วยขาย (MWh)",
+      "ar": "หน่วยขาย (MWh)"
+    },
+    "solar.ppa.colRate": {
+      "th": "อัตรา (฿/kWh)",
+      "en": "อัตรา (฿/kWh)",
+      "zh": "อัตรา (฿/kWh)",
+      "ar": "อัตรา (฿/kWh)"
+    },
+    "solar.ppa.colAmount": {
+      "th": "มูลค่า (฿)",
+      "en": "มูลค่า (฿)",
+      "zh": "มูลค่า (฿)",
+      "ar": "มูลค่า (฿)"
+    },
+    "solar.ppa.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "solar.ppa.footYtd": {
+      "th": "รวม YTD",
+      "en": "รวม YTD",
+      "zh": "รวม YTD",
+      "ar": "รวม YTD"
+    },
+    "solar.roi.breadcrumbEpc": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.roi.breadcrumbSelf": {
+      "th": "ROI & ผลตอบแทน",
+      "en": "ROI & ผลตอบแทน",
+      "zh": "ROI & ผลตอบแทน",
+      "ar": "ROI & ผลตอบแทน"
+    },
+    "solar.roi.title": {
+      "th": "ROI & ผลตอบแทนการลงทุน",
+      "en": "ROI & ผลตอบแทนการลงทุน",
+      "zh": "ROI & ผลตอบแทนการลงทุน",
+      "ar": "ROI & ผลตอบแทนการลงทุน"
+    },
+    "solar.roi.subtitle": {
+      "th": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน",
+      "en": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน",
+      "zh": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน",
+      "ar": "วิเคราะห์ผลตอบแทนการลงทุนโครงการโรงไฟฟ้า — CAPEX, กระแสเงินสด, จุดคืนทุน"
+    },
+    "solar.roi.actionExportModel": {
+      "th": "Export Model",
+      "en": "Export Model",
+      "zh": "Export Model",
+      "ar": "Export Model"
+    },
+    "solar.roi.toastExportModel": {
+      "th": "Export Financial Model",
+      "en": "Export Financial Model",
+      "zh": "Export Financial Model",
+      "ar": "Export Financial Model"
+    },
+    "solar.roi.kpiCapexLabel": {
+      "th": "เงินลงทุน (CAPEX)",
+      "en": "เงินลงทุน (CAPEX)",
+      "zh": "เงินลงทุน (CAPEX)",
+      "ar": "เงินลงทุน (CAPEX)"
+    },
+    "solar.roi.kpiCapexUnit": {
+      "th": "ล้านบาท",
+      "en": "ล้านบาท",
+      "zh": "ล้านบาท",
+      "ar": "ล้านบาท"
+    },
+    "solar.roi.kpiCapexSub": {
+      "th": "8 MW · 31฿/Wp",
+      "en": "8 MW · 31฿/Wp",
+      "zh": "8 MW · 31฿/Wp",
+      "ar": "8 MW · 31฿/Wp"
+    },
+    "solar.roi.kpiNetCashflowLabel": {
+      "th": "กระแสเงินสดสุทธิ/ปี",
+      "en": "กระแสเงินสดสุทธิ/ปี",
+      "zh": "กระแสเงินสดสุทธิ/ปี",
+      "ar": "กระแสเงินสดสุทธิ/ปี"
+    },
+    "solar.roi.kpiNetCashflowUnit": {
+      "th": "ล้านบาท",
+      "en": "ล้านบาท",
+      "zh": "ล้านบาท",
+      "ar": "ล้านบาท"
+    },
+    "solar.roi.kpiNetCashflowSub": {
+      "th": "รายได้ − OPEX",
+      "en": "รายได้ − OPEX",
+      "zh": "รายได้ − OPEX",
+      "ar": "รายได้ − OPEX"
+    },
+    "solar.roi.kpiPaybackLabel": {
+      "th": "จุดคืนทุน (Payback)",
+      "en": "จุดคืนทุน (Payback)",
+      "zh": "จุดคืนทุน (Payback)",
+      "ar": "จุดคืนทุน (Payback)"
+    },
+    "solar.roi.kpiPaybackUnit": {
+      "th": "ปี",
+      "en": "ปี",
+      "zh": "ปี",
+      "ar": "ปี"
+    },
+    "solar.roi.kpiPaybackSub": {
+      "th": "แบบไม่คิดลด",
+      "en": "แบบไม่คิดลด",
+      "zh": "แบบไม่คิดลด",
+      "ar": "แบบไม่คิดลด"
+    },
+    "solar.roi.kpiIrrLabel": {
+      "th": "IRR (20 ปี)",
+      "en": "IRR (20 ปี)",
+      "zh": "IRR (20 ปี)",
+      "ar": "IRR (20 ปี)"
+    },
+    "solar.roi.kpiIrrUnit": {
+      "th": "%",
+      "en": "%",
+      "zh": "%",
+      "ar": "%"
+    },
+    "solar.roi.kpiIrrSub": {
+      "th": "NPV @ 6% = +312 ลบ.",
+      "en": "NPV @ 6% = +312 ลบ.",
+      "zh": "NPV @ 6% = +312 ลบ.",
+      "ar": "NPV @ 6% = +312 ลบ."
+    },
+    "solar.roi.tableTitle": {
+      "th": "กระแสเงินสดสะสม (Cumulative Cashflow)",
+      "en": "กระแสเงินสดสะสม (Cumulative Cashflow)",
+      "zh": "กระแสเงินสดสะสม (Cumulative Cashflow)",
+      "ar": "กระแสเงินสดสะสม (Cumulative Cashflow)"
+    },
+    "solar.roi.colYear": {
+      "th": "ปีที่",
+      "en": "ปีที่",
+      "zh": "ปีที่",
+      "ar": "ปีที่"
+    },
+    "solar.roi.colRevenue": {
+      "th": "รายได้ (ลบ.)",
+      "en": "รายได้ (ลบ.)",
+      "zh": "รายได้ (ลบ.)",
+      "ar": "รายได้ (ลบ.)"
+    },
+    "solar.roi.colOpex": {
+      "th": "OPEX (ลบ.)",
+      "en": "OPEX (ลบ.)",
+      "zh": "OPEX (ลบ.)",
+      "ar": "OPEX (ลบ.)"
+    },
+    "solar.roi.colCumulative": {
+      "th": "เงินสดสะสม (ลบ.)",
+      "en": "เงินสดสะสม (ลบ.)",
+      "zh": "เงินสดสะสม (ลบ.)",
+      "ar": "เงินสดสะสม (ลบ.)"
+    },
+    "solar.roi.rowYearPrefix": {
+      "th": "ปี",
+      "en": "ปี",
+      "zh": "ปี",
+      "ar": "ปี"
+    },
+    "solar.permit.breadcrumbRoot": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.permit.breadcrumbSelf": {
+      "th": "ขออนุญาต (PEA/MEA/COD)",
+      "en": "ขออนุญาต (PEA/MEA/COD)",
+      "zh": "ขออนุญาต (PEA/MEA/COD)",
+      "ar": "ขออนุญาต (PEA/MEA/COD)"
+    },
+    "solar.permit.title": {
+      "th": "การขออนุญาต · ใบอนุญาต",
+      "en": "การขออนุญาต · ใบอนุญาต",
+      "zh": "การขออนุญาต · ใบอนุญาต",
+      "ar": "การขออนุญาต · ใบอนุญาต"
+    },
+    "solar.permit.subtitle": {
+      "th": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า",
+      "en": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า",
+      "zh": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า",
+      "ar": "ติดตามสถานะใบอนุญาตและขั้นตอนการขออนุญาตกับหน่วยงานราชการและการไฟฟ้า"
+    },
+    "solar.permit.addBtn": {
+      "th": "เพิ่มใบอนุญาต",
+      "en": "เพิ่มใบอนุญาต",
+      "zh": "เพิ่มใบอนุญาต",
+      "ar": "เพิ่มใบอนุญาต"
+    },
+    "solar.permit.kpiAllLabel": {
+      "th": "ใบอนุญาตทั้งหมด",
+      "en": "ใบอนุญาตทั้งหมด",
+      "zh": "ใบอนุญาตทั้งหมด",
+      "ar": "ใบอนุญาตทั้งหมด"
+    },
+    "solar.permit.kpiUnitItems": {
+      "th": "รายการ",
+      "en": "รายการ",
+      "zh": "รายการ",
+      "ar": "รายการ"
+    },
+    "solar.permit.kpiAllSub": {
+      "th": "5 อนุมัติ · 1 รอผล",
+      "en": "5 อนุมัติ · 1 รอผล",
+      "zh": "5 อนุมัติ · 1 รอผล",
+      "ar": "5 อนุมัติ · 1 รอผล"
+    },
+    "solar.permit.kpiCodLabel": {
+      "th": "สถานะ COD",
+      "en": "สถานะ COD",
+      "zh": "สถานะ COD",
+      "ar": "สถานะ COD"
+    },
+    "solar.permit.kpiCodValue": {
+      "th": "ผ่านแล้ว",
+      "en": "ผ่านแล้ว",
+      "zh": "ผ่านแล้ว",
+      "ar": "ผ่านแล้ว"
+    },
+    "solar.permit.kpiCodSub": {
+      "th": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68",
+      "en": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68",
+      "zh": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68",
+      "ar": "จ่ายไฟเชิงพาณิชย์ 15 ธ.ค. 68"
+    },
+    "solar.permit.kpiPendingLabel": {
+      "th": "รอดำเนินการ",
+      "en": "รอดำเนินการ",
+      "zh": "รอดำเนินการ",
+      "ar": "รอดำเนินการ"
+    },
+    "solar.permit.kpiPendingSub": {
+      "th": "อ.6 — รอผลตรวจ",
+      "en": "อ.6 — รอผลตรวจ",
+      "zh": "อ.6 — รอผลตรวจ",
+      "ar": "อ.6 — รอผลตรวจ"
+    },
+    "solar.permit.stepsHeader": {
+      "th": "ขั้นตอนการขออนุญาต",
+      "en": "ขั้นตอนการขออนุญาต",
+      "zh": "ขั้นตอนการขออนุญาต",
+      "ar": "ขั้นตอนการขออนุญาต"
+    },
+    "solar.permit.statusApproved": {
+      "th": "อนุมัติแล้ว",
+      "en": "อนุมัติแล้ว",
+      "zh": "อนุมัติแล้ว",
+      "ar": "อนุมัติแล้ว"
+    },
+    "solar.permit.statusPending": {
+      "th": "รอผล",
+      "en": "รอผล",
+      "zh": "รอผล",
+      "ar": "รอผล"
+    },
+    "solar.permit.stepMeta": {
+      "th": "{org} · {date}",
+      "en": "{org} · {date}",
+      "zh": "{org} · {date}",
+      "ar": "{org} · {date}"
+    },
+    "solar.warranty.breadcrumbSection": {
+      "th": "พลังงาน · EPC",
+      "en": "พลังงาน · EPC",
+      "zh": "พลังงาน · EPC",
+      "ar": "พลังงาน · EPC"
+    },
+    "solar.warranty.breadcrumbPage": {
+      "th": "Warranty / รับประกัน",
+      "en": "Warranty / รับประกัน",
+      "zh": "Warranty / รับประกัน",
+      "ar": "Warranty / รับประกัน"
+    },
+    "solar.warranty.title": {
+      "th": "Warranty / การรับประกันอุปกรณ์",
+      "en": "Warranty / การรับประกันอุปกรณ์",
+      "zh": "Warranty / การรับประกันอุปกรณ์",
+      "ar": "Warranty / การรับประกันอุปกรณ์"
+    },
+    "solar.warranty.subtitle": {
+      "th": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)",
+      "en": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)",
+      "zh": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)",
+      "ar": "ทะเบียนการรับประกันอุปกรณ์หลัก — สมรรถนะ (Performance) และผลิตภัณฑ์ (Product)"
+    },
+    "solar.warranty.actionAdd": {
+      "th": "เพิ่มรายการ",
+      "en": "เพิ่มรายการ",
+      "zh": "เพิ่มรายการ",
+      "ar": "เพิ่มรายการ"
+    },
+    "solar.warranty.colItem": {
+      "th": "อุปกรณ์",
+      "en": "อุปกรณ์",
+      "zh": "อุปกรณ์",
+      "ar": "อุปกรณ์"
+    },
+    "solar.warranty.colBrand": {
+      "th": "ยี่ห้อ / รุ่น",
+      "en": "ยี่ห้อ / รุ่น",
+      "zh": "ยี่ห้อ / รุ่น",
+      "ar": "ยี่ห้อ / รุ่น"
+    },
+    "solar.warranty.colQty": {
+      "th": "จำนวน",
+      "en": "จำนวน",
+      "zh": "จำนวน",
+      "ar": "จำนวน"
+    },
+    "solar.warranty.colPerf": {
+      "th": "รับประกันสมรรถนะ",
+      "en": "รับประกันสมรรถนะ",
+      "zh": "รับประกันสมรรถนะ",
+      "ar": "รับประกันสมรรถนะ"
+    },
+    "solar.warranty.colProd": {
+      "th": "รับประกันสินค้า",
+      "en": "รับประกันสินค้า",
+      "zh": "รับประกันสินค้า",
+      "ar": "รับประกันสินค้า"
+    },
+    "solar.warranty.colExpiry": {
+      "th": "หมดอายุ",
+      "en": "หมดอายุ",
+      "zh": "หมดอายุ",
+      "ar": "หมดอายุ"
+    },
+    "solar.warranty.colStatus": {
+      "th": "สถานะ",
+      "en": "สถานะ",
+      "zh": "สถานะ",
+      "ar": "สถานะ"
+    },
+    "solar.warranty.statusActive": {
+      "th": "คุ้มครอง",
+      "en": "คุ้มครอง",
+      "zh": "คุ้มครอง",
+      "ar": "คุ้มครอง"
+    },
+    "solar.warranty.statusExpiring": {
+      "th": "ใกล้หมดอายุ",
+      "en": "ใกล้หมดอายุ",
+      "zh": "ใกล้หมดอายุ",
+      "ar": "ใกล้หมดอายุ"
     }
   },
   "nav_i18n": {
