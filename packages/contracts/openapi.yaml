@@ -81,6 +81,8 @@ tags:
     description: Dashboard (aggregation/read — KPIs, budget vs actual, approvals inbox, alerts, cashflow forecast, contractors)
   - name: solar
     description: Solar (read-only op-groups — B-174 · monitoring, PPA, ROI, permit, warranty)
+  - name: subscription
+    description: Tenant subscription reads (plan catalog + own platform invoices — B-181)
 
 paths:
   # ============================ Auth & Tenant ================================
@@ -4323,6 +4325,33 @@ paths:
       tags: [solar]
       summary: List solar warranties
       operationId: listSolarWarranties
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  # ===== Tenant subscription reads (read-only op-groups — B-181) =====
+  /subscription/plans:
+    get:
+      tags: [subscription]
+      summary: List the subscription plan catalog (tenant)
+      operationId: listSubscriptionPlans
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /subscription/invoices:
+    get:
+      tags: [subscription]
+      summary: List the tenant's own platform (subscription-billing) invoices
+      operationId: listSubscriptionInvoices
       parameters:
         - $ref: "#/components/parameters/Filter"
         - $ref: "#/components/parameters/Page"
