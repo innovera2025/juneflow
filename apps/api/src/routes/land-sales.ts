@@ -29,6 +29,8 @@
 //   booking  Dr 1020 bank / Cr 2040 advance-received = received     source booking:<unitId>
 //   down     Dr 1020 bank / Cr 2040 advance-received = received     source down:<unitId>:<seq>
 //   deal     Dr 1150 land-held / Cr 2010 AP          = 10% deposit  source deal:<plotId>
+//     ^ B-164 (Wei=ก): also writes an ap_billing (kind=deposit) subledger row in the
+//       SAME tx so the Cr 2010 payable shows in AP aging, not only the GL JV.
 // A loan application (SA-6) is a RECORDED document, NOT a GL posting — its ask/
 // approved amounts are stored as supplied, no JV. A contract signing (B-161(c)) is
 // unit metadata only — no JV.
@@ -42,6 +44,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import {
+  apBillings,
   downPaymentTxns,
   jvLines,
   jvs,
@@ -120,11 +123,6 @@ function notFound(reply: FastifyReply, message: string): FastifyReply {
 /** Flat 409 INVALID_STATE error. */
 function conflict(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(409).send({ code: "INVALID_STATE", message });
-}
-
-/** Flat 422 NOT_IMPLEMENTED (an honestly-blocked branch — never a guessed value). */
-function notImplemented(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(422).send({ code: "NOT_IMPLEMENTED", message });
 }
 
 /** Flat 403 FORBIDDEN (financial-authz fail-closed). */
@@ -745,12 +743,16 @@ async function createSalesDown(
 // ---------------------------------------------------------------------------
 
 // POST /land/plots/:id/deal — close a land deal (land.jsx). Load the plot (404).
-// ONLY `type === "buy"` is producible: the deposit is COMPUTED server-side =
+// `type === "buy"`: the deposit is COMPUTED server-side =
 // round2(round2(area_sqm / 1600 × price_per_rai) × 10%) (money=SERVER — the client
 // terms are never read for the amount). A null area/price → honest 409. Posts
 // Dr 1150 land-held / Cr 2010 AP = deposit, keyed source_doc `deal:<plotId>`.
-// `type === "lease"` → 422 NOT_IMPLEMENTED (the lease PV formula is undefined,
-// B-161 — never guessed). Any other type → 400.
+// `type === "lease"` (B-161 · Wei=ง, rent code B-173=ก): the first-period land-lease
+// rent is an OPERATING EXPENSE. money=SERVER posts the CLIENT-supplied rent verbatim
+// (no invented amortization/escalation, no lease entity) → Dr 5100 admin-expense
+// (cost-center scoped) / Cr 2010 AP + an ap_billing subledger row, keyed source_doc
+// `deal:<plotId>:lease` (keeps the ^deal: prefix so jv_source_doc_uq covers it →
+// idempotent, yet distinct from a buy deal on the same plot). Any other type → 400.
 async function createLandPlotDeal(
   db: TenantDb,
   plotId: string,
@@ -763,7 +765,68 @@ async function createLandPlotDeal(
   if (!plot) return notFound(reply, `land plot ${plotId} not found`);
 
   if (type === "lease") {
-    return notImplemented(reply, "lease deal PV formula is not yet defined (B-161)");
+    // The client supplies the first-period rent (money=SERVER = post what is received,
+    // invent no formula). A missing/non-positive rent is a client-input error → 400.
+    const rent = toNum(pick(body, "amount"));
+    if (rent == null || rent <= 0) {
+      return badRequest(reply, "amount (first-period rent) is required and must be greater than zero");
+    }
+    const rentAmt = round2(rent);
+    // Cost-center attribution rides on the expense (Dr) line only — the AP liability is
+    // not cost-center scoped. Stored as-is, mirroring the labor/inventory/fa jv cc_id.
+    const ccId = str(pick(body, "cc_id", "ccId")).trim() || null;
+
+    const sourceDoc = `deal:${plotId}:lease`;
+    const priorJv = (await db.select(jvs, eq(jvs.sourceDoc, sourceDoc))) as JvRow[];
+    if (priorJv.length > 0) return conflict(reply, `land plot ${plotId} lease deal already posted`);
+
+    const acctIds = await resolveAccountIds(db, [ACCT.adminExpense, ACCT.ap]);
+    const expId = acctIds.get(ACCT.adminExpense);
+    const apId = acctIds.get(ACCT.ap);
+    if (!expId || !apId) {
+      return conflict(
+        reply,
+        "the tenant chart of accounts is missing a required posting account (rent-expense / AP)",
+      );
+    }
+
+    const jvNo = await allocJvNo(db);
+    const jvId = randomUUID();
+    const currencyCode = plot.currencyCode ?? "THB";
+    const lineRows: (typeof jvLines.$inferInsert)[] = [
+      { jvId, accountId: expId, dr: moneyStr(rentAmt), cr: moneyStr(0), currencyCode, ccId },
+      { jvId, accountId: apId, dr: moneyStr(0), cr: moneyStr(rentAmt), currencyCode },
+    ];
+    if (!isBalanced(lineRows)) {
+      return conflict(reply, "internal: lease deal journal entry does not balance");
+    }
+
+    try {
+      await db.transaction(async (tx) => {
+        await tx
+          .insert(apBillings, {
+            vendorId: null,
+            amount: moneyStr(rentAmt),
+            vat: "0",
+            currencyCode,
+            status: "draft",
+            kind: "progress",
+          })
+          .returning();
+        await tx
+          .insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `land-lease ${plotId}` })
+          .returning();
+        await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+      });
+      return reply.code(200).send({ plot_id: plotId, type, amount: rentAmt, jv_no: jvNo });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        return reply
+          .code(409)
+          .send({ code: "INVALID_STATE", message: `land plot ${plotId} lease deal already posted` });
+      }
+      throw err;
+    }
   }
   if (type !== "buy") {
     return badRequest(reply, "type must be 'buy' or 'lease'");
@@ -809,6 +872,22 @@ async function createLandPlotDeal(
 
   try {
     await db.transaction(async (tx) => {
+      // B-164 (Wei=ก): the Cr 2010 AP is a real payable to the land owner — record it
+      // in the AP subledger (ap_billing) so it surfaces in GET /ap/billings + aging,
+      // not just the GL. Same tx as the JV: the jv_source_doc_uq 23505 on a concurrent
+      // double-post rolls this row back too (ap_billing carries no own unique key), so
+      // there is never an orphan subledger row. A land deal has no vendor FK
+      // (plot.owner is free text), so vendor_id/due_date stay null (never invented).
+      await tx
+        .insert(apBillings, {
+          vendorId: null,
+          amount: moneyStr(deposit),
+          vat: "0",
+          currencyCode,
+          status: "draft",
+          kind: "deposit",
+        })
+        .returning();
       await tx.insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `land-deal ${plotId}` }).returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });

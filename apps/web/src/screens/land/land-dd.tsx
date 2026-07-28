@@ -21,15 +21,18 @@
  *     register -> the deal is honest-empty (all em-dash).
  *   - COST CENTER: the selector reads REAL centers (GET /cost-centers, ccOptionsForProject)
  *     scoped to the active project; the "manage" button navigates to master.cc (nav only).
- *   - DEAL WRITES DISABLED (Wei: deal actions await backend): view-draft, make-PV (deposit /
- *     rent) and confirm-transfer / save-lease are all honest-disabled — no deal / PV /
- *     contract endpoint is merged, so no action opens a mock modal or hits a 404.
+ *   - LEASE DEAL WIRED (B-161, Wei=d): the lease "make rent PV" action posts the CLIENT-
+ *     ENTERED first-period rent (a new rent input, pvLeaseDesc label) via POST
+ *     /land/plots/:id/deal { type: "lease", amount, cc_id } — money=SERVER: the server books
+ *     the rent-expense JV (ap.pv) and owns jv_no; the client sends only the rent + cost
+ *     center. On success -> pvToast + navigate ap.pv. The BUY deal + view-draft +
+ *     save-lease-contract have no merged endpoint yet -> still honest-disabled.
  *
  * i18n (§0 rule 2): every visible string is a land.dd.* dict key (t, minted B-153) or a
  * reuse of land.bc.root (the breadcrumb root, same land.* prototype family). CONSUME-ONLY:
- * nothing is minted here. Keys tied to unbuilt surfaces are intentionally not consumed —
- * the neutral status skips stPass/stIssue/stWait + cycleTitle, and the disabled writes skip
- * the whole PV-modal key set (pvModalTitle, pvRow[Item/Cc/Amount/...], pvToast, ...). No
+ * nothing is minted here. Keys tied to STILL-unbuilt surfaces stay unconsumed — the neutral
+ * status skips stPass/stIssue/stWait + cycleTitle, and the buy/save-lease PV-modal keys stay
+ * unused; the LEASE deal now consumes pvLeaseDesc (rent label) + pvToast (success). No
  * Thai/baht literal sits in this source (B-073); tokens back every colour (§0 rule 6);
  * numeric deal values carry class `num` via DealField (§0 rule 7); loading = token
  * skeleton; no plot = honest-empty.
@@ -40,6 +43,7 @@ import type { DictKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
+import { Field } from "../../ui/field";
 import { Icon } from "../../ui/icon";
 import { Page } from "../../shell/page";
 import { useShellCtx } from "../../shell/shell-context";
@@ -48,10 +52,18 @@ import { useProjects, resolveActiveProject } from "../../shell/use-shell-data";
 import { toPlotRow, formatMoney, type PlotRow } from "./land-bank-rows";
 import { dealTerms, pickDealPlot, ccOptionsForProject, type DealTerms } from "./land-dd-rows";
 import { useLandPlots } from "./use-land-bank";
+import { useCreateLandDeal } from "./use-land-dd";
 import { useCostCenterList } from "../master/use-cost-centers";
 
 /** The literal em-dash rendered for every value with no wire (mirrors land-bank DASH). */
 const DASH = "—";
+
+/** Extract an error message off an unknown mutation error (ar-rv-form precedent). */
+function dealErr(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
+}
 
 /**
  * The 7 DD checklist items, in prototype order (land2.jsx DD_ITEMS, L129-137). Each is a
@@ -177,6 +189,33 @@ export function LandDueDiligence() {
     [ccQ.data, active?.id],
   );
   const ccValue = cc || ccOptions[0]?.code || "";
+
+  const createDeal = useCreateLandDeal();
+  // B-161 (Wei=d): the LEASE deal posts the client-entered first-period rent. money=SERVER
+  // — the server books the rent-expense JV (via ap.pv) and owns jv_no; the client supplies
+  // only the rent figure + the cost center (the CC-card selector, per the prototype's PV gate).
+  const [rentRaw, setRentRaw] = useState("");
+  const rentParsed = Number.parseFloat(rentRaw);
+  const rentAmount = Number.isFinite(rentParsed) && rentParsed > 0 ? rentParsed : 0;
+  const leaseSubmittable = !!dealPlot && rentAmount > 0 && ccValue !== "";
+
+  const submitLease = () => {
+    if (!leaseSubmittable || !dealPlot) return;
+    // money=SERVER: send { type, amount (the rent), cc_id } — NEVER a Dr/Cr line or a JV
+    // number; the server books the rent-expense JV and owns jv_no.
+    createDeal.mutate(
+      { plotId: dealPlot.id, body: { type: "lease", amount: rentAmount, cc_id: ccValue } },
+      {
+        onSuccess: () => {
+          ctx.notify(
+            t("land.dd.pvToast").replace("{amt}", formatMoney(rentAmount)).replace("{cc}", ccValue),
+          );
+          ctx.navigate("ap.pv");
+        },
+        onError: (err) => ctx.notify(dealErr(err) || DASH, "danger"),
+      },
+    );
+  };
 
   // No DD-status wire -> no check is confirmed-passed. The header reads 0/7 and the bar is 0.
   const passed = 0;
@@ -450,12 +489,41 @@ export function LandDueDiligence() {
               <Icon name="info" size={15} />
               {t("land.dd.leaseInfo")}
             </div>
+            {/* B-161 (Wei=d): the client-entered first-period rent — the ONLY money the
+                client supplies; the server books the rent-expense JV (via ap.pv). */}
+            <Field label={t("land.dd.pvLeaseDesc")} required style={{ maxWidth: 260, marginBottom: 16 }}>
+              <input
+                type="number"
+                value={rentRaw}
+                onChange={(e) => setRentRaw(e.target.value)}
+                className="num"
+                style={{
+                  width: "100%",
+                  height: 36,
+                  padding: "0 10px",
+                  fontSize: 13,
+                  border: "1px solid var(--border)",
+                  borderRadius: 7,
+                  background: "var(--surface)",
+                  outline: "none",
+                  fontFamily: "var(--font-num)",
+                  color: "var(--text)",
+                }}
+              />
+            </Field>
             <div style={dealActions}>
-              {/* Honest-DISABLED: no deal / PV / contract endpoint is merged. */}
+              {/* view-draft + save-lease-contract have no endpoint -> honest-disabled. The
+                  rent PV IS the wired lease deal (POST /land/plots/:id/deal type=lease). */}
               <Btn kind="outline" size="md" icon="doc" disabled>
                 {t("land.dd.viewDraftBtn")}
               </Btn>
-              <Btn kind="soft" size="md" icon="cash" disabled>
+              <Btn
+                kind="soft"
+                size="md"
+                icon="cash"
+                onClick={submitLease}
+                disabled={!leaseSubmittable || createDeal.isPending}
+              >
                 {t("land.dd.pvRentBtn")}
               </Btn>
               <Btn kind="primary" size="md" icon="check" disabled>

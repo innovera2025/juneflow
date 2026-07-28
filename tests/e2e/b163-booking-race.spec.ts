@@ -319,4 +319,47 @@ liveDescribe("B-163 sales money-post concurrency (live seeded stack, G4)", () =>
       }
     }
   });
+
+  test("LEASE-DEAL race: N concurrent lease-deals on one fresh plot → exactly one 200, rest 409 (deal:<plotId>:lease · B-161)", async () => {
+    const plotId = await freshUndealtPlotId(finMgr);
+    test.skip(
+      plotId == null,
+      "no un-dealt priced land plot in the seeded stack — cannot prove a fresh lease-deal race without a false pass",
+    );
+    const pid = plotId as string;
+
+    // B-161 (Wei=ง): a land LEASE deal posts the CLIENT first-period rent → Dr 5100
+    // admin-expense / Cr 2010 AP + an ap_billing row, keyed source_doc `deal:<pid>:lease`
+    // — keeps the ^deal: prefix so jv_source_doc_uq covers it, DISTINCT from the buy
+    // `deal:<pid>`. N concurrent lease posts of one plot → the SAME source_doc → exactly
+    // one commits, the rest trip 23505 → 409 (no double rent-expense, no double ap_billing).
+    // The rent is a client figure (money=SERVER — the server posts what is received, it
+    // does not invent a formula the prototype never defined).
+    const LEASE_RENT = 85_000;
+    const responses = await Promise.all(
+      Array.from({ length: N }, () =>
+        finMgr.post(`/api/v1/land/plots/${pid}/deal`, { data: { type: "lease", amount: LEASE_RENT } }),
+      ),
+    );
+    const statuses = responses.map((r) => r.status());
+
+    expect(
+      statuses.filter((s) => s >= 500),
+      `no 5xx from a lease-deal race (got ${statuses.join(",")})`,
+    ).toHaveLength(0);
+    expect(
+      statuses.filter((s) => s === 200 || s === 201),
+      `exactly one winning 200/201 (got ${statuses.join(",")})`,
+    ).toHaveLength(1);
+    expect(
+      statuses.filter((s) => s === 409),
+      `the other ${N - 1} are 409 (got ${statuses.join(",")})`,
+    ).toHaveLength(N - 1);
+
+    for (const res of responses) {
+      if (res.status() === 409) {
+        expect(await errorCode(res), "lease-deal loser 409 → INVALID_STATE").toBe("INVALID_STATE");
+      }
+    }
+  });
 });

@@ -7,7 +7,8 @@
 //     received-amount JV keyed source_doc booking:<id> / down:<id>:<seq>,
 //     idempotent (prior-jv + 23505) and fail-closed on a missing COA account.
 //   - the computed-JV write (land buy deal): deposit = area/1600 × price × 10%,
-//     Dr 1150 / Cr 2010, source deal:<id>; lease → 422 (never a guessed amount).
+//     Dr 1150 / Cr 2010, source deal:<id>; lease posts the client rent Dr 5100 /
+//     Cr 2010 (source deal:<id>:lease), no/zero rent → 400 (never a guessed amount).
 // Every expected value comes from the stub, EXCEPT the money=SERVER contracts
 // under test (the JV direction/balance, the deal deposit formula, and that a
 // loan's ask/approved are stored as supplied). Routes are wired in app.ts
@@ -17,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  apBillings,
   downPaymentTxns,
   glAccounts,
   jvLines,
@@ -42,11 +44,12 @@ const SESSION = {
 const D0 = new Date(1_700_000_000_000);
 const D1 = new Date(1_700_100_000_000);
 
-// The four COA accounts the Program-3 sales/land postings resolve against.
+// The COA accounts the Program-3 sales/land postings resolve against.
 const ACC_BANK = "acc00000-0000-0000-0000-000000001020"; // 1020 bank
 const ACC_ADV = "acc00000-0000-0000-0000-000000002040"; // 2040 advance-received
 const ACC_LAND = "acc00000-0000-0000-0000-000000001150"; // 1150 land-held-for-dev
 const ACC_AP = "acc00000-0000-0000-0000-000000002010"; // 2010 AP
+const ACC_ADMIN = "acc00000-0000-0000-0000-000000005100"; // 5100 admin/rent expense (B-161)
 
 /** A canned rows source: a fixed list, or a where-aware fn (jvs is read 3× per post). */
 type RowSource = unknown[] | ((where: SQL | undefined) => unknown[]);
@@ -162,12 +165,13 @@ const glAcc = (id: string, code: string, name: string) => ({
   createdAt: D0,
   updatedAt: D0,
 });
-/** All four posting accounts present (the happy path resolves every code). */
+/** All posting accounts present (the happy path resolves every code). */
 const COA_ROWS = [
   glAcc(ACC_BANK, "1020", "เงินฝากธนาคาร"),
   glAcc(ACC_ADV, "2040", "เงินมัดจำ/เงินจองรับล่วงหน้า"),
   glAcc(ACC_LAND, "1150", "ที่ดินรอการพัฒนา"),
   glAcc(ACC_AP, "2010", "เจ้าหนี้การค้า"),
+  glAcc(ACC_ADMIN, "5100", "ค่าใช้จ่ายในการบริหาร"),
 ];
 
 let app: FastifyInstance;
@@ -908,6 +912,7 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().message).toMatch(/finance create permission/);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // no money posted on a denied deal
+    expect(inserted.find((i) => i.table === apBillings)).toBeUndefined(); // and no subledger row (B-164)
   });
 
   it("computes the buy deposit (area/1600 × price × 10%) + posts Dr 1150 / Cr 2010, source deal:<id>", async () => {
@@ -930,15 +935,90 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     expect(lines.reduce((s, l) => s + Number(l.dr), 0)).toBe(lines.reduce((s, l) => s + Number(l.cr), 0));
     const jvIns = inserted.find((i) => i.table === jvs)!.values as Record<string, unknown>;
     expect(jvIns.sourceDoc).toBe("deal:p1");
+
+    // B-164: the Cr 2010 AP is ALSO recorded in the AP subledger (ap_billing) in the
+    // same tx, so the payable surfaces in AP aging — not only the GL JV.
+    const bill = inserted.find((i) => i.table === apBillings)!.values as Record<string, unknown>;
+    expect(bill.amount).toBe("250000.00"); // matches the Cr 2010 line
+    expect(bill.kind).toBe("deposit");
+    expect(bill.status).toBe("draft");
+    expect(bill.currencyCode).toBe("THB");
+    expect(bill.vendorId).toBeNull(); // a land deal has no vendor FK — never invented
   });
 
-  it("422s a lease deal (PV formula undefined — never a guessed amount)", async () => {
+  it("lease deal: posts the CLIENT first-period rent Dr 5100 (ccId) / Cr 2010 + ap_billing, source deal:<id>:lease (B-161 Wei=ง)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: dealDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/land/plots/p1/deal",
+      payload: { type: "lease", amount: 85000, cc_id: "cc-solar-1" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.type).toBe("lease");
+    expect(body.amount).toBe(85000); // the client rent, posted verbatim (money=SERVER, no formula)
+    expect(body.jv_no).toMatch(/^JV-\d{4}-\d{4}$/);
+
+    const lines = inserted.find((i) => i.table === jvLines)!.values as Record<string, unknown>[];
+    const dr = lines.find((l) => l.accountId === ACC_ADMIN)!; // Dr 5100 rent-expense
+    const cr = lines.find((l) => l.accountId === ACC_AP)!; // Cr 2010 AP
+    expect(dr.dr).toBe("85000.00");
+    expect(dr.ccId).toBe("cc-solar-1"); // cost-center scoped on the expense line only
+    expect(cr.cr).toBe("85000.00");
+    expect(cr.ccId ?? null).toBeNull(); // the AP liability is not cost-center scoped
+    expect(lines.reduce((s, l) => s + Number(l.dr), 0)).toBe(lines.reduce((s, l) => s + Number(l.cr), 0));
+
+    const jvIns = inserted.find((i) => i.table === jvs)!.values as Record<string, unknown>;
+    expect(jvIns.sourceDoc).toBe("deal:p1:lease"); // distinct from a buy deal:p1, still ^deal: (idempotent)
+
+    // The rent payable also lands in the AP subledger (kind=progress, not deposit).
+    const bill = inserted.find((i) => i.table === apBillings)!.values as Record<string, unknown>;
+    expect(bill.amount).toBe("85000.00");
+    expect(bill.kind).toBe("progress");
+    expect(bill.currencyCode).toBe("THB");
+  });
+
+  it("400s a lease deal with no/zero rent (client-input error — money=SERVER never invents an amount)", async () => {
     const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: dealDb({ inserted }) })
     ).inject({ method: "POST", url: "/api/v1/land/plots/p1/deal", payload: { type: "lease" } });
-    expect(res.statusCode).toBe(422);
-    expect(res.json().code).toBe("NOT_IMPLEMENTED");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/first-period rent/);
+    expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
+    expect(inserted.find((i) => i.table === apBillings)).toBeUndefined();
+  });
+
+  it("409s a lease deal when the tenant COA lacks the rent-expense account (5100 missing)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: dealDb({ coa: [glAcc(ACC_AP, "2010", "ap")] }), // 5100 rent-expense MISSING
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/land/plots/p1/deal",
+      payload: { type: "lease", amount: 85000, cc_id: "cc-solar-1" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/missing a required posting account/);
+  });
+
+  it("409s (idempotent) a lease deal already posted (deal:<id>:lease exists)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: dealDb({ inserted, jv: [{ id: "jv-prior", companyId: COMPANY, sourceDoc: "deal:p1:lease" }] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/land/plots/p1/deal",
+      payload: { type: "lease", amount: 85000, cc_id: "cc-solar-1" },
+    });
+    expect(res.statusCode).toBe(409);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
   });
 
@@ -977,6 +1057,7 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     ).inject({ method: "POST", url: "/api/v1/land/plots/p1/deal", payload: { type: "buy" } });
     expect(res.statusCode).toBe(409);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
+    expect(inserted.find((i) => i.table === apBillings)).toBeUndefined(); // pre-check returns before the tx (B-164)
   });
 
   it("409s honestly when the tenant COA lacks a required posting account", async () => {
