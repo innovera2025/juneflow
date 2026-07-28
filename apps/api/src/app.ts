@@ -70,6 +70,7 @@ import { registerLaborRoute } from "./routes/labor.js";
 import { registerInventoryRoute } from "./routes/inventory.js";
 import { registerLandSalesRoute } from "./routes/land-sales.js";
 import { registerSalesServiceRoute } from "./routes/sales-service.js";
+import { registerSolarRoute } from "./routes/solar.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -208,6 +209,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerInventoryRoute(v1);
       registerLandSalesRoute(v1);
       registerSalesServiceRoute(v1);
+      registerSolarRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,
