@@ -58,6 +58,101 @@ export const MASK_REGISTRY: Record<string, MaskRegion> = {
       "B-186 first-time G5 app-baseline (sub.mine) — the daysLeft warn strip is a live wall-clock element (daysLeft(renewAt, new Date()) decrements daily); masking this class is pre-authorised by B-120(ข) live-time-widget ruling + B-160 body relative-time follow-up. Covers only the measured strip bbox (x295 y513 w494 h37), not neighbouring content",
   },
 
+  // ── B-160 body date-column masks (G5 baseline date-drift · orch-B QA 2026-07-29) ──
+  // Root cause (measured live on the running stack): 8 list/detail screens render a
+  // SERVER-side date/time value that equals the SEED DAY — either the row's `created_at`
+  // (schema defaultNow() → the DB-insert instant) or a SEED_TODAY-relative due/start date
+  // (packages/db/seed: `SEED_NOW = new Date()` + isoDaysFromToday). The stack re-seeds on
+  // every fresh `up`, so these cells print the current calendar day as ABSOLUTE ISO text
+  // ("2026-07-29" / "2026-07-29 13:58"). A committed app-baseline captured on an earlier
+  // day therefore drifts against a later gate run — the layout, labels, column order and
+  // colour tokens are pixel-identical; ONLY the date DIGITS differ (verified: every red
+  // region is a single narrow date column, 165–1971 px). This is NOT a regression.
+  //
+  // Why a mask, not a clock-freeze (B-160 preferred → rejected on evidence): the drift is
+  // SERVER-computed (value comes from the DB/API), so pinning the Playwright browser clock
+  // (page.clock) does nothing to it — and would positively HARM the currently-passing
+  // dashboard, whose timeAgo(at = SEED_NOW − i·4h, Date.now()) is deterministic ONLY because
+  // browser-now tracks seed-now; freezing browser-now to a fixed instant while the seed
+  // clock keeps advancing would desync it into a fresh failure. The seed/DB clock is out of
+  // the tests/ zone (packages/db + infra), so the sanctioned fix is a MINIMAL per-column mask
+  // — exactly the class B-120(ข) pre-authorised and B-160 was filed to address.
+  //
+  // Geometry: ISO dates are FIXED-WIDTH (YYYY-MM-DD is always 10 chars), so each column's
+  // bbox is stable day-to-day — the digits change inside a constant box. Every rect was
+  // measured LIVE from the value cells at 1600x1000 dSF=1 and wraps ONLY that column's DATA
+  // rows with a ~2px margin: it sits BELOW the static column header (never masks the header
+  // label) and clear of every neighbouring column. Thresholds stay strict and
+  // dimensionMismatch still auto-FAILs — a layout/label/colour change anywhere else, or in
+  // any other column, still FAILs. maskedDiffPixels is reported so the absorbed drift stays
+  // visible (never silent). admin.* are NOT here: their ~2.2% failure is a viewMode/sidebar
+  // mismatch (default viewMode="tenant" vs platform-mode baselines), a run-config issue —
+  // masking it would hide the whole sidebar and real regressions, so it is left untouched.
+  "gl-inbox-createdat-b160": {
+    x: 1315,
+    y: 414,
+    width: 124,
+    height: 427,
+    reason:
+      "B-160 (class B-120(ข)) — gl.inbox time column renders each row's created_at (defaultNow at seed) as 'YYYY-MM-DD HH:mm'; the value = the seed day and drifts vs an older baseline. Covers only the 9-row date/time column (measured cells x1317-1437 y416-839), no neighbouring cell",
+  },
+  "gl-jv-date-b160": {
+    x: 415,
+    y: 447,
+    width: 114,
+    height: 312,
+    reason:
+      "B-160 (class B-120(ข)) — gl.jv date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 7-row date column (measured cells x417-527 y449-757), no neighbouring cell",
+  },
+  "ar-tax-date-b160": {
+    x: 505,
+    y: 409,
+    width: 114,
+    height: 268,
+    reason:
+      "B-160 (class B-120(ข)) — ar.tax date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 6-row date column (measured cells x507-617 y411-675), no neighbouring cell",
+  },
+  "ar-cn-date-b160": {
+    x: 1245,
+    y: 356,
+    width: 104,
+    height: 163,
+    reason:
+      "B-160 (class B-120(ข)) — ar.cn date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 3-row date column (measured cells x1247-1347 y358-517), no neighbouring cell",
+  },
+  "tax-etax-date-b160": {
+    x: 1221,
+    y: 356,
+    width: 94,
+    height: 406,
+    reason:
+      "B-160 (class B-120(ข)) — tax.etax date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 6-row date column (measured cells x1223-1313 y358-760), no neighbouring cell",
+  },
+  "ap-retention-due-b160": {
+    x: 1165,
+    y: 416,
+    width: 144,
+    height: 185,
+    reason:
+      "B-160 (class B-120(ข)) — ap.retention due-date column: rows 1-3 render a SEED_TODAY-relative due date ('2027-07-29') that drifts vs an older baseline; row 0 is a fixed literal ('2025-01-15') and is left UNMASKED. Covers only the 3 drifting rows (measured cells x1167-1307 y418-599), no neighbouring cell",
+  },
+  "sub-billing-date-b160": {
+    x: 445,
+    y: 209,
+    width: 124,
+    height: 175,
+    reason:
+      "B-160 (class B-120(ข)) — sub.billing invoice-date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 3-row date column (measured cells x447-567 y211-382), no neighbouring cell",
+  },
+  "sub-mine-startedat-b160": {
+    x: 721,
+    y: 399,
+    width: 75,
+    height: 23,
+    reason:
+      "B-160 (class B-120(ข)) — sub.mine contract-start value (formatDate(me.startedAt), sub-mine.tsx:161) renders the seed-time start date '2026-07-29' (= seed day); latent daily drift (passes today only by margin). Covers ONLY the startedAt value cell (measured x723-788 y401-420), not its label nor the fixed renewAt row below",
+  },
+
   // B-044(ก) — Wei ruling 2026-07-13: the port's t("app.name") th =
   // "ระบบงานก่อสร้าง" is CORRECT; all ~128 reference images carry an older
   // logo lockup (lowercase "juneflow" wordmark + English "Construction ERP"
