@@ -142,6 +142,14 @@ export const packages = pgTable("package", {
   limits: jsonb("limits").$type<PackageLimits>().notNull(),
   menus: jsonb("menus").$type<string[]>().notNull(),
   subRules: jsonb("sub_rules").$type<PackageSubRules>().notNull().default({}),
+  // B-197 (Phase-6 W1b): pkg-builder.jsx / plan-card display fields. tagline =
+  // the plan strapline; mod_label = the "modules included" summary; color = the
+  // plan card accent; popular = the "แนะนำ/Popular" ribbon flag. All presentational
+  // (non-money); additive-nullable (popular defaults false) so existing rows are safe.
+  tagline: text("tagline"),
+  modLabel: text("mod_label"),
+  color: text("color"),
+  popular: boolean("popular").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

@@ -14,6 +14,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { eq } from "drizzle-orm";
 import {
   companies,
+  packageSize,
   packages,
   platformInvoices,
   subscriptions,
@@ -23,6 +24,8 @@ import type { PlatformDb } from "../db/platform-db.js";
 import type { PlatformWriteDb } from "../db/platform-write-db.js";
 import { ownerOnly } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
+import { round2 } from "./money.js";
+import { pick, str, toNum } from "./procurement.js";
 
 type PackageRow = typeof packages.$inferSelect;
 type SubscriptionRow = typeof subscriptions.$inferSelect;
@@ -33,6 +36,66 @@ type PlatformInvoiceRow = typeof platformInvoices.$inferSelect;
 /** Flat 404 NOT_FOUND (opaque, no cross-tenant existence leak). */
 function notFound(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(404).send({ code: "NOT_FOUND", message });
+}
+
+/** Flat 400 BAD_REQUEST (client-input error). */
+function badRequest(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(400).send({ code: "BAD_REQUEST", message });
+}
+
+/** A numeric(12,2) money string, or null (the Full=contact no-price case). */
+function moneyStr(n: number | null): string | null {
+  return n == null ? null : round2(n).toFixed(2);
+}
+
+/** The plan-card accent per tier — the pkg-builder default when the client omits color. */
+const SIZE_COLOR: Record<string, string> = {
+  S: "#5A7CA8",
+  M: "#0B2A4A",
+  L: "#0F766E",
+  Full: "#B45309",
+};
+
+/**
+ * Parse + validate a package create/edit body into the persistable columns.
+ * money=SERVER: the YEARLY price is DERIVED (10× monthly = "ประหยัด 2 เดือน") — a
+ * client-sent price_y/yearly is IGNORED. A contact/enterprise tier (contact:true)
+ * carries no price → both null. limits/menus/tagline/etc. are client-supplied
+ * (non-money) and persisted as-received. Returns a 400-message string on invalid
+ * input, else the column values.
+ */
+function packageValues(b: Record<string, unknown>): string | Record<string, unknown> {
+  const name = str(pick(b, "name")).trim();
+  if (!name) return "name is required";
+  const size = str(pick(b, "size")).trim();
+  if (!(packageSize.enumValues as readonly string[]).includes(size)) {
+    return `size must be one of ${packageSize.enumValues.join("/")}`;
+  }
+  const menus = Array.isArray(b.menus) ? (b.menus as unknown[]) : null;
+  if (!menus || menus.length === 0) return "menus is required (at least one nav id)";
+  const contact = b.contact === true;
+  const priceRaw = toNum(pick(b, "price", "price_m"));
+  if (!contact && (priceRaw == null || priceRaw <= 0)) {
+    return "monthly price is required and must be greater than zero (unless a contact tier)";
+  }
+  // money=SERVER: derive the yearly from the monthly; never trust a client yearly.
+  const priceM = contact ? null : round2(priceRaw as number);
+  const priceY = contact ? null : round2((priceRaw as number) * 10);
+  const color = str(pick(b, "color")).trim();
+  return {
+    size,
+    name,
+    priceM: moneyStr(priceM),
+    priceY: moneyStr(priceY),
+    currencyCode: "THB", // server-set — the client never overrides the currency
+    limits: b.limits ?? {},
+    menus,
+    subRules: pick(b, "sub_rules", "subRules") ?? {},
+    tagline: str(pick(b, "tagline")).trim() || null,
+    modLabel: str(pick(b, "mod_label", "modLabel")).trim() || null,
+    color: color || SIZE_COLOR[size] || null,
+    popular: b.popular === true,
+  };
 }
 
 /** Coerce a drizzle numeric (string) / number / null to a finite number, else null. */
@@ -61,6 +124,10 @@ function packageWire(p: PackageRow): Record<string, unknown> {
     limits: p.limits,
     menus: p.menus,
     sub_rules: p.subRules,
+    tagline: p.tagline,
+    mod_label: p.modLabel,
+    color: p.color,
+    popular: p.popular,
     created_at: p.createdAt,
   };
 }
@@ -233,4 +300,37 @@ export function registerAdminRoutes(
     request.auditTargetCompanyId = company.id;
     return reply.code(200).send(subscriberWire(sub, company));
   });
+
+  // --- package CRUD (Phase-6 W1b, B-197) — create/edit ONLY, NO delete (B-196) -
+  // packages is a GLOBAL catalog: no per-tenant scope, so NO auditTargetCompanyId
+  // (the audit hook attributes the change to the owner's own tenant). ⚠ An EDIT is
+  // GLOBAL-blast-radius — it retro-mutates the live quota/menus of EVERY tenant on
+  // the plan (the quota resolver + GET /me read package.limits/menus fresh) — the
+  // intended prototype behavior (B-187), gated by ownerOnly() alone. money=SERVER:
+  // price_y is DERIVED (never trusted from the client).
+
+  // POST /admin/packages — create a plan.
+  app.post("/admin/packages", async (request, reply) => {
+    const caller = await ownerOnly(request, reply);
+    if (!caller) return;
+    const values = packageValues((request.body ?? {}) as Record<string, unknown>);
+    if (typeof values === "string") return badRequest(reply, values);
+    const created = await platformWriteDb.insertOne(packages, values); // door strips id/owner-flag
+    return reply.code(201).send(packageWire(created));
+  });
+
+  // PUT /admin/packages/{id} — edit a plan (GLOBAL blast-radius; never a status flip).
+  app.put("/admin/packages/:id", async (request, reply) => {
+    const caller = await ownerOnly(request, reply);
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const values = packageValues((request.body ?? {}) as Record<string, unknown>);
+    if (typeof values === "string") return badRequest(reply, values);
+    const [updated] = await platformWriteDb.updateAllTenants(packages, id, values);
+    if (!updated) return notFound(reply, `package ${id} not found`);
+    return reply.code(200).send(packageWire(updated));
+  });
+
+  // NO DELETE /admin/packages/{id} — B-196=ก: the prototype exposes no delete
+  // affordance, and deleting a referenced plan would orphan every subscription.
 }
