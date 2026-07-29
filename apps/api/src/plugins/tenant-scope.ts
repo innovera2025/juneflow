@@ -41,6 +41,14 @@ declare module "fastify" {
     db?: TenantDb;
     /** Session user identity (set when the resolver returns one — e.g. /me). */
     authUser?: AuthUserContext;
+    /**
+     * B-193 (Phase-6 W1a): the TARGET tenant of a platform-owner cross-tenant
+     * WRITE. An /admin/* write handler stamps the affected tenant's company_id
+     * here; the audit hook logs THIS (not the owner's own company) so the trail
+     * attributes the mutation to the tenant it actually changed. Unset for every
+     * normal in-tenant request (the hook falls back to request.tenant.companyId).
+     */
+    auditTargetCompanyId?: string;
   }
 }
 

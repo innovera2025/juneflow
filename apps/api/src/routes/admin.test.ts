@@ -25,6 +25,8 @@ import {
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { PlatformDb } from "../db/platform-db.js";
+import { PlatformWriteDb } from "../db/platform-write-db.js";
+import type { AuditRecord } from "../plugins/audit-log.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -42,12 +44,18 @@ interface Captured {
   table: unknown;
   where: SQL | undefined;
 }
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL;
+}
 interface StubOpts {
   rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
+  updated?: Updated[];
 }
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [] } = opts;
+  const { rows, captured = [], updated = [] } = opts;
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -71,6 +79,20 @@ function stubDb(opts: StubOpts): Db {
   };
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
+    // UPDATE … RETURNING: echoes the table's stubbed rows with the SET applied
+    // (empty when the table has no rows → models a not-found 0-row update).
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            updated.push({ table, set, where });
+            return Promise.resolve(
+              rowsFor(table, where).map((r) => ({ ...(r as object), ...set })),
+            );
+          },
+        }),
+      }),
+    }),
   };
   return raw as unknown as Db;
 }
@@ -314,5 +336,199 @@ describe("PlatformDb door (B-177) — allowlist fail-closed", () => {
     for (const t of [packages, companies, subscriptions, platformInvoices, users]) {
       expect(() => pdb.selectAllTenants(t)).not.toThrow();
     }
+  });
+});
+
+// ===========================================================================
+// W1a — PlatformWriteDb door (B-193): allowlist + field-strip (self-elevation).
+// ===========================================================================
+describe("PlatformWriteDb door (B-193) — allowlist + strip fail-closed", () => {
+  // A fake Db whose UPDATE…RETURNING captures the SET the door actually applied.
+  function captureFake() {
+    const captured: Array<{ table: unknown; set: Record<string, unknown> }> = [];
+    const db = {
+      update: (table: unknown) => ({
+        set: (set: Record<string, unknown>) => ({
+          where: () => ({
+            returning: () => {
+              captured.push({ table, set });
+              return Promise.resolve([{ id: "x", ...set }]);
+            },
+          }),
+        }),
+      }),
+    } as unknown as Db;
+    return { db, captured };
+  }
+
+  it("throws for a non-allowlisted (tenant ERP) table", async () => {
+    const { db } = captureFake();
+    const wdb = new PlatformWriteDb(db);
+    // roles is a tenant table, NOT on the WRITE allowlist {user, company}.
+    await expect(
+      wdb.updateAllTenants(roles, "r-1", {} as Partial<typeof roles.$inferInsert>),
+    ).rejects.toThrow(/PLATFORM_ADMIN_WRITE_DENIED/);
+  });
+
+  it("STRIPS is_platform_admin / company_id / id from the SET (self-elevation + tenant-move + PK defense)", async () => {
+    const { db, captured } = captureFake();
+    const wdb = new PlatformWriteDb(db);
+    // A smuggled payload trying to mint an owner, move the tenant, and reassign the PK.
+    await wdb.updateAllTenants(users, "u-victim", {
+      status: "blocked",
+      isPlatformAdmin: true,
+      is_platform_admin: true,
+      companyId: "attacker-co",
+      company_id: "attacker-co",
+      id: "some-other-id",
+    } as unknown as Partial<typeof users.$inferInsert>);
+    expect(captured).toHaveLength(1);
+    // ONLY status survives — every owner-flag / tenant / PK key is dropped.
+    expect(captured[0]!.set).toEqual({ status: "blocked" });
+  });
+
+  it("permits the two writable tables (user, company)", async () => {
+    const { db } = captureFake();
+    const wdb = new PlatformWriteDb(db);
+    await expect(
+      wdb.updateAllTenants(users, "u-1", { status: "active" } as Partial<typeof users.$inferInsert>),
+    ).resolves.toBeDefined();
+    await expect(
+      wdb.updateAllTenants(companies, "c-1", { status: "active" } as Partial<typeof companies.$inferInsert>),
+    ).resolves.toBeDefined();
+  });
+});
+
+// ===========================================================================
+// W1a — owner-gated cross-tenant writes (block/unblock/suspend/resume).
+// ===========================================================================
+const OWNER = caller(true);
+// The caller-vs-victim discriminator: loadCaller reads `user` WHERE email=owner;
+// a write reads/returns `user` WHERE id=victim. Same table, different rows.
+const usersByWhere = (victimRows: unknown[]) => (where: SQL | undefined) =>
+  paramsOf(where).includes(SESSION.user.email) ? [OWNER] : victimRows;
+
+const victimUser = {
+  id: "u-victim", companyId: OTHER_COMPANY, email: "victim@other.co.th", name: "Victim",
+  roleId: null, status: "active", isPlatformAdmin: false, department: null, createdAt: D0, updatedAt: D0,
+};
+
+const W1A_WRITES = [
+  ["/api/v1/admin/users/u-victim/block", "block"],
+  ["/api/v1/admin/users/u-victim/unblock", "unblock"],
+  ["/api/v1/admin/subscribers/sub-1/suspend", "suspend"],
+  ["/api/v1/admin/subscribers/sub-1/resume", "resume"],
+] as const;
+
+describe("W1a owner writes (B-193) — owner flips TARGET-tenant status + target audit", () => {
+  it("block: owner blocks a user in ANOTHER tenant → user.status='blocked' + audit companyId=target", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, usersByWhere([victimUser])]], updated }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/users/u-victim/block" });
+    expect(res.statusCode).toBe(200);
+    const w = updated.find((u) => u.table === users)!;
+    expect(w.set).toEqual({ status: "blocked" }); // status flip only
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, userId: "u-0", action: "block" });
+    expect(String(records[0]!.entity)).toContain("admin/users");
+  });
+
+  it("unblock: → user.status='active', action=unblock, audit target company", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, usersByWhere([{ ...victimUser, status: "blocked" }])]], updated }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/users/u-victim/unblock" });
+    expect(res.statusCode).toBe(200);
+    expect(updated.find((u) => u.table === users)!.set).toEqual({ status: "active" });
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, action: "unblock" });
+  });
+
+  it("suspend: resolves subscription→company, flips companies.status='suspended' (NOT subscription), audit target", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [OWNER]],
+            [subscriptions, [sub("sub-1", OTHER_COMPANY)]],
+            [companies, [company(OTHER_COMPANY, "อื่น")]],
+          ],
+          updated,
+        }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/subscribers/sub-1/suspend" });
+    expect(res.statusCode).toBe(200);
+    const w = updated.find((u) => u.table === companies)!;
+    expect(w.set).toEqual({ status: "suspended" });
+    expect(updated.find((u) => u.table === subscriptions)).toBeUndefined(); // never writes subscription
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, action: "suspend" });
+  });
+
+  it("resume: flips companies.status='active', action=resume", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [OWNER]],
+            [subscriptions, [sub("sub-1", OTHER_COMPANY)]],
+            [companies, [company(OTHER_COMPANY, "อื่น", { status: "suspended" })]],
+          ],
+          updated,
+        }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/subscribers/sub-1/resume" });
+    expect(res.statusCode).toBe(200);
+    expect(updated.find((u) => u.table === companies)!.set).toEqual({ status: "active" });
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, action: "resume" });
+  });
+
+  it.each(W1A_WRITES)("403s a valid tenant NON-owner on %s (no write, no audit)", async (url) => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [caller(false)]], // a valid tenant, is_platform_admin=false
+            [subscriptions, [sub("sub-1", OTHER_COMPANY)]],
+            [companies, [company(OTHER_COMPANY, "อื่น")]],
+          ],
+          updated,
+        }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url });
+    expect(res.statusCode).toBe(403);
+    expect(updated).toHaveLength(0); // the write never reached the door
+    expect(records).toHaveLength(0); // and nothing was audited
+  });
+
+  it("404s block on an unknown user id (0-row update)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, usersByWhere([])]] }), // caller resolves; victim id → no row
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/users/nope/block" });
+    expect(res.statusCode).toBe(404);
   });
 });

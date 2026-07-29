@@ -20,6 +20,7 @@ import {
   users,
 } from "@juneflow/db/schema";
 import type { PlatformDb } from "../db/platform-db.js";
+import type { PlatformWriteDb } from "../db/platform-write-db.js";
 import { ownerOnly } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
 
@@ -106,12 +107,12 @@ function invoiceWire(i: PlatformInvoiceRow): Record<string, unknown> {
   };
 }
 
-/** Register the owner-gated platform-admin read routes on the /api/v1 scope. */
+/** Register the owner-gated platform-admin read + write routes on the /api/v1 scope. */
 export function registerAdminRoutes(
   app: FastifyInstance,
-  deps: { platformDb: PlatformDb },
+  deps: { platformDb: PlatformDb; platformWriteDb: PlatformWriteDb },
 ): void {
-  const { platformDb } = deps;
+  const { platformDb, platformWriteDb } = deps;
 
   // GET /admin/packages — the S/M/L/Full plan catalog (global; owner-gated read).
   app.get("/admin/packages", async (request, reply) => {
@@ -165,5 +166,71 @@ export function registerAdminRoutes(
     if (!caller) return;
     const rows = (await platformDb.selectAllTenants(platformInvoices)) as PlatformInvoiceRow[];
     return reply.code(200).send(listEnvelope([...rows].sort(byCreatedDesc).map(invoiceWire)));
+  });
+
+  // --- writes (Phase-6 W1a, B-193) — cross-tenant, owner-gated, non-money -----
+  // Every handler: ownerOnly FIRST (a non-owner is 403 before ANY write) → mutate
+  // via the guarded PlatformWriteDb door (strips is_platform_admin / company_id /
+  // id) → stamp the TARGET tenant on the request so the audit hook logs the
+  // affected tenant (not the owner's own). All status flips are zero-money.
+
+  // POST /admin/users/{id}/block — a USER id (block → user.status='blocked').
+  app.post("/admin/users/:id/block", async (request, reply) => {
+    const caller = await ownerOnly(request, reply);
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const [user] = await platformWriteDb.updateAllTenants(users, id, { status: "blocked" });
+    if (!user) return notFound(reply, `user ${id} not found`);
+    request.auditTargetCompanyId = user.companyId; // audit the affected tenant
+    return reply.code(200).send(userWire(user));
+  });
+
+  // POST /admin/users/{id}/unblock — user.status='active'.
+  app.post("/admin/users/:id/unblock", async (request, reply) => {
+    const caller = await ownerOnly(request, reply);
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const [user] = await platformWriteDb.updateAllTenants(users, id, { status: "active" });
+    if (!user) return notFound(reply, `user ${id} not found`);
+    request.auditTargetCompanyId = user.companyId;
+    return reply.code(200).send(userWire(user));
+  });
+
+  // POST /admin/subscribers/{id}/suspend — {id} is a SUBSCRIPTION id. Resolve it
+  // to its company and flip companies.status (NOT subscription.status — the
+  // subscriptionStatus enum has no 'suspended'). company_id is a NOT-NULL FK.
+  app.post("/admin/subscribers/:id/suspend", async (request, reply) => {
+    const caller = await ownerOnly(request, reply);
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const [sub] = (await platformDb.selectAllTenants(
+      subscriptions,
+      eq(subscriptions.id, id),
+    )) as SubscriptionRow[];
+    if (!sub) return notFound(reply, `subscriber ${id} not found`);
+    const [company] = await platformWriteDb.updateAllTenants(companies, sub.companyId, {
+      status: "suspended",
+    });
+    if (!company) return notFound(reply, `company ${sub.companyId} not found`);
+    request.auditTargetCompanyId = company.id; // the affected tenant
+    return reply.code(200).send(subscriberWire(sub, company));
+  });
+
+  // POST /admin/subscribers/{id}/resume — companies.status='active'.
+  app.post("/admin/subscribers/:id/resume", async (request, reply) => {
+    const caller = await ownerOnly(request, reply);
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const [sub] = (await platformDb.selectAllTenants(
+      subscriptions,
+      eq(subscriptions.id, id),
+    )) as SubscriptionRow[];
+    if (!sub) return notFound(reply, `subscriber ${id} not found`);
+    const [company] = await platformWriteDb.updateAllTenants(companies, sub.companyId, {
+      status: "active",
+    });
+    if (!company) return notFound(reply, `company ${sub.companyId} not found`);
+    request.auditTargetCompanyId = company.id;
+    return reply.code(200).send(subscriberWire(sub, company));
   });
 }

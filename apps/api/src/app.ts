@@ -15,6 +15,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import type { Db } from "@juneflow/db/client";
 import { PlatformDb } from "./db/platform-db.js";
+import { PlatformWriteDb } from "./db/platform-write-db.js";
 import {
   registerTenantScope,
   DEFAULT_PUBLIC_PATHS,
@@ -173,6 +174,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // owner-gated admin routes — NEVER attached to `request` (request.db stays a
   // company-scoped TenantDb for every tenant handler).
   const platformDb = new PlatformDb(deps.db);
+  // B-193 (W1a): the cross-tenant WRITE door — same containment (private handle,
+  // injected ONLY into the owner-gated admin routes, never on request).
+  const platformWriteDb = new PlatformWriteDb(deps.db);
 
   // Contract routes under the contract server prefix /api/v1.
   await app.register(
@@ -189,7 +193,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerVendorsRoute(v1);
       registerUsersRoute(v1);
       registerRolesRoute(v1);
-      registerAdminRoutes(v1, { platformDb });
+      registerAdminRoutes(v1, { platformDb, platformWriteDb });
       registerSubscriptionRoutes(v1);
       registerOrgUnitsRoute(v1);
       registerProjectNodesRoute(v1);
