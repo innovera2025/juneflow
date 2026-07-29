@@ -79,18 +79,19 @@ liveDescribe("Phase-6 W1a cross-tenant write-door (live seeded stack, security)"
     test.skip(rateLimited, "login throttled (429) or a seed user missing — skip honestly");
   });
 
-  /** A non-owner, currently-active user in a DIFFERENT company than the owner. */
-  async function crossTenantTarget(): Promise<Record<string, unknown>> {
+  /** Any non-owner, currently-active user. The door does an UNSCOPED-by-id UPDATE (cross-tenant
+   *  capable); the explicit cross-COMPANY write is proven by the subscriber-suspend test below
+   *  (the seed puts all USERS in the owner's company, so a cross-company user cannot be picked —
+   *  and W1a has no user-create). This still fully exercises block + the injection guard. */
+  async function activeUserTarget(): Promise<Record<string, unknown>> {
     const users = rowsOf((await (await owner.get("/api/v1/admin/users")).json()) as Record<string, unknown>);
-    const t = users.find(
-      (u) => u.email !== OWNER_EMAIL && String(u.company_id) !== ownerCompanyId && u.status === "active",
-    );
-    expect(t, "seed has a non-owner active user in another company (cross-tenant target)").toBeTruthy();
+    const t = users.find((u) => u.email !== OWNER_EMAIL && u.status === "active");
+    expect(t, "seed has a non-owner active user (block target)").toBeTruthy();
     return t!;
   }
 
-  test("OWNER blocks/unblocks a CROSS-TENANT user → status flips and PERSISTS", async () => {
-    const target = await crossTenantTarget();
+  test("OWNER blocks/unblocks a user → status flips and PERSISTS", async () => {
+    const target = await activeUserTarget();
     const id = String(target.id);
 
     const block = await owner.post(`/api/v1/admin/users/${id}/block`);
@@ -107,10 +108,18 @@ liveDescribe("Phase-6 W1a cross-tenant write-door (live seeded stack, security)"
     expect((await unblock.json()).status, "unblock restored user.status='active'").toBe("active");
   });
 
-  test("OWNER suspends/resumes a subscriber → companies.status flips (NOT subscription.status)", async () => {
+  test("OWNER suspends/resumes a CROSS-TENANT subscriber → companies.status flips (NOT subscription.status)", async () => {
     const subs = rowsOf((await (await owner.get("/api/v1/admin/subscribers")).json()) as Record<string, unknown>);
-    const target = subs.find((s) => s.company_status === "active") ?? subs[0];
+    // A subscriber in a DIFFERENT company than the owner = the real cross-tenant WRITE proof
+    // (a plain TenantDb write could never suspend another tenant's company).
+    const target =
+      subs.find((s) => s.company_status === "active" && String(s.company_id) !== ownerCompanyId) ??
+      subs.find((s) => s.company_status === "active") ??
+      subs[0];
     expect(target, "seed has a subscriber to suspend").toBeTruthy();
+    expect(String(target.company_id), "the suspend target is a DIFFERENT tenant (cross-tenant)").not.toBe(
+      ownerCompanyId,
+    );
     const id = String(target.id);
     const subStatusBefore = String(target.status); // the subscription's own lifecycle status
 
@@ -143,7 +152,7 @@ liveDescribe("Phase-6 W1a cross-tenant write-door (live seeded stack, security)"
   test("INJECTION / PRIV-ESC: a malicious body is IGNORED — no field injection, no self-elevation", async ({
     playwright,
   }) => {
-    const target = await crossTenantTarget();
+    const target = await activeUserTarget();
     const id = String(target.id);
     const origCompany = String(target.company_id);
 
@@ -185,7 +194,7 @@ liveDescribe("Phase-6 W1a cross-tenant write-door (live seeded stack, security)"
   });
 
   test("idempotent re-block (block twice → still blocked, no crash)", async () => {
-    const target = await crossTenantTarget();
+    const target = await activeUserTarget();
     const id = String(target.id);
     const r1 = await owner.post(`/api/v1/admin/users/${id}/block`);
     expect(r1.status()).toBe(200);
