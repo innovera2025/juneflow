@@ -1,7 +1,8 @@
 /*
  * Data hooks for the Platform-Admin screens (admin.subs, admin.plans, admin.invoices) —
- * READ-ONLY. All four reads go through the generated typed client (api-client.ts) +
- * TanStack Query via unwrap() — no hand-written models/fetch (PLAN.md §5).
+ * four reads plus the four owner-gated subscriber/user state mutations (suspend/resume a
+ * subscriber, block/unblock a user). Everything goes through the generated typed client
+ * (api-client.ts) + TanStack Query via unwrap() — no hand-written models/fetch (PLAN.md §5).
  *
  * These are owner-gated endpoints (registry section "platform", shown only when
  * viewMode="platform"; the backend 403s non-owners). unwrap() throws on a non-2xx, so a
@@ -16,11 +17,13 @@
  *   GET /admin/users       -> the cross-tenant user list (roster + per-company counts).
  *   GET /admin/invoices    -> every tenant's platform (subscription-billing) invoice.
  *
- * Every write in the prototype (create/edit package, suspend/activate, block, reset-pw,
- * invite, remind, export) has NO merged Phase-6 backend handler — the screens surface those
- * as honest toasts / honest-disabled instead of wiring a mutation that cannot persist.
+ * The four owner-gated state writes below (POST /admin/subscribers/{id}/suspend|resume,
+ * POST /admin/users/{id}/block|unblock) are merged handlers and wired for real — each mutates
+ * server state (companies.status / users.status) and invalidates its own read key. The
+ * remaining prototype writes (create/edit package, save-settings, reset-pw, invite, remind,
+ * export) have NO merged handler and stay honest toasts / honest-disabled in the screen.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { apiClient } from "../../api-client";
 import { unwrap } from "../../query-client";
 import { getAuthToken } from "../../auth-token";
@@ -79,5 +82,48 @@ export function useAdminInvoices() {
     queryFn: async () => (await unwrap(apiClient.GET("/admin/invoices"))).data ?? [],
     enabled: authed(),
     staleTime: 5 * 60_000,
+  });
+}
+
+/* ---------------------------------------------------------------------------------------- */
+/* Owner-gated state mutations (no request body; the id is a path param). Each unwrap()s the */
+/* POST so a non-2xx (403 non-owner / 404 unknown id) lands in the mutation's error state,   */
+/* and invalidates ONLY its own read key on success — the flipped company_status lives on    */
+/* the subscribers row; the block/unblock roster is a client derivation of the users read.   */
+/* ---------------------------------------------------------------------------------------- */
+
+/** POST /admin/subscribers/{id}/suspend — id = the SUBSCRIPTION id; flips companies.status. */
+export function useSuspendSubscriber(): UseMutationResult<unknown, unknown, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(apiClient.POST("/admin/subscribers/{id}/suspend", { params: { path: { id } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_SUBSCRIBERS_KEY }),
+  });
+}
+
+/** POST /admin/subscribers/{id}/resume — id = the SUBSCRIPTION id; flips companies.status. */
+export function useResumeSubscriber(): UseMutationResult<unknown, unknown, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(apiClient.POST("/admin/subscribers/{id}/resume", { params: { path: { id } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_SUBSCRIBERS_KEY }),
+  });
+}
+
+/** POST /admin/users/{id}/block — id = the USER id; sets users.status='blocked'. */
+export function useBlockUser(): UseMutationResult<unknown, unknown, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(apiClient.POST("/admin/users/{id}/block", { params: { path: { id } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_USERS_KEY }),
+  });
+}
+
+/** POST /admin/users/{id}/unblock — id = the USER id; sets users.status='active'. */
+export function useUnblockUser(): UseMutationResult<unknown, unknown, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(apiClient.POST("/admin/users/{id}/unblock", { params: { path: { id } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_USERS_KEY }),
   });
 }
