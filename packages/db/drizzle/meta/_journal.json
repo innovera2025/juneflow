@@ -316,6 +316,13 @@
       "when": 1785209707549,
       "tag": "0044_short_captain_britain",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1785343341783,
+      "tag": "0045_zippy_fenris",
+      "breakpoints": true
     }
   ]
 }

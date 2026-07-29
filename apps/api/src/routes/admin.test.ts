@@ -49,13 +49,18 @@ interface Updated {
   set: Record<string, unknown>;
   where: SQL;
 }
+interface Inserted {
+  table: unknown;
+  values: Record<string, unknown>;
+}
 interface StubOpts {
   rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
   updated?: Updated[];
+  inserted?: Inserted[];
 }
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], updated = [] } = opts;
+  const { rows, captured = [], updated = [], inserted = [] } = opts;
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -91,6 +96,16 @@ function stubDb(opts: StubOpts): Db {
             );
           },
         }),
+      }),
+    }),
+    // INSERT … RETURNING: echoes the values with a server-generated id (models
+    // defaultRandom — the door strips any client id before this).
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => ({
+        returning: () => {
+          inserted.push({ table, values });
+          return Promise.resolve([{ id: "new-pkg", createdAt: D0, ...values }]);
+        },
       }),
     }),
   };
@@ -530,5 +545,158 @@ describe("W1a owner writes (B-193) — owner flips TARGET-tenant status + target
       })
     ).inject({ method: "POST", url: "/api/v1/admin/users/nope/block" });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+// ===========================================================================
+// W1b — PlatformWriteDb.insertOne (B-197): its OWN INSERT allowlist + strip.
+// ===========================================================================
+describe("PlatformWriteDb.insertOne (B-197) — INSERT allowlist + strip", () => {
+  function insFake() {
+    const captured: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const db = {
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => ({
+          returning: () => {
+            captured.push({ table, values });
+            return Promise.resolve([{ id: "srv-gen", ...values }]);
+          },
+        }),
+      }),
+    } as unknown as Db;
+    return { db, captured };
+  }
+
+  it("throws for a non-INSERT-allowlisted table — user/company are UPDATE-only (no cross-tenant create)", async () => {
+    const { db } = insFake();
+    const wdb = new PlatformWriteDb(db);
+    await expect(
+      wdb.insertOne(users, { status: "active" } as Partial<typeof users.$inferInsert>),
+    ).rejects.toThrow(/PLATFORM_ADMIN_INSERT_DENIED/);
+    await expect(
+      wdb.insertOne(companies, { name: "x" } as Partial<typeof companies.$inferInsert>),
+    ).rejects.toThrow(/PLATFORM_ADMIN_INSERT_DENIED/);
+  });
+
+  it("permits packages + STRIPS id / is_platform_admin / company_id from the VALUES", async () => {
+    const { db, captured } = insFake();
+    const wdb = new PlatformWriteDb(db);
+    await wdb.insertOne(packages, {
+      name: "Pro",
+      isPlatformAdmin: true,
+      is_platform_admin: true,
+      companyId: "x",
+      company_id: "x",
+      id: "client-pinned-pk",
+    } as unknown as Partial<typeof packages.$inferInsert>);
+    expect(captured).toHaveLength(1);
+    // ONLY name survives — a client can't pin the PK, mint an owner, or inject a tenant.
+    expect(captured[0]!.values).toEqual({ name: "Pro" });
+  });
+});
+
+// ===========================================================================
+// W1b — package CRUD handlers (create/edit · money=SERVER · NO delete).
+// ===========================================================================
+describe("W1b package CRUD (B-197) — owner-gated, money=SERVER, no delete", () => {
+  const okBody = {
+    size: "M", name: "Professional", price: 7900,
+    menus: ["dashboard", "boq"], limits: { projects: -1, users: 20, storage: 100, ai: 50 },
+  };
+
+  it("POST create: owner → 201, price_y DERIVED 10× (ignores a client yearly), currency THB, audit=owner-own action=create", async () => {
+    const inserted: Inserted[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]]], inserted }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/packages", payload: { ...okBody, yearly: 1, price_y: 1 } });
+    expect(res.statusCode).toBe(201);
+    const v = inserted.find((i) => i.table === packages)!.values;
+    expect(v.priceM).toBe("7900.00");
+    expect(v.priceY).toBe("79000.00"); // 10× monthly — NOT the client's yearly:1 (money=SERVER)
+    expect(v.currencyCode).toBe("THB");
+    expect(v.color).toBe("#0B2A4A"); // the M-tier default (client omitted color)
+    // A global catalog change is attributed to the owner's own tenant, action=create.
+    expect(records[0]).toMatchObject({ companyId: COMPANY, action: "create" });
+  });
+
+  it("POST create: a contact/Full tier (no price) → priceM=null AND priceY=null", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]]], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/admin/packages",
+      payload: { size: "Full", name: "Enterprise", contact: true, menus: ["dashboard"] },
+    });
+    expect(res.statusCode).toBe(201);
+    const v = inserted.find((i) => i.table === packages)!.values;
+    expect(v.priceM).toBeNull();
+    expect(v.priceY).toBeNull();
+  });
+
+  it("POST create: 400 on a missing name / empty menus / non-positive price", async () => {
+    const app0 = await buildTestApp({
+      resolveTenant: async () => SESSION,
+      db: stubDb({ rows: [[users, [caller(true)]]] }),
+    });
+    const noName = await app0.inject({ method: "POST", url: "/api/v1/admin/packages", payload: { size: "M", menus: ["x"], price: 100 } });
+    expect(noName.statusCode).toBe(400);
+    const noMenus = await app0.inject({ method: "POST", url: "/api/v1/admin/packages", payload: { size: "M", name: "X", price: 100, menus: [] } });
+    expect(noMenus.statusCode).toBe(400);
+  });
+
+  it("PUT edit: owner → 200, price_y re-derived server-side; unknown id → 404", async () => {
+    const updated: Updated[] = [];
+    const found = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]], [packages, [pkg("pkg-1")]]], updated }),
+      })
+    ).inject({ method: "PUT", url: "/api/v1/admin/packages/pkg-1", payload: { ...okBody, price: 9900 } });
+    expect(found.statusCode).toBe(200);
+    expect(updated.find((u) => u.table === packages)!.set.priceY).toBe("99000.00");
+
+    const missing = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]], [packages, []]] }),
+      })
+    ).inject({ method: "PUT", url: "/api/v1/admin/packages/nope", payload: okBody });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it.each([
+    ["POST", "/api/v1/admin/packages"],
+    ["PUT", "/api/v1/admin/packages/pkg-1"],
+  ])("403s a valid tenant NON-owner on %s %s (no write reached)", async (method, url) => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(false)]], [packages, [pkg("pkg-1")]]], inserted, updated }),
+      })
+    ).inject({ method: method as "POST" | "PUT", url, payload: okBody });
+    expect(res.statusCode).toBe(403);
+    expect(inserted).toHaveLength(0);
+    expect(updated).toHaveLength(0);
+  });
+
+  it("NO delete endpoint (B-196) — DELETE /admin/packages/{id} is not registered", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]]] }),
+      })
+    ).inject({ method: "DELETE", url: "/api/v1/admin/packages/pkg-1" });
+    expect(res.statusCode).toBe(404); // no route
   });
 });

@@ -63,6 +63,10 @@ function planWire(p: PackageRow): Record<string, unknown> {
     limits: p.limits,
     menus: p.menus,
     sub_rules: p.subRules,
+    tagline: p.tagline,
+    mod_label: p.modLabel,
+    color: p.color,
+    popular: p.popular,
     created_at: p.createdAt,
   };
 }
