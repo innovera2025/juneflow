@@ -10,6 +10,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { registerAuditLog, type AuditRecord } from "./audit-log.js";
 
 const COMPANY = "33333333-3333-3333-3333-333333333333";
+const TARGET_COMPANY = "44444444-4444-4444-4444-444444444444";
 
 let app: FastifyInstance;
 afterEach(async () => {
@@ -40,6 +41,12 @@ async function buildApp(): Promise<{ app: FastifyInstance; records: AuditRecord[
   // and a 403 admin read (a denied non-owner) must NOT be logged.
   app.get("/admin/subscribers", async () => ({ ok: true }));
   app.get("/admin/denied", async (_req, reply) => reply.code(403).send({ bad: true }));
+  // B-193 W1a: a cross-tenant WRITE stamps the TARGET tenant on the request; the
+  // audit row must carry THAT company, not the caller's own (COMPANY).
+  app.post("/admin/users/:id/block", async (request) => {
+    request.auditTargetCompanyId = TARGET_COMPANY;
+    return { ok: true };
+  });
   await app.ready();
   return { app, records };
 }
@@ -110,6 +117,16 @@ describe("every successful mutation writes exactly one record", () => {
     await app.inject({ method: "POST", url: "/projects/p1/approve" });
     expect(records).toHaveLength(1);
     expect(records[0]!.action).toBe("approve");
+  });
+
+  it("B-193: a cross-tenant write attributes the audit row to the TARGET tenant, not the caller's own", async () => {
+    const { app, records } = await buildApp();
+    const res = await app.inject({ method: "POST", url: "/admin/users/u-1/block" });
+    expect(res.statusCode).toBe(200);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.companyId).toBe(TARGET_COMPANY); // the affected tenant, NOT COMPANY
+    expect(records[0]!.companyId).not.toBe(COMPANY);
+    expect(records[0]!.action).toBe("block"); // derived from the trailing path segment
   });
 });
 

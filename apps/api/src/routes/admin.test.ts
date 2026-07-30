@@ -25,6 +25,8 @@ import {
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { PlatformDb } from "../db/platform-db.js";
+import { PlatformWriteDb } from "../db/platform-write-db.js";
+import type { AuditRecord } from "../plugins/audit-log.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -42,12 +44,23 @@ interface Captured {
   table: unknown;
   where: SQL | undefined;
 }
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL;
+}
+interface Inserted {
+  table: unknown;
+  values: Record<string, unknown>;
+}
 interface StubOpts {
   rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
+  updated?: Updated[];
+  inserted?: Inserted[];
 }
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [] } = opts;
+  const { rows, captured = [], updated = [], inserted = [] } = opts;
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -71,6 +84,30 @@ function stubDb(opts: StubOpts): Db {
   };
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
+    // UPDATE … RETURNING: echoes the table's stubbed rows with the SET applied
+    // (empty when the table has no rows → models a not-found 0-row update).
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            updated.push({ table, set, where });
+            return Promise.resolve(
+              rowsFor(table, where).map((r) => ({ ...(r as object), ...set })),
+            );
+          },
+        }),
+      }),
+    }),
+    // INSERT … RETURNING: echoes the values with a server-generated id (models
+    // defaultRandom — the door strips any client id before this).
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => ({
+        returning: () => {
+          inserted.push({ table, values });
+          return Promise.resolve([{ id: "new-pkg", createdAt: D0, ...values }]);
+        },
+      }),
+    }),
   };
   return raw as unknown as Db;
 }
@@ -314,5 +351,352 @@ describe("PlatformDb door (B-177) — allowlist fail-closed", () => {
     for (const t of [packages, companies, subscriptions, platformInvoices, users]) {
       expect(() => pdb.selectAllTenants(t)).not.toThrow();
     }
+  });
+});
+
+// ===========================================================================
+// W1a — PlatformWriteDb door (B-193): allowlist + field-strip (self-elevation).
+// ===========================================================================
+describe("PlatformWriteDb door (B-193) — allowlist + strip fail-closed", () => {
+  // A fake Db whose UPDATE…RETURNING captures the SET the door actually applied.
+  function captureFake() {
+    const captured: Array<{ table: unknown; set: Record<string, unknown> }> = [];
+    const db = {
+      update: (table: unknown) => ({
+        set: (set: Record<string, unknown>) => ({
+          where: () => ({
+            returning: () => {
+              captured.push({ table, set });
+              return Promise.resolve([{ id: "x", ...set }]);
+            },
+          }),
+        }),
+      }),
+    } as unknown as Db;
+    return { db, captured };
+  }
+
+  it("throws for a non-allowlisted (tenant ERP) table", async () => {
+    const { db } = captureFake();
+    const wdb = new PlatformWriteDb(db);
+    // roles is a tenant table, NOT on the WRITE allowlist {user, company}.
+    await expect(
+      wdb.updateAllTenants(roles, "r-1", {} as Partial<typeof roles.$inferInsert>),
+    ).rejects.toThrow(/PLATFORM_ADMIN_WRITE_DENIED/);
+  });
+
+  it("STRIPS is_platform_admin / company_id / id from the SET (self-elevation + tenant-move + PK defense)", async () => {
+    const { db, captured } = captureFake();
+    const wdb = new PlatformWriteDb(db);
+    // A smuggled payload trying to mint an owner, move the tenant, and reassign the PK.
+    await wdb.updateAllTenants(users, "u-victim", {
+      status: "blocked",
+      isPlatformAdmin: true,
+      is_platform_admin: true,
+      companyId: "attacker-co",
+      company_id: "attacker-co",
+      id: "some-other-id",
+    } as unknown as Partial<typeof users.$inferInsert>);
+    expect(captured).toHaveLength(1);
+    // ONLY status survives — every owner-flag / tenant / PK key is dropped.
+    expect(captured[0]!.set).toEqual({ status: "blocked" });
+  });
+
+  it("permits the two writable tables (user, company)", async () => {
+    const { db } = captureFake();
+    const wdb = new PlatformWriteDb(db);
+    await expect(
+      wdb.updateAllTenants(users, "u-1", { status: "active" } as Partial<typeof users.$inferInsert>),
+    ).resolves.toBeDefined();
+    await expect(
+      wdb.updateAllTenants(companies, "c-1", { status: "active" } as Partial<typeof companies.$inferInsert>),
+    ).resolves.toBeDefined();
+  });
+});
+
+// ===========================================================================
+// W1a — owner-gated cross-tenant writes (block/unblock/suspend/resume).
+// ===========================================================================
+const OWNER = caller(true);
+// The caller-vs-victim discriminator: loadCaller reads `user` WHERE email=owner;
+// a write reads/returns `user` WHERE id=victim. Same table, different rows.
+const usersByWhere = (victimRows: unknown[]) => (where: SQL | undefined) =>
+  paramsOf(where).includes(SESSION.user.email) ? [OWNER] : victimRows;
+
+const victimUser = {
+  id: "u-victim", companyId: OTHER_COMPANY, email: "victim@other.co.th", name: "Victim",
+  roleId: null, status: "active", isPlatformAdmin: false, department: null, createdAt: D0, updatedAt: D0,
+};
+
+const W1A_WRITES = [
+  ["/api/v1/admin/users/u-victim/block", "block"],
+  ["/api/v1/admin/users/u-victim/unblock", "unblock"],
+  ["/api/v1/admin/subscribers/sub-1/suspend", "suspend"],
+  ["/api/v1/admin/subscribers/sub-1/resume", "resume"],
+] as const;
+
+describe("W1a owner writes (B-193) — owner flips TARGET-tenant status + target audit", () => {
+  it("block: owner blocks a user in ANOTHER tenant → user.status='blocked' + audit companyId=target", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, usersByWhere([victimUser])]], updated }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/users/u-victim/block" });
+    expect(res.statusCode).toBe(200);
+    const w = updated.find((u) => u.table === users)!;
+    expect(w.set).toEqual({ status: "blocked" }); // status flip only
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, userId: "u-0", action: "block" });
+    expect(String(records[0]!.entity)).toContain("admin/users");
+  });
+
+  it("unblock: → user.status='active', action=unblock, audit target company", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, usersByWhere([{ ...victimUser, status: "blocked" }])]], updated }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/users/u-victim/unblock" });
+    expect(res.statusCode).toBe(200);
+    expect(updated.find((u) => u.table === users)!.set).toEqual({ status: "active" });
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, action: "unblock" });
+  });
+
+  it("suspend: resolves subscription→company, flips companies.status='suspended' (NOT subscription), audit target", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [OWNER]],
+            [subscriptions, [sub("sub-1", OTHER_COMPANY)]],
+            [companies, [company(OTHER_COMPANY, "อื่น")]],
+          ],
+          updated,
+        }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/subscribers/sub-1/suspend" });
+    expect(res.statusCode).toBe(200);
+    const w = updated.find((u) => u.table === companies)!;
+    expect(w.set).toEqual({ status: "suspended" });
+    expect(updated.find((u) => u.table === subscriptions)).toBeUndefined(); // never writes subscription
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, action: "suspend" });
+  });
+
+  it("resume: flips companies.status='active', action=resume", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [OWNER]],
+            [subscriptions, [sub("sub-1", OTHER_COMPANY)]],
+            [companies, [company(OTHER_COMPANY, "อื่น", { status: "suspended" })]],
+          ],
+          updated,
+        }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/subscribers/sub-1/resume" });
+    expect(res.statusCode).toBe(200);
+    expect(updated.find((u) => u.table === companies)!.set).toEqual({ status: "active" });
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, action: "resume" });
+  });
+
+  it.each(W1A_WRITES)("403s a valid tenant NON-owner on %s (no write, no audit)", async (url) => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [caller(false)]], // a valid tenant, is_platform_admin=false
+            [subscriptions, [sub("sub-1", OTHER_COMPANY)]],
+            [companies, [company(OTHER_COMPANY, "อื่น")]],
+          ],
+          updated,
+        }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url });
+    expect(res.statusCode).toBe(403);
+    expect(updated).toHaveLength(0); // the write never reached the door
+    expect(records).toHaveLength(0); // and nothing was audited
+  });
+
+  it("404s block on an unknown user id (0-row update)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, usersByWhere([])]] }), // caller resolves; victim id → no row
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/users/nope/block" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ===========================================================================
+// W1b — PlatformWriteDb.insertOne (B-197): its OWN INSERT allowlist + strip.
+// ===========================================================================
+describe("PlatformWriteDb.insertOne (B-197) — INSERT allowlist + strip", () => {
+  function insFake() {
+    const captured: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const db = {
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => ({
+          returning: () => {
+            captured.push({ table, values });
+            return Promise.resolve([{ id: "srv-gen", ...values }]);
+          },
+        }),
+      }),
+    } as unknown as Db;
+    return { db, captured };
+  }
+
+  it("throws for a non-INSERT-allowlisted table — user/company are UPDATE-only (no cross-tenant create)", async () => {
+    const { db } = insFake();
+    const wdb = new PlatformWriteDb(db);
+    await expect(
+      wdb.insertOne(users, { status: "active" } as Partial<typeof users.$inferInsert>),
+    ).rejects.toThrow(/PLATFORM_ADMIN_INSERT_DENIED/);
+    await expect(
+      wdb.insertOne(companies, { name: "x" } as Partial<typeof companies.$inferInsert>),
+    ).rejects.toThrow(/PLATFORM_ADMIN_INSERT_DENIED/);
+  });
+
+  it("permits packages + STRIPS id / is_platform_admin / company_id from the VALUES", async () => {
+    const { db, captured } = insFake();
+    const wdb = new PlatformWriteDb(db);
+    await wdb.insertOne(packages, {
+      name: "Pro",
+      isPlatformAdmin: true,
+      is_platform_admin: true,
+      companyId: "x",
+      company_id: "x",
+      id: "client-pinned-pk",
+    } as unknown as Partial<typeof packages.$inferInsert>);
+    expect(captured).toHaveLength(1);
+    // ONLY name survives — a client can't pin the PK, mint an owner, or inject a tenant.
+    expect(captured[0]!.values).toEqual({ name: "Pro" });
+  });
+});
+
+// ===========================================================================
+// W1b — package CRUD handlers (create/edit · money=SERVER · NO delete).
+// ===========================================================================
+describe("W1b package CRUD (B-197) — owner-gated, money=SERVER, no delete", () => {
+  const okBody = {
+    size: "M", name: "Professional", price: 7900,
+    menus: ["dashboard", "boq"], limits: { projects: -1, users: 20, storage: 100, ai: 50 },
+  };
+
+  it("POST create: owner → 201, price_y DERIVED 10× (ignores a client yearly), currency THB, audit=owner-own action=create", async () => {
+    const inserted: Inserted[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]]], inserted }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/packages", payload: { ...okBody, yearly: 1, price_y: 1 } });
+    expect(res.statusCode).toBe(201);
+    const v = inserted.find((i) => i.table === packages)!.values;
+    expect(v.priceM).toBe("7900.00");
+    expect(v.priceY).toBe("79000.00"); // 10× monthly — NOT the client's yearly:1 (money=SERVER)
+    expect(v.currencyCode).toBe("THB");
+    expect(v.color).toBe("#0B2A4A"); // the M-tier default (client omitted color)
+    // A global catalog change is attributed to the owner's own tenant, action=create.
+    expect(records[0]).toMatchObject({ companyId: COMPANY, action: "create" });
+  });
+
+  it("POST create: a contact/Full tier (no price) → priceM=null AND priceY=null", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]]], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/admin/packages",
+      payload: { size: "Full", name: "Enterprise", contact: true, menus: ["dashboard"] },
+    });
+    expect(res.statusCode).toBe(201);
+    const v = inserted.find((i) => i.table === packages)!.values;
+    expect(v.priceM).toBeNull();
+    expect(v.priceY).toBeNull();
+  });
+
+  it("POST create: 400 on a missing name / empty menus / non-positive price", async () => {
+    const app0 = await buildTestApp({
+      resolveTenant: async () => SESSION,
+      db: stubDb({ rows: [[users, [caller(true)]]] }),
+    });
+    const noName = await app0.inject({ method: "POST", url: "/api/v1/admin/packages", payload: { size: "M", menus: ["x"], price: 100 } });
+    expect(noName.statusCode).toBe(400);
+    const noMenus = await app0.inject({ method: "POST", url: "/api/v1/admin/packages", payload: { size: "M", name: "X", price: 100, menus: [] } });
+    expect(noMenus.statusCode).toBe(400);
+  });
+
+  it("PUT edit: owner → 200, price_y re-derived server-side; unknown id → 404", async () => {
+    const updated: Updated[] = [];
+    const found = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]], [packages, [pkg("pkg-1")]]], updated }),
+      })
+    ).inject({ method: "PUT", url: "/api/v1/admin/packages/pkg-1", payload: { ...okBody, price: 9900 } });
+    expect(found.statusCode).toBe(200);
+    expect(updated.find((u) => u.table === packages)!.set.priceY).toBe("99000.00");
+
+    const missing = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]], [packages, []]] }),
+      })
+    ).inject({ method: "PUT", url: "/api/v1/admin/packages/nope", payload: okBody });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it.each([
+    ["POST", "/api/v1/admin/packages"],
+    ["PUT", "/api/v1/admin/packages/pkg-1"],
+  ])("403s a valid tenant NON-owner on %s %s (no write reached)", async (method, url) => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(false)]], [packages, [pkg("pkg-1")]]], inserted, updated }),
+      })
+    ).inject({ method: method as "POST" | "PUT", url, payload: okBody });
+    expect(res.statusCode).toBe(403);
+    expect(inserted).toHaveLength(0);
+    expect(updated).toHaveLength(0);
+  });
+
+  it("NO delete endpoint (B-196) — DELETE /admin/packages/{id} is not registered", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [caller(true)]]] }),
+      })
+    ).inject({ method: "DELETE", url: "/api/v1/admin/packages/pkg-1" });
+    expect(res.statusCode).toBe(404); // no route
   });
 });

@@ -24,10 +24,14 @@
  *   - CompanyControl roster: name/email/status are REAL from /admin/users; role_id is an
  *     opaque uuid with no name join (role -> em-dash) and there is no last-login field
  *     (-> em-dash); the admin-role avatar/tag heuristic is dropped (a neutral colour).
- *   - EVERY write is MOCK (only GETs merged): export / save-settings / suspend / activate /
- *     block-unblock / reset-password fire faithful ctx.notify toasts (the seat stepper +
- *     block toggle mutate LOCAL React state only, never persisted); invite-user is
- *     honest-DISABLED (no invite endpoint; the invite form is a dropped mock write path).
+ *   - suspend/resume (subscriber) + block/unblock (user) are REAL owner-gated mutations behind
+ *     a title-only confirm (use-admin.ts): suspend/resume flip companies.status (surfaced as
+ *     company_status; the suspend/resume swap branches on THAT field, not subscription.status)
+ *     and invalidate the subscribers read; block/unblock take the roster user id and invalidate
+ *     the users read (the roster is a pure derivation of it, no local copy). The remaining
+ *     writes stay MOCK (no merged handler): export / save-settings / reset-password fire
+ *     faithful ctx.notify toasts (the seat stepper mutates LOCAL React state only, never
+ *     persisted); invite-user is honest-DISABLED (the invite form is a dropped mock write path).
  *
  * i18n (rule 2): every visible string is an admin.subs.* / admin.common.* dict key (t). No
  * Thai literal in source (B-073); tokens back every colour except the prototype-verbatim
@@ -69,7 +73,15 @@ import {
   type PackageRow,
   type UserRow,
 } from "./admin-rows";
-import { useAdminSubscribers, useAdminPackages, useAdminUsers } from "./use-admin";
+import {
+  useAdminSubscribers,
+  useAdminPackages,
+  useAdminUsers,
+  useSuspendSubscriber,
+  useResumeSubscriber,
+  useBlockUser,
+  useUnblockUser,
+} from "./use-admin";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
 const DASH = "—";
@@ -199,12 +211,20 @@ function CompanyControl({
   const { t } = useI18n();
   const ctx = useShellCtx();
 
+  // Owner-gated state mutations. suspend/resume take the SUBSCRIPTION id (sub.id) and invalidate
+  // the subscribers read; block/unblock take the USER id (u.id) and invalidate the users read.
+  const suspend = useSuspendSubscriber();
+  const resume = useResumeSubscriber();
+  const block = useBlockUser();
+  const unblock = useUnblockUser();
+
   const [tab, setTab] = useState<"control" | "users">("control");
   const [pkgId, setPkgId] = useState(sub.packageId);
   const selected = pkgMap.get(pkgId);
   const [seatLimit, setSeatLimit] = useState<number>(selected?.users ?? 0);
-  // A local roster copy so the block toggle mutates state only (mock, no persist).
-  const [roster, setRoster] = useState<UserRow[]>(() => usersForCompany(allUsers, sub.companyId));
+  // The roster is a pure derivation of the /admin/users read (invalidated by block/unblock) —
+  // no local copy, so a real status flip flows back through the query, not an optimistic mock.
+  const roster = useMemo<UserRow[]>(() => usersForCompany(allUsers, sub.companyId), [allUsers, sub.companyId]);
 
   const p = pkgMap.get(pkgId);
   const activeUsers = activeUserCount(roster);
@@ -231,8 +251,6 @@ function CompanyControl({
     const n = Number.parseInt(raw.replace(/\D/g, ""), 10);
     setSeatLimit(Number.isNaN(n) ? 0 : n);
   };
-  const toggleBlock = (i: number) =>
-    setRoster((prev) => prev.map((u, idx) => (idx === i ? { ...u, status: u.status === "blocked" ? "active" : "blocked" } : u)));
 
   const save = () => {
     onClose();
@@ -441,15 +459,34 @@ function CompanyControl({
           )}
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-            {sub.status === "active" ? (
+            {/* suspend/resume flip companies.status (surfaced as company_status) — branch on the
+                COMPANY status field, NOT subscription.status, so the button swaps after a real flip. */}
+            {sub.companyStatus === "active" ? (
               <Btn
                 kind="danger"
                 size="md"
                 icon="x"
-                onClick={() => {
-                  onClose();
-                  ctx.notify(t("admin.subs.suspendToast").replace("{org}", sub.companyName || DASH), "warn");
-                }}
+                disabled={suspend.isPending}
+                onClick={() =>
+                  ctx.confirm({
+                    title: t("admin.subs.suspendBtn"),
+                    subtitle: sub.companyName,
+                    icon: "x",
+                    iconTone: "var(--danger)",
+                    danger: true,
+                    onConfirm: () => {
+                      onClose();
+                      // ctx.confirm unmounts CompanyControl (single modal slot) before the POST
+                      // settles, so a mutate-scoped onSuccess is hasListeners()-gated off the dead
+                      // observer. Fire the toast off the settled promise instead; the hook-level
+                      // invalidateQueries survives (Mutation.execute dispatch, not listener-gated).
+                      suspend
+                        .mutateAsync(sub.id)
+                        .then(() => ctx.notify(t("admin.subs.suspendToast").replace("{org}", sub.companyName || DASH), "warn"))
+                        .catch(() => {});
+                    },
+                  })
+                }
               >
                 {t("admin.subs.suspendBtn")}
               </Btn>
@@ -458,10 +495,24 @@ function CompanyControl({
                 kind="ok"
                 size="md"
                 icon="check"
-                onClick={() => {
-                  onClose();
-                  ctx.notify(t("admin.subs.activateToast").replace("{org}", sub.companyName || DASH));
-                }}
+                disabled={resume.isPending}
+                onClick={() =>
+                  ctx.confirm({
+                    title: t("admin.subs.activateBtn"),
+                    subtitle: sub.companyName,
+                    icon: "check",
+                    iconTone: "var(--ok)",
+                    onConfirm: () => {
+                      onClose();
+                      // Toast off the settled promise — CompanyControl unmounts before the POST
+                      // settles, so a mutate-scoped onSuccess would be dropped (see suspend note).
+                      resume
+                        .mutateAsync(sub.id)
+                        .then(() => ctx.notify(t("admin.subs.activateToast").replace("{org}", sub.companyName || DASH)))
+                        .catch(() => {});
+                    },
+                  })
+                }
               >
                 {t("admin.subs.activateBtn")}
               </Btn>
@@ -546,15 +597,31 @@ function CompanyControl({
                               kind={blocked ? "ok" : "danger"}
                               size="sm"
                               icon={blocked ? "check" : "lock"}
-                              onClick={() => {
-                                toggleBlock(i);
-                                ctx.notify(
-                                  blocked
-                                    ? t("admin.subs.unblockToast").replace("{name}", u.name || DASH)
-                                    : t("admin.subs.blockToast").replace("{name}", u.name || DASH),
-                                  blocked ? "ok" : "warn",
-                                );
-                              }}
+                              // block/unblock take the USER id (u.id); a blank id would POST
+                              // /admin/users//block, so skip it (the render tolerates key={u.id||i}).
+                              disabled={block.isPending || unblock.isPending || !u.id}
+                              onClick={() =>
+                                ctx.confirm({
+                                  title: t(blocked ? "admin.subs.unblockBtn" : "admin.subs.blockBtn"),
+                                  subtitle: u.name,
+                                  icon: blocked ? "check" : "lock",
+                                  iconTone: blocked ? "var(--ok)" : "var(--danger)",
+                                  danger: !blocked,
+                                  // Toast off the settled promise — ctx.confirm unmounts this
+                                  // modal before the POST settles, so a mutate-scoped onSuccess
+                                  // would be dropped off the dead observer (see suspend note).
+                                  onConfirm: () =>
+                                    (blocked ? unblock : block)
+                                      .mutateAsync(u.id)
+                                      .then(() =>
+                                        ctx.notify(
+                                          (blocked ? t("admin.subs.unblockToast") : t("admin.subs.blockToast")).replace("{name}", u.name || DASH),
+                                          blocked ? "ok" : "warn",
+                                        ),
+                                      )
+                                      .catch(() => {}),
+                                })
+                              }
                             >
                               {blocked ? t("admin.subs.unblockBtn") : t("admin.subs.blockBtn")}
                             </Btn>

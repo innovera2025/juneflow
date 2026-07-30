@@ -110,9 +110,12 @@ export async function registerAuditLog(
       if (!isMutation && !isOwnerRead) return;
       // Only successful requests changed/accessed state; a 4xx/5xx did not.
       if (reply.statusCode >= 400) return;
-      // Without a tenant there is nothing to attribute (tenant-scope would already
-      // have rejected it); fail safe by not writing an orphan row.
-      const companyId = request.tenant?.companyId;
+      // Attribute to the TARGET tenant when a platform-owner /admin/* write set
+      // one (B-193 W1a cross-tenant write) — the mutation changed THAT tenant, not
+      // the owner's own — else the caller's own tenant. Without either there is
+      // nothing to attribute (tenant-scope would already have rejected it); fail
+      // safe by not writing an orphan row.
+      const companyId = request.auditTargetCompanyId ?? request.tenant?.companyId;
       if (!companyId) return;
 
       const record: AuditRecord = {

@@ -4373,6 +4373,35 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /admin/users/{id}/unblock:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin]
+      summary: Unblock user (action endpoint)
+      operationId: unblockAdminUser
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /admin/subscribers/{id}/resume:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [admin]
+      summary: Resume subscriber (action endpoint)
+      operationId: resumeAdminSubscriber
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 
 components:
   securitySchemes:
