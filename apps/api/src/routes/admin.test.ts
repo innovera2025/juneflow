@@ -26,6 +26,7 @@ import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { PlatformDb } from "../db/platform-db.js";
 import { PlatformWriteDb } from "../db/platform-write-db.js";
+import type { DunningNotice } from "./admin.js";
 import type { AuditRecord } from "../plugins/audit-log.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
@@ -132,6 +133,7 @@ async function buildTestApp(overrides: Partial<AppDeps> = {}): Promise<FastifyIn
       overrides.quota ??
       new QuotaGuard({ resolver: unlimitedQuotaResolver, upgradeUrl: "https://upgrade.test" }),
     auditSink: overrides.auditSink ?? (async () => {}),
+    notify: overrides.notify,
     logger: false,
   });
   await app.ready();
@@ -811,5 +813,80 @@ describe("W1b/B-200 — package create/edit requires a non-empty limits (no quot
     expect(noLimits.statusCode).toBe(400);
     const emptyLimits = await app0.inject({ method: "PUT", url: "/api/v1/admin/packages/pkg-1", payload: { size: "M", name: "X", price: 100, menus: ["d"], limits: {} } });
     expect(emptyLimits.statusCode).toBe(400);
+  });
+});
+
+// ===========================================================================
+// W1d — POST /admin/invoices/{id}/remind (dunning · owner-gated · audit + notify).
+// ===========================================================================
+describe("W1d dunning remind (B-188/189) — owner-gated, real audit, notification, no money", () => {
+  const stub = (o: { owner?: boolean; status?: string; hasInvoice?: boolean; hasSub?: boolean } = {}) =>
+    stubDb({
+      rows: [
+        [users, [caller(o.owner ?? true)]],
+        [platformInvoices, o.hasInvoice === false ? [] : [invoice("inv-1", { status: o.status ?? "overdue" })]],
+        [subscriptions, o.hasSub === false ? [] : [sub("sub-1", OTHER_COMPANY)]],
+      ],
+    });
+
+  it("owner + overdue → 200; a REAL audit (action=remind, DUNNED tenant); notification fired once", async () => {
+    const records: AuditRecord[] = [];
+    const notices: DunningNotice[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stub({}),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+        notify: (n) => { notices.push(n); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/invoices/inv-1/remind" });
+    expect(res.statusCode).toBe(200);
+    // the audit is REAL (the prototype toast only claimed it) — attributed to the dunned tenant.
+    expect(records[0]).toMatchObject({ action: "remind", companyId: OTHER_COMPANY });
+    expect(String(records[0]!.entity)).toContain("admin/invoices");
+    // the side-effect notification carries SERVER-derived recipient/amount (no client text).
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ companyId: OTHER_COMPANY, invoiceId: "inv-1", amount: "7900.00" });
+  });
+
+  it("403 a valid tenant NON-owner (before any read) — no audit, no notification", async () => {
+    const records: AuditRecord[] = [];
+    const notices: DunningNotice[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stub({ owner: false }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+        notify: (n) => { notices.push(n); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/invoices/inv-1/remind" });
+    expect(res.statusCode).toBe(403);
+    expect(records).toHaveLength(0);
+    expect(notices).toHaveLength(0);
+  });
+
+  it("404 an unknown invoice; 400 a non-overdue invoice (prototype gates the button to overdue)", async () => {
+    const notFoundRes = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stub({ hasInvoice: false }) })
+    ).inject({ method: "POST", url: "/api/v1/admin/invoices/ghost/remind" });
+    expect(notFoundRes.statusCode).toBe(404);
+    const notOverdue = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stub({ status: "paid" }) })
+    ).inject({ method: "POST", url: "/api/v1/admin/invoices/inv-1/remind" });
+    expect(notOverdue.statusCode).toBe(400);
+  });
+
+  it("a throwing notifier (future real LINE TODO) degrades to a log — remind still 200s + audits", async () => {
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stub({}),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+        notify: () => { throw new Error("TODO(P0-INT-03) LINE send not built"); },
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/invoices/inv-1/remind" });
+    expect(res.statusCode).toBe(200); // the try/catch never lets the adapter 500 the remind
+    expect(records[0]).toMatchObject({ action: "remind" }); // and the audit still fires
   });
 });
