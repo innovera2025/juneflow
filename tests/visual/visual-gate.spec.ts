@@ -318,6 +318,13 @@ interface ManifestEntry {
   // between capture and reference dimensions auto-FAILs (PLAN.md §0), so the run
   // must shoot at the reference size.
   viewport?: { width: number; height: number };
+  // B-187 (2026-07-30): per-row sidebar viewMode. "platform" seeds
+  // juneflow-state={tweaks:{viewMode:'platform'}} in localStorage BEFORE the app
+  // boots so an owner-only screen (admin.*) renders the SAME platform sidebar its
+  // app-baseline was captured with. Omit -> the app defaults to "tenant"
+  // (unchanged for every other row). viewMode is a sidebar-only gate; screen
+  // bodies enable on authed() — the owner (wipha) token renders both sidebars.
+  viewMode?: "tenant" | "platform";
 }
 
 function loadManifest(): ManifestEntry[] {
@@ -366,6 +373,27 @@ test.describe("visual gate · capture mode (real screens vs reference)", () => {
       // which equals the fixed-size reference (the Fiori shell is 100vh — the
       // content pane scrolls internally, not the page).
       await page.setViewportSize(entry.viewport ?? { width: 1600, height: 1000 });
+      // B-187: seed the sidebar viewMode BEFORE the app boots. The run
+      // storageState seeds only juneflow-token; the app's tweaks/viewMode
+      // (localStorage "juneflow-state", shell-context.tsx STATE_KEY) then defaults
+      // to "tenant". The 3 platform-owner admin.* baselines were captured with the
+      // owner (platform) sidebar, so seeding juneflow-state here makes the capture
+      // render the SAME sidebar the baseline has (~2.2% whole-sidebar mismatch → 0).
+      // addInitScript runs before any page script on every navigation, so
+      // ShellProvider's loadTweaks() reads it on mount. Rows without entry.viewMode
+      // are untouched → default "tenant" (unchanged behaviour for every other row).
+      if (entry.viewMode) {
+        await page.addInitScript((mode) => {
+          try {
+            window.localStorage.setItem(
+              "juneflow-state",
+              JSON.stringify({ tweaks: { viewMode: mode } })
+            );
+          } catch {
+            /* localStorage unavailable — leave default tenant viewMode */
+          }
+        }, entry.viewMode);
+      }
       // B-120 (regression gate): wait for the DATA to settle before shooting.
       // Default goto resolves at `load` — TanStack Query fetches are still in
       // flight then, so the shot captures skeleton/loading frames and the gate

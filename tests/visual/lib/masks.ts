@@ -153,6 +153,37 @@ export const MASK_REGISTRY: Record<string, MaskRegion> = {
       "B-160 (class B-120(ข)) — sub.mine contract-start value (formatDate(me.startedAt), sub-mine.tsx:161) renders the seed-time start date '2026-07-29' (= seed day); latent daily drift (passes today only by margin). Covers ONLY the startedAt value cell (measured x723-788 y401-420), not its label nor the fixed renewAt row below",
   },
 
+  // B-187 date-column masks (B-160 class, exposed once the viewMode fix landed).
+  // The admin.* baselines were captured in PLATFORM viewMode; the gate seeded only
+  // juneflow-token -> tenant sidebar -> a whole-sidebar ~2.2% mismatch that DOMINATED
+  // the diff and hid the body. B-187 seeds juneflow-state={tweaks:{viewMode:platform}}
+  // per-row (screens.manifest.json "viewMode" + visual-gate.spec.ts addInitScript), so
+  // the sidebar is now pixel-identical (admin.plans = 0.0000%). That uncovered a small,
+  // deterministic BODY residual on two rows -- the SAME server/seed date-drift class as
+  // the b160 masks above, which B-160 had explicitly deferred here (admin.* left
+  // untouched). Proven date-drift, not a regression: identical committed dev code +
+  // identical deterministic seed + identical viewMode make admin.plans and every sibling
+  // screen 0%, so wall-clock rendering is the ONLY variable; capture-twice is byte-stable
+  // (RUN A == RUN B). Each rect wraps ONLY its column data cells (below the header, clear
+  // of both neighbours -- measured live), threshold stays strict, dimensionMismatch still
+  // auto-FAILs, and maskedDiffPixels is reported so the absorbed drift stays visible.
+  "admin-subs-renew-b187": {
+    x: 1322,
+    y: 290,
+    width: 100,
+    height: 540,
+    reason:
+      "B-187 (class B-160 / B-120) - admin.subs renew (ต่ออายุ) column renders renew_at overdue-TINTED (admin-subs.tsx: REAL renew_at, tint flips as now() passes the seed date) so the cell colour/text drifts vs an older platform-mode baseline. Covers only the renew data cells (measured red x1341-1398 y294-824; cell band x1330-1417), clear of MRR (ends x1304) and the status badges (start x1480)",
+  },
+  "admin-invoices-date-b187": {
+    x: 1104,
+    y: 374,
+    width: 78,
+    height: 366,
+    reason:
+      "B-187 (class B-160 / B-120) - admin.invoices date (วันที่) column renders each invoice seed-day date as YYYY-MM-DD (baseline froze 2026-07-28; a fresh stack re-seeds to the current day) so the day digits drift vs an older baseline. Covers only the date-text data cells (measured text x1110-1172 y381-731; changing digits x1160-1173), clear of the amount column (starts x1285)",
+  },
+
   // B-044(ก) — Wei ruling 2026-07-13: the port's t("app.name") th =
   // "ระบบงานก่อสร้าง" is CORRECT; all ~128 reference images carry an older
   // logo lockup (lowercase "juneflow" wordmark + English "Construction ERP"
