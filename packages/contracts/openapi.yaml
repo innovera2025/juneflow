@@ -4402,6 +4402,33 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /subscription/change-plan:
+    post:
+      tags: [subscription]
+      summary: Change the tenant's own subscription plan (POST {package_id,cycle})
+      operationId: changeSubscriptionPlan
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /subscription/renew:
+    post:
+      tags: [subscription]
+      summary: Renew the tenant's own subscription (action endpoint)
+      operationId: renewSubscription
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
 
 components:
   securitySchemes:

@@ -26,12 +26,18 @@ interface Captured {
   table: unknown;
   where: SQL | undefined;
 }
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL;
+}
 interface StubOpts {
   rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
+  updated?: Updated[];
 }
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [] } = opts;
+  const { rows, captured = [], updated = [] } = opts;
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -55,6 +61,23 @@ function stubDb(opts: StubOpts): Db {
   };
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
+    // TenantDb.update() awaits the builder WITHOUT .returning() (no RETURNING), so
+    // capture on BOTH the await (.then) and .returning() paths.
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => {
+          const exec = () => {
+            updated.push({ table, set, where });
+            return rowsFor(table, where).map((r) => ({ ...(r as object), ...set }));
+          };
+          return {
+            returning: () => Promise.resolve(exec()),
+            then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+              Promise.resolve(exec()).then(onOk, onErr),
+          };
+        },
+      }),
+    }),
   };
   return raw as unknown as Db;
 }
@@ -206,5 +229,86 @@ describe("GET /api/v1/subscription/invoices", () => {
     // platform_invoice → subscription join) — never another tenant's invoices.
     const where = captured.find((c) => c.table === platformInvoices)?.where;
     expect(paramsOf(where)).toContain(COMPANY);
+  });
+});
+
+// ===========================================================================
+// W1c — tenant self-service writes (change-plan + renew · auto-scoped).
+// ===========================================================================
+describe("POST /api/v1/subscription/change-plan (B-201)", () => {
+  it("401s without a session", async () => {
+    const res = await (await buildTestApp()).inject({ method: "POST", url: "/api/v1/subscription/change-plan", payload: { package_id: "pkg-new", cycle: "yearly" } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("swaps the tenant's OWN package+cycle (company-scoped WHERE), 200, no proration write", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[subscriptions, [sub("sub-1")]], [packages, [pkg("pkg-new")]]], updated }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/subscription/change-plan", payload: { package_id: "pkg-new", cycle: "yearly" } });
+    expect(res.statusCode).toBe(200);
+    const w = updated.find((u) => u.table === subscriptions)!;
+    expect(w.set).toEqual({ packageId: "pkg-new", cycle: "yearly" }); // only plan+cycle
+    expect(paramsOf(w.where)).toContain(COMPANY); // auto-scope: only the tenant's own sub
+    expect(updated.find((u) => u.table === platformInvoices)).toBeUndefined(); // NO prorated charge (B-191)
+  });
+
+  it("400 a bad cycle / missing package_id; 404 an unknown package / no subscription", async () => {
+    const good = { resolveTenant: async () => SESSION, db: stubDb({ rows: [[subscriptions, [sub("sub-1")]], [packages, [pkg("pkg-new")]]] }) };
+    const app0 = await buildTestApp(good);
+    expect((await app0.inject({ method: "POST", url: "/api/v1/subscription/change-plan", payload: { package_id: "pkg-new", cycle: "weekly" } })).statusCode).toBe(400);
+    expect((await app0.inject({ method: "POST", url: "/api/v1/subscription/change-plan", payload: { cycle: "yearly" } })).statusCode).toBe(400);
+    await app0.close();
+    const noPkg = await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[subscriptions, [sub("sub-1")]], [packages, []]] }) });
+    expect((await noPkg.inject({ method: "POST", url: "/api/v1/subscription/change-plan", payload: { package_id: "ghost", cycle: "yearly" } })).statusCode).toBe(404);
+    await noPkg.close();
+    const noSub = await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[subscriptions, []], [packages, [pkg("pkg-new")]]] }) });
+    expect((await noSub.inject({ method: "POST", url: "/api/v1/subscription/change-plan", payload: { package_id: "pkg-new", cycle: "yearly" } })).statusCode).toBe(404);
+  });
+});
+
+describe("POST /api/v1/subscription/renew (B-201)", () => {
+  it("401s without a session", async () => {
+    const res = await (await buildTestApp()).inject({ method: "POST", url: "/api/v1/subscription/renew" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("advances renew_at exactly one cycle in UTC; keeps status + cycle; ignores a client date", async () => {
+    const updated: Updated[] = [];
+    const base = new Date("2026-01-15T00:00:00Z");
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[subscriptions, [sub("sub-1", { cycle: "monthly", renewAt: base, status: "active" })]], [packages, [pkg("pkg-1")]]], updated }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/subscription/renew", payload: { renew_at: "2099-01-01T00:00:00Z" } });
+    expect(res.statusCode).toBe(200);
+    const w = updated.find((u) => u.table === subscriptions)!;
+    expect((w.set.renewAt as Date).toISOString()).toBe("2026-02-15T00:00:00.000Z"); // +1 month, NOT the client 2099
+    expect(w.set.status).toBeUndefined(); // no invented status transition
+    expect(w.set.cycle).toBeUndefined(); // renew keeps the stored cycle
+    expect(paramsOf(w.where)).toContain(COMPANY); // own sub only
+  });
+
+  it("yearly cycle → +1 year", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[subscriptions, [sub("sub-1", { cycle: "yearly", renewAt: new Date("2026-12-31T00:00:00Z") })]], [packages, [pkg("pkg-1")]]], updated }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/subscription/renew" });
+    expect(res.statusCode).toBe(200);
+    expect((updated.find((u) => u.table === subscriptions)!.set.renewAt as Date).toISOString()).toBe("2027-12-31T00:00:00.000Z");
+  });
+
+  it("404 when the tenant has no subscription", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[subscriptions, []]] }) })
+    ).inject({ method: "POST", url: "/api/v1/subscription/renew" });
+    expect(res.statusCode).toBe(404);
   });
 });
