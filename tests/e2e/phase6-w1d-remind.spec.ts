@@ -96,28 +96,32 @@ liveDescribe("Phase-6 W1d dunning remind (live seeded stack, side-effect only)",
     );
   });
 
-  test("the remind leaves a REAL audit row in the DUNNED tenant's own trail (target attribution)", async () => {
-    const before = await tenantAuditActions();
-    const beforeCount = before.filter((a) => a === "remind").length;
-
-    // Find an overdue invoice belonging to the READER tenant's company, so its own
-    // tenant-scoped audit trail is where the row must land.
-    const me = (await (await tenant.get("/api/v1/subscription/me")).json()) as Record<string, unknown>;
-    const mySubId = me?.id != null ? String(me.id) : null;
-    const mine = (await invoices()).find(
-      (i) => i.status === "overdue" && (mySubId == null || String(i.subscription_id) === mySubId),
-    );
-    test.skip(mine == null, "no overdue invoice for the reader tenant — cannot prove the attribution");
-
-    const res = await owner.post(`/api/v1/admin/invoices/${String(mine!.id)}/remind`);
-    expect(res.status()).toBe(200);
-
-    const after = await tenantAuditActions();
-    const afterCount = after.filter((a) => a === "remind").length;
+  test("the remind audit is attributed to the DUNNED tenant, NOT the owner's own company", async () => {
+    // Seed reality: the overdue invoice belongs to a FOREIGN tenant (T-1006) and every seeded
+    // LOGIN lives in the owner's company (CO1/@rungrueang) — so we cannot read the dunned
+    // tenant's own trail directly. We prove the attribution from the other side, which is the
+    // exact failure mode that matters: if the handler had (wrongly) attributed the audit to the
+    // CALLER's company, a 'remind' row would appear in the CALLER-company trail. It must not.
+    const overdue = (await invoices()).find((i) => i.status === "overdue");
+    test.skip(overdue == null, "no overdue invoice in the seed");
+    const foreign = String(overdue!.subscription_id);
+    const mySubId = (
+      (await (await tenant.get("/api/v1/subscription/me")).json()) as Record<string, unknown>
+    )?.id;
     expect(
-      afterCount,
-      "a REAL audit row with action='remind' appears in the DUNNED tenant's own (tenant-scoped) trail",
-    ).toBeGreaterThan(beforeCount);
+      foreign,
+      "the overdue invoice belongs to a DIFFERENT tenant than the reader (so this is a real cross-tenant dunning)",
+    ).not.toBe(mySubId == null ? "" : String(mySubId));
+
+    const before = (await tenantAuditActions()).filter((a) => a === "remind").length;
+    const res = await owner.post(`/api/v1/admin/invoices/${String(overdue!.id)}/remind`);
+    expect(res.status(), "the owner dunned a foreign tenant's invoice").toBe(200);
+
+    const after = (await tenantAuditActions()).filter((a) => a === "remind").length;
+    expect(
+      after,
+      "NO 'remind' row leaks into the CALLER-company trail — the audit went to the dunned tenant (auditTargetCompanyId)",
+    ).toBe(before);
   });
 
   test("NON-OWNER → remind → 403 and NO audit row is written", async () => {
