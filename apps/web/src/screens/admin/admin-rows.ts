@@ -6,7 +6,7 @@
  *   GET /admin/packages    packageWire   { id, size, name, price_m, price_y, currency_code,
  *                                          limits, menus, sub_rules }
  *   GET /admin/subscribers subscriberWire { id, company_id, company_name, company_status,
- *                                          package_id, cycle, renew_at, status }
+ *                                          package_id, cycle, renew_at, status, seats }
  *   GET /admin/users       userWire      { id, company_id, email, name, role_id, status,
  *                                          department }
  *   GET /admin/invoices    invoiceWire   { id, subscription_id, amount, currency_code,
@@ -339,6 +339,15 @@ export interface SubscriberRow {
   renewAt: string;
   /** subscription_status: trial | active | expiring | overdue | cancelled. */
   status: string;
+  /** The subscription's seat override (-1 = unlimited); null -> fall back to the package's users limit. */
+  seats: number | null;
+}
+
+/** A finite integer, or null (absent / non-integer -> "use the package default"). */
+function intOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  const n = num(v);
+  return Number.isInteger(n) ? n : null;
 }
 
 /** Narrow an opaque /admin/subscribers Entity row to a SubscriberRow. */
@@ -352,6 +361,7 @@ export function toSubscriberRow(e: Record<string, unknown>): SubscriberRow {
     cycle: str(e.cycle),
     renewAt: str(e.renew_at ?? e.renewAt),
     status: str(e.status),
+    seats: intOrNull(e.seats),
   };
 }
 
@@ -628,18 +638,15 @@ export function canManageUser(id: string): boolean {
 }
 
 /**
- * Fire an id-keyed mutation and route the SETTLED promise to a success/failure callback
- * (subscription-admin.jsx suspend/resume/block/unblock): mutateAsync(id).then(onOk).catch(onErr).
- * The toast fires off the settled promise (not a mutate-scoped onSuccess) because ctx.confirm
- * unmounts the modal before the POST settles; this helper holds ZERO component state, so onOk /
- * onErr each run exactly once regardless of the caller's mount lifecycle. Returns the chain so a
- * test can await it (the screen fires-and-forgets the result).
+ * Run a mutation thunk and route the SETTLED promise to a success/failure callback
+ * (subscription-admin.jsx suspend/resume/block/unblock + the W1c set-package / change-plan /
+ * renew writes): run().then(onOk).catch(onErr). The toast fires off the settled promise (not a
+ * mutate-scoped onSuccess) because the modal unmounts before the POST/PUT settles; this helper
+ * holds ZERO component state, so onOk / onErr each run exactly once regardless of the caller's
+ * mount lifecycle. The caller supplies the thunk so it fits both id-keyed mutations
+ * (`() => suspend.mutateAsync(sub.id)`) and body / no-arg mutations (`() => renew.mutateAsync()`).
+ * Returns the chain so a test can await it (the screen fires-and-forgets the result).
  */
-export function fireWithToast(
-  mutateAsync: (id: string) => Promise<unknown>,
-  id: string,
-  onOk: () => void,
-  onErr: () => void,
-): Promise<void> {
-  return mutateAsync(id).then(onOk).catch(onErr);
+export function fireWithToast(run: () => Promise<unknown>, onOk: () => void, onErr: () => void): Promise<void> {
+  return run().then(onOk).catch(onErr);
 }

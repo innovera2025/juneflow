@@ -146,6 +146,7 @@ describe("toSubscriberRow / subStatusInfo / deriveMrr / filterSubscribers", () =
     cycle: "yearly",
     renewAt: "2026-12-31T00:00:00Z",
     status: "active",
+    seats: null,
     ...over,
   });
 
@@ -187,7 +188,14 @@ describe("toSubscriberRow / subStatusInfo / deriveMrr / filterSubscribers", () =
       cycle: "yearly",
       renewAt: "2026-06-24T00:00:00Z",
       status: "trial",
+      seats: null,
     });
+  });
+
+  it("narrows the seat override (-1 unlimited / integer kept / absent -> null)", () => {
+    expect(toSubscriberRow({ id: "T-1", seats: 25 }).seats).toBe(25);
+    expect(toSubscriberRow({ id: "T-1", seats: -1 }).seats).toBe(-1);
+    expect(toSubscriberRow({ id: "T-1" }).seats).toBeNull();
   });
 
   it("maps subscription status to tone + label discriminant (expiring -> raw)", () => {
@@ -564,7 +572,7 @@ describe("admin.subs + pkg mutation wiring (B-200b)", () => {
     const mutateAsync = vi.fn().mockResolvedValue(undefined);
     const onOk = vi.fn();
     const onErr = vi.fn();
-    await fireWithToast(mutateAsync, "u1", onOk, onErr);
+    await fireWithToast(() => mutateAsync("u1"), onOk, onErr);
     expect(mutateAsync).toHaveBeenCalledWith("u1");
     expect(onOk).toHaveBeenCalledTimes(1);
     expect(onErr).not.toHaveBeenCalled();
@@ -574,7 +582,7 @@ describe("admin.subs + pkg mutation wiring (B-200b)", () => {
     const mutateAsync = vi.fn().mockRejectedValue(new Error("boom"));
     const onOk = vi.fn();
     const onErr = vi.fn();
-    await expect(fireWithToast(mutateAsync, "u1", onOk, onErr)).resolves.toBeUndefined();
+    await expect(fireWithToast(() => mutateAsync("u1"), onOk, onErr)).resolves.toBeUndefined();
     expect(onOk).not.toHaveBeenCalled();
     expect(onErr).toHaveBeenCalledTimes(1);
   });

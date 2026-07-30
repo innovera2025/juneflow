@@ -22,8 +22,11 @@
  * server state (companies.status / users.status) and invalidates its own read key. The package
  * create/edit writes (POST /admin/packages, PUT /admin/packages/{id}) are likewise real (W1b,
  * B-197) — money = SERVER (price_y is DERIVED server-side; the client sends price_m only) and
- * both invalidate ADMIN_PACKAGES_KEY. The remaining prototype writes (save-settings, reset-pw,
- * invite, remind, export) have NO merged handler and stay honest toasts / honest-disabled.
+ * both invalidate ADMIN_PACKAGES_KEY. The CompanyControl "Save settings" write is real too
+ * (W1c, PUT /admin/subscribers/{id}/package) — it writes package_id + a seat override onto the
+ * subscription row (money = SERVER) and invalidates ADMIN_SUBSCRIBERS_KEY. The remaining
+ * prototype writes (reset-pw, invite, remind, export) have NO merged handler and stay honest
+ * toasts / honest-disabled.
  */
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { components } from "@juneflow/contracts";
@@ -153,5 +156,22 @@ export function useUpdatePackage(id: string): UseMutationResult<Entity, unknown,
   return useMutation({
     mutationFn: (body: Entity) => unwrap(apiClient.PUT("/admin/packages/{id}", { params: { path: { id } }, body })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_PACKAGES_KEY }),
+  });
+}
+
+/* ---------------------------------------------------------------------------------------- */
+/* Subscriber package change (W1c) — the owner-gated CompanyControl "Save settings" write.    */
+/* PUT /admin/subscribers/{id}/package writes package_id + a seat override directly onto the  */
+/* SUBSCRIPTION row (the id is that subscription id, in the PATH). Body = the opaque           */
+/* {package_id, seats}; money = SERVER (no client price). Invalidates the subscribers read     */
+/* ONLY — the package catalogue is untouched.                                                 */
+/* ---------------------------------------------------------------------------------------- */
+
+/** PUT /admin/subscribers/{id}/package — id = the SUBSCRIPTION id (PATH); body = {package_id, seats}. */
+export function useSetSubscriberPackage(id: string): UseMutationResult<Entity, unknown, Entity> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Entity) => unwrap(apiClient.PUT("/admin/subscribers/{id}/package", { params: { path: { id } }, body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_SUBSCRIBERS_KEY }),
   });
 }
