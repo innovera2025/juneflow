@@ -29,18 +29,28 @@
 import type { SQL } from "drizzle-orm";
 import { eq } from "drizzle-orm";
 import type { PgColumn, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
-import { companies, packages, users } from "@juneflow/db/schema";
+import { companies, packages, subscriptions, users } from "@juneflow/db/schema";
 import type { Db } from "@juneflow/db/client";
 import { TenantScopeError } from "./tenant-db.js";
 
 /**
  * The tables the platform owner may UPDATE through this door — the writable admin
- * subset: user (block/unblock), company (suspend/resume), and package (edit the
- * global plan catalog, B-197). Narrower than PlatformDb's read allowlist. Extend
- * ONLY for a genuinely platform-admin-WRITABLE table alongside an owner-gated
- * write handler.
+ * subset: user (block/unblock), company (suspend/resume), package (edit the global
+ * plan catalog, B-197), and subscription (set a tenant's plan/seats, B-201).
+ * Narrower than PlatformDb's read allowlist. Extend ONLY for a genuinely
+ * platform-admin-WRITABLE table alongside an owner-gated write handler.
+ *
+ * NOTE on the company_id strip: package is GLOBAL (no company_id), but subscription
+ * is a TENANT-owned table WITH company_id — so for it the updateAllTenants
+ * company_id strip is LOAD-BEARING: it stops an owner re-homing a subscription to
+ * another tenant (a smuggled company_id in the set is dropped).
  */
-const WRITE_TABLES: ReadonlySet<PgTable> = new Set<PgTable>([users, companies, packages]);
+const WRITE_TABLES: ReadonlySet<PgTable> = new Set<PgTable>([
+  users,
+  companies,
+  packages,
+  subscriptions,
+]);
 
 /**
  * The tables the platform owner may CREATE (INSERT) through this door — a
@@ -80,7 +90,7 @@ export class PlatformWriteDb {
     if (!WRITE_TABLES.has(table)) {
       throw new TenantScopeError(
         "PLATFORM_ADMIN_WRITE_DENIED: not a platform-admin-writable table " +
-          "(allowlist: user, company, package)",
+          "(allowlist: user, company, package, subscription)",
       );
     }
     const {

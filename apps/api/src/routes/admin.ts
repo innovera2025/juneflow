@@ -73,6 +73,13 @@ function packageValues(b: Record<string, unknown>): string | Record<string, unkn
   }
   const menus = Array.isArray(b.menus) ? (b.menus as unknown[]) : null;
   if (!menus || menus.length === 0) return "menus is required (at least one nav id)";
+  // B-200: require a non-empty limits object. An omitted/empty limits on an EDIT
+  // would persist {} and WIPE the plan's quota LIVE for every subscriber on it
+  // (the resolver reads package.limits fresh) — never silently zero the fleet.
+  const limits = b.limits;
+  if (!limits || typeof limits !== "object" || Array.isArray(limits) || Object.keys(limits).length === 0) {
+    return "limits is required (a non-empty quota object)";
+  }
   const contact = b.contact === true;
   const priceRaw = toNum(pick(b, "price", "price_m"));
   if (!contact && (priceRaw == null || priceRaw <= 0)) {
@@ -88,7 +95,7 @@ function packageValues(b: Record<string, unknown>): string | Record<string, unkn
     priceM: moneyStr(priceM),
     priceY: moneyStr(priceY),
     currencyCode: "THB", // server-set — the client never overrides the currency
-    limits: b.limits ?? {},
+    limits,
     menus,
     subRules: pick(b, "sub_rules", "subRules") ?? {},
     tagline: str(pick(b, "tagline")).trim() || null,
@@ -144,6 +151,7 @@ function subscriberWire(s: SubscriptionRow, company: CompanyRow | undefined): Re
     cycle: s.cycle,
     renew_at: s.renewAt,
     status: s.status,
+    seats: s.seats, // B-195: the per-subscriber seat override (null = package default)
     created_at: s.createdAt,
   };
 }
@@ -333,4 +341,48 @@ export function registerAdminRoutes(
 
   // NO DELETE /admin/packages/{id} — B-196=ก: the prototype exposes no delete
   // affordance, and deleting a referenced plan would orphan every subscription.
+
+  // PUT /admin/subscribers/{id}/package — owner changes a tenant's plan (+seats).
+  // W1c (B-201). {id} is a SUBSCRIPTION id, written DIRECTLY. subscription CARRIES
+  // company_id (a tenant-owned table, unlike the global package) → the company_id
+  // STRIP in updateAllTenants is LOAD-BEARING here: an owner must NEVER re-home a
+  // sub to another tenant. Audit → the TARGET tenant. Zero-money (no price/proration).
+  app.put("/admin/subscribers/:id/package", async (request, reply) => {
+    const caller = await ownerOnly(request, reply); // 403 before ANY read/write
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const body = (request.body ?? {}) as Record<string, unknown>;
+
+    // FK pre-check: package_id is a NOT-NULL FK (onDelete:restrict) — a bad id
+    // would surface as a raw 23503 → 500. Resolve it to a clean 400/404 first.
+    const packageId = str(pick(body, "package_id", "packageId")).trim();
+    if (!packageId) return badRequest(reply, "package_id is required");
+    const [pkg] = (await platformDb.selectAllTenants(
+      packages,
+      eq(packages.id, packageId),
+    )) as PackageRow[];
+    if (!pkg) return notFound(reply, `package ${packageId} not found`);
+
+    const set: Record<string, unknown> = { packageId };
+    // seats override: integer; -1 = unlimited, else >= 1. Omitted → untouched.
+    const seatsRaw = pick(body, "seats");
+    if (seatsRaw != null) {
+      const seats = toNum(seatsRaw);
+      if (seats == null || !Number.isInteger(seats) || (seats !== -1 && seats < 1)) {
+        return badRequest(reply, "seats must be a positive integer or -1 (unlimited)");
+      }
+      set.seats = seats;
+    }
+
+    // The door strips company_id/companyId/id/is_platform_admin; packageId/seats pass.
+    const [updated] = await platformWriteDb.updateAllTenants(subscriptions, id, set);
+    if (!updated) return notFound(reply, `subscriber ${id} not found`);
+
+    const [company] = (await platformDb.selectAllTenants(
+      companies,
+      eq(companies.id, updated.companyId),
+    )) as CompanyRow[];
+    request.auditTargetCompanyId = updated.companyId; // the AFFECTED tenant
+    return reply.code(200).send(subscriberWire(updated, company));
+  });
 }

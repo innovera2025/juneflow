@@ -634,7 +634,7 @@ describe("W1b package CRUD (B-197) — owner-gated, money=SERVER, no delete", ()
     ).inject({
       method: "POST",
       url: "/api/v1/admin/packages",
-      payload: { size: "Full", name: "Enterprise", contact: true, menus: ["dashboard"] },
+      payload: { size: "Full", name: "Enterprise", contact: true, menus: ["dashboard"], limits: { projects: -1, users: -1, storage: -1, ai: -1 } },
     });
     expect(res.statusCode).toBe(201);
     const v = inserted.find((i) => i.table === packages)!.values;
@@ -698,5 +698,118 @@ describe("W1b package CRUD (B-197) — owner-gated, money=SERVER, no delete", ()
       })
     ).inject({ method: "DELETE", url: "/api/v1/admin/packages/pkg-1" });
     expect(res.statusCode).toBe(404); // no route
+  });
+});
+
+// ===========================================================================
+// W1c — subscriptions in the WRITE (not INSERT) allowlist + the load-bearing strip.
+// ===========================================================================
+describe("PlatformWriteDb — subscriptions (B-201): UPDATE-allowed, INSERT-denied, company_id strip", () => {
+  function wFake() {
+    const upd: Array<{ table: unknown; set: Record<string, unknown> }> = [];
+    const db = {
+      update: (table: unknown) => ({
+        set: (set: Record<string, unknown>) => ({
+          where: () => ({ returning: () => { upd.push({ table, set }); return Promise.resolve([{ id: "x", companyId: "c", ...set }]); } }),
+        }),
+      }),
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => ({ returning: () => Promise.resolve([{ id: "x", ...values }]) }),
+      }),
+    } as unknown as Db;
+    return { db, upd };
+  }
+  it("updateAllTenants(subscriptions, …) is allowed (subscriptions ∈ WRITE_TABLES)", async () => {
+    const { db } = wFake();
+    await expect(
+      new PlatformWriteDb(db).updateAllTenants(subscriptions, "sub-1", { packageId: "p" } as Partial<typeof subscriptions.$inferInsert>),
+    ).resolves.toBeDefined();
+  });
+  it("insertOne(subscriptions, …) THROWS — subscriptions is NOT in INSERT_TABLES (created at signup only)", async () => {
+    const { db } = wFake();
+    await expect(
+      new PlatformWriteDb(db).insertOne(subscriptions, { packageId: "p" } as Partial<typeof subscriptions.$inferInsert>),
+    ).rejects.toThrow(/PLATFORM_ADMIN_INSERT_DENIED/);
+  });
+  it("STRIPS a smuggled company_id/id on a subscription UPDATE (load-bearing: no tenant re-home)", async () => {
+    const { db, upd } = wFake();
+    await new PlatformWriteDb(db).updateAllTenants(subscriptions, "sub-1", {
+      packageId: "p-new", companyId: "attacker-co", company_id: "attacker-co", id: "other-sub",
+    } as unknown as Partial<typeof subscriptions.$inferInsert>);
+    expect(upd[0]!.set).toEqual({ packageId: "p-new" }); // company_id/id dropped — sub can't move tenants
+  });
+});
+
+// ===========================================================================
+// W1c — owner PUT /admin/subscribers/{id}/package (set plan + seats).
+// ===========================================================================
+describe("W1c owner set-package (B-201) — plan/seat write to a tenant-owned sub", () => {
+  const stub = (o: { financeOk?: boolean; owner?: boolean; pkg?: boolean; updated?: Updated[]; captured?: Captured[] } = {}) =>
+    stubDb({
+      rows: [
+        [users, [caller(o.owner ?? true)]],
+        [packages, o.pkg === false ? [] : [pkg("pkg-new")]],
+        [subscriptions, [sub("sub-1", OTHER_COMPANY, { packageId: "pkg-old" })]],
+        [companies, [company(OTHER_COMPANY, "อื่น")]],
+      ],
+      updated: o.updated,
+      captured: o.captured,
+    });
+
+  it("owner → 200, swaps package_id (+seats), audit → the TARGET tenant, action=update", async () => {
+    const updated: Updated[] = [];
+    const records: AuditRecord[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stub({ updated }),
+        auditSink: (r) => { records.push(r as AuditRecord); },
+      })
+    ).inject({ method: "PUT", url: "/api/v1/admin/subscribers/sub-1/package", payload: { package_id: "pkg-new", seats: 5 } });
+    expect(res.statusCode).toBe(200);
+    const w = updated.find((u) => u.table === subscriptions)!;
+    expect(w.set).toMatchObject({ packageId: "pkg-new", seats: 5 });
+    expect(res.json().seats).toBe(5);
+    expect(records[0]).toMatchObject({ companyId: OTHER_COMPANY, action: "update" }); // affected tenant, not owner
+  });
+
+  it("seats validation: -1 (unlimited) ok; 0 / 1.5 / -2 → 400", async () => {
+    const app0 = await buildTestApp({ resolveTenant: async () => SESSION, db: stub({}) });
+    const unlimited = await app0.inject({ method: "PUT", url: "/api/v1/admin/subscribers/sub-1/package", payload: { package_id: "pkg-new", seats: -1 } });
+    expect(unlimited.statusCode).toBe(200);
+    for (const bad of [0, 1.5, -2]) {
+      const r = await app0.inject({ method: "PUT", url: "/api/v1/admin/subscribers/sub-1/package", payload: { package_id: "pkg-new", seats: bad } });
+      expect(r.statusCode).toBe(400);
+    }
+  });
+
+  it("404 on an unknown package_id (FK pre-check → clean 404, not 500)", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stub({ pkg: false }) })
+    ).inject({ method: "PUT", url: "/api/v1/admin/subscribers/sub-1/package", payload: { package_id: "ghost" } });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("403 a valid tenant NON-owner (before any write)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stub({ owner: false, updated }) })
+    ).inject({ method: "PUT", url: "/api/v1/admin/subscribers/sub-1/package", payload: { package_id: "pkg-new", seats: 5 } });
+    expect(res.statusCode).toBe(403);
+    expect(updated).toHaveLength(0);
+  });
+});
+
+// W1c/B-200 — the package-edit quota-wipe guard folded in.
+describe("W1b/B-200 — package create/edit requires a non-empty limits (no quota-wipe)", () => {
+  it("400s a create/edit whose limits is omitted or empty (would zero the fleet's quota)", async () => {
+    const app0 = await buildTestApp({
+      resolveTenant: async () => SESSION,
+      db: stubDb({ rows: [[users, [caller(true)]], [packages, [pkg("pkg-1")]]] }),
+    });
+    const noLimits = await app0.inject({ method: "POST", url: "/api/v1/admin/packages", payload: { size: "M", name: "X", price: 100, menus: ["d"] } });
+    expect(noLimits.statusCode).toBe(400);
+    const emptyLimits = await app0.inject({ method: "PUT", url: "/api/v1/admin/packages/pkg-1", payload: { size: "M", name: "X", price: 100, menus: ["d"], limits: {} } });
+    expect(emptyLimits.statusCode).toBe(400);
   });
 });
