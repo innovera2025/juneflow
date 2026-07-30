@@ -19,15 +19,19 @@
  *
  * The four owner-gated state writes below (POST /admin/subscribers/{id}/suspend|resume,
  * POST /admin/users/{id}/block|unblock) are merged handlers and wired for real — each mutates
- * server state (companies.status / users.status) and invalidates its own read key. The
- * remaining prototype writes (create/edit package, save-settings, reset-pw, invite, remind,
- * export) have NO merged handler and stay honest toasts / honest-disabled in the screen.
+ * server state (companies.status / users.status) and invalidates its own read key. The package
+ * create/edit writes (POST /admin/packages, PUT /admin/packages/{id}) are likewise real (W1b,
+ * B-197) — money = SERVER (price_y is DERIVED server-side; the client sends price_m only) and
+ * both invalidate ADMIN_PACKAGES_KEY. The remaining prototype writes (save-settings, reset-pw,
+ * invite, remind, export) have NO merged handler and stay honest toasts / honest-disabled.
  */
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
+import type { components } from "@juneflow/contracts";
 import { apiClient } from "../../api-client";
 import { unwrap } from "../../query-client";
 import { getAuthToken } from "../../auth-token";
 
+type Entity = components["schemas"]["Entity"];
 /** Opaque list-row shape (the contract types these rows as Entity). */
 type Row = Record<string, unknown>;
 
@@ -125,5 +129,29 @@ export function useUnblockUser(): UseMutationResult<unknown, unknown, string> {
   return useMutation({
     mutationFn: (id: string) => unwrap(apiClient.POST("/admin/users/{id}/unblock", { params: { path: { id } } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_USERS_KEY }),
+  });
+}
+
+/* ---------------------------------------------------------------------------------------- */
+/* Package CRUD (W1b, B-197) — owner-gated create/edit; NO delete (B-196). The caller        */
+/* composes the opaque body (buildPackageBody); money = SERVER, so it sends price_m only     */
+/* (never price_y/yearly — the door derives it). Both invalidate the packages read.          */
+/* ---------------------------------------------------------------------------------------- */
+
+/** POST /admin/packages — create a plan; the door strips any client `id`. Body is opaque Entity. */
+export function useCreatePackage(): UseMutationResult<Entity, unknown, Entity> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Entity) => unwrap(apiClient.POST("/admin/packages", { body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_PACKAGES_KEY }),
+  });
+}
+
+/** PUT /admin/packages/{id} — edit a plan; the id is the PATH param, never in the body. */
+export function useUpdatePackage(id: string): UseMutationResult<Entity, unknown, Entity> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Entity) => unwrap(apiClient.PUT("/admin/packages/{id}", { params: { path: { id } }, body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_PACKAGES_KEY }),
   });
 }

@@ -15,14 +15,12 @@
  * subscriberCountByPackage in admin-rows.ts). The menu-tree denominator + the chip labels are
  * NAV-registry data (nav-tree.ts top-level items), NOT screen i18n keys — never minted.
  *
- * Honest divergences (reported, never fabricated — Phase-6 B-179):
- *   - Create/Edit are honest-DISABLED: Phase-6 merges only GET /admin/packages (no POST/PUT
- *     handler), so the create-package primary + the per-card edit ghost are disabled buttons
- *     -- the PkgBuilderForm builder modal (a mock write path) is dropped, mirroring land-bank's
- *     dropped add-plot form. (The builder-specific i18n keys are intentionally unused.)
- *   - wire gaps: packageWire carries no `color` (reconstructed from size, B-037(a)) and no
- *     `popular` flag (the popular tag is dropped). yearly is the server price_y (never
- *     recomputed).
+ * W1b (B-197): Create/Edit are REAL owner-gated writes — the create-package primary + the
+ * per-card edit ghost both open the builder modal (openPkgBuilder, admin-pkg-builder.tsx).
+ * money = SERVER: the builder sends price_m only, the door derives price_y, and the card shows
+ * the server price_y — never a client yearly. NO delete affordance (B-196). The "popular" badge
+ * renders from the real `popular` column (0045). `color` is still reconstructed from size on the
+ * card (B-037(a)); a plan that carries its own color round-trips it through an edit.
  *   - Enterprise `menus` is the ["*"] wildcard -> expanded to the full nav id list so the
  *     n/total + first-5 chips match the prototype's Full-shows-all behaviour (expandMenus).
  *
@@ -33,11 +31,13 @@
  * cells carry class `num`.
  */
 import { useMemo } from "react";
+import type { ReactNode } from "react";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Icon } from "../../ui/icon";
 import { Page } from "../../shell/page";
+import { useShellCtx } from "../../shell/shell-context";
 import { NAV_TREE, type NavItem } from "../../shell/nav-tree";
 import {
   toPackageRow,
@@ -50,6 +50,7 @@ import {
   type PackageRow,
 } from "./admin-rows";
 import { useAdminPackages, useAdminSubscribers } from "./use-admin";
+import { openPkgBuilder } from "./admin-pkg-builder";
 
 /** Middot separator (U+00B7, non-Thai) — matches the prototype's price line. */
 const MIDDOT = "·";
@@ -58,8 +59,31 @@ const WHITE = "white";
 /** How many nav-label chips a card shows before the "+N" overflow (pkg-builder L219). */
 const CHIP_LIMIT = 5;
 
+/** Tag, ported 1:1 from ds.jsx Tag() — the "popular" badge. color-mix + white are verbatim. */
+function Tag({ children, tone = "var(--text-2)" }: { children: ReactNode; tone?: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        fontSize: 11,
+        fontWeight: 600,
+        padding: "3px 9px",
+        borderRadius: 6,
+        background: `color-mix(in srgb, ${tone} 13%, ${WHITE})`,
+        color: tone,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function AdminPlans() {
   const { t, tn } = useI18n();
+  const ctx = useShellCtx();
 
   const packagesQ = useAdminPackages();
   const subscribersQ = useAdminSubscribers();
@@ -97,9 +121,8 @@ export function AdminPlans() {
       title={t("admin.plans.title")}
       subtitle={t("admin.plans.subtitle")}
       actions={
-        // Honest-DISABLED: no POST /admin/packages handler in Phase-6 (the builder modal is
-        // a dropped mock write path).
-        <Btn kind="primary" size="md" icon="plus" disabled>
+        // W1b: open the builder modal for a new plan (POST /admin/packages, money=SERVER).
+        <Btn kind="primary" size="md" icon="plus" onClick={() => openPkgBuilder(ctx, null)}>
           {t("admin.plans.createBtn")}
         </Btn>
       }
@@ -147,10 +170,11 @@ export function AdminPlans() {
                         {p.size}
                       </span>
                       <span style={{ fontSize: 14.5, fontWeight: 800 }}>{p.name}</span>
-                      {/* popular tag — NO wire field (dropped, data-completeness follow-up). */}
+                      {/* popular badge — REAL `popular` column (0045), rendered like pkg-builder L202. */}
+                      {p.popular && <Tag tone="var(--brand)">{t("admin.plans.popularTag")}</Tag>}
                     </span>
-                    {/* Honest-DISABLED: no PUT /admin/packages handler. */}
-                    <Btn kind="ghost" size="sm" icon="edit" disabled>
+                    {/* W1b: open the builder modal to edit this plan (PUT /admin/packages/{id}). */}
+                    <Btn kind="ghost" size="sm" icon="edit" onClick={() => openPkgBuilder(ctx, p)}>
                       {t("admin.plans.editBtn")}
                     </Btn>
                   </div>

@@ -63,6 +63,10 @@ import {
   activeUserCount,
   overSeat,
   userStatusKind,
+  suspendAction,
+  blockAction,
+  canManageUser,
+  fireWithToast,
   isUnlimited,
   sizeColor,
   formatMoney,
@@ -459,9 +463,10 @@ function CompanyControl({
           )}
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-            {/* suspend/resume flip companies.status (surfaced as company_status) — branch on the
-                COMPANY status field, NOT subscription.status, so the button swaps after a real flip. */}
-            {sub.companyStatus === "active" ? (
+            {/* suspend/resume flip companies.status (surfaced as company_status) — the action is
+                decided by suspendAction(company_status) (B-200b), NOT subscription.status, so the
+                button swaps after a real flip. */}
+            {suspendAction(sub.companyStatus) === "suspend" ? (
               <Btn
                 kind="danger"
                 size="md"
@@ -478,12 +483,15 @@ function CompanyControl({
                       onClose();
                       // ctx.confirm unmounts CompanyControl (single modal slot) before the POST
                       // settles, so a mutate-scoped onSuccess is hasListeners()-gated off the dead
-                      // observer. Fire the toast off the settled promise instead; the hook-level
-                      // invalidateQueries survives (Mutation.execute dispatch, not listener-gated).
-                      suspend
-                        .mutateAsync(sub.id)
-                        .then(() => ctx.notify(t("admin.subs.suspendToast").replace("{org}", sub.companyName || DASH), "warn"))
-                        .catch(() => {});
+                      // observer. fireWithToast (B-200b) fires the toast off the settled promise
+                      // instead; the hook-level invalidateQueries survives (not listener-gated).
+                      // The rejection path shows the B-200(a) error toast, not a swallowed catch.
+                      fireWithToast(
+                        (id) => suspend.mutateAsync(id),
+                        sub.id,
+                        () => ctx.notify(t("admin.subs.suspendToast").replace("{org}", sub.companyName || DASH), "warn"),
+                        () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                      );
                     },
                   })
                 }
@@ -505,11 +513,13 @@ function CompanyControl({
                     onConfirm: () => {
                       onClose();
                       // Toast off the settled promise — CompanyControl unmounts before the POST
-                      // settles, so a mutate-scoped onSuccess would be dropped (see suspend note).
-                      resume
-                        .mutateAsync(sub.id)
-                        .then(() => ctx.notify(t("admin.subs.activateToast").replace("{org}", sub.companyName || DASH)))
-                        .catch(() => {});
+                      // settles (see suspend note); the rejection path shows the B-200(a) toast.
+                      fireWithToast(
+                        (id) => resume.mutateAsync(id),
+                        sub.id,
+                        () => ctx.notify(t("admin.subs.activateToast").replace("{org}", sub.companyName || DASH)),
+                        () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                      );
                     },
                   })
                 }
@@ -598,8 +608,8 @@ function CompanyControl({
                               size="sm"
                               icon={blocked ? "check" : "lock"}
                               // block/unblock take the USER id (u.id); a blank id would POST
-                              // /admin/users//block, so skip it (the render tolerates key={u.id||i}).
-                              disabled={block.isPending || unblock.isPending || !u.id}
+                              // /admin/users//block, so canManageUser(u.id) gates it off (B-200b).
+                              disabled={block.isPending || unblock.isPending || !canManageUser(u.id)}
                               onClick={() =>
                                 ctx.confirm({
                                   title: t(blocked ? "admin.subs.unblockBtn" : "admin.subs.blockBtn"),
@@ -608,18 +618,20 @@ function CompanyControl({
                                   iconTone: blocked ? "var(--ok)" : "var(--danger)",
                                   danger: !blocked,
                                   // Toast off the settled promise — ctx.confirm unmounts this
-                                  // modal before the POST settles, so a mutate-scoped onSuccess
-                                  // would be dropped off the dead observer (see suspend note).
+                                  // modal before the POST settles (see suspend note). The tone
+                                  // comes from blockAction(u.status) (B-200b); the rejection path
+                                  // shows the B-200(a) error toast, not a swallowed catch.
                                   onConfirm: () =>
-                                    (blocked ? unblock : block)
-                                      .mutateAsync(u.id)
-                                      .then(() =>
+                                    fireWithToast(
+                                      (id) => (blocked ? unblock : block).mutateAsync(id),
+                                      u.id,
+                                      () =>
                                         ctx.notify(
                                           (blocked ? t("admin.subs.unblockToast") : t("admin.subs.blockToast")).replace("{name}", u.name || DASH),
-                                          blocked ? "ok" : "warn",
+                                          blockAction(u.status).tone,
                                         ),
-                                      )
-                                      .catch(() => {}),
+                                      () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                                    ),
                                 })
                               }
                             >

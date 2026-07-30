@@ -6,7 +6,10 @@
  * subscriber/invoice status maps, the DERIVED MRR / KPI figures, the subscriber filter, and
  * the per-company user + per-package subscriber counts.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { NavNode } from "../../shell/nav-tree";
+import type { NavKey } from "@juneflow/i18n";
+import type { SectionId } from "../../routes/registry";
 import {
   str,
   num,
@@ -17,6 +20,10 @@ import {
   toPackageRow,
   packageById,
   expandMenus,
+  pkgNavGroups,
+  presetMenuIds,
+  validatePackageForm,
+  buildPackageBody,
   toSubscriberRow,
   subStatusInfo,
   deriveMrr,
@@ -27,12 +34,17 @@ import {
   activeUserCount,
   overSeat,
   userStatusKind,
+  suspendAction,
+  blockAction,
+  canManageUser,
+  fireWithToast,
   toAdminInvoiceRow,
   subscriberNameById,
   invoiceStatusInfo,
   invoiceTotals,
   subscriberCountByPackage,
   type PackageRow,
+  type PackageFormValues,
   type SubscriberRow,
   type UserRow,
 } from "./admin-rows";
@@ -79,7 +91,27 @@ describe("toPackageRow / packageById / expandMenus", () => {
       storageGb: 100,
       aiPerMonth: 50,
       menus: ["dashboard", "boq", "proc"],
+      color: "",
+      tagline: "",
+      popular: false,
     });
+  });
+
+  it("narrows the 0045 color/tagline/popular cols when present (W1b edit round-trip)", () => {
+    const rich = toPackageRow({
+      id: "M",
+      size: "M",
+      name: "Pro",
+      price_m: 7900,
+      limits: {},
+      menus: [],
+      color: "#0B2A4A",
+      tagline: "mid team",
+      popular: true,
+    });
+    expect(rich.color).toBe("#0B2A4A");
+    expect(rich.tagline).toBe("mid team");
+    expect(rich.popular).toBe(true);
   });
 
   it("coerces a null/0 price to null (contact sales)", () => {
@@ -128,6 +160,9 @@ describe("toSubscriberRow / subStatusInfo / deriveMrr / filterSubscribers", () =
     storageGb: 100,
     aiPerMonth: 50,
     menus: [],
+    color: "",
+    tagline: "",
+    popular: false,
   };
   const fullPkg: PackageRow = { ...proPkg, id: "Full", size: "Full", priceM: null, priceY: null };
 
@@ -293,5 +328,254 @@ describe("subscriberCountByPackage", () => {
     expect(map.get("M")).toBe(2);
     expect(map.get("S")).toBeUndefined(); // cancelled excluded
     expect(map.get("Full")).toBe(1);
+  });
+});
+
+/* --------------------------------------------------------------------------- */
+/* Package builder pure helpers (W1b, B-197)                                    */
+/* --------------------------------------------------------------------------- */
+
+describe("pkgNavGroups", () => {
+  const tree = [
+    { kind: "item", id: "dashboard", icon: "grid", label: "nav.dashboard" },
+    { kind: "item", id: "exec", icon: "chart", label: "nav.exec" },
+    { kind: "section", sectionId: "main", label: "nav.section.main.node" },
+    {
+      kind: "item",
+      id: "boq",
+      icon: "list",
+      label: "nav.boq",
+      sub: [
+        { id: "boq.a", label: "nav.boq.a" },
+        { id: "boq.b", label: "nav.boq.b" },
+      ],
+    },
+    { kind: "item", id: "proc", icon: "cart", label: "nav.proc" },
+  ] as unknown as NavNode[];
+  const sections = { main: "nav.section.main.key" } as unknown as Readonly<Record<SectionId, NavKey>>;
+
+  it("leads with a general group (labelKey null) for pre-section items, then groups by section", () => {
+    expect(pkgNavGroups(tree, sections)).toEqual([
+      {
+        labelKey: null,
+        items: [
+          { id: "dashboard", label: "nav.dashboard", subs: 0 },
+          { id: "exec", label: "nav.exec", subs: 0 },
+        ],
+      },
+      {
+        labelKey: "nav.section.main.key", // resolved from navSections[sectionId], not the node label
+        items: [
+          { id: "boq", label: "nav.boq", subs: 2 }, // subs = sub[].length
+          { id: "proc", label: "nav.proc", subs: 0 },
+        ],
+      },
+    ]);
+  });
+
+  it("drops an empty leading group when a section comes first", () => {
+    const t2 = [
+      { kind: "section", sectionId: "main", label: "x" },
+      { kind: "item", id: "a", icon: "i", label: "nav.a" },
+    ] as unknown as NavNode[];
+    const groups = pkgNavGroups(t2, sections);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].labelKey).toBe("nav.section.main.key");
+  });
+});
+
+describe("presetMenuIds", () => {
+  const all = [
+    "dashboard", "boq", "proc", "petty", "timeline", "reports", "land", "subcon", "accept", "inv",
+    "pm", "gl", "ap", "ar", "bank", "tax", "fa", "alloc", "dms", "master", "sales", "labor", "opex",
+    "exec", "mobile", "line", "users", "audit", "settings", "extra",
+  ];
+
+  it("S = the 6-menu starter set (intersected with the live nav)", () => {
+    expect(presetMenuIds("S", all)).toEqual(["dashboard", "boq", "proc", "petty", "timeline", "reports"]);
+  });
+
+  it("is cumulative (S ⊂ M ⊂ L)", () => {
+    const S = presetMenuIds("S", all);
+    const M = presetMenuIds("M", all);
+    const L = presetMenuIds("L", all);
+    expect(S.every((id) => M.includes(id))).toBe(true);
+    expect(M.every((id) => L.includes(id))).toBe(true);
+  });
+
+  it("Full = every live nav id (a fresh copy, not the same reference)", () => {
+    const full = presetMenuIds("Full", all);
+    expect(full).toEqual(all);
+    expect(full).not.toBe(all);
+  });
+
+  it("intersects with the live nav (drops ids that are not present)", () => {
+    expect(presetMenuIds("S", ["dashboard", "boq"])).toEqual(["dashboard", "boq"]);
+  });
+});
+
+describe("validatePackageForm", () => {
+  const base: PackageFormValues = {
+    size: "S",
+    name: "Starter",
+    price: "2900",
+    contact: false,
+    projects: "2",
+    users: "5",
+    storage: "20",
+    ai: "10",
+    menus: ["dashboard"],
+  };
+
+  it("passes a complete form (no flags)", () => {
+    expect(validatePackageForm(base)).toEqual({});
+  });
+
+  it("flags a blank name (n)", () => {
+    expect(validatePackageForm({ ...base, name: "   " }).n).toBe(true);
+  });
+
+  it("flags a missing price on a non-contact tier (p) but NOT on a contact tier", () => {
+    expect(validatePackageForm({ ...base, price: "" }).p).toBe(true);
+    expect(validatePackageForm({ ...base, price: "", contact: true }).p).toBeUndefined();
+  });
+
+  it("flags an empty menu selection (m)", () => {
+    expect(validatePackageForm({ ...base, menus: [] }).m).toBe(true);
+  });
+});
+
+describe("buildPackageBody (money=SERVER)", () => {
+  const form: PackageFormValues = {
+    size: "L",
+    name: " Business ",
+    price: "14900",
+    contact: false,
+    projects: "30",
+    users: "60",
+    storage: "300",
+    ai: "200",
+    menus: ["dashboard", "boq"],
+  };
+
+  it("create: NO id, NO price_y/yearly, snake limit keys, tagline ''/popular false, NO color", () => {
+    const body = buildPackageBody(form, false, null);
+    expect(body).toEqual({
+      size: "L",
+      name: "Business", // trimmed
+      contact: false,
+      price_m: 14900, // price_m ONLY — the server derives price_y
+      limits: { projects: 30, users: 60, storage_gb: 300, ai_per_month: 200 },
+      menus: ["dashboard", "boq"],
+      tagline: "",
+      popular: false,
+    });
+    expect("id" in body).toBe(false);
+    expect("price_y" in body).toBe(false);
+    expect("yearly" in body).toBe(false);
+    expect("color" in body).toBe(false);
+    expect("currency_code" in body).toBe(false);
+    expect("sub_rules" in body).toBe(false);
+  });
+
+  it("contact tier: price_m is null", () => {
+    expect(buildPackageBody({ ...form, contact: true, price: "" }, false, null).price_m).toBeNull();
+  });
+
+  it("limit coercions: 0/'' -> -1 (projects/users/storage), ai '' -> 50 (asymmetric)", () => {
+    const body = buildPackageBody({ ...form, projects: "0", users: "", storage: "0", ai: "" }, false, null);
+    expect(body.limits).toEqual({ projects: -1, users: -1, storage_gb: -1, ai_per_month: 50 });
+  });
+
+  it("edit: preserves color/tagline/popular from the preset; id stays out of the body", () => {
+    const preset: PackageRow = {
+      id: "biz",
+      size: "L",
+      name: "Business",
+      priceM: 14900,
+      priceY: 149000,
+      projects: 30,
+      users: 60,
+      storageGb: 300,
+      aiPerMonth: 200,
+      menus: ["dashboard"],
+      color: "#0F766E",
+      tagline: "multi-project",
+      popular: true,
+    };
+    const body = buildPackageBody(form, true, preset);
+    expect(body.tagline).toBe("multi-project");
+    expect(body.popular).toBe(true);
+    expect(body.color).toBe("#0F766E");
+    expect("id" in body).toBe(false);
+    expect("price_y" in body).toBe(false);
+  });
+
+  it("edit with a blank preset color omits color (server default)", () => {
+    const preset: PackageRow = {
+      id: "s",
+      size: "S",
+      name: "Starter",
+      priceM: 2900,
+      priceY: 29000,
+      projects: 2,
+      users: 5,
+      storageGb: 20,
+      aiPerMonth: 10,
+      menus: [],
+      color: "",
+      tagline: "",
+      popular: false,
+    };
+    expect("color" in buildPackageBody(form, true, preset)).toBe(false);
+  });
+});
+
+/* --------------------------------------------------------------------------- */
+/* admin.subs + pkg mutation wiring (B-200b)                                    */
+/*                                                                              */
+/* These guard the CONTROL-FLOW contract (which action fires, with which tone,  */
+/* and that a settled toast runs exactly once) — NOT TanStack's live            */
+/* cross-unmount toast survival, which is node-untestable here (no jsdom) and    */
+/* already live-proven 5/5 + adversarial-verified.                              */
+/* --------------------------------------------------------------------------- */
+
+describe("admin.subs + pkg mutation wiring (B-200b)", () => {
+  it("suspendAction: active -> suspend, everything else -> resume", () => {
+    expect(suspendAction("active")).toBe("suspend");
+    expect(suspendAction("suspended")).toBe("resume");
+    expect(suspendAction("")).toBe("resume");
+    expect(suspendAction("frozen")).toBe("resume");
+  });
+
+  it("blockAction: blocked -> unblock/ok, everyone else -> block/warn", () => {
+    expect(blockAction("blocked")).toEqual({ action: "unblock", tone: "ok" });
+    expect(blockAction("active")).toEqual({ action: "block", tone: "warn" });
+    expect(blockAction("invited")).toEqual({ action: "block", tone: "warn" });
+    expect(blockAction("")).toEqual({ action: "block", tone: "warn" });
+  });
+
+  it("canManageUser: gates the action off a present id", () => {
+    expect(canManageUser("")).toBe(false);
+    expect(canManageUser("u1")).toBe(true);
+  });
+
+  it("fireWithToast: on resolve runs onOk once, never onErr", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue(undefined);
+    const onOk = vi.fn();
+    const onErr = vi.fn();
+    await fireWithToast(mutateAsync, "u1", onOk, onErr);
+    expect(mutateAsync).toHaveBeenCalledWith("u1");
+    expect(onOk).toHaveBeenCalledTimes(1);
+    expect(onErr).not.toHaveBeenCalled();
+  });
+
+  it("fireWithToast: on reject runs onErr once, never onOk, and does not throw", async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new Error("boom"));
+    const onOk = vi.fn();
+    const onErr = vi.fn();
+    await expect(fireWithToast(mutateAsync, "u1", onOk, onErr)).resolves.toBeUndefined();
+    expect(onOk).not.toHaveBeenCalled();
+    expect(onErr).toHaveBeenCalledTimes(1);
   });
 });
