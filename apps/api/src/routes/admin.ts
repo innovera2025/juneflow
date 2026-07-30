@@ -33,6 +33,22 @@ type CompanyRow = typeof companies.$inferSelect;
 type UserRow = typeof users.$inferSelect;
 type PlatformInvoiceRow = typeof platformInvoices.$inferSelect;
 
+/**
+ * W1d dunning notice (the side-effect a platform-owner remind emits). Every field
+ * is SERVER-derived from the resolved overdue invoice/subscription — never client
+ * text/recipient/amount. The notifier is an injectable seam (mirrors AuditSink):
+ * the default is a no-op, tests record it, and the real LINE integration
+ * (P0-INT-03, whose send() currently throws a TODO) is a later default-swap — so
+ * the remind NEVER depends on the unbuilt adapter.
+ */
+export interface DunningNotice {
+  /** The dunned tenant (the invoice's subscription's company). */
+  companyId: string;
+  invoiceId: string;
+  amount: string | null;
+}
+export type DunningNotifier = (notice: DunningNotice) => Promise<void> | void;
+
 /** Flat 404 NOT_FOUND (opaque, no cross-tenant existence leak). */
 function notFound(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(404).send({ code: "NOT_FOUND", message });
@@ -185,9 +201,9 @@ function invoiceWire(i: PlatformInvoiceRow): Record<string, unknown> {
 /** Register the owner-gated platform-admin read + write routes on the /api/v1 scope. */
 export function registerAdminRoutes(
   app: FastifyInstance,
-  deps: { platformDb: PlatformDb; platformWriteDb: PlatformWriteDb },
+  deps: { platformDb: PlatformDb; platformWriteDb: PlatformWriteDb; notify: DunningNotifier },
 ): void {
-  const { platformDb, platformWriteDb } = deps;
+  const { platformDb, platformWriteDb, notify } = deps;
 
   // GET /admin/packages — the S/M/L/Full plan catalog (global; owner-gated read).
   app.get("/admin/packages", async (request, reply) => {
@@ -384,5 +400,40 @@ export function registerAdminRoutes(
     )) as CompanyRow[];
     request.auditTargetCompanyId = updated.companyId; // the AFFECTED tenant
     return reply.code(200).send(subscriberWire(updated, company));
+  });
+
+  // POST /admin/invoices/{id}/remind — dunning remind on an overdue platform
+  // invoice (Phase-6 W1d, the LAST Wave-1 billing write). PURE side-effect: writes
+  // NO row and NO GL/JV (B-188 — platform billing is standalone). The prototype's
+  // ทวงถาม button is per-invoice-row, shown ONLY on an overdue invoice. The audit
+  // is REAL (the prototype toast claimed "· บันทึกใน Audit Log"): the onResponse
+  // hook logs action="remind" attributed to the DUNNED tenant (auditTargetCompanyId).
+  // NO invoice-generation / NO mark-paid (B-189=ก DEFER). money=SERVER: no amount
+  // is client-supplied — the notice echoes the stored invoice.
+  app.post("/admin/invoices/:id/remind", async (request, reply) => {
+    const caller = await ownerOnly(request, reply); // 403 BEFORE any read
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const [inv] = (await platformDb.selectAllTenants(
+      platformInvoices,
+      eq(platformInvoices.id, id),
+    )) as PlatformInvoiceRow[];
+    if (!inv) return notFound(reply, `invoice ${id} not found`);
+    if (inv.status !== "overdue") return badRequest(reply, "invoice is not overdue");
+    const [sub] = (await platformDb.selectAllTenants(
+      subscriptions,
+      eq(subscriptions.id, inv.subscriptionId),
+    )) as SubscriptionRow[];
+    if (!sub) return notFound(reply, `subscription ${inv.subscriptionId} not found`);
+    // Dunning notification side-effect — SERVER-derived recipient/amount. Wrapped so
+    // a future real-adapter throw (LINE send() TODO) degrades to a log, never a 500,
+    // and never blocks the audit (mirrors the auditSink actor-lookup degrade).
+    try {
+      await notify({ companyId: sub.companyId, invoiceId: inv.id, amount: inv.amount });
+    } catch (err) {
+      request.log.error(err);
+    }
+    request.auditTargetCompanyId = sub.companyId; // the DUNNED tenant → the audit hook
+    return reply.code(200).send({ ok: true });
   });
 }

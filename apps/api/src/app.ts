@@ -43,7 +43,7 @@ import { registerModelsRoute } from "./routes/models.js";
 import { registerVendorsRoute } from "./routes/vendors.js";
 import { registerUsersRoute } from "./routes/users.js";
 import { registerRolesRoute } from "./routes/roles.js";
-import { registerAdminRoutes } from "./routes/admin.js";
+import { registerAdminRoutes, type DunningNotifier } from "./routes/admin.js";
 import { registerSubscriptionRoutes } from "./routes/subscription.js";
 import { registerOrgUnitsRoute } from "./routes/org-units.js";
 import { registerProjectNodesRoute } from "./routes/project-nodes.js";
@@ -92,6 +92,9 @@ export interface AppDeps {
   features?: FeatureFlags;
   /** Audit sink override for tests (defaults to the DB sink). */
   auditSink?: AuditSink;
+  /** Dunning-notification seam (W1d). Default no-op; tests record it; real LINE
+   *  delivery (P0-INT-03) lands later as a default-swap. */
+  notify?: DunningNotifier;
   /** Fastify logger toggle (tests turn it off). */
   logger?: boolean;
 }
@@ -177,6 +180,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // B-193 (W1a): the cross-tenant WRITE door — same containment (private handle,
   // injected ONLY into the owner-gated admin routes, never on request).
   const platformWriteDb = new PlatformWriteDb(deps.db);
+  // W1d dunning notifier — no-op by default (the real LINE adapter's send() throws
+  // a TODO until P0-INT-03; the remind never depends on it). Test-overridable.
+  const notify: DunningNotifier = deps.notify ?? (() => {});
 
   // Contract routes under the contract server prefix /api/v1.
   await app.register(
@@ -193,7 +199,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerVendorsRoute(v1);
       registerUsersRoute(v1);
       registerRolesRoute(v1);
-      registerAdminRoutes(v1, { platformDb, platformWriteDb });
+      registerAdminRoutes(v1, { platformDb, platformWriteDb, notify });
       registerSubscriptionRoutes(v1);
       registerOrgUnitsRoute(v1);
       registerProjectNodesRoute(v1);
