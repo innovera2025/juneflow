@@ -1,7 +1,8 @@
 /*
- * Data hooks for the tenant Subscription screens (sub.plans, sub.billing) — READ-ONLY.
+ * Data hooks for the tenant Subscription screens (sub.plans, sub.mine, sub.billing) — three
+ * reads plus the tenant's OWN change-plan + renew writes (W1c).
  *
- * Both reads go through the generated typed client (api-client.ts) + TanStack Query via
+ * Every hook goes through the generated typed client (api-client.ts) + TanStack Query via
  * unwrap() — no hand-written models/fetch (PLAN.md §5, apps/web/CLAUDE.md). The prototype
  * held plans/invoices in local arrays (subscription.jsx SUB_PACKAGES / SUB_INVOICES); here
  * the server is the system of record (Phase-6 Wave-0, B-179 standalone status-only billing):
@@ -16,16 +17,20 @@
  *                                 subscription) resolves to null so the screen renders a
  *                                 graceful empty state instead of throwing.
  *
- * There is intentionally NO plan-change / signup / renew / cancel mutation hook: Phase-6
- * exposes only these three GETs (no PUT/POST subscribe on merged routes), so the plan-change
- * CTA + signup button + sub.mine renew/cancel are honest toast / honest-disabled in the
- * screens instead of wiring a write that cannot persist (see sub-plans.tsx / sub-mine.tsx).
+ * The change-plan + renew writes below (POST /subscription/change-plan {package_id, cycle},
+ * POST /subscription/renew) are merged handlers and wired for real — money = SERVER (change-plan
+ * does NO proration, B-191; renew's next date is SERVER-computed), and both invalidate SUB_ME_KEY
+ * so the /me read re-fetches the authoritative row (the responses are treated as opaque). The
+ * remaining prototype writes (signup, cancel) have NO merged handler and stay honest-disabled /
+ * honest toast in the screens (see sub-plans.tsx / sub-mine.tsx).
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { components } from "@juneflow/contracts";
 import { apiClient } from "../../api-client";
 import { unwrap } from "../../query-client";
 import { getAuthToken } from "../../auth-token";
 
+type Entity = components["schemas"]["Entity"];
 /** Opaque list-row shape (the contract types these rows as Entity). */
 type Row = Record<string, unknown>;
 
@@ -76,5 +81,36 @@ export function useSubscriptionMe() {
     },
     enabled: authed(),
     staleTime: 5 * 60_000,
+  });
+}
+
+/* ---------------------------------------------------------------------------------------- */
+/* Tenant-own subscription writes (W1c) — money = SERVER. Both invalidate SUB_ME_KEY so the  */
+/* /me read re-fetches the authoritative row; the responses are treated as OPAQUE (the        */
+/* contract types them ActionOk, but the handlers return the full me-object — never typed off).*/
+/* ---------------------------------------------------------------------------------------- */
+
+/**
+ * POST /subscription/change-plan — change the tenant's OWN plan; body = {package_id, cycle}. NO
+ * client price and NO proration (B-191 defer); the server owns the money. Invalidates SUB_ME_KEY.
+ */
+export function useChangePlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Entity) => unwrap(apiClient.POST("/subscription/change-plan", { body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: SUB_ME_KEY }),
+  });
+}
+
+/**
+ * POST /subscription/renew — renew the tenant's OWN subscription; NO body (the next date is
+ * SERVER-computed). NOT idempotent (each POST advances renew_at one cycle, no server dedup), so
+ * the caller disables the button while pending. Invalidates SUB_ME_KEY.
+ */
+export function useRenewSubscription() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(apiClient.POST("/subscription/renew")),
+    onSuccess: () => qc.invalidateQueries({ queryKey: SUB_ME_KEY }),
   });
 }

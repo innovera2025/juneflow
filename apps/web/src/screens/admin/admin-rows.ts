@@ -6,7 +6,7 @@
  *   GET /admin/packages    packageWire   { id, size, name, price_m, price_y, currency_code,
  *                                          limits, menus, sub_rules }
  *   GET /admin/subscribers subscriberWire { id, company_id, company_name, company_status,
- *                                          package_id, cycle, renew_at, status }
+ *                                          package_id, cycle, renew_at, status, seats }
  *   GET /admin/users       userWire      { id, company_id, email, name, role_id, status,
  *                                          department }
  *   GET /admin/invoices    invoiceWire   { id, subscription_id, amount, currency_code,
@@ -27,6 +27,9 @@
  * Package `limits` jsonb keys are `storage_gb` / `ai_per_month` (C5), `-1` = unlimited.
  * Enterprise `menus` is the `["*"]` wildcard (= all top-level nav menus).
  */
+import type { NavKey } from "@juneflow/i18n";
+import type { SectionId } from "../../routes/registry";
+import type { NavNode } from "../../shell/nav-tree";
 
 /** Read a string field off an opaque row; "" when absent. */
 export function str(v: unknown): string {
@@ -105,6 +108,12 @@ export interface PackageRow {
   aiPerMonth: number;
   /** Released nav-menu ids (top-level ids, or ["*"] for all). */
   menus: string[];
+  /** Plan accent hex (0045 col); "" when absent — the EDIT form preserves it (W1b). */
+  color: string;
+  /** Marketing tagline (0045 col); "" when absent — the EDIT form preserves it (W1b). */
+  tagline: string;
+  /** "Popular" flag (0045 col) — the card badge + the EDIT-form round-trip preserve it (W1b). */
+  popular: boolean;
 }
 
 /** A positive finite number, or null (absent/null/<=0 price -> "contact sales"). */
@@ -143,6 +152,9 @@ export function toPackageRow(e: Record<string, unknown>): PackageRow {
     storageGb: limitOf(e.limits, "storage_gb", "storageGb"),
     aiPerMonth: limitOf(e.limits, "ai_per_month", "aiPerMonth"),
     menus: menusOf(e.menus),
+    color: str(e.color),
+    tagline: str(e.tagline),
+    popular: e.popular === true,
   };
 }
 
@@ -164,6 +176,152 @@ export function expandMenus(menus: readonly string[], allNavIds: readonly string
 }
 
 /* --------------------------------------------------------------------------- */
+/* Package builder (pkg-builder.jsx PkgBuilderForm, L71-113) — W1b (B-197)       */
+/* --------------------------------------------------------------------------- */
+
+/** One selectable menu row in the builder's group tree (pkg-builder pkgNavGroups items). */
+export interface PkgNavItem {
+  id: string;
+  /** NAV-registry key (tn) for the item label — never a minted screen key. */
+  label: NavKey;
+  /** Child-row count (sub[].length), shown as "(n)" after the label. */
+  subs: number;
+}
+
+/** One group in the builder's menu tree (a section + its items, or the leading pre-section set). */
+export interface PkgNavGroup {
+  /** Section-header NAV key (tn), or null for the leading "general" group (pre-section items). */
+  labelKey: NavKey | null;
+  items: PkgNavItem[];
+}
+
+/**
+ * Group the NAV registry into the builder's 2-level menu tree (pkg-builder.jsx pkgNavGroups,
+ * L7-19): items that precede the first section header collect into a leading group whose label
+ * the screen resolves to admin.plans.menuGroupGeneral (marked here by labelKey === null); every
+ * later item joins the group of the most recent section header (label = navSections[sectionId]).
+ * Section labels stay NAV keys so the screen renders them with tn() (never a minted key).
+ */
+export function pkgNavGroups(
+  navTree: readonly NavNode[],
+  navSections: Readonly<Record<SectionId, NavKey>>,
+): PkgNavGroup[] {
+  const groups: PkgNavGroup[] = [];
+  let cur: PkgNavGroup = { labelKey: null, items: [] };
+  for (const n of navTree) {
+    if (n.kind === "section") {
+      if (cur.items.length) groups.push(cur);
+      cur = { labelKey: navSections[n.sectionId], items: [] };
+      continue;
+    }
+    cur.items.push({ id: n.id, label: n.label, subs: n.sub ? n.sub.length : 0 });
+  }
+  if (cur.items.length) groups.push(cur);
+  return groups;
+}
+
+/**
+ * The per-size preset menu id set (pkg-builder.jsx pkgPresetIds, L24-34): the prototype's S/M/L
+ * id lists intersected with the ids that actually exist in the running NAV registry (allNavIds);
+ * Full releases every menu. Cumulative (S ⊂ M ⊂ L), matching the seed.
+ */
+export function presetMenuIds(size: string, allNavIds: readonly string[]): string[] {
+  const has = (x: string): boolean => allNavIds.includes(x);
+  const S = ["dashboard", "boq", "proc", "petty", "timeline", "reports"].filter(has);
+  const M = [
+    ...S,
+    "land",
+    "subcon",
+    "accept",
+    "inv",
+    "pm",
+    "gl",
+    "ap",
+    "ar",
+    "bank",
+    "tax",
+    "fa",
+    "alloc",
+    "dms",
+    "master",
+  ].filter(has);
+  const L = [
+    ...new Set([...M, "sales", "labor", "opex", "exec", "mobile", "line", "users", "audit", "settings"]),
+  ].filter(has);
+  if (size === "S") return S;
+  if (size === "M") return M;
+  if (size === "L") return L;
+  return [...allNavIds]; // Full
+}
+
+/** The fully-controlled builder form values the screen holds (all strings + a menu id set). */
+export interface PackageFormValues {
+  size: string;
+  name: string;
+  /** Digits-only monthly price string ("" when contact / blank). */
+  price: string;
+  contact: boolean;
+  projects: string;
+  users: string;
+  storage: string;
+  ai: string;
+  menus: readonly string[];
+}
+
+/** Builder validation flags (pkg-builder.jsx save, L96-101): name / price / no-menu. */
+export interface PackageFormErrors {
+  n?: boolean;
+  p?: boolean;
+  m?: boolean;
+}
+
+/**
+ * Validate the builder form (pkg-builder.jsx L97-100): a blank name (n), a missing price on a
+ * non-contact tier (p), and an empty menu selection (m). name/price surface as a red border; the
+ * empty-menu case additionally drives the needMenu warn-toast + an early return in the screen.
+ */
+export function validatePackageForm(form: PackageFormValues): PackageFormErrors {
+  const e: PackageFormErrors = {};
+  if (!form.name.trim()) e.n = true;
+  if (!form.contact && !form.price) e.p = true;
+  if (form.menus.length === 0) e.m = true;
+  return e;
+}
+
+/**
+ * Compose the opaque POST/PUT /admin/packages body (pkg-builder.jsx save, L102-110) — money =
+ * SERVER: send price_m only, NEVER a client price_y/yearly (the door derives price_y = price_m×10
+ * and ignores any client yearly). A contact tier sends price_m: null. NO `id` (the create door
+ * strips it; edit carries the id in the PATH). `limits` uses the snake keys storage_gb /
+ * ai_per_month (C5); the coercions match the prototype (Number(x)||-1, ai ""→50). `color` is
+ * omitted on create (the door defaults SIZE_COLOR[size]); an edit preserves the stored
+ * color/tagline/popular the form has no inputs for, so a PUT full-replace never wipes them.
+ */
+export function buildPackageBody(
+  form: PackageFormValues,
+  isEdit: boolean,
+  preset: PackageRow | null,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    size: form.size,
+    name: form.name.trim(),
+    contact: form.contact,
+    price_m: form.contact ? null : Number(form.price),
+    limits: {
+      projects: Number(form.projects) || -1,
+      users: Number(form.users) || -1,
+      storage_gb: Number(form.storage) || -1,
+      ai_per_month: form.ai === "" ? 50 : Number(form.ai),
+    },
+    menus: [...form.menus],
+    tagline: isEdit && preset ? preset.tagline : "",
+    popular: isEdit && preset ? preset.popular : false,
+  };
+  if (isEdit && preset && preset.color) body.color = preset.color;
+  return body;
+}
+
+/* --------------------------------------------------------------------------- */
 /* Subscribers (subscription-admin.jsx AdminSubscribers, L113-176)              */
 /* --------------------------------------------------------------------------- */
 
@@ -181,6 +339,15 @@ export interface SubscriberRow {
   renewAt: string;
   /** subscription_status: trial | active | expiring | overdue | cancelled. */
   status: string;
+  /** The subscription's seat override (-1 = unlimited); null -> fall back to the package's users limit. */
+  seats: number | null;
+}
+
+/** A finite integer, or null (absent / non-integer -> "use the package default"). */
+function intOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  const n = num(v);
+  return Number.isInteger(n) ? n : null;
 }
 
 /** Narrow an opaque /admin/subscribers Entity row to a SubscriberRow. */
@@ -194,6 +361,7 @@ export function toSubscriberRow(e: Record<string, unknown>): SubscriberRow {
     cycle: str(e.cycle),
     renewAt: str(e.renew_at ?? e.renewAt),
     status: str(e.status),
+    seats: intOrNull(e.seats),
   };
 }
 
@@ -431,4 +599,54 @@ export function subscriberCountByPackage(subscribers: readonly SubscriberRow[]):
     map.set(s.packageId, (map.get(s.packageId) ?? 0) + 1);
   }
   return map;
+}
+
+/* --------------------------------------------------------------------------- */
+/* Mutation wiring (B-200b) — the CompanyControl action decisions, extracted     */
+/* from admin-subs.tsx into pure, node-testable helpers so the control-flow       */
+/* contract (which action fires, with which tone, and that a settled toast runs   */
+/* exactly once) is guarded by G3. These cover the control-flow contract, NOT     */
+/* TanStack's live cross-unmount toast survival (already live-proven 5/5).        */
+/* --------------------------------------------------------------------------- */
+
+/**
+ * Which subscriber action a company_status implies (subscription-admin.jsx B-194): an active
+ * company suspends; anything else (suspended / blank / unknown) resumes. The button swaps only
+ * after a REAL flip because it branches on the company_status field, not subscription.status.
+ */
+export function suspendAction(companyStatus: string): "suspend" | "resume" {
+  return companyStatus === "active" ? "suspend" : "resume";
+}
+
+/**
+ * Which user action a roster status implies + the toast tone it carries (subscription-admin.jsx
+ * L596-627): a blocked user unblocks (an "ok" toast); everyone else blocks (a "warn" toast).
+ * Derived off userStatusKind so it stays consistent with the roster's status rendering.
+ */
+export function blockAction(userStatus: string): { action: "block" | "unblock"; tone: "ok" | "warn" } {
+  return userStatusKind(userStatus) === "blocked"
+    ? { action: "unblock", tone: "ok" }
+    : { action: "block", tone: "warn" };
+}
+
+/**
+ * Whether a roster user can be block/unblock-managed: a blank id would POST /admin/users//block
+ * (a malformed path), so the action is gated off a present id (the `!u.id` guard, inverted).
+ */
+export function canManageUser(id: string): boolean {
+  return !!id;
+}
+
+/**
+ * Run a mutation thunk and route the SETTLED promise to a success/failure callback
+ * (subscription-admin.jsx suspend/resume/block/unblock + the W1c set-package / change-plan /
+ * renew writes): run().then(onOk).catch(onErr). The toast fires off the settled promise (not a
+ * mutate-scoped onSuccess) because the modal unmounts before the POST/PUT settles; this helper
+ * holds ZERO component state, so onOk / onErr each run exactly once regardless of the caller's
+ * mount lifecycle. The caller supplies the thunk so it fits both id-keyed mutations
+ * (`() => suspend.mutateAsync(sub.id)`) and body / no-arg mutations (`() => renew.mutateAsync()`).
+ * Returns the chain so a test can await it (the screen fires-and-forgets the result).
+ */
+export function fireWithToast(run: () => Promise<unknown>, onOk: () => void, onErr: () => void): Promise<void> {
+  return run().then(onOk).catch(onErr);
 }

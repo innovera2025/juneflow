@@ -28,10 +28,12 @@
  *     a title-only confirm (use-admin.ts): suspend/resume flip companies.status (surfaced as
  *     company_status; the suspend/resume swap branches on THAT field, not subscription.status)
  *     and invalidate the subscribers read; block/unblock take the roster user id and invalidate
- *     the users read (the roster is a pure derivation of it, no local copy). The remaining
- *     writes stay MOCK (no merged handler): export / save-settings / reset-password fire
- *     faithful ctx.notify toasts (the seat stepper mutates LOCAL React state only, never
- *     persisted); invite-user is honest-DISABLED (the invite form is a dropped mock write path).
+ *     the users read (the roster is a pure derivation of it, no local copy). The "Save settings"
+ *     write is REAL too (W1c): PUT /admin/subscribers/{id}/package writes the selected package_id
+ *     + a seat override onto the subscription row (money = SERVER; the seat stepper edits LOCAL
+ *     state the Save button then persists) and invalidates the subscribers read. The remaining
+ *     writes stay MOCK (no merged handler): export / reset-password fire faithful ctx.notify
+ *     toasts; invite-user is honest-DISABLED (the invite form is a dropped mock write path).
  *
  * i18n (rule 2): every visible string is an admin.subs.* / admin.common.* dict key (t). No
  * Thai literal in source (B-073); tokens back every colour except the prototype-verbatim
@@ -63,6 +65,10 @@ import {
   activeUserCount,
   overSeat,
   userStatusKind,
+  suspendAction,
+  blockAction,
+  canManageUser,
+  fireWithToast,
   isUnlimited,
   sizeColor,
   formatMoney,
@@ -81,6 +87,7 @@ import {
   useResumeSubscriber,
   useBlockUser,
   useUnblockUser,
+  useSetSubscriberPackage,
 } from "./use-admin";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
@@ -213,15 +220,20 @@ function CompanyControl({
 
   // Owner-gated state mutations. suspend/resume take the SUBSCRIPTION id (sub.id) and invalidate
   // the subscribers read; block/unblock take the USER id (u.id) and invalidate the users read.
+  // setPkg is the "Save settings" write — PUT /admin/subscribers/{id}/package (id = sub.id, the
+  // SUBSCRIPTION id) — and invalidates the subscribers read.
   const suspend = useSuspendSubscriber();
   const resume = useResumeSubscriber();
   const block = useBlockUser();
   const unblock = useUnblockUser();
+  const setPkg = useSetSubscriberPackage(sub.id);
 
   const [tab, setTab] = useState<"control" | "users">("control");
   const [pkgId, setPkgId] = useState(sub.packageId);
   const selected = pkgMap.get(pkgId);
-  const [seatLimit, setSeatLimit] = useState<number>(selected?.users ?? 0);
+  // Init from the saved seat override so it re-displays on re-open; fall back to the package's
+  // users limit (a fresh subscription with no override yet).
+  const [seatLimit, setSeatLimit] = useState<number>(sub.seats ?? selected?.users ?? 0);
   // The roster is a pure derivation of the /admin/users read (invalidated by block/unblock) —
   // no local copy, so a real status flip flows back through the query, not an optimistic mock.
   const roster = useMemo<UserRow[]>(() => usersForCompany(allUsers, sub.companyId), [allUsers, sub.companyId]);
@@ -253,12 +265,21 @@ function CompanyControl({
   };
 
   const save = () => {
+    // onClose() unmounts CompanyControl before the PUT settles, so the toast fires off the
+    // settled promise (fireWithToast). Body = {package_id, seats}; money = SERVER (no client
+    // price). seats is sent RAW (server validates integer && (-1 || >=1)); a rejection (e.g. a
+    // 0 from editSeat -> 400) surfaces the B-200(a) error toast, never a swallowed catch.
     onClose();
-    ctx.notify(
-      t("admin.subs.saveToast")
-        .replace("{org}", sub.companyName || DASH)
-        .replace("{pkg}", p?.name ?? DASH)
-        .replace("{seats}", seatText),
+    fireWithToast(
+      () => setPkg.mutateAsync({ package_id: pkgId, seats: seatLimit }),
+      () =>
+        ctx.notify(
+          t("admin.subs.saveToast")
+            .replace("{org}", sub.companyName || DASH)
+            .replace("{pkg}", p?.name ?? DASH)
+            .replace("{seats}", seatText),
+        ),
+      () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
     );
   };
 
@@ -459,9 +480,10 @@ function CompanyControl({
           )}
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-            {/* suspend/resume flip companies.status (surfaced as company_status) — branch on the
-                COMPANY status field, NOT subscription.status, so the button swaps after a real flip. */}
-            {sub.companyStatus === "active" ? (
+            {/* suspend/resume flip companies.status (surfaced as company_status) — the action is
+                decided by suspendAction(company_status) (B-200b), NOT subscription.status, so the
+                button swaps after a real flip. */}
+            {suspendAction(sub.companyStatus) === "suspend" ? (
               <Btn
                 kind="danger"
                 size="md"
@@ -478,12 +500,14 @@ function CompanyControl({
                       onClose();
                       // ctx.confirm unmounts CompanyControl (single modal slot) before the POST
                       // settles, so a mutate-scoped onSuccess is hasListeners()-gated off the dead
-                      // observer. Fire the toast off the settled promise instead; the hook-level
-                      // invalidateQueries survives (Mutation.execute dispatch, not listener-gated).
-                      suspend
-                        .mutateAsync(sub.id)
-                        .then(() => ctx.notify(t("admin.subs.suspendToast").replace("{org}", sub.companyName || DASH), "warn"))
-                        .catch(() => {});
+                      // observer. fireWithToast (B-200b) fires the toast off the settled promise
+                      // instead; the hook-level invalidateQueries survives (not listener-gated).
+                      // The rejection path shows the B-200(a) error toast, not a swallowed catch.
+                      fireWithToast(
+                        () => suspend.mutateAsync(sub.id),
+                        () => ctx.notify(t("admin.subs.suspendToast").replace("{org}", sub.companyName || DASH), "warn"),
+                        () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                      );
                     },
                   })
                 }
@@ -505,11 +529,12 @@ function CompanyControl({
                     onConfirm: () => {
                       onClose();
                       // Toast off the settled promise — CompanyControl unmounts before the POST
-                      // settles, so a mutate-scoped onSuccess would be dropped (see suspend note).
-                      resume
-                        .mutateAsync(sub.id)
-                        .then(() => ctx.notify(t("admin.subs.activateToast").replace("{org}", sub.companyName || DASH)))
-                        .catch(() => {});
+                      // settles (see suspend note); the rejection path shows the B-200(a) toast.
+                      fireWithToast(
+                        () => resume.mutateAsync(sub.id),
+                        () => ctx.notify(t("admin.subs.activateToast").replace("{org}", sub.companyName || DASH)),
+                        () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                      );
                     },
                   })
                 }
@@ -521,7 +546,7 @@ function CompanyControl({
             <Btn kind="outline" size="md" onClick={onClose}>
               {t("admin.common.cancel")}
             </Btn>
-            <Btn kind="primary" size="md" icon="check" onClick={save}>
+            <Btn kind="primary" size="md" icon="check" disabled={setPkg.isPending} onClick={save}>
               {t("admin.subs.saveSettingsBtn")}
             </Btn>
           </div>
@@ -598,8 +623,8 @@ function CompanyControl({
                               size="sm"
                               icon={blocked ? "check" : "lock"}
                               // block/unblock take the USER id (u.id); a blank id would POST
-                              // /admin/users//block, so skip it (the render tolerates key={u.id||i}).
-                              disabled={block.isPending || unblock.isPending || !u.id}
+                              // /admin/users//block, so canManageUser(u.id) gates it off (B-200b).
+                              disabled={block.isPending || unblock.isPending || !canManageUser(u.id)}
                               onClick={() =>
                                 ctx.confirm({
                                   title: t(blocked ? "admin.subs.unblockBtn" : "admin.subs.blockBtn"),
@@ -608,18 +633,19 @@ function CompanyControl({
                                   iconTone: blocked ? "var(--ok)" : "var(--danger)",
                                   danger: !blocked,
                                   // Toast off the settled promise — ctx.confirm unmounts this
-                                  // modal before the POST settles, so a mutate-scoped onSuccess
-                                  // would be dropped off the dead observer (see suspend note).
+                                  // modal before the POST settles (see suspend note). The tone
+                                  // comes from blockAction(u.status) (B-200b); the rejection path
+                                  // shows the B-200(a) error toast, not a swallowed catch.
                                   onConfirm: () =>
-                                    (blocked ? unblock : block)
-                                      .mutateAsync(u.id)
-                                      .then(() =>
+                                    fireWithToast(
+                                      () => (blocked ? unblock : block).mutateAsync(u.id),
+                                      () =>
                                         ctx.notify(
                                           (blocked ? t("admin.subs.unblockToast") : t("admin.subs.blockToast")).replace("{name}", u.name || DASH),
-                                          blocked ? "ok" : "warn",
+                                          blockAction(u.status).tone,
                                         ),
-                                      )
-                                      .catch(() => {}),
+                                      () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                                    ),
                                 })
                               }
                             >

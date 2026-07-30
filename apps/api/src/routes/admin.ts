@@ -33,6 +33,22 @@ type CompanyRow = typeof companies.$inferSelect;
 type UserRow = typeof users.$inferSelect;
 type PlatformInvoiceRow = typeof platformInvoices.$inferSelect;
 
+/**
+ * W1d dunning notice (the side-effect a platform-owner remind emits). Every field
+ * is SERVER-derived from the resolved overdue invoice/subscription — never client
+ * text/recipient/amount. The notifier is an injectable seam (mirrors AuditSink):
+ * the default is a no-op, tests record it, and the real LINE integration
+ * (P0-INT-03, whose send() currently throws a TODO) is a later default-swap — so
+ * the remind NEVER depends on the unbuilt adapter.
+ */
+export interface DunningNotice {
+  /** The dunned tenant (the invoice's subscription's company). */
+  companyId: string;
+  invoiceId: string;
+  amount: string | null;
+}
+export type DunningNotifier = (notice: DunningNotice) => Promise<void> | void;
+
 /** Flat 404 NOT_FOUND (opaque, no cross-tenant existence leak). */
 function notFound(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(404).send({ code: "NOT_FOUND", message });
@@ -73,6 +89,13 @@ function packageValues(b: Record<string, unknown>): string | Record<string, unkn
   }
   const menus = Array.isArray(b.menus) ? (b.menus as unknown[]) : null;
   if (!menus || menus.length === 0) return "menus is required (at least one nav id)";
+  // B-200: require a non-empty limits object. An omitted/empty limits on an EDIT
+  // would persist {} and WIPE the plan's quota LIVE for every subscriber on it
+  // (the resolver reads package.limits fresh) — never silently zero the fleet.
+  const limits = b.limits;
+  if (!limits || typeof limits !== "object" || Array.isArray(limits) || Object.keys(limits).length === 0) {
+    return "limits is required (a non-empty quota object)";
+  }
   const contact = b.contact === true;
   const priceRaw = toNum(pick(b, "price", "price_m"));
   if (!contact && (priceRaw == null || priceRaw <= 0)) {
@@ -88,7 +111,7 @@ function packageValues(b: Record<string, unknown>): string | Record<string, unkn
     priceM: moneyStr(priceM),
     priceY: moneyStr(priceY),
     currencyCode: "THB", // server-set — the client never overrides the currency
-    limits: b.limits ?? {},
+    limits,
     menus,
     subRules: pick(b, "sub_rules", "subRules") ?? {},
     tagline: str(pick(b, "tagline")).trim() || null,
@@ -144,6 +167,7 @@ function subscriberWire(s: SubscriptionRow, company: CompanyRow | undefined): Re
     cycle: s.cycle,
     renew_at: s.renewAt,
     status: s.status,
+    seats: s.seats, // B-195: the per-subscriber seat override (null = package default)
     created_at: s.createdAt,
   };
 }
@@ -177,9 +201,9 @@ function invoiceWire(i: PlatformInvoiceRow): Record<string, unknown> {
 /** Register the owner-gated platform-admin read + write routes on the /api/v1 scope. */
 export function registerAdminRoutes(
   app: FastifyInstance,
-  deps: { platformDb: PlatformDb; platformWriteDb: PlatformWriteDb },
+  deps: { platformDb: PlatformDb; platformWriteDb: PlatformWriteDb; notify: DunningNotifier },
 ): void {
-  const { platformDb, platformWriteDb } = deps;
+  const { platformDb, platformWriteDb, notify } = deps;
 
   // GET /admin/packages — the S/M/L/Full plan catalog (global; owner-gated read).
   app.get("/admin/packages", async (request, reply) => {
@@ -333,4 +357,83 @@ export function registerAdminRoutes(
 
   // NO DELETE /admin/packages/{id} — B-196=ก: the prototype exposes no delete
   // affordance, and deleting a referenced plan would orphan every subscription.
+
+  // PUT /admin/subscribers/{id}/package — owner changes a tenant's plan (+seats).
+  // W1c (B-201). {id} is a SUBSCRIPTION id, written DIRECTLY. subscription CARRIES
+  // company_id (a tenant-owned table, unlike the global package) → the company_id
+  // STRIP in updateAllTenants is LOAD-BEARING here: an owner must NEVER re-home a
+  // sub to another tenant. Audit → the TARGET tenant. Zero-money (no price/proration).
+  app.put("/admin/subscribers/:id/package", async (request, reply) => {
+    const caller = await ownerOnly(request, reply); // 403 before ANY read/write
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const body = (request.body ?? {}) as Record<string, unknown>;
+
+    // FK pre-check: package_id is a NOT-NULL FK (onDelete:restrict) — a bad id
+    // would surface as a raw 23503 → 500. Resolve it to a clean 400/404 first.
+    const packageId = str(pick(body, "package_id", "packageId")).trim();
+    if (!packageId) return badRequest(reply, "package_id is required");
+    const [pkg] = (await platformDb.selectAllTenants(
+      packages,
+      eq(packages.id, packageId),
+    )) as PackageRow[];
+    if (!pkg) return notFound(reply, `package ${packageId} not found`);
+
+    const set: Record<string, unknown> = { packageId };
+    // seats override: integer; -1 = unlimited, else >= 1. Omitted → untouched.
+    const seatsRaw = pick(body, "seats");
+    if (seatsRaw != null) {
+      const seats = toNum(seatsRaw);
+      if (seats == null || !Number.isInteger(seats) || (seats !== -1 && seats < 1)) {
+        return badRequest(reply, "seats must be a positive integer or -1 (unlimited)");
+      }
+      set.seats = seats;
+    }
+
+    // The door strips company_id/companyId/id/is_platform_admin; packageId/seats pass.
+    const [updated] = await platformWriteDb.updateAllTenants(subscriptions, id, set);
+    if (!updated) return notFound(reply, `subscriber ${id} not found`);
+
+    const [company] = (await platformDb.selectAllTenants(
+      companies,
+      eq(companies.id, updated.companyId),
+    )) as CompanyRow[];
+    request.auditTargetCompanyId = updated.companyId; // the AFFECTED tenant
+    return reply.code(200).send(subscriberWire(updated, company));
+  });
+
+  // POST /admin/invoices/{id}/remind — dunning remind on an overdue platform
+  // invoice (Phase-6 W1d, the LAST Wave-1 billing write). PURE side-effect: writes
+  // NO row and NO GL/JV (B-188 — platform billing is standalone). The prototype's
+  // ทวงถาม button is per-invoice-row, shown ONLY on an overdue invoice. The audit
+  // is REAL (the prototype toast claimed "· บันทึกใน Audit Log"): the onResponse
+  // hook logs action="remind" attributed to the DUNNED tenant (auditTargetCompanyId).
+  // NO invoice-generation / NO mark-paid (B-189=ก DEFER). money=SERVER: no amount
+  // is client-supplied — the notice echoes the stored invoice.
+  app.post("/admin/invoices/:id/remind", async (request, reply) => {
+    const caller = await ownerOnly(request, reply); // 403 BEFORE any read
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const [inv] = (await platformDb.selectAllTenants(
+      platformInvoices,
+      eq(platformInvoices.id, id),
+    )) as PlatformInvoiceRow[];
+    if (!inv) return notFound(reply, `invoice ${id} not found`);
+    if (inv.status !== "overdue") return badRequest(reply, "invoice is not overdue");
+    const [sub] = (await platformDb.selectAllTenants(
+      subscriptions,
+      eq(subscriptions.id, inv.subscriptionId),
+    )) as SubscriptionRow[];
+    if (!sub) return notFound(reply, `subscription ${inv.subscriptionId} not found`);
+    // Dunning notification side-effect — SERVER-derived recipient/amount. Wrapped so
+    // a future real-adapter throw (LINE send() TODO) degrades to a log, never a 500,
+    // and never blocks the audit (mirrors the auditSink actor-lookup degrade).
+    try {
+      await notify({ companyId: sub.companyId, invoiceId: inv.id, amount: inv.amount });
+    } catch (err) {
+      request.log.error(err);
+    }
+    request.auditTargetCompanyId = sub.companyId; // the DUNNED tenant → the audit hook
+    return reply.code(200).send({ ok: true });
+  });
 }

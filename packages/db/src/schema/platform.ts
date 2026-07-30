@@ -216,6 +216,11 @@ export const subscriptions = pgTable("subscription", {
   cycle: subscriptionCycle("cycle").notNull(),
   renewAt: timestamp("renew_at", { withTimezone: true, mode: "date" }),
   status: subscriptionStatus("status").notNull().default("active"),
+  // B-195 (Phase-6 W1c): a per-subscriber seat-cap OVERRIDE the owner may set via
+  // PUT /admin/subscribers/{id}/package. NULL = no override (fall back to the
+  // package's limits.users); -1 = unlimited (mirrors the PackageLimits convention).
+  // W1c PERSISTS this override; wiring it into the quota resolver is a follow-up.
+  seats: integer("seats"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

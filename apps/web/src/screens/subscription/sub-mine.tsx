@@ -23,8 +23,10 @@
  *   - usageUpdatedAt: the fixed sub.mine.usageUpdatedAt key renders verbatim (the prototype's
  *     static "last updated today HH:MM" label); NO live now() is computed.
  *   - PkgDemoSwitcher (prototype L60): a pure demo mock (no i18n key) -> dropped entirely.
- *   - renew/cancel: MOCK -> faithful ctx.notify toasts (Phase-6 has no renew/cancel mutation,
- *     so nothing is written); the upgrade + bill-history header actions navigate.
+ *   - renew: REAL (W1c) -> POST /subscription/renew (no body) invalidates the /me read; renew is
+ *     NOT idempotent, so the button is disabled-while-pending (a double-click would double-advance
+ *     the paid-through date). cancel stays MOCK -> a faithful ctx.notify toast (no cancel
+ *     mutation). The upgrade + bill-history header actions navigate.
  *   - money: the yearly price renders verbatim from the server via formatMoney (never
  *     recomputed); the baht/year suffix is the prototype's static keyed UI text.
  *   - billing cycle: the yearly cycle shows the sub.mine.valYearly key; any other cycle code
@@ -59,7 +61,8 @@ import {
   type SubscriptionMe,
   type BadgeTone,
 } from "./sub-rows";
-import { useSubscriptionMe } from "./use-subscription";
+import { fireWithToast } from "../admin/admin-rows";
+import { useRenewSubscription, useSubscriptionMe } from "./use-subscription";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
 const DASH = "—";
@@ -143,6 +146,7 @@ interface QuotaRow {
 function MineBody({ me }: { me: SubscriptionMe }) {
   const { t } = useI18n();
   const ctx = useShellCtx();
+  const renew = useRenewSubscription();
 
   const pkg = me.package;
   const accent = sizeColor(pkg ? pkg.size : "");
@@ -234,7 +238,23 @@ function MineBody({ me }: { me: SubscriptionMe }) {
             </span>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <Btn kind="outline" size="md" style={{ flex: 1 }} onClick={() => ctx.notify(t("sub.mine.toastRenew"))}>
+            <Btn
+              kind="outline"
+              size="md"
+              style={{ flex: 1 }}
+              // renew is NOT idempotent (each POST advances renew_at one cycle, no server dedup),
+              // so disabled-while-pending guards a double-click double-advance of the paid-through
+              // date. The toast off the settled promise; the new date surfaces via the SUB_ME
+              // re-read (rowNextRenew), NOT the static toast. The rejection path shows the error toast.
+              disabled={renew.isPending}
+              onClick={() =>
+                fireWithToast(
+                  () => renew.mutateAsync(),
+                  () => ctx.notify(t("sub.mine.toastRenew")),
+                  () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                )
+              }
+            >
               {t("sub.mine.btnRenew")}
             </Btn>
             <Btn kind="ghost" size="md" onClick={() => ctx.notify(t("sub.mine.toastCancel"))}>

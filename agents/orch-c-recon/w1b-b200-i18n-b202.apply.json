@@ -1,0 +1,7 @@
+{
+  "override": "wei-approved:B-202",
+  "dict": {
+    "admin.plans.menuGroupGeneral": "ทั่วไป",
+    "admin.common.actionFailedToast": "ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง"
+  }
+}

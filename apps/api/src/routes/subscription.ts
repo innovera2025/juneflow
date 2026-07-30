@@ -122,7 +122,20 @@ async function loadSubscriptionMe(db: TenantDb): Promise<Record<string, unknown>
   };
 }
 
-/** Register the tenant subscription reads on the /api/v1 scope. */
+/** Flat 400 VALIDATION (client-input error). */
+function validation(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(400).send({ code: "VALIDATION", message });
+}
+
+/** Advance a date by exactly one billing cycle, in UTC (PLAN.md §4 — time is UTC). */
+function nextCycle(from: Date, cycle: "monthly" | "yearly"): Date {
+  const d = new Date(from.getTime()); // clone — never mutate the stored renewAt
+  if (cycle === "yearly") d.setUTCFullYear(d.getUTCFullYear() + 1);
+  else d.setUTCMonth(d.getUTCMonth() + 1);
+  return d;
+}
+
+/** Register the tenant subscription reads + self-service writes on the /api/v1 scope. */
 export function registerSubscriptionRoutes(app: FastifyInstance): void {
   // GET /subscription/plans — the plan CATALOG (S/M/L/Full). Global reference
   // data (package has no company_id), read through the allowlisted reference door
@@ -157,5 +170,51 @@ export function registerSubscriptionRoutes(app: FastifyInstance): void {
       { fk: platformInvoices.subscriptionId, parent: subscriptions },
     ])) as PlatformInvoiceRow[];
     return reply.code(200).send(listEnvelope([...rows].sort(byCreatedDesc).map(invoiceWire)));
+  });
+
+  // --- tenant self-service writes (Phase-6 W1c, B-201) -----------------------
+  // Both act on THE tenant's OWN subscription via request.db (TenantDb), which
+  // auto-ANDs eq(company_id, <tenant>) into every read/write — a tenant can NEVER
+  // reach another tenant's subscription (NO PlatformWriteDb, no client id accepted).
+
+  // POST /subscription/change-plan {package_id, cycle} — swap the tenant's OWN
+  // plan/cycle IMMEDIATELY. money=SERVER: NO prorated charge, NO renew_at shift
+  // (B-191=ก DEFER — proration is billing logic the prototype never defined). The
+  // quota/module effect is immediate (the next GET /subscription/me reflects it).
+  app.post("/subscription/change-plan", async (request: FastifyRequest, reply: FastifyReply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const packageId = typeof body.package_id === "string" ? body.package_id.trim() : "";
+    const cycle = typeof body.cycle === "string" ? body.cycle.trim() : "";
+    if (!packageId) return validation(reply, "package_id is required");
+    if (cycle !== "monthly" && cycle !== "yearly") {
+      return validation(reply, "cycle must be 'monthly' or 'yearly'");
+    }
+    // FK-validate package_id against the global catalog (400/404, never a raw 500).
+    const pkgRows = (await db.selectReference(packages, eq(packages.id, packageId))) as PackageRow[];
+    if (pkgRows.length === 0) return notFound(reply, "package not found");
+    // Resolve THIS tenant's own subscription (the select is company-scoped).
+    const subs = (await db.select(subscriptions)) as SubscriptionRow[];
+    const sub = subs.find((s) => s.status === "active" || s.status === "trial") ?? subs[0];
+    if (!sub) return notFound(reply, "this tenant has no subscription");
+    // update() AND-s company_id → only this tenant's own row can ever be written.
+    await db.update(subscriptions, { packageId, cycle }, eq(subscriptions.id, sub.id));
+    return reply.code(200).send(await loadSubscriptionMe(db));
+  });
+
+  // POST /subscription/renew — renew the tenant's OWN sub one cycle forward.
+  // money=SERVER: the next renew_at is server-computed (UTC), NEVER client-sent.
+  // Status is left AS-IS — the prototype defines no renew transition (not invented).
+  app.post("/subscription/renew", async (request: FastifyRequest, reply: FastifyReply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    const subs = (await db.select(subscriptions)) as SubscriptionRow[];
+    const sub = subs.find((s) => s.status === "active" || s.status === "trial") ?? subs[0];
+    if (!sub) return notFound(reply, "this tenant has no subscription");
+    const base = sub.renewAt ?? new Date(); // extend from paid-through, else now
+    const renewAt = nextCycle(base, sub.cycle as "monthly" | "yearly"); // keep the stored cycle
+    await db.update(subscriptions, { renewAt }, eq(subscriptions.id, sub.id));
+    return reply.code(200).send(await loadSubscriptionMe(db));
   });
 }

@@ -16,8 +16,9 @@
  * Honest divergences (reported, never fabricated — Phase-6 B-179 minimal wire):
  *   - NO current-plan marking: there is no active-subscription read, so no card is disabled
  *     as the current plan; every card shows a change CTA (contact / downgrade / upgrade).
- *   - plan-change CTA is MOCK: the confirm modal's confirm button fires a faithful
- *     ctx.notify toast only -- Phase-6 has no plan-change mutation, so nothing is written.
+ *   - plan-change CTA is REAL (W1c): the confirm modal's confirm button fires POST
+ *     /subscription/change-plan {package_id, cycle} (money = SERVER, NO proration — B-191) and
+ *     invalidates the /me read; the Enterprise (price==null) card stays a toast-only no-POST.
  *   - signup button is honest-DISABLED: the signup action had a window.openSignup global with
  *     no backend; it must not POST, so it is a disabled button.
  *   - wire gaps: planWire carries no `tagline` (em-dash), no `modLabel` (em-dash), no
@@ -47,7 +48,8 @@ import {
   formatMoney,
   type PlanRow,
 } from "./sub-rows";
-import { useSubscriptionPlans } from "./use-subscription";
+import { fireWithToast } from "../admin/admin-rows";
+import { useChangePlan, useSubscriptionPlans } from "./use-subscription";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
 const DASH = "—";
@@ -74,6 +76,7 @@ export function SubPlans() {
 
   const [cycle, setCycle] = useState<Cycle>("yearly");
   const plansQ = useSubscriptionPlans();
+  const changePlan = useChangePlan();
   const plans = useMemo<PlanRow[]>(() => (plansQ.data ?? []).map(toPlanRow), [plansQ.data]);
 
   /** Quota display: an unlimited value -> the shared "unlimited" key, else grouped digits. */
@@ -108,10 +111,19 @@ export function SubPlans() {
               icon="check"
               onClick={() => {
                 close();
-                ctx.notify(
-                  price == null
-                    ? t("sub.plans.toastEnterprise")
-                    : `${t("sub.plans.changeToPrefix")} ${p.name} ${t("sub.plans.toastChangedSuffix")}`,
+                // Enterprise (price==null) stays a toast-only no-POST (no priced plan to change to).
+                if (price == null) {
+                  ctx.notify(t("sub.plans.toastEnterprise"));
+                  return;
+                }
+                // The modal unmounts on close() before the POST settles, so the toast fires off the
+                // settled promise (fireWithToast). Body = {package_id, cycle} (cycle captured at
+                // modal-open); money = SERVER (NO client price, NO proration — B-191). The rejection
+                // path shows the error toast, not a swallowed catch.
+                fireWithToast(
+                  () => changePlan.mutateAsync({ package_id: p.id, cycle }),
+                  () => ctx.notify(`${t("sub.plans.changeToPrefix")} ${p.name} ${t("sub.plans.toastChangedSuffix")}`),
+                  () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
                 );
               }}
             >
