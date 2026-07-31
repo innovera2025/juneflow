@@ -153,6 +153,61 @@ export const MASK_REGISTRY: Record<string, MaskRegion> = {
       "B-160 (class B-120(ข)) — sub.mine contract-start value (formatDate(me.startedAt), sub-mine.tsx:161) renders the seed-time start date '2026-07-29' (= seed day); latent daily drift (passes today only by margin). Covers ONLY the startedAt value cell (measured x723-788 y401-420), not its label nor the fixed renewAt row below",
   },
 
+  // ── B-160 dashboard as_of masks (G5 full-manifest audit · orch-B QA 2026-07-31) ──
+  // Root cause (measured live on the running stack): the dashboard page-header subtitle
+  // renders i18n key `dashboard.tplAsOf` = "ข้อมูล ณ {date} (อัปเดต {time} น.)" where BOTH
+  // values come from the SERVER — apps/api/src/routes/dashboard.ts:200 sets
+  // `as_of = new Date().toISOString()` at REQUEST time, and dashboard.tsx:266-267/382 prints
+  // it as absolute Thai-short text ("31 ก.ค. 69"). Only the {time} half sat inside
+  // header-update-time-b120 (x560-800); the {date} half renders LEFT of it (measured
+  // x515.31-574.58, y125-145) and so drifts against any baseline captured on an earlier
+  // calendar day. Measured today (baseline 2026-07-27 vs run 2026-07-31): 100 of the row's
+  // 146 unmasked diff px are exactly the day digits "27"→"31" at x[515-529] y[129-139] —
+  // 91% of the 160 px epsilon, i.e. the row was one digit-width from a false FAIL.
+  //
+  // Proven by a live API-intercept experiment (as_of rewritten, nothing else changed):
+  //   as_of day 2-digit→1-digit (2026-08-01 "1 ส.ค. 69")   → 587 unmasked px = FAIL
+  //   worst case 5-char month + 1-digit day (2026-03-05)   → 604 unmasked px = FAIL
+  // because a shorter date REFLOWS the rest of the one-line subtitle leftwards: 319-327 px
+  // at the date itself (x515-559) plus 222-231 px where the trailing "online" glyphs slide
+  // past the existing mask's right edge (x[800-833]). With the two rects below both cases
+  // fall to 46 px (= the same sub-pixel topbar AA residual every other row carries) = PASS.
+  //
+  // Class: B-160 / B-120(ข) — a SERVER-computed date printed as absolute text. Not a
+  // regression (layout, labels, order and colour tokens are pixel-identical; only the date
+  // glyphs and the reflow they cause differ), and not fixable by a browser clock freeze
+  // (the value is computed server-side; freezing browser-now would also desync the
+  // dashboard's seed-relative timeAgo — see the B-160 note above).
+  //
+  // Minimal by construction: both rects sit INSIDE the 20px-tall subtitle line band
+  // (y125-145, wrapped to y123-147) and each only extends the ALREADY-approved
+  // header-update-time-b120 rect (x560-800) to the true edges of the drifting text run —
+  // 50px on the left, 40px on the right. No KPI, button, tab, menu row or table column is
+  // touched (the h1 title row ends at y112; the role banner starts at y165). Thresholds
+  // stay strict and dimensionMismatch still auto-FAILs.
+  //
+  // REVIEW FLAG (drafted for BLOCKERS.md, orch-B QA 2026-07-31): the -tail rect covers the
+  // last ~34px of the STATIC "· Sync SAP/REM ● online" copy — static text that MOVES because
+  // of the date drift, not drifting text itself. header-update-time-b120 already covers that
+  // phrase from x560 to x800, so the tail rect hides the final glyphs of "online" from the
+  // gate. Pending Wei ratification.
+  "dashboard-asof-date-b160": {
+    x: 513,
+    y: 123,
+    width: 50,
+    height: 24,
+    reason:
+      "B-160 (class B-120(ข)) — dashboard subtitle `dashboard.tplAsOf` prints the SERVER as_of (dashboard.ts:200 new Date()) as Thai-short text; its {date} half renders left of header-update-time-b120 and drifts vs an older baseline (measured live: date value x515.31-574.58 y125-145; drifting day digits x515-529 = 100 of 146 unmasked px). Covers only the strip of that date value left of the existing mask, inside the subtitle line band — no neighbouring element",
+  },
+  "dashboard-asof-tail-b160": {
+    x: 798,
+    y: 123,
+    width: 40,
+    height: 24,
+    reason:
+      "B-160 (class B-120(ข)) — reflow tail of the same dashboard as_of drift: a shorter date (1-digit day / 5-char Thai month) slides the one-line subtitle leftwards, pushing the trailing '● online' glyphs (measured run x780.80-834.11 y125-145) past header-update-time-b120's right edge (x800) — measured 222-231 px, enough to FAIL on its own. Covers only x798-838 inside the subtitle line band; the same phrase is already masked from x560-800 by header-update-time-b120. Static copy that MOVES — flagged for Wei ratification in the G5 audit report",
+  },
+
   // B-187 date-column masks (B-160 class, exposed once the viewMode fix landed).
   // The admin.* baselines were captured in PLATFORM viewMode; the gate seeded only
   // juneflow-token -> tenant sidebar -> a whole-sidebar ~2.2% mismatch that DOMINATED

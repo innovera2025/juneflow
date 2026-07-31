@@ -296,10 +296,20 @@ test.describe("visual gate · content-area crop (B-048 · P0-QA-08)", () => {
     expect(shell, "app-shell row present in screens.manifest.json").toBeDefined();
     expect(shell!.route).toBe("dashboard");
     expect(shell!.ref).toBe("app-baseline/dashboard.png");
-    expect(shell!.masks).toEqual(["header-update-time-b120", "header-date-chip-b120"]);
+    // B-160 dashboard as_of (2026-07-31 · full-manifest G5 audit): two more
+    // B-160-class rects joined the row — the subtitle prints the SERVER as_of
+    // (apps/api dashboard.ts:200 new Date()) as absolute Thai-short text, whose
+    // {date} half sat LEFT of header-update-time-b120 and whose reflow (shorter
+    // date) pushes the line's trailing glyphs past that mask's right edge.
+    expect(shell!.masks).toEqual([
+      "header-update-time-b120",
+      "header-date-chip-b120",
+      "dashboard-asof-date-b160",
+      "dashboard-asof-tail-b160",
+    ]);
     // Every listed mask key must be a real registry entry (throws otherwise).
     expect(() => resolveMasks(shell!.masks)).not.toThrow();
-    expect(resolveMasks(shell!.masks)).toHaveLength(2);
+    expect(resolveMasks(shell!.masks)).toHaveLength(4);
   });
 });
 
