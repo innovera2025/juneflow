@@ -82,17 +82,21 @@ liveDescribe("Solar Wave-1 workflow writes (live seeded stack, non-money)", () =
     return rowsOf((await res.json()) as Record<string, unknown>);
   }
 
-  test("OWNER opens an O&M ticket → 201 and it appears in the list (+1)", async () => {
+  test("OWNER opens an O&M ticket → 201, status server-set 'open', appears in the caller's list (+1)", async () => {
     const before = (await list("solar/om-tickets")).length;
     const res = await owner.post("/api/v1/solar/om-tickets", {
-      data: { title: "e2e-w1 O&M", priority: "medium", status: "open", company_id: MISSING_UUID }, // smuggled company_id must be dropped
+      // hostile: smuggle a foreign company_id + an already-closed status. The door strips
+      // company_id; the handler server-sets status='open' (createSolarOmTicket ignores body.status).
+      data: { title: "e2e-w1 O&M", priority: "medium", status: "closed", company_id: MISSING_UUID },
     });
     expect(res.status(), "owner may open an O&M ticket").toBe(201);
     const created = await res.json();
-    expect(String(created.company_id), "the door force-set the caller's tenant (smuggled id dropped)").toBe(ownerCompanyId);
+    expect(statusOf(created), "status is SERVER-set 'open' — a smuggled 'closed' is ignored").toBe("open");
+    // Tenant-scope proof: the row lands in the CALLER's tenant (company_id was force-set, the
+    // smuggled MISSING_UUID dropped) — so it appears in the owner's tenant-scoped list (+1). If the
+    // door had honored the smuggled company_id, the row would sit in another tenant and NOT be listed.
     const after = await list("solar/om-tickets");
-    expect(after.length, "the new ticket is listed").toBe(before + 1);
-    return created;
+    expect(after.length, "the new ticket is listed in the caller's tenant").toBe(before + 1);
   });
 
   test("close an O&M ticket → 200 status=closed · RE-close → 409 (idempotent) · unknown → 404", async () => {
@@ -118,8 +122,9 @@ liveDescribe("Solar Wave-1 workflow writes (live seeded stack, non-money)", () =
       data: { name: "e2e-w1 permit", org: "กฟภ.", status: "pending", company_id: MISSING_UUID },
     });
     expect(res.status(), "owner may add a permit step").toBe(201);
-    expect(String((await res.json()).company_id), "tenant force-set").toBe(ownerCompanyId);
-    expect((await list("solar/permit-steps")).length, "the permit step is listed").toBe(before + 1);
+    expect(statusOf(await res.json()), "status server-set 'pending' (no advance-step, B-212)").toBe("pending");
+    // tenant-scope: the smuggled company_id was force-stripped → the row lands in + is listed by the caller's tenant.
+    expect((await list("solar/permit-steps")).length, "the permit step is listed in the caller's tenant").toBe(before + 1);
   });
 
   test("OWNER adds a warranty registry item → 201 and it appears (+1) · money=NONE", async () => {
@@ -128,10 +133,10 @@ liveDescribe("Solar Wave-1 workflow writes (live seeded stack, non-money)", () =
       data: { item: "e2e-w1 inverter", brand: "Huawei", qty: 1, status: "active", company_id: MISSING_UUID },
     });
     expect(res.status(), "owner may add a warranty item").toBe(201);
-    const created = await res.json();
-    expect(String(created.company_id), "tenant force-set").toBe(ownerCompanyId);
-    // money=NONE: a warranty add composes no JV/GL — there is no amount/currency posting on this row.
-    expect((await list("solar/warranties")).length, "the warranty item is listed").toBe(before + 1);
+    expect(statusOf(await res.json()), "status server-set 'active'").toBe("active");
+    // money=NONE: a warranty add composes no JV/GL — no amount/currency posting on this row.
+    // tenant-scope: smuggled company_id force-stripped → row lands in + is listed by the caller's tenant.
+    expect((await list("solar/warranties")).length, "the warranty item is listed in the caller's tenant").toBe(before + 1);
   });
 
   // Wave-1b (PPA · money) — placeholder. PPA billing reuses the AR-invoice create path

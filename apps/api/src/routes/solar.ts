@@ -242,7 +242,7 @@ async function createSolarOmTicket(
       title,
       priority: str(pick(body, "priority")).trim() || null,
       assigneeUserId,
-      status: str(pick(body, "status")).trim() || "open",
+      status: "open", // initial state — server-set (the mock create form has no status field; close moves it to 'closed')
     })
     .returning()) as SolarOmTicketRow[];
   return reply.code(201).send(omTicketWire(created));
@@ -288,7 +288,7 @@ async function createSolarPermitStep(
       projectId,
       name,
       org: str(pick(body, "org")).trim() || null,
-      status: str(pick(body, "status")).trim() || "pending",
+      status: "pending", // initial state — server-set (the mock add form has no status field; no advance-step, B-212)
       stepDate: str(pick(body, "step_date", "stepDate")).trim() || null,
     })
     .returning()) as SolarPermitStepRow[];
@@ -318,7 +318,7 @@ async function createSolarWarranty(
       perf: str(pick(body, "perf")).trim() || null,
       prodDate: str(pick(body, "prod_date", "prodDate")).trim() || null,
       expiryDate: str(pick(body, "expiry_date", "expiryDate")).trim() || null,
-      status: str(pick(body, "status")).trim() || "active",
+      status: "active", // initial state — server-set (the mock add form has no status field)
     })
     .returning()) as SolarWarrantyRow[];
   return reply.code(201).send(warrantyWire(created));
