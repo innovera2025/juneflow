@@ -267,13 +267,24 @@ const coaRows = [
 // POST /ar/invoices  (Wave-0 authz + SERVER money, round-A lines/due_date/status)
 // ===========================================================================
 describe("POST /api/v1/ar/invoices", () => {
+  // arInvoices is read twice per create: the B-217 dup-`no` pre-check (probes by
+  // the invoice number, an "INV-" string → no dup) and the jv-line insertThrough
+  // ownership (probes by the invoice uuid + company → the owned row).
+  const invSource = (where: SQL | undefined): unknown[] => {
+    const isDupNoProbe = paramsOf(where).some(
+      (p) => typeof p === "string" && p.startsWith("INV-"),
+    );
+    return isDupNoProbe ? [] : [arInvoice(INV0)];
+  };
   const authedDb = (inserted: Inserted[] = [], captured: Captured[] = []) =>
     stubDb({
       rows: [
         [customers, [customerRow]],
         [users, [userRow]],
         [roles, [roleRow(true)]],
-        [arInvoices, [arInvoice(INV0)]], // insertThrough parent-ownership read
+        [arInvoices, invSource], // B-217 dup-`no` pre-check (→ []) + insertThrough ownership (→ row)
+        [glAccounts, coaRows], // B-216: the revenue JV resolves AR/revenue/VAT-output codes
+        [jvs, [{ id: "jv-owned", companyId: COMPANY }]], // allocJvNo (max) + jvLines insertThrough ownership
       ],
       inserted,
       captured,
@@ -477,6 +488,119 @@ describe("POST /api/v1/ar/invoices", () => {
     });
     expect(badRes.statusCode).toBe(400);
     expect(silent).toHaveLength(0);
+  });
+
+  it("B-216 — posts a BALANCED revenue JV on create (Dr AR gross / Cr revenue net / Cr VAT-output vat) to 4010", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: authedDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ar/invoices",
+      payload: {
+        customer_id: CUSTOMER,
+        no: "INV-2026-0500",
+        lines: [{ qty: 2, price: 100000 }], // amount 200000, vat 14000 (7%), gross 214000
+      },
+    });
+    expect(res.statusCode).toBe(201);
+
+    // The JV header carries an idempotency-safe source marker (invoice:<id>).
+    const jvIns = inserted.find((i) => i.table === jvs);
+    expect(jvIns).toBeTruthy();
+    expect(String((jvIns!.values as Record<string, unknown>).sourceDoc)).toMatch(/^invoice:/);
+
+    const lineIns = inserted.find((i) => i.table === jvLines);
+    const lines = lineIns!.values as Record<string, unknown>[];
+    expect(lines).toHaveLength(3);
+    const sumDr = lines.reduce((s, l) => s + Number(l.dr), 0);
+    const sumCr = lines.reduce((s, l) => s + Number(l.cr), 0);
+    expect(sumDr).toBe(214000); // Dr AR gross = net 200000 + vat 14000
+    expect(sumCr).toBe(214000); // Cr revenue 200000 + Cr VAT-output 14000 — BALANCED (C9)
+    // Dr AR = gross, Cr revenue = net (to 4010), Cr VAT-output = vat.
+    expect(lines.find((l) => l.accountId === ACC_AR)!.dr).toBe("214000.00");
+    expect(lines.find((l) => l.accountId === ACC_REVENUE)!.cr).toBe("200000.00");
+    expect(lines.find((l) => l.accountId === ACC_VATOUT)!.cr).toBe("14000.00");
+  });
+
+  it("B-216 — 409s honestly when the tenant COA lacks a posting account (no invoice posted)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [customers, [customerRow]],
+            [users, [userRow]],
+            [roles, [roleRow(true)]],
+            [glAccounts, []], // COA missing the AR/revenue/VAT-output codes
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ar/invoices",
+      payload: { customer_id: CUSTOMER, no: "INV-NOCOA", lines: [{ qty: 1, price: 100 }] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/missing a required posting account/);
+    // fail-fast: the COA check is before the tx → no invoice / JV written.
+    expect(inserted.find((i) => i.table === arInvoices)).toBeFalsy();
+  });
+
+  it("B-217 — 409s a duplicate `no` (would double-recognize revenue) with NO insert/JV", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [customers, [customerRow]],
+            [users, [userRow]],
+            [roles, [roleRow(true)]],
+            [arInvoices, [arInvoice(INV0, { no: "INV-DUP" })]], // an invoice with this `no` already exists
+            [glAccounts, coaRows],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ar/invoices",
+      payload: { customer_id: CUSTOMER, no: "INV-DUP", lines: [{ qty: 1, price: 100 }] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already exists/);
+    // the money proof: NO second invoice + NO second revenue JV was written.
+    expect(inserted.find((i) => i.table === arInvoices)).toBeFalsy();
+    expect(inserted.find((i) => i.table === jvs)).toBeFalsy();
+  });
+
+  it("B-217 — 409s a concurrent duplicate (23505 on the unique index → no double-post)", async () => {
+    // A racer committed the same (company_id, no) first: the in-memory pre-check
+    // passes (no dup visible yet) but the tx trips the 0047 unique index → 23505.
+    // The handler maps it to the same 409, never a 500 / double revenue JV.
+    const base = authedDb();
+    const db = {
+      ...(base as unknown as Record<string, unknown>),
+      transaction: async () => {
+        const e = new Error("duplicate key value violates unique constraint") as Error & {
+          code: string;
+        };
+        e.code = "23505";
+        throw e;
+      },
+    } as unknown as typeof base;
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ar/invoices",
+      payload: { customer_id: CUSTOMER, no: "INV-RACE", lines: [{ qty: 1, price: 100 }] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already exists/);
   });
 });
 
