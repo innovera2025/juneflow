@@ -20,9 +20,13 @@
  * verbatim" rule.
  *
  * HONEST DIVERGENCES (rule 4 — flagged, never fabricated):
- *   - open-OM-ticket (header primary + the per-ticket card click) is a dropped mock — no
- *     write endpoint — so the header button is DISABLED and the ticket card is
- *     non-interactive (no form wired).
+ *   - The per-ticket card is now interactive (Wave-1a): clicking it opens OmTicketView — the
+ *     ticket detail + close action (POST /solar/om-tickets/{id}/close, money=NONE, idempotent).
+ *   - The header "new ticket" primary stays honest-DISABLED: the create form (RF2OMForm) has a
+ *     team dropdown whose 4 option strings (the O&M-team names) have NO i18n key (not in
+ *     i18n-full.json — minting is forbidden, B-073) AND no wire column (the door only takes an
+ *     assignee_user_id uuid, not a free-text team), so the create affordance is BLOCKED pending
+ *     a ruling rather than shipping an unfaithful/unpersisted field.
  *   - the O&M ticket `priority` is a raw backend value (seed = a Thai word) with NO code
  *     to switch on, so the Tag renders it with a NEUTRAL tone for every row (a code-based
  *     tone is a future round).
@@ -30,10 +34,12 @@
  *     prototype hardcodes pending for every ticket).
  *   - Export has no endpoint -> the prototype's client-intent toast (solar.monitor.toastExport).
  *
- * i18n (rule 2): every visible string is a solar.monitor.* dict key (t) — consume-only, no
- * key minted here. No Thai literal lives in source (B-073); tokens back every colour except
- * the KPI accent hex #B45309 (prototype-verbatim, solar.jsx L50, B-037(a)); numeric cells
- * carry class `num` (rule 7).
+ * i18n (rule 2): every visible string is a solar.monitor.* / borrowed (pm.fieldAsset /
+ * labor.team / common.*) dict key (t) — consume-only, no key minted here; the view-modal title
+ * composes the same-screen omCardTitle prefix (the "O&M ticket" label) with the ticket's own
+ * number (data, no omViewModalTitle key exists). No Thai literal lives in source (B-073); tokens
+ * back every colour except the KPI accent + modal icon tone hex #B45309 (prototype-verbatim,
+ * solar.jsx L50 / real-forms2.jsx L254, B-037(a)); numeric cells carry class `num` (rule 7).
  */
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
@@ -55,10 +61,12 @@ import {
   perfColor,
   toUserRef,
   userNameById,
+  omAssetLabel,
   type InverterRow,
   type TicketRow,
 } from "./solar-monitor-rows";
 import { useSolarInverters, useSolarOmTickets } from "./use-solar";
+import { OmTicketView } from "./om-ticket-view";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
 const DASH = "—";
@@ -126,6 +134,27 @@ export function SolarMonitoring() {
 
   const cellUnit = t("solar.monitor.cellOutputUnit");
 
+  // open the O&M ticket detail + close modal (real-forms2.jsx openOMTicketForm view branch,
+  // L250-256). The asset + team labels are resolved here against the loaded inverters + users
+  // (real FK joins, never a raw uuid) and captured for the modal. The view title has no
+  // dedicated key, so it composes the same-screen omCardTitle (the "O&M ticket" label) + the
+  // ticket number (data), matching the prototype's `<O&M ticket label> ${no}`.
+  const openView = (tk: TicketRow) => {
+    const assetLabel = omAssetLabel(tk.inverterId, inverters);
+    const teamLabel = tk.assigneeUserId ? assignees.get(tk.assigneeUserId) ?? "" : "";
+    ctx.openModal({
+      title: `${t("solar.monitor.omCardTitle")} ${tk.no}`,
+      subtitle: t("solar.monitor.omViewModalSubtitle"),
+      icon: "wrench",
+      // prototype-verbatim icon tone (real-forms2.jsx L254); no matching token (B-037(a)).
+      iconTone: "#B45309",
+      size: "md",
+      body: ({ close }: { close: () => void }) => (
+        <OmTicketView ticket={tk} assetLabel={assetLabel} teamLabel={teamLabel} onClose={close} />
+      ),
+    });
+  };
+
   return (
     <Page
       breadcrumbs={[t("solar.monitor.crumbModule"), t("solar.monitor.crumbScreen")]}
@@ -141,7 +170,8 @@ export function SolarMonitoring() {
           <Btn kind="outline" size="md" icon="download" onClick={() => ctx.notify(t("solar.monitor.toastExport"))}>
             {t("solar.monitor.actionExport")}
           </Btn>
-          {/* Honest-DISABLED: no write endpoint (open-OM-ticket is a dropped mock). */}
+          {/* Honest-DISABLED (BLOCKED, not a dropped mock): the create form's team dropdown has
+              no i18n keys for its options + no wire column — see the file-header divergence note. */}
           <Btn kind="primary" size="md" icon="plus" disabled>
             {t("solar.monitor.actionNewTicket")}
           </Btn>
@@ -251,8 +281,22 @@ export function SolarMonitoring() {
                 tickets.map((tk) => {
                   const who = tk.assigneeUserId ? assignees.get(tk.assigneeUserId) ?? "" : "";
                   return (
-                    // Non-interactive: no write endpoint, so the prototype's onClick form is dropped.
-                    <div key={tk.id} style={{ padding: 12, borderRadius: 9, marginBottom: 4, border: "1px solid var(--border)" }}>
+                    // Interactive (Wave-1a): clicking the card opens the ticket detail + close
+                    // modal (openView). role=button + Enter/Space keyboard activation (a11y) keep
+                    // the visual a div; the destructive close lives behind the view's outline btn.
+                    <div
+                      key={tk.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openView(tk)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openView(tk);
+                        }
+                      }}
+                      style={{ padding: 12, borderRadius: 9, marginBottom: 4, border: "1px solid var(--border)", cursor: "pointer" }}
+                    >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                         <span className="num" style={{ fontSize: 11.5, fontWeight: 700, color: "var(--brand)" }}>{tk.no || DASH}</span>
                         {/* Priority is a raw backend value with no code -> neutral tone (divergence). */}

@@ -8,28 +8,36 @@
  *
  * DATA (rule 3): GET /solar/warranties (use-solar.ts) via the generated client — the
  * prototype's local array becomes the server register. Pure narrowing / status mapping lives
- * in solar-warranty-rows.ts (unit-tested, G3).
+ * in solar-warranty-rows.ts (unit-tested, G3). Add-item is REAL (Wave-1a): the header primary
+ * opens WarrantyForm and POSTs /solar/warranties ({ item, years }, money=NONE, B-219); the
+ * modal unmounts on submit so the toast fires off the settled promise (fireWithToast).
  *
  * HONEST DIVERGENCES (rule 4 — flagged, never fabricated):
- *   - add-item (header primary) is a dropped mock — no write endpoint — so DISABLED.
  *   - prod_date / expiry_date are nullable on the wire; a null renders an em-dash (never a
  *     fabricated date). perf renders the raw returned value.
  *
- * i18n (rule 2): every visible string is a solar.warranty.* dict key (t) — consume-only, no
- * key minted here. No Thai literal lives in source (B-073); tokens back every colour; numeric
- * cells carry class `num` (rule 7).
+ * i18n (rule 2): every visible string is a solar.warranty.* / common.* dict key (t) —
+ * consume-only, no key minted here. No Thai literal lives in source (B-073); tokens back every
+ * colour except the prototype-verbatim modal icon tone #B45309 (real-forms2.jsx L334, B-037(a));
+ * numeric cells carry class `num` (rule 7).
  */
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
+import type { components } from "@juneflow/contracts";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Page } from "../../shell/page";
 import { TypeBadge } from "../../shell/type-badge";
+import { useShellCtx } from "../../shell/shell-context";
 import { StatusBadge } from "./solar-kpi";
 import { formatMoney } from "./solar-shared";
+import { fireWithToast } from "../admin/admin-rows";
 import { toWarrantyRow, warrantyStatus, type WarrantyRow } from "./solar-warranty-rows";
-import { useSolarWarranties } from "./use-solar";
+import { useSolarWarranties, useCreateWarranty } from "./use-solar";
+import { WarrantyForm, type WarrantyDraft } from "./warranty-form";
+
+type Entity = components["schemas"]["Entity"];
 
 /** Em-dash for every honest wire gap (a null date / an absent field). */
 const DASH = "—";
@@ -58,9 +66,44 @@ function statusLabel(t: (k: "solar.warranty.statusActive" | "solar.warranty.stat
 
 export function SolarWarranty() {
   const { t } = useI18n();
+  const ctx = useShellCtx();
 
   const warrantiesQ = useSolarWarranties();
+  const createWarranty = useCreateWarranty();
   const rows = useMemo<WarrantyRow[]>(() => (warrantiesQ.data ?? []).map(toWarrantyRow), [warrantiesQ.data]);
+
+  // add warranty (real-forms2.jsx openWarrantyForm L331-336): open the form modal; on submit
+  // close it, then POST { item, years } and fire the toast off the settled promise (the modal
+  // has unmounted). years -> Number for the wire (server truncates, B-219); money = NONE.
+  const openForm = () => {
+    ctx.openModal({
+      title: t("solar.warranty.addModalTitle"),
+      subtitle: t("solar.warranty.addModalSubtitle"),
+      icon: "shield",
+      // prototype-verbatim icon tone (real-forms2.jsx L334); no matching token (B-037(a)).
+      iconTone: "#B45309",
+      size: "sm",
+      body: ({ close }: { close: () => void }) => (
+        <WarrantyForm
+          onClose={close}
+          onSubmit={(draft: WarrantyDraft) => {
+            close();
+            const body = { item: draft.item, years: Number(draft.years) } as Entity;
+            fireWithToast(
+              () => createWarranty.mutateAsync(body),
+              () =>
+                ctx.notify(
+                  t("solar.warranty.addToast")
+                    .replace("{item}", draft.item)
+                    .replace("{years}", draft.years),
+                ),
+              () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+            );
+          }}
+        />
+      ),
+    });
+  };
 
   return (
     <Page
@@ -73,8 +116,7 @@ export function SolarWarranty() {
         </span>
       }
       actions={
-        // Honest-DISABLED: no write endpoint (add-item is a dropped mock).
-        <Btn kind="primary" size="md" icon="plus" disabled>
+        <Btn kind="primary" size="md" icon="plus" onClick={openForm}>
           {t("solar.warranty.actionAdd")}
         </Btn>
       }

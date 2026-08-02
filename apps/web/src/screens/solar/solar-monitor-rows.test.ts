@@ -16,6 +16,7 @@ import {
   perfColor,
   toUserRef,
   userNameById,
+  omAssetLabel,
   type InverterRow,
 } from "./solar-monitor-rows";
 
@@ -66,11 +67,11 @@ describe("toTicketRow", () => {
         assignee_user_id: "u9",
         status: "open",
       }),
-    ).toEqual({ id: "t1", no: "OM-2569-001", title: "fix inverter", priority: "high", assigneeUserId: "u9", status: "open" });
+    ).toEqual({ id: "t1", no: "OM-2569-001", inverterId: "inv-1", title: "fix inverter", priority: "high", assigneeUserId: "u9", status: "open" });
   });
 
   it("defaults absent fields (never fabricates)", () => {
-    expect(toTicketRow({ id: "y" })).toEqual({ id: "y", no: "", title: "", priority: "", assigneeUserId: "", status: "" });
+    expect(toTicketRow({ id: "y" })).toEqual({ id: "y", no: "", inverterId: "", title: "", priority: "", assigneeUserId: "", status: "" });
   });
 });
 
@@ -135,5 +136,25 @@ describe("assignee resolver", () => {
 
   it("is empty for undefined input", () => {
     expect(userNameById(undefined).size).toBe(0);
+  });
+});
+
+describe("omAssetLabel", () => {
+  const inverters: InverterRow[] = [
+    { id: "INV-05", zone: "Array 1", kw: 500, outputKw: 0, perf: 0, status: "offline" },
+    { id: "INV-09", zone: "", kw: 500, outputKw: 400, perf: 90, status: "normal" },
+  ];
+
+  it("joins id · zone for a resolved inverter", () => {
+    expect(omAssetLabel("INV-05", inverters)).toBe("INV-05 · Array 1");
+  });
+
+  it("falls back to the bare id when the zone is blank", () => {
+    expect(omAssetLabel("INV-09", inverters)).toBe("INV-09");
+  });
+
+  it("returns '' for an absent or unresolved FK (never leaks the raw id)", () => {
+    expect(omAssetLabel("", inverters)).toBe("");
+    expect(omAssetLabel("INV-99", inverters)).toBe("");
   });
 });

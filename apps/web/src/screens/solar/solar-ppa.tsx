@@ -1,7 +1,8 @@
 /*
  * SolarPPA — the sell-electricity / PPA billing screen (route solar.ppa), ported from
  * pototype/solar.jsx SolarPPA (L110-161) + the shared SolarKpi (L6-22). Section module
- * `ppa` (registry.ts L125). READ-ONLY (solar.ts is GET-only, no write bundle filed).
+ * `ppa` (registry.ts L125). The list is READ-ONLY (solar.ts is GET-only); the
+ * create-invoice header action reuses the shared AR invoice write path (POST /ar/invoices).
  *
  * Design fidelity (§0 rule 1): the two-crumb breadcrumb, the title + TypeBadge subtitle,
  * the create-invoice header action, the 4-card KPI strip, and the monthly-billing table
@@ -15,8 +16,15 @@
  * / FiT-rate / COD are fixed illustrative figures rendered via their i18n value-keys
  * (solar.ppa.kpiCounterpartyValue / kpiFitValue / kpiCodValue — consume-only).
  *
+ * CREATE (rule 8): the create-invoice header action (header primary) opens the shared
+ *   ARInvoiceForm via ctx.openModal — the SAME modal ar-invoice.tsx opens — running
+ *   POST /ar/invoices. MONEY AUTHORITY (money=SERVER, B-216/B-217): the server computes
+ *   VAT + total and posts the revenue JV; the client sends only the line items. Faithful
+ *   to the prototype (solar.jsx L124 openInvoiceForm → the GENERAL AR invoice form whose
+ *   customer dropdown includes the PPA counterparty PEA), so the user picks the customer —
+ *   no counterparty is preset here.
+ *
  * HONEST DIVERGENCES (rule 4 — flagged, never fabricated):
- *   - create-invoice (header primary) is a dropped mock — no write endpoint — so DISABLED.
  *   - the ppa `status` enum has NO i18n label keys, so the badge renders the RAW backend
  *     value; only the tone is code-mapped (ppaStatusKind). Labels are a future i18n round.
  *
@@ -31,11 +39,13 @@ import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Page } from "../../shell/page";
+import { useShellCtx } from "../../shell/shell-context";
 import { TypeBadge } from "../../shell/type-badge";
 import { SolarKpi, StatusBadge } from "./solar-kpi";
 import { formatMoney } from "./solar-shared";
 import { toPpaRow, ytdAmount, kpiYtdValue, rateText, ppaStatusKind, type PpaRow } from "./solar-ppa-rows";
 import { useSolarPpaInvoices } from "./use-solar";
+import { ARInvoiceForm } from "../ar/ar-invoice-form";
 
 /** Em-dash for an empty billing register (never a fabricated value). */
 const DASH = "—";
@@ -59,6 +69,7 @@ const td: CSSProperties = { padding: "14px", verticalAlign: "middle" };
 
 export function SolarPPA() {
   const { t } = useI18n();
+  const ctx = useShellCtx();
 
   const ppaQ = useSolarPpaInvoices();
   const rows = useMemo<PpaRow[]>(() => (ppaQ.data ?? []).map(toPpaRow), [ppaQ.data]);
@@ -75,8 +86,25 @@ export function SolarPPA() {
         </span>
       }
       actions={
-        // Honest-DISABLED: no write endpoint (create-invoice is a dropped mock).
-        <Btn kind="primary" size="md" icon="plus" disabled>
+        // Reuse the shared AR invoice form (the SAME modal ar-invoice.tsx opens):
+        // POST /ar/invoices, money=SERVER (server computes VAT + total + revenue JV,
+        // B-216/B-217). The general form lets the user pick the PPA counterparty — no
+        // customer is preset (prototype-faithful, solar.jsx L124 openInvoiceForm).
+        <Btn
+          kind="primary"
+          size="md"
+          icon="plus"
+          onClick={() =>
+            ctx.openModal({
+              title: t("ar.invoice.modalTitle"),
+              subtitle: t("ar.invoice.modalSubtitle"),
+              icon: "ledger",
+              iconTone: "var(--brand)",
+              size: "lg",
+              body: ({ close }: { close: () => void }) => <ARInvoiceForm onClose={close} />,
+            })
+          }
+        >
           {t("solar.ppa.actionCreateInvoice")}
         </Btn>
       }
