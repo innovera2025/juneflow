@@ -337,6 +337,13 @@
       "when": 1785691928240,
       "tag": "0047_ar_invoice_no_uq",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785693415594,
+      "tag": "0048_solar_warranty_years",
+      "breakpoints": true
     }
   ]
 }

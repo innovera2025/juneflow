@@ -1,0 +1,1 @@
+ALTER TABLE "solar_warranty" ADD COLUMN "years" integer;

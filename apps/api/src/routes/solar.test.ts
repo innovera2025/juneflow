@@ -165,7 +165,7 @@ const permitStep = (id: string, createdAt: Date, extra: Record<string, unknown> 
 const warranty = (id: string, createdAt: Date, extra: Record<string, unknown> = {}) =>
   ({
     id, companyId: COMPANY, projectId: null, item: "แผงโซลาร์", brand: "JA Solar", qty: 14400,
-    perf: "87.40", prodDate: "2025-06-01", expiryDate: "2050-06-01", status: "active",
+    perf: "87.40", years: 10, prodDate: "2025-06-01", expiryDate: "2050-06-01", status: "active",
     createdAt, updatedAt: createdAt, ...extra,
   }) as typeof solarWarranties.$inferSelect;
 
@@ -424,15 +424,16 @@ describe("POST /api/v1/solar/permit-steps + /warranties (create · money=NONE)",
     expect(foreign.statusCode).toBe(404);
   });
 
-  it("warranty: 201 · item + qty stored · status=active", async () => {
+  it("warranty: 201 · item + qty + years stored · status=active", async () => {
     const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [], inserted }) })
-    ).inject({ method: "POST", url: "/api/v1/solar/warranties", payload: { item: "SCADA Server Dell R650", qty: 2 } });
+    ).inject({ method: "POST", url: "/api/v1/solar/warranties", payload: { item: "SCADA Server Dell R650", qty: 2, years: 10 } });
     expect(res.statusCode).toBe(201);
     const v = inserted.find((i) => i.table === solarWarranties)!.values;
     expect(v.item).toBe("SCADA Server Dell R650");
     expect(v.qty).toBe(2);
+    expect(v.years).toBe(10); // B-219: the form's product-warranty years is stored
     expect(v.status).toBe("active");
     expect(v.companyId).toBe(COMPANY);
   });

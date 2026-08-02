@@ -171,6 +171,7 @@ function warrantyWire(r: SolarWarrantyRow): Record<string, unknown> {
     item: r.item,
     brand: r.brand,
     qty: r.qty,
+    years: r.years,
     perf: num(r.perf),
     prod_date: r.prodDate,
     expiry_date: r.expiryDate,
@@ -309,12 +310,14 @@ async function createSolarWarranty(
     if (!p) return notFound(reply, `project ${projectId} not found`);
   }
   const qtyRaw = toNum(pick(body, "qty"));
+  const yearsRaw = toNum(pick(body, "years")); // B-219: product-warranty duration (years)
   const [created] = (await db
     .insert(solarWarranties, {
       projectId,
       item,
       brand: str(pick(body, "brand")).trim() || null,
       qty: qtyRaw == null ? null : Math.trunc(qtyRaw),
+      years: yearsRaw == null ? null : Math.trunc(yearsRaw),
       perf: str(pick(body, "perf")).trim() || null,
       prodDate: str(pick(body, "prod_date", "prodDate")).trim() || null,
       expiryDate: str(pick(body, "expiry_date", "expiryDate")).trim() || null,

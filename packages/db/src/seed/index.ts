@@ -1738,7 +1738,7 @@ async function seed(): Promise<void> {
         Array.from({ length: 4 }, (_, i) => ({
           id: det(`warr:${i}`), companyId: CO1, projectId: det("project:slr"),
           item: at(WARR_ITEMS, i), brand: at(WARR_BRANDS, i),
-          qty: 100 + i * 10, perf: m(90 + i), prodDate: null, expiryDate: null, status: "active",
+          qty: 100 + i * 10, perf: m(90 + i), years: [12, 10, 12, 5][i] ?? null, prodDate: null, expiryDate: null, status: "active",
         })),
       );
 
