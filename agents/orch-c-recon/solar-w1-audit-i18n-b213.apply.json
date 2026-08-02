@@ -1,0 +1,15 @@
+{
+  "override": "wei-approved:B-213",
+  "dict": {
+    "audit.crumb": "บันทึกการใช้งาน (รวม)",
+    "audit.title": "บันทึกการใช้งาน · Audit Log",
+    "audit.subtitle": "ประวัติการทำรายการทั้งหมดข้ามทุกโมดูล — ใคร ทำอะไร เมื่อไหร่ ที่ไหน เพื่อการตรวจสอบและความโปร่งใส",
+    "audit.exportToast": "ส่งออกบันทึกการใช้งาน (CSV)",
+    "audit.allModules": "ทุกโมดูล",
+    "audit.filterAction": "การกระทำ",
+    "audit.actCreate": "สร้าง",
+    "audit.actPost": "ลงบัญชี",
+    "audit.actSync": "ซิงก์",
+    "audit.empty": "ไม่พบบันทึกตามเงื่อนไข"
+  }
+}
