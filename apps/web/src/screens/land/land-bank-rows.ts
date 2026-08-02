@@ -1,5 +1,5 @@
 /*
- * Land Bank list-row helpers for LandBank (P3-WEB, read-only) — pure, i18n-free,
+ * Land Bank list-row helpers for LandBank (P3-WEB, read helpers) — pure, i18n-free,
  * ASCII-only logic narrowed from pototype/land.jsx LandBank (L137-220) + the shared
  * plot helpers (plotArea/plotPrice/areaText L29-31, tenureStatus/tenureStLabel L155-156)
  * and the ds.jsx STATUS map the prototype's <StatusBadge> reads.
@@ -15,15 +15,15 @@
  * (the seed stores rai*1600 + ngan*400 + wa*4, so the Thai rai-ngan-wa breakdown is an
  * EXACT reconstruction, never a fabricated value); price_per_rai is money -> currency_code.
  *
- * WIRE GAP (reported, never fabricated — LA-2 not merged): the prototype's title /
- * tambon / amphoe / prov / owner columns have NO source on plotWire yet (the LA-2 ALTER
- * is a pending P3 backend migration). The view renders an em-dash for the location cell
- * and the free-text search narrows to the wire-backed fields only (id + deedNo); this
- * module never invents the missing columns. A future enrich round adds them.
+ * VIEW GAP (reported, never fabricated): the LA-2 title / tambon / amphoe / prov / owner
+ * columns now exist on plotWire, but the LandBank TABLE does not consume them yet — the
+ * location cell still renders an em-dash and the free-text search narrows to the wire-backed
+ * fields the view reads (id + deedNo); this module never invents the missing columns. A
+ * future view-enrich round wires the location columns into the table read.
  *
- * READ-ONLY (no write bundle): there is no POST/PUT /land/plots handler, so the add-plot
- * form is dropped (mock mechanic, §0 rule 3) and the screen surfaces add/export as
- * honest-disabled — no create logic lives here.
+ * READ helpers only: POST /land/plots is now wired (the add-plot form in land-bank.tsx /
+ * land-plot-form.tsx -> use-land-bank.ts useCreatePlot). The client id is dropped (the
+ * server generates it, §0 rule 3). No create logic lives in THIS pure-logic module.
  */
 
 /** A land plot as the table consumes it (GET /land/plots row, narrowed from the wire). */

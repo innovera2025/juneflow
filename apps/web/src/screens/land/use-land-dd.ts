@@ -4,8 +4,9 @@
  * POST /land/plots/{id}/deal — post a land deal (money=SERVER). For a LEASE (B-161, Wei=
  * d) the client supplies { type: "lease", amount (the first-period rent — a legitimate
  * client cash figure), cc_id? }; the SERVER books the rent-expense JV (via ap.pv) and
- * owns the JV/jv_no. For a BUY the server computes the 10% deposit itself (the client
- * sends only { type: "buy" }). The client NEVER composes a Dr/Cr line or a JV number.
+ * owns the JV/jv_no. For a BUY the client supplies { type: "buy", cc_id? } and NO amount —
+ * the server COMPUTES the 10% deposit itself and returns it (cc_id is ignored for a buy,
+ * which posts no cost-center line). The client NEVER composes a Dr/Cr line or a JV number.
  * Invalidates the plot register (the deal advances the plot). Body/response = the opaque
  * Entity from the contract; a not-yet-implemented lease branch surfaces its error honestly.
  */

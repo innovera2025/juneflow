@@ -25,15 +25,22 @@
  *     ENTERED first-period rent (a new rent input, pvLeaseDesc label) via POST
  *     /land/plots/:id/deal { type: "lease", amount, cc_id } — money=SERVER: the server books
  *     the rent-expense JV (ap.pv) and owns jv_no; the client sends only the rent + cost
- *     center. On success -> pvToast + navigate ap.pv. The BUY deal + view-draft +
- *     save-lease-contract have no merged endpoint yet -> still honest-disabled.
+ *     center. On success -> pvToast + navigate ap.pv.
+ *   - BUY DEAL WIRED (the buy analog of the lease PV): the buy "make deposit PV" action posts
+ *     POST /land/plots/:id/deal { type: "buy", cc_id } — money=SERVER: the client sends NO
+ *     amount; the server COMPUTES the 10% deposit (round2((area/1600)*price*10%)), books
+ *     Dr 1150 land-held / Cr 2010 AP, and owns jv_no. The response carries the computed
+ *     deposit -> the toast reads it. On success -> pvToast + navigate ap.pv. The buy tab's
+ *     view-draft (openContractDraft) + confirm-transfer (openContractConfirm) and the lease
+ *     tab's view-draft + save-lease-contract have no merged endpoint -> still honest-disabled.
  *
  * i18n (§0 rule 2): every visible string is a land.dd.* dict key (t, minted B-153) or a
  * reuse of land.bc.root (the breadcrumb root, same land.* prototype family). CONSUME-ONLY:
  * nothing is minted here. Keys tied to STILL-unbuilt surfaces stay unconsumed — the neutral
- * status skips stPass/stIssue/stWait + cycleTitle, and the buy/save-lease PV-modal keys stay
- * unused; the LEASE deal now consumes pvLeaseDesc (rent label) + pvToast (success). No
- * Thai/baht literal sits in this source (B-073); tokens back every colour (§0 rule 6);
+ * status skips stPass/stIssue/stWait + cycleTitle, and the view-draft / confirm-transfer /
+ * save-lease PV-modal keys stay unused; the LEASE deal consumes pvLeaseDesc (rent label) +
+ * pvToast (success) and the BUY deal consumes pvDepositBtn + pvToast (the shared PV toast).
+ * No Thai/baht literal sits in this source (B-073); tokens back every colour (§0 rule 6);
  * numeric deal values carry class `num` via DealField (§0 rule 7); loading = token
  * skeleton; no plot = honest-empty.
  */
@@ -63,6 +70,19 @@ function dealErr(err: unknown): string {
   return typeof err === "object" && err !== null && "message" in err
     ? String((err as { message?: unknown }).message ?? "")
     : "";
+}
+
+/**
+ * Read the SERVER-computed deposit off the buy-deal response (Entity: { [k]: unknown }).
+ * money=SERVER: the client never knows the deposit; the buy branch returns
+ * { plot_id, type, deposit, jv_no } (land-sales.ts createLandPlotDeal), so the toast reads
+ * `deposit` (with an `amount` fallback for the lease-shaped response). 0 when absent.
+ */
+function dealAmount(data: Record<string, unknown>): number {
+  const v = data.deposit ?? data.amount;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number.parseFloat(String(v ?? ""));
+  return Number.isFinite(n) ? n : 0;
 }
 
 /**
@@ -209,6 +229,33 @@ export function LandDueDiligence() {
         onSuccess: () => {
           ctx.notify(
             t("land.dd.pvToast").replace("{amt}", formatMoney(rentAmount)).replace("{cc}", ccValue),
+          );
+          ctx.navigate("ap.pv");
+        },
+        onError: (err) => ctx.notify(dealErr(err) || DASH, "danger"),
+      },
+    );
+  };
+
+  // The BUY deal (the buy analog of the wired lease PV): post the deposit request. money=
+  // SERVER — the 10% deposit is COMPUTED server-side (round2((area/1600)*price*10%)); the
+  // client sends NO amount, only { type: "buy", cc_id }. The backend ignores cc for a buy
+  // (it posts Dr 1150 land-held / Cr 2010 AP with no cost center), but the prototype shows
+  // the shared CC selector, so passing cc_id is faithful and harmless. The response carries
+  // the server-computed deposit -> the toast reads it (the client never knew it). A plot
+  // missing area/price -> server 409 -> graceful dealErr toast.
+  const buySubmittable = !!dealPlot && ccValue !== "";
+
+  const submitBuy = () => {
+    if (!buySubmittable || !dealPlot) return;
+    createDeal.mutate(
+      { plotId: dealPlot.id, body: { type: "buy", cc_id: ccValue } },
+      {
+        onSuccess: (data) => {
+          ctx.notify(
+            t("land.dd.pvToast")
+              .replace("{amt}", formatMoney(dealAmount(data)))
+              .replace("{cc}", ccValue),
           );
           ctx.navigate("ap.pv");
         },
@@ -448,11 +495,19 @@ export function LandDueDiligence() {
               <DealField label={t("land.dd.buySbt")} value={money(terms?.sbt)} />
             </div>
             <div style={dealActions}>
-              {/* Honest-DISABLED: no deal / PV / contract endpoint is merged. */}
+              {/* view-draft (openContractDraft) + confirm-transfer (openContractConfirm) have
+                  no endpoint -> honest-disabled. The deposit PV IS the wired buy deal (POST
+                  /land/plots/:id/deal type=buy; the server computes + owns the deposit). */}
               <Btn kind="outline" size="md" icon="doc" disabled>
                 {t("land.dd.viewDraftBtn")}
               </Btn>
-              <Btn kind="soft" size="md" icon="cash" disabled>
+              <Btn
+                kind="soft"
+                size="md"
+                icon="cash"
+                onClick={submitBuy}
+                disabled={!buySubmittable || createDeal.isPending}
+              >
                 {t("land.dd.pvDepositBtn")}
               </Btn>
               <Btn kind="primary" size="md" icon="check" disabled>
