@@ -198,6 +198,29 @@ function invoiceWire(i: PlatformInvoiceRow): Record<string, unknown> {
   };
 }
 
+/**
+ * Server-derived MRR/ARR (B-192/B-209 · money=SERVER). MRR = Σ each subscription's
+ * normalized MONTHLY revenue: a yearly plan contributes price_y/12, a monthly plan
+ * price_m. A trial (not yet paying) and a cancelled (churned) sub contribute 0; every
+ * committed status (active/expiring/overdue) counts. Priced off the PLAN (package
+ * price), never the per-subscriber seat override. ARR = MRR × 12. The client no
+ * longer derives this (it was admin-rows.ts deriveMrr) — this is the authoritative value.
+ */
+export function computeMrrArr(
+  subs: SubscriptionRow[],
+  pkgById: Map<string, PackageRow>,
+): { mrr: number; arr: number } {
+  let mrr = 0;
+  for (const s of subs) {
+    if (s.status === "trial" || s.status === "cancelled") continue; // not committed revenue
+    const pkg = pkgById.get(s.packageId);
+    if (!pkg) continue;
+    mrr += s.cycle === "yearly" ? (num(pkg.priceY) ?? 0) / 12 : (num(pkg.priceM) ?? 0);
+  }
+  const rounded = round2(mrr);
+  return { mrr: rounded, arr: round2(rounded * 12) };
+}
+
 /** Register the owner-gated platform-admin read + write routes on the /api/v1 scope. */
 export function registerAdminRoutes(
   app: FastifyInstance,
@@ -231,10 +254,18 @@ export function registerAdminRoutes(
     if (!caller) return;
     const subs = (await platformDb.selectAllTenants(subscriptions)) as SubscriptionRow[];
     const comps = (await platformDb.selectAllTenants(companies)) as CompanyRow[];
+    const pkgs = (await platformDb.selectAllTenants(packages)) as PackageRow[];
     const byId = new Map(comps.map((c) => [c.id, c]));
-    return reply
-      .code(200)
-      .send(listEnvelope([...subs].sort(byCreatedDesc).map((s) => subscriberWire(s, byId.get(s.companyId)))));
+    const pkgById = new Map(pkgs.map((p) => [p.id, p]));
+    // B-192/B-209: MRR/ARR are SERVER-derived (money=SERVER) and ride on the list
+    // envelope (Paginated allows extra fields) so admin.overview drops its client
+    // deriveMrr and shows the authoritative value.
+    const { mrr, arr } = computeMrrArr(subs, pkgById);
+    return reply.code(200).send({
+      ...listEnvelope([...subs].sort(byCreatedDesc).map((s) => subscriberWire(s, byId.get(s.companyId)))),
+      mrr,
+      arr,
+    });
   });
 
   // GET /admin/users?company= — the cross-tenant user list (optional company

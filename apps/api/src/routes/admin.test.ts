@@ -26,7 +26,7 @@ import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { PlatformDb } from "../db/platform-db.js";
 import { PlatformWriteDb } from "../db/platform-write-db.js";
-import type { DunningNotice } from "./admin.js";
+import { computeMrrArr, type DunningNotice } from "./admin.js";
 import type { AuditRecord } from "../plugins/audit-log.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
@@ -888,5 +888,65 @@ describe("W1d dunning remind (B-188/189) — owner-gated, real audit, notificati
     ).inject({ method: "POST", url: "/api/v1/admin/invoices/inv-1/remind" });
     expect(res.statusCode).toBe(200); // the try/catch never lets the adapter 500 the remind
     expect(records[0]).toMatchObject({ action: "remind" }); // and the audit still fires
+  });
+});
+
+// ===========================================================================
+// B-192/B-209 — server-derived MRR/ARR (money=SERVER).
+// ===========================================================================
+describe("computeMrrArr (B-192/B-209) — server MRR/ARR", () => {
+  it("sums active/expiring/overdue by cycle; zeros trial + cancelled; ARR=MRR×12", () => {
+    const pkgById = new Map<string, ReturnType<typeof pkg>>([
+      ["pkg-m", pkg("pkg-m", { priceM: "7900.00", priceY: "79000.00" })],
+      ["pkg-y", pkg("pkg-y", { priceM: "10000.00", priceY: "120000.00" })],
+    ]);
+    const subs = [
+      sub("s1", COMPANY, { packageId: "pkg-m", cycle: "monthly", status: "active" }), // +7900
+      sub("s2", COMPANY, { packageId: "pkg-y", cycle: "yearly", status: "active" }), // +10000 (120000/12)
+      sub("s3", COMPANY, { packageId: "pkg-m", cycle: "monthly", status: "overdue" }), // +7900 (still committed)
+      sub("s4", COMPANY, { packageId: "pkg-m", cycle: "monthly", status: "trial" }), // 0
+      sub("s5", COMPANY, { packageId: "pkg-y", cycle: "yearly", status: "cancelled" }), // 0
+    ];
+    const { mrr, arr } = computeMrrArr(subs, pkgById);
+    expect(mrr).toBe(25800); // 7900 + 10000 + 7900
+    expect(arr).toBe(309600); // ×12
+  });
+
+  it("a sub whose package is missing contributes 0 (no crash)", () => {
+    const { mrr, arr } = computeMrrArr(
+      [sub("s1", COMPANY, { packageId: "ghost", status: "active" })],
+      new Map(),
+    );
+    expect(mrr).toBe(0);
+    expect(arr).toBe(0);
+  });
+});
+
+describe("GET /admin/subscribers — mrr/arr on the envelope (money=SERVER)", () => {
+  it("includes server-derived mrr/arr; only committed subs count (trial=0)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [caller(true)]],
+            [
+              subscriptions,
+              [
+                sub("s1", COMPANY, { packageId: "pkg-m", cycle: "monthly", status: "active" }),
+                sub("s2", OTHER_COMPANY, { packageId: "pkg-m", cycle: "monthly", status: "trial" }),
+              ],
+            ],
+            [companies, [company(COMPANY, "A"), company(OTHER_COMPANY, "B")]],
+            [packages, [pkg("pkg-m", { priceM: "7900.00" })]],
+          ],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/admin/subscribers" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(2); // both subs still listed
+    expect(body.mrr).toBe(7900); // only the active monthly; the trial is 0
+    expect(body.arr).toBe(94800); // 7900 × 12
   });
 });
