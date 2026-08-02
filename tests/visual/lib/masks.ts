@@ -153,6 +153,61 @@ export const MASK_REGISTRY: Record<string, MaskRegion> = {
       "B-160 (class B-120(ข)) — sub.mine contract-start value (formatDate(me.startedAt), sub-mine.tsx:161) renders the seed-time start date '2026-07-29' (= seed day); latent daily drift (passes today only by margin). Covers ONLY the startedAt value cell (measured x723-788 y401-420), not its label nor the fixed renewAt row below",
   },
 
+  // ── B-160 dashboard as_of masks (G5 full-manifest audit · orch-B QA 2026-07-31) ──
+  // Root cause (measured live on the running stack): the dashboard page-header subtitle
+  // renders i18n key `dashboard.tplAsOf` = "ข้อมูล ณ {date} (อัปเดต {time} น.)" where BOTH
+  // values come from the SERVER — apps/api/src/routes/dashboard.ts:200 sets
+  // `as_of = new Date().toISOString()` at REQUEST time, and dashboard.tsx:266-267/382 prints
+  // it as absolute Thai-short text ("31 ก.ค. 69"). Only the {time} half sat inside
+  // header-update-time-b120 (x560-800); the {date} half renders LEFT of it (measured
+  // x515.31-574.58, y125-145) and so drifts against any baseline captured on an earlier
+  // calendar day. Measured today (baseline 2026-07-27 vs run 2026-07-31): 100 of the row's
+  // 146 unmasked diff px are exactly the day digits "27"→"31" at x[515-529] y[129-139] —
+  // 91% of the 160 px epsilon, i.e. the row was one digit-width from a false FAIL.
+  //
+  // Proven by a live API-intercept experiment (as_of rewritten, nothing else changed):
+  //   as_of day 2-digit→1-digit (2026-08-01 "1 ส.ค. 69")   → 587 unmasked px = FAIL
+  //   worst case 5-char month + 1-digit day (2026-03-05)   → 604 unmasked px = FAIL
+  // because a shorter date REFLOWS the rest of the one-line subtitle leftwards: 319-327 px
+  // at the date itself (x515-559) plus 222-231 px where the trailing "online" glyphs slide
+  // past the existing mask's right edge (x[800-833]). With the two rects below both cases
+  // fall to 46 px (= the same sub-pixel topbar AA residual every other row carries) = PASS.
+  //
+  // Class: B-160 / B-120(ข) — a SERVER-computed date printed as absolute text. Not a
+  // regression (layout, labels, order and colour tokens are pixel-identical; only the date
+  // glyphs and the reflow they cause differ), and not fixable by a browser clock freeze
+  // (the value is computed server-side; freezing browser-now would also desync the
+  // dashboard's seed-relative timeAgo — see the B-160 note above).
+  //
+  // Minimal by construction: both rects sit INSIDE the 20px-tall subtitle line band
+  // (y125-145, wrapped to y123-147) and each only extends the ALREADY-approved
+  // header-update-time-b120 rect (x560-800) to the true edges of the drifting text run —
+  // 50px on the left, 40px on the right. No KPI, button, tab, menu row or table column is
+  // touched (the h1 title row ends at y112; the role banner starts at y165). Thresholds
+  // stay strict and dimensionMismatch still auto-FAILs.
+  //
+  // REVIEW FLAG (drafted for BLOCKERS.md, orch-B QA 2026-07-31): the -tail rect covers the
+  // last ~34px of the STATIC "· Sync SAP/REM ● online" copy — static text that MOVES because
+  // of the date drift, not drifting text itself. header-update-time-b120 already covers that
+  // phrase from x560 to x800, so the tail rect hides the final glyphs of "online" from the
+  // gate. Pending Wei ratification.
+  "dashboard-asof-date-b160": {
+    x: 513,
+    y: 123,
+    width: 50,
+    height: 24,
+    reason:
+      "B-160 (class B-120(ข)) — dashboard subtitle `dashboard.tplAsOf` prints the SERVER as_of (dashboard.ts:200 new Date()) as Thai-short text; its {date} half renders left of header-update-time-b120 and drifts vs an older baseline (measured live: date value x515.31-574.58 y125-145; drifting day digits x515-529 = 100 of 146 unmasked px). Covers only the strip of that date value left of the existing mask, inside the subtitle line band — no neighbouring element",
+  },
+  "dashboard-asof-tail-b160": {
+    x: 798,
+    y: 123,
+    width: 40,
+    height: 24,
+    reason:
+      "B-160 (class B-120(ข)) — reflow tail of the same dashboard as_of drift: a shorter date (1-digit day / 5-char Thai month) slides the one-line subtitle leftwards, pushing the trailing '● online' glyphs (measured run x780.80-834.11 y125-145) past header-update-time-b120's right edge (x800) — measured 222-231 px, enough to FAIL on its own. Covers only x798-838 inside the subtitle line band; the same phrase is already masked from x560-800 by header-update-time-b120. Static copy that MOVES — flagged for Wei ratification in the G5 audit report",
+  },
+
   // B-187 date-column masks (B-160 class, exposed once the viewMode fix landed).
   // The admin.* baselines were captured in PLATFORM viewMode; the gate seeded only
   // juneflow-token -> tenant sidebar -> a whole-sidebar ~2.2% mismatch that DOMINATED
@@ -182,6 +237,97 @@ export const MASK_REGISTRY: Record<string, MaskRegion> = {
     height: 366,
     reason:
       "B-187 (class B-160 / B-120) - admin.invoices date (วันที่) column renders each invoice seed-day date as YYYY-MM-DD (baseline froze 2026-07-28; a fresh stack re-seeds to the current day) so the day digits drift vs an older baseline. Covers only the date-text data cells (measured text x1110-1172 y381-731; changing digits x1160-1173), clear of the amount column (starts x1285)",
+  },
+
+  // ── B-205 first-time app-baselines: the ONLY two proven-drifting cells (orch-B QA 2026-07-31) ──
+  // B-205=ก (Wei 2026-07-31) baselined the 28 shipped-but-ungated screens. A live audit of all 28
+  // (DOM text-node scan for today's ISO/Thai date + current YYYY-MM/CE/BE year, cross-checked
+  // against packages/db/src/seed/index.ts's only three clock anchors — isoDaysFromToday (L824),
+  // the EVM SEED_TODAY month series (L1643) and the dashboard activity feed (L1789) — plus a
+  // `new Date()` sweep of every apps/api route that serves them) found exactly TWO screens whose
+  // captured viewport renders a clock-derived value. Every other row is baselined mask-free: their
+  // dates are fixed seed literals (bank.cheque/bank.recon 2026-05-xx, ap.billing's PO/WO doc nos)
+  // and none of the 27 shell-bearing rows carries the live-time header widgets, so they do NOT
+  // take the header-*-b120 masks either (adding them would mask static copy — B-186/B-160 rule).
+  //
+  // Class: B-160 / B-120(ข) — a SERVER-computed date printed as absolute text; not fixable from
+  // tests/ (the value comes from the DB/API, so a browser clock freeze does nothing).
+  //
+  // PROVEN LIVE by API interception (agents/orch-b-recon/b205-results/drift-sim2.js — the response
+  // is rewritten in-flight, nothing else changes), each verdict measured with these exact rects:
+  //   ap.billing due_date  +1d = 255px · +40d = 832px · +400d = 923px unmasked → FAIL (epsilon 160)
+  //                        with masks → 0px = PASS, all 3
+  //   ap.pv      created_at +1d = 364px · +40d = 528px · +400d = 709px → FAIL; with masks → 0/0/5px
+  //   NEIGHBOUR CONTROLS (the mask must not swallow the line touching it):
+  //     ap.billing `aging` sub-line, rendered DIRECTLY BELOW each masked date → 149,768px unmasked,
+  //       still 147,317px = FAIL with the masks on (a real regression there is still caught);
+  //     ap.pv payee name, rendered DIRECTLY ABOVE each masked date → 202px, and the masks absorb
+  //       ZERO of it (maskedDiff = 0) = still FAIL — the rects clear the payee ink by ~1.25px.
+  // Total masked area: 6,270px (0.39%) on ap.billing + 4,602px (0.29%) on ap.pv. Thresholds stay
+  // strict, dimensionMismatch still auto-FAILs, and maskedDiffPixels is reported so the absorbed
+  // drift is never silent.
+
+  // ap.billing — due_date = isoDaysFromToday(AP_DUE_DAYS = [-10,3,14,30,5]) (packages/db seed
+  // L1418): an ABSOLUTE 'YYYY-MM-DD' re-anchored to SEED_TODAY on every fresh stack, so the digits
+  // change every day. The aging sub-line right below it ("อีก 10 วัน" / "เลย 3 วัน") is a
+  // seed-relative offset and is STABLE across days — it stays UNMASKED and gated.
+  // Measured live at 1600x1000 dSF=1: date text runs x1366.77-1426.80 (w60.03, h17) at
+  // y429.25/489.25/549.25/609.25/669.25; aging line boxes start y446.25+ (ink ~y449);
+  // retention column ends at x1352.77 and the status cell starts at x1462.77 — so each rect
+  // (x1364..1430) sits inside the due column, clear of BOTH neighbours, and stops above the aging ink.
+  "ap-billing-due-r1-b205": {
+    x: 1364, y: 427, width: 66, height: 19,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 1: seed dueDate = isoDaysFromToday(-10) re-anchors to the seed day, so the ISO digits drift daily. Covers only the measured date text run (x1366.77-1426.80 y429.25-446.25); the aging sub-line below (ink from y449) and the retention/status neighbours stay gated",
+  },
+  "ap-billing-due-r2-b205": {
+    x: 1364, y: 487, width: 66, height: 19,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 2 (isoDaysFromToday(+3)); same daily digit drift. Covers only the measured date text run (y489.25-506.25), aging sub-line below stays gated",
+  },
+  "ap-billing-due-r3-b205": {
+    x: 1364, y: 547, width: 66, height: 19,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 3 (isoDaysFromToday(+14)); same daily digit drift. Covers only the measured date text run (y549.25-566.25), aging sub-line below stays gated",
+  },
+  "ap-billing-due-r4-b205": {
+    x: 1364, y: 607, width: 66, height: 19,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 4 (isoDaysFromToday(+30)); same daily digit drift. Covers only the measured date text run (y609.25-626.25), aging sub-line below stays gated",
+  },
+  "ap-billing-due-r5-b205": {
+    x: 1364, y: 667, width: 66, height: 19,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 5 (isoDaysFromToday(+5)); same daily digit drift. Covers only the measured date text run (y669.25-686.25), aging sub-line below stays gated",
+  },
+
+  // ap.pv — the payee cell's sub-line prints formatDate(created_at) (ap-pv.tsx:294 / pv-rows.ts:135
+  // toISOString().slice(0,10)); created_at is schema defaultNow(), i.e. the seed-insert instant, so
+  // every fresh stack renders the CURRENT day. Unlike the b160 column masks this is NOT a dedicated
+  // column: the payee NAME sits directly above each date inside the same cell, so a single column-tall
+  // band would swallow 3 payee names. Hence one minimal rect per row.
+  // Measured live at 1600x1000 dSF=1: date runs x421.00-475.81 (w54.81, h16) at
+  // y372.75/433.25/493.25/553.75; payee name runs end at y372.75/433.25/493.75/554.25 with ink
+  // ~4px higher; the cell spans x407-777 so x419..478 touches no neighbouring column.
+  "ap-pv-date-r1-b205": {
+    x: 419, y: 371, width: 59, height: 19,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.pv row 1 created_at date (formatDate(r.createdAt), ap-pv.tsx:294): defaultNow() = the seed-insert day, so it renders TODAY and drifts against any older baseline. Covers only the measured date run (x421.00-475.81 y372.75-388.75); the payee name above it is untouched (proven: a payee-text change still FAILs with 0 px absorbed)",
+  },
+  "ap-pv-date-r2-b205": {
+    x: 419, y: 431, width: 59, height: 20,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.pv row 2 created_at date; same daily drift. Covers only the measured date run (y433.25-449.25), payee name above stays gated",
+  },
+  "ap-pv-date-r3-b205": {
+    x: 419, y: 491, width: 59, height: 20,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.pv row 3 created_at date; same daily drift. Covers only the measured date run (y493.25-509.25), payee name above stays gated",
+  },
+  "ap-pv-date-r4-b205": {
+    x: 419, y: 552, width: 59, height: 19,
+    reason:
+      "B-205 (class B-160 / B-120(ข)) — ap.pv row 4 created_at date; same daily drift. Covers only the measured date run (y553.75-569.75), payee name above stays gated",
   },
 
   // B-044(ก) — Wei ruling 2026-07-13: the port's t("app.name") th =

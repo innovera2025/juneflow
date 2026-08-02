@@ -22,7 +22,19 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: ".",
   testIgnore: ["reference/**"],
-  fullyParallel: true,
+  // B-206=ก (Wei · 2026-07-31): the G5 gate runs SEQUENTIALLY, enforced by the config
+  // rather than by runner discipline. Proven cause of the long-standing flake: under
+  // parallel load the capture lands on a deterministic PRE-DATA frame (KPIs 0, empty
+  // table bodies, skeleton pickers — chrome/labels/columns/colours pixel-identical), so
+  // the failing SET tracks load, not screens: a cold-container 8-worker run failed 8 rows
+  // (land.bank 49.7% · pm.wo 33.9% · solar.monitor 32.5% · ar.invoice 31.4% · gl.jv 25.4%
+  // · subcon.contracts 23.3% · pm.dashboard 16.5% · dashboard 16.2%) — a DIFFERENT set
+  // than an earlier parallel run, while two rows reproduced byte-identical diff counts
+  // across days/branches. Sequential = 48/48 PASS twice with identical per-row diffs.
+  // Cost ~2 min per full run; a flaky gate is a gate people learn to ignore (B-186 was
+  // only a note, which is not enforcement).
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: !!process.env.CI,
   reporter: [["list"]],
   outputDir: "./.results/playwright",
