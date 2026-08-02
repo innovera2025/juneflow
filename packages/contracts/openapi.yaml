@@ -4281,6 +4281,37 @@ paths:
           $ref: "#/components/responses/EntityList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [solar]
+      summary: Open a solar O&M ticket
+      operationId: createSolarOmTicket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /solar/om-tickets/{id}/close:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [solar]
+      summary: Close a solar O&M ticket (action)
+      operationId: closeSolarOmTicket
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /solar/ppa-invoices:
     get:
       tags: [solar]
@@ -4320,6 +4351,21 @@ paths:
           $ref: "#/components/responses/EntityList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [solar]
+      summary: Add a solar permit step
+      operationId: createSolarPermitStep
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /solar/warranties:
     get:
       tags: [solar]
@@ -4331,6 +4377,21 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/EntityList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [solar]
+      summary: Add a solar warranty registry item
+      operationId: createSolarWarranty
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "201":
+          $ref: "#/components/responses/EntityCreated"
         "401":
           $ref: "#/components/responses/Unauthorized"
   # ===== Tenant subscription reads (read-only op-groups — B-181) =====

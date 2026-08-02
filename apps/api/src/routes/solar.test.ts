@@ -10,6 +10,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
   ppaInvoices,
+  projects,
   solarInverters,
   solarOmTickets,
   solarPermitSteps,
@@ -35,13 +36,27 @@ interface Captured {
   table: unknown;
   where: SQL | undefined;
 }
+interface Inserted {
+  table: unknown;
+  values: Record<string, unknown>;
+}
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL;
+}
 interface StubOpts {
   rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
+  inserted?: Inserted[];
+  updated?: Updated[];
+  /** When true, an UPDATE … RETURNING yields 0 rows — models the close guard's
+   *  FINAL-UPDATE WHERE status != 'closed' matching nothing (a concurrent flip). */
+  updateEmpty?: boolean;
 }
 
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [] } = opts;
+  const { rows, captured = [], inserted = [], updated = [], updateEmpty = false } = opts;
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -65,6 +80,26 @@ function stubDb(opts: StubOpts): Db {
   };
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => ({
+        returning: () => {
+          inserted.push({ table, values });
+          return Promise.resolve([{ id: "new-1", ...values }]);
+        },
+      }),
+    }),
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            updated.push({ table, set, where });
+            return Promise.resolve(
+              updateEmpty ? [] : rowsFor(table, where).map((r) => ({ ...(r as object), ...set })),
+            );
+          },
+        }),
+      }),
+    }),
   };
   return raw as unknown as Db;
 }
@@ -276,5 +311,136 @@ describe("GET /api/v1/solar/warranties", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().data[0]).toMatchObject({ id: "w0", item: "แผงโซลาร์", brand: "JA Solar", qty: 14400, status: "active" });
     expect(paramsOf(captured.find((c) => c.table === solarWarranties)?.where)).toContain(COMPANY);
+  });
+});
+
+// ===========================================================================
+// Wave-1a workflow writes (B-212/B-215) — money=NONE, tenant-scoped.
+// ===========================================================================
+describe("POST /api/v1/solar/om-tickets (create)", () => {
+  it("401s flat without a session", async () => {
+    const res = await (await buildTestApp()).inject({ method: "POST", url: "/api/v1/solar/om-tickets", payload: { title: "x" } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("201 · server-generated running no (OM-YYYY-0001) · status=open · company_id force-set", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[solarOmTickets, []]], inserted }), // empty → allocOmNo = 0001
+      })
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets", payload: { title: "อินเวอร์เตอร์ offline", priority: "high" } });
+    expect(res.statusCode).toBe(201);
+    const v = inserted.find((i) => i.table === solarOmTickets)!.values;
+    expect(String(v.no)).toMatch(/^OM-\d{4}-0001$/); // server-generated, not the mock literal
+    expect(v.title).toBe("อินเวอร์เตอร์ offline");
+    expect(v.status).toBe("open");
+    expect(v.companyId).toBe(COMPANY); // TenantDb force-set
+    expect(res.json().status).toBe("open");
+  });
+
+  it("400 without a title", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[solarOmTickets, []]] }) })
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets", payload: { priority: "high" } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("404 a foreign inverter_id (in-tenant FK check → clean 404, not 500)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[solarInverters, []], [solarOmTickets, []]] }), // inverter not in tenant
+      })
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets", payload: { title: "x", inverter_id: "ghost" } });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("POST /api/v1/solar/om-tickets/{id}/close (idempotent)", () => {
+  it("200 open→closed (guard status != 'closed' on the FINAL update)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[solarOmTickets, [omTicket("t1", D0, { status: "open" })]]], updated }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets/t1/close" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("closed");
+    expect(updated.find((u) => u.table === solarOmTickets)!.set.status).toBe("closed");
+  });
+
+  it("409 already-closed (JS pre-check)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[solarOmTickets, [omTicket("t1", D0, { status: "closed" })]]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets/t1/close" });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("409 via the FINAL-UPDATE guard 0-row (read said open, but a concurrent close raced)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[solarOmTickets, [omTicket("t1", D0, { status: "open" })]]], updateEmpty: true }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets/t1/close" });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("404 an unknown ticket", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[solarOmTickets, []]] }) })
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets/ghost/close" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("POST /api/v1/solar/permit-steps + /warranties (create · money=NONE)", () => {
+  it("permit: 201 · status=pending · company_id force-set", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [], inserted }) })
+    ).inject({ method: "POST", url: "/api/v1/solar/permit-steps", payload: { name: "รง.4", org: "กรมโรงงาน" } });
+    expect(res.statusCode).toBe(201);
+    const v = inserted.find((i) => i.table === solarPermitSteps)!.values;
+    expect(v.name).toBe("รง.4");
+    expect(v.status).toBe("pending");
+    expect(v.companyId).toBe(COMPANY);
+  });
+
+  it("permit: 400 without a name; 404 a foreign project_id", async () => {
+    const noName = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [] }) })
+    ).inject({ method: "POST", url: "/api/v1/solar/permit-steps", payload: { org: "x" } });
+    expect(noName.statusCode).toBe(400);
+    const foreign = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[projects, []]] }) })
+    ).inject({ method: "POST", url: "/api/v1/solar/permit-steps", payload: { name: "x", project_id: "ghost" } });
+    expect(foreign.statusCode).toBe(404);
+  });
+
+  it("warranty: 201 · item + qty stored · status=active", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [], inserted }) })
+    ).inject({ method: "POST", url: "/api/v1/solar/warranties", payload: { item: "SCADA Server Dell R650", qty: 2 } });
+    expect(res.statusCode).toBe(201);
+    const v = inserted.find((i) => i.table === solarWarranties)!.values;
+    expect(v.item).toBe("SCADA Server Dell R650");
+    expect(v.qty).toBe(2);
+    expect(v.status).toBe("active");
+    expect(v.companyId).toBe(COMPANY);
+  });
+
+  it("warranty: 400 without an item", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [] }) })
+    ).inject({ method: "POST", url: "/api/v1/solar/warranties", payload: { qty: 2 } });
+    expect(res.statusCode).toBe(400);
   });
 });

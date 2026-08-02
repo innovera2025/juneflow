@@ -3281,7 +3281,27 @@ export interface paths {
         /** List solar O&M tickets */
         get: operations["listSolarOmTickets"];
         put?: never;
-        post?: never;
+        /** Open a solar O&M ticket */
+        post: operations["createSolarOmTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/solar/om-tickets/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close a solar O&M ticket (action) */
+        post: operations["closeSolarOmTicket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3332,7 +3352,8 @@ export interface paths {
         /** List solar permit steps */
         get: operations["listSolarPermitSteps"];
         put?: never;
-        post?: never;
+        /** Add a solar permit step */
+        post: operations["createSolarPermitStep"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3349,7 +3370,8 @@ export interface paths {
         /** List solar warranties */
         get: operations["listSolarWarranties"];
         put?: never;
-        post?: never;
+        /** Add a solar warranty registry item */
+        post: operations["createSolarWarranty"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8131,6 +8153,40 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    createSolarOmTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    closeSolarOmTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     listSolarPpaInvoices: {
         parameters: {
             query?: {
@@ -8185,6 +8241,23 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    createSolarPermitStep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     listSolarWarranties: {
         parameters: {
             query?: {
@@ -8200,6 +8273,23 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createSolarWarranty: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
             401: components["responses"]["Unauthorized"];
         };
     };
