@@ -89,7 +89,7 @@ liveDescribe("B-217 AR invoice create idempotency (live seeded stack, money-crit
   const invoiceBody = (no: string, customerId: string) => ({
     customer_id: customerId,
     no,
-    lines: [{ description: "e2e electricity", qty: 1, unit_price: 100000 }],
+    lines: [{ description: "e2e electricity", qty: 1, price: 100000 }],
     // hostile: a client amount/vat must be ignored (server computes) — a leftover check.
     amount: 999999,
     vat: 999999,
