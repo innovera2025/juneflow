@@ -595,6 +595,78 @@
       "screen": "exec",
       "route": "exec",
       "ref": "app-baseline/exec.png"
+    },
+    {
+      "screen": "inventory-items",
+      "route": "inv.items",
+      "ref": "app-baseline/inventory-items.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "inventory-stock",
+      "route": "inv.stock",
+      "ref": "app-baseline/inventory-stock.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "inventory-transfer",
+      "route": "inv.transfer",
+      "ref": "app-baseline/inventory-transfer.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "inventory-issue",
+      "route": "inv.issue",
+      "ref": "app-baseline/inventory-issue.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "labor-workers",
+      "route": "labor.workers",
+      "ref": "app-baseline/labor-workers.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "labor-attendance",
+      "route": "labor.attendance",
+      "ref": "app-baseline/labor-attendance.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "land-pipeline",
+      "route": "land.pipeline",
+      "ref": "app-baseline/land-pipeline.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "accept",
+      "route": "accept",
+      "ref": "app-baseline/accept.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }

@@ -3,16 +3,17 @@
  * + the shared LandKpi (L41-57). Route land.bank (docs/extract/NAV-ROUTES.md L18, parent
  * `land`, prototype file land.jsx).
  *
- * READ-ONLY register (no write bundle filed). The read-side wire (GET /land/plots,
- * apps/api/src/routes/land-sales.ts plotWire) returns
+ * READ + CREATE register. The read-side wire (GET /land/plots, apps/api/src/routes/
+ * land-sales.ts plotWire) returns
  *   { id, project_id, deed_no, area_sqm, gps, price_per_rai, currency_code, stage,
- *     tenure, created_at }
- * and there is NO write handler — POST/PUT /land/plots are not registered (a live 404).
- * So this screen ships the honest register:
+ *     tenure, title, tambon, amphoe, prov, owner, dd_checklist, created_at }
+ * and POST /land/plots is now registered (createLandPlot). So this screen ships:
  *   - the breadcrumb / title / subtitle are the prototype's;
- *   - the two header actions (Export / add-plot) are honest-DISABLED — the add-plot form
- *     is a dropped mock (§0 rule 3, no POST handler) and there is no export endpoint, so
- *     neither is a functional button that would 404 / open a mock modal;
+ *   - the add-plot action is WIRED: it opens the LandPlotForm modal (land-plot-form.tsx) and
+ *     fires POST /land/plots. money=SERVER — price_per_rai is a plain stored attribute and
+ *     area_sqm is a rai->sqm UNIT conversion (rai*1600 + ngan*400 + wa*4), NOT a JV amount;
+ *     the SERVER generates the plot id (the prototype's editable client "L-" code is a
+ *     dropped mock, §0 rule 3). Export stays honest-DISABLED (no export endpoint);
  *   - the three KPI cards are REAL: plots-in-registry = the filtered row count, total area
  *     (rai + sqm) and total assessed value are summed from area_sqm x price_per_rai;
  *   - the table renders id / deed_no / area (rai-ngan-wa reconstructed EXACTLY from
@@ -21,10 +22,9 @@
  *   - the toolbar search + tenure filter operate on the real wire fields;
  *   - loading = token skeleton; an empty catalogue = the table's empty state.
  *
- * WIRE GAP (reported honestly, never fabricated — LA-2 not merged yet): the prototype's
- * title / tambon / amphoe / prov / owner columns have NO source on plotWire (the LA-2
- * ALTER is a pending P3 backend migration). The location cell renders a literal em-dash
- * and the free-text search narrows to id + deed_no; a future enrich round adds them.
+ * WIRE GAP (reported honestly, never fabricated): the location cell (title / tambon /
+ * amphoe / prov) still renders a literal em-dash and the free-text search narrows to
+ * id + deed_no; a future enrich round wires the LA-2 columns into the table read.
  *
  * i18n (§0 rule 2): every visible string is a land.bank.* dict key (t, minted B-153) or a
  * reuse of an existing land.* / common.* dict key from the SAME prototype file (land.jsx):
@@ -41,12 +41,14 @@
 import { useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { PhraseKey } from "@juneflow/i18n";
+import type { components } from "@juneflow/contracts";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Icon, type IconName } from "../../ui/icon";
 import { Page } from "../../shell/page";
-import { useProjects } from "../../shell/use-shell-data";
+import { useShellCtx } from "../../shell/shell-context";
+import { useProjects, resolveActiveProject } from "../../shell/use-shell-data";
 import {
   toPlotRow,
   filterPlots,
@@ -66,11 +68,22 @@ import {
   projectNameById,
   type PlotRow,
 } from "./land-bank-rows";
-import { useLandPlots } from "./use-land-bank";
+import { useLandPlots, useCreatePlot } from "./use-land-bank";
+import { LandPlotForm, type PlotDraft } from "./land-plot-form";
 import landBankStrings from "./land-bank-strings.json" with { type: "json" };
+
+/** Opaque POST /land/plots body (the contract types plots as Entity). */
+type Entity = components["schemas"]["Entity"];
 
 /** The literal em-dash the screen renders for every LA-2 column with no wire field. */
 const DASH = "—";
+
+/** Extract a server error message off an unknown mutation error (land-dd dealErr precedent). */
+function plotErr(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
+}
 
 /** Table header cell style, ported from ds.jsx th() — same as boq-list/po-list. */
 function th(w?: number, right = false): CSSProperties {
@@ -172,9 +185,11 @@ function LandKpi({
 
 export function LandBank() {
   const { t, tp } = useI18n();
+  const ctx = useShellCtx();
 
   const plotsQ = useLandPlots();
   const projectsQ = useProjects();
+  const createPlot = useCreatePlot();
 
   const [q, setQ] = useState("");
   const [tenure, setTenure] = useState("");
@@ -182,6 +197,52 @@ export function LandBank() {
   const docs = useMemo<PlotRow[]>(() => (plotsQ.data ?? []).map(toPlotRow), [plotsQ.data]);
   const rows = useMemo(() => filterPlots(docs, { q, tenure }), [docs, q, tenure]);
   const projectNames = useMemo(() => projectNameById(projectsQ.data), [projectsQ.data]);
+
+  // Add-plot (land.jsx LandBank openAdd, L149-153): open the form modal; on submit compose
+  // the opaque POST /land/plots body and fire the create. money=SERVER — price_per_rai is a
+  // plain stored attribute and area_sqm is a rai->sqm UNIT conversion (rai*1600 + ngan*400 +
+  // wa*4), NOT a JV amount; no client id / currency_code / stage is sent (the server owns
+  // the id and defaults currency=THB). project_id binds the plot to the active project.
+  const openAdd = () => {
+    ctx.openModal({
+      title: t("land.bank.addModalTitle"),
+      subtitle: t("land.bank.addModalSubtitle"),
+      icon: "landplot",
+      iconTone: "var(--brand)",
+      size: "lg",
+      body: ({ close }: { close: () => void }) => (
+        <LandPlotForm
+          onClose={close}
+          onSubmit={(draft: PlotDraft) => {
+            const activeProjectId =
+              resolveActiveProject(projectsQ.data, ctx.tweaks.project)?.id ?? "";
+            const body = {
+              title: draft.title,
+              deed_no: draft.deed || null,
+              tenure: draft.tenure,
+              tambon: draft.tambon,
+              amphoe: draft.amphoe,
+              prov: draft.prov,
+              gps: draft.gps || null,
+              price_per_rai: Number(draft.price),
+              area_sqm:
+                Number(draft.rai) * 1600 + Number(draft.ngan) * 400 + Number(draft.wa) * 4,
+              project_id: activeProjectId,
+            } as Entity;
+            // The mutation observer lives on this (mounted) screen, so its onError still
+            // fires after the modal body unmounts on close. No success toast is shown: the
+            // prototype's "into registry" add-toast has NO i18n key and the only add-toast
+            // key (land.pipeline.toastAdded) is cross-purpose ("into Pipeline") — minting is
+            // forbidden (§0 rule 2), so the invalidated register surfaces the new row instead.
+            createPlot.mutate(body, {
+              onError: (err) => ctx.notify(plotErr(err) || DASH, "danger"),
+            });
+            close();
+          }}
+        />
+      ),
+    });
+  };
 
   const unitPlot = t("land.unit.plot");
   const unitRai = t("land.unit.rai");
@@ -212,8 +273,8 @@ export function LandBank() {
           <Btn kind="outline" size="md" icon="download" disabled>
             {t("land.action.export")}
           </Btn>
-          {/* Honest-DISABLED: POST /land/plots is not registered (a 404) — no functional add. */}
-          <Btn kind="primary" size="md" icon="plus" disabled>
+          {/* WIRED: opens the add-plot form -> POST /land/plots (the server generates the id). */}
+          <Btn kind="primary" size="md" icon="plus" onClick={openAdd}>
             {t("land.bank.addBtn")}
           </Btn>
         </div>

@@ -42,6 +42,7 @@ import { POList } from "./screens/po-wo/po-list";
 import { WOList } from "./screens/po-wo/wo-list";
 import { SubconContracts } from "./screens/subcon/subcon-contracts";
 import { SubconAccept } from "./screens/subcon/subcon-accept";
+import { AcceptanceCenter } from "./screens/accept/accept";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
 import { MasterCompany } from "./screens/master/master-company";
@@ -85,9 +86,16 @@ import { SalesProcess } from "./screens/sales/sales-process";
 import { SalesDown } from "./screens/sales/sales-down";
 import { SalesLoan } from "./screens/sales/sales-loan";
 import { AfterSalesService } from "./screens/sales/sales-service";
+import { InventoryItems } from "./screens/inventory/inventory-items";
+import { InventoryStock } from "./screens/inventory/inventory-stock";
+import { InventoryTransfer } from "./screens/inventory/inventory-transfer";
+import { InventoryIssue } from "./screens/inventory/inventory-issue";
+import { LandPipeline } from "./screens/land/land-pipeline";
 import { LandBank } from "./screens/land/land-bank";
 import { LandSurvey } from "./screens/land/land-survey";
 import { LandDueDiligence } from "./screens/land/land-dd";
+import { LaborWorkers } from "./screens/labor/labor-workers";
+import { LaborAttendance } from "./screens/labor/labor-attendance";
 import { SolarMonitoring } from "./screens/solar/solar-monitor";
 import { SolarPPA } from "./screens/solar/solar-ppa";
 import { SolarROI } from "./screens/solar/solar-roi";
@@ -112,9 +120,12 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   login: LoginScreen,
   dashboard: Dashboard,
   exec: ExecDashboard,
+  "land.pipeline": LandPipeline,
   "land.bank": LandBank,
   "land.survey": LandSurvey,
   "land.dd": LandDueDiligence,
+  "labor.workers": LaborWorkers,
+  "labor.attendance": LaborAttendance,
   "boq.overview": BOQOverview,
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
@@ -129,6 +140,11 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "wo.list": WOList,
   "subcon.contracts": SubconContracts,
   "subcon.accept": SubconAccept,
+  accept: AcceptanceCenter,
+  "inv.items": InventoryItems,
+  "inv.stock": InventoryStock,
+  "inv.transfer": InventoryTransfer,
+  "inv.issue": InventoryIssue,
   "master.cc": MasterCC,
   "master.docnum": MasterDocNum,
   "master.company": MasterCompany,
