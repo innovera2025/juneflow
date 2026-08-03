@@ -52,6 +52,7 @@ import { loadCaller, permAllowed } from "./authz.js";
 type JvRow = typeof jvs.$inferSelect;
 type JvLineRow = typeof jvLines.$inferSelect;
 type GlAccountRow = typeof glAccounts.$inferSelect;
+type ProjectRow = typeof projects.$inferSelect;
 type AccountingPeriodRow = typeof accountingPeriods.$inferSelect;
 
 /**
@@ -1030,6 +1031,139 @@ async function listPeriods(db: TenantDb): Promise<Record<string, unknown>[]> {
 }
 
 /** Register the GL routes on the given (already /api/v1-prefixed) scope. */
+// ---------------------------------------------------------------------------
+// GET /gl/reports/project-pl — profit & loss per project (accounting-extra2.jsx
+// GLProjectPL · B-227 un-defer F-GL1). Opaque EntityOk (a single report object,
+// NOT list-enveloped) — mirrors trial-balance / statements.
+// ---------------------------------------------------------------------------
+// Real source: jv_line (aggregated per project) THROUGH jv (jv_line has NO
+// company_id — a bare select escapes tenant scope) + gl_account (company-scoped,
+// supplies code + account_type) + project (company-scoped, supplies the name).
+// Each jv_line is grouped by project_id and classified by its account:
+//   revenue  = account_type 'revenue' (4xxx)   → credit-normal Σ(cr − dr)
+//   cogs     = expense code prefix '50'         → debit-normal  Σ(dr − cr)
+//   interest = expense code prefix '52' (5200)  → debit-normal  Σ(dr − cr)
+//   sga      = every OTHER expense (5100 admin + any other 5xxx) → debit-normal
+//              (a catch-all so no real expense is ever dropped)
+// Derived per project (the prototype plNP rule — a flat 20% corporate-tax estimate,
+// a real rule like VAT-7%): gross_profit = revenue − cogs · ebit = gp − sga ·
+// pre_tax = ebit − interest · tax = pre_tax>0 ? round(pre_tax×0.20) : 0 ·
+// net_income = pre_tax − tax. Margins are honest-null when revenue is 0 (never a
+// divide-by-zero — mirror statements' margin-omit). A jv_line with a NULL
+// project_id → the unallocated (central) group (project_id/name null) so real
+// central activity is never dropped. money=SERVER: every figure is server-derived
+// from the balanced jv_line, never a client input.
+//
+// NOTE (C-180, DEFERRED): the openapi declares ?period= but this handler does NOT
+// filter by period — jv.period_id is NULL across the whole seed (identical to
+// trial-balance / statements / cashflow). Honest deferral until the posting/close
+// flow populates jv.period_id.
+const PROJECT_PL_TAX_RATE = 0.2;
+
+interface ProjectPlAcc {
+  revenue: number;
+  cogs: number;
+  sga: number;
+  interest: number;
+}
+
+async function glProjectPl(
+  db: TenantDb,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const [lineRows, accountRows, projectRows] = await Promise.all([
+    db.selectThrough(jvLines, [{ fk: jvLines.jvId, parent: jvs }]) as Promise<JvLineRow[]>,
+    db.select(glAccounts) as Promise<GlAccountRow[]>,
+    db.select(projects) as Promise<ProjectRow[]>,
+  ]);
+
+  const accounts = new Map(accountRows.map((a) => [a.id, a]));
+  const projName = new Map(projectRows.map((p) => [p.id, p.name]));
+  const byProject = new Map<string, ProjectPlAcc>();
+  let currency: string | null = null;
+
+  for (const ln of lineRows) {
+    if (currency == null) currency = ln.currencyCode ?? null;
+    const account = accounts.get(ln.accountId);
+    const type = account?.accountType ?? null;
+    const code = account?.code ?? "";
+    const dr = num(ln.dr);
+    const cr = num(ln.cr);
+    const key = ln.projectId ?? ""; // "" = the unallocated (central) bucket
+    const acc = byProject.get(key) ?? { revenue: 0, cogs: 0, sga: 0, interest: 0 };
+    if (type === "revenue") {
+      acc.revenue += cr - dr; // credit-normal
+    } else if (type === "expense") {
+      const debit = dr - cr; // debit-normal
+      if (code.startsWith("50")) acc.cogs += debit;
+      else if (code.startsWith("52")) acc.interest += debit;
+      else acc.sga += debit; // 5100 admin + any other operating expense (never dropped)
+    }
+    // asset/liability/equity lines are not part of a P&L — skipped, never an error.
+    byProject.set(key, acc);
+  }
+
+  const projectsOut = [...byProject.entries()].map(([key, a]) => {
+    const revenue = round2(a.revenue);
+    const cogs = round2(a.cogs);
+    const sga = round2(a.sga);
+    const interest = round2(a.interest);
+    const grossProfit = round2(revenue - cogs);
+    const ebit = round2(grossProfit - sga);
+    const preTax = round2(ebit - interest);
+    const tax = preTax > 0 ? round2(preTax * PROJECT_PL_TAX_RATE) : 0;
+    const netIncome = round2(preTax - tax);
+    return {
+      project_id: key || null,
+      project_name: key ? projName.get(key) ?? null : null,
+      revenue,
+      cogs,
+      gross_profit: grossProfit,
+      sga,
+      interest,
+      pre_tax: preTax,
+      tax,
+      net_income: netIncome,
+      gross_margin: revenue > 0 ? round2((grossProfit / revenue) * 100) : null,
+      net_margin: revenue > 0 ? round2((netIncome / revenue) * 100) : null,
+    };
+  });
+  // Highest revenue first — a stable, defined order (the mock's margin sort needs a
+  // nonzero revenue the seed lacks; revenue desc is the honest ordering).
+  projectsOut.sort((a, b) => b.revenue - a.revenue);
+
+  const t = projectsOut.reduce(
+    (s, p) => {
+      s.revenue += p.revenue;
+      s.cogs += p.cogs;
+      s.gross_profit += p.gross_profit;
+      s.sga += p.sga;
+      s.interest += p.interest;
+      s.net_income += p.net_income;
+      return s;
+    },
+    { revenue: 0, cogs: 0, gross_profit: 0, sga: 0, interest: 0, net_income: 0 },
+  );
+  const totalRevenue = round2(t.revenue);
+  const totalNetIncome = round2(t.net_income);
+
+  return reply.code(200).send({
+    projects: projectsOut,
+    totals: {
+      revenue: totalRevenue,
+      cogs: round2(t.cogs),
+      gross_profit: round2(t.gross_profit),
+      sga: round2(t.sga),
+      interest: round2(t.interest),
+      net_income: totalNetIncome,
+      net_margin: totalRevenue > 0 ? round2((totalNetIncome / totalRevenue) * 100) : null,
+      project_count: projectsOut.length,
+      losing_count: projectsOut.filter((p) => p.net_income < 0).length,
+    },
+    currency_code: currency ?? "THB",
+  });
+}
+
 export function registerGlRoute(app: FastifyInstance): void {
   const withTenant =
     (run: (db: TenantDb) => Promise<Record<string, unknown>[]>) =>
@@ -1068,6 +1202,15 @@ export function registerGlRoute(app: FastifyInstance): void {
     const db = request.db;
     if (!db) return unauthenticated(reply);
     return cashFlow(db, reply);
+  });
+
+  // Project P&L (B-227 F-GL1) — opaque EntityOk, NOT list-enveloped. ?period=
+  // accepted (contract) but NOT filtered (honest deferral, C-180 — period_id NULL).
+  // Fail-closed 401 without a tenant; no perm gate (a read, mirrors the reports).
+  app.get("/gl/reports/project-pl", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return glProjectPl(db, reply);
   });
 
   app.post("/gl/jv", async (request, reply) => {
