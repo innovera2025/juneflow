@@ -40,10 +40,13 @@ import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
 import { PRForm } from "./screens/pr/pr-form";
 import { POList } from "./screens/po-wo/po-list";
+import { POForm } from "./screens/po-wo/po-form";
 import { WOList } from "./screens/po-wo/wo-list";
+import { WOForm } from "./screens/po-wo/wo-form";
 import { SubconProgress } from "./screens/subcon/subcon-progress";
 import { SubconContracts } from "./screens/subcon/subcon-contracts";
 import { SubconAccept } from "./screens/subcon/subcon-accept";
+import { SubconHandover } from "./screens/subcon/subcon-handover";
 import { AcceptanceCenter } from "./screens/accept/accept";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
@@ -70,6 +73,9 @@ import { ARTaxInvoice } from "./screens/ar/ar-tax";
 import { GLPeriodClose } from "./screens/gl/gl-close";
 import { FARegister } from "./screens/fa/fa-register";
 import { APBilling } from "./screens/ap/ap-billing";
+import { APDeposit } from "./screens/ap/ap-deposit";
+import { NotificationsCenter } from "./screens/notifications/notifications";
+import { PettyCash } from "./screens/petty/petty";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
 import { APRetention } from "./screens/ap/ap-retention";
 import { ARAging, APAging } from "./screens/ar/fin-aging";
@@ -147,10 +153,13 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "pr.list": PRList,
   "pr.form": PRForm,
   "po.list": POList,
+  "wo.form": WOForm,
+  "po.form": POForm,
   "wo.list": WOList,
   "subcon.progress": SubconProgress,
   "subcon.contracts": SubconContracts,
   "subcon.accept": SubconAccept,
+  "subcon.handover": SubconHandover,
   accept: AcceptanceCenter,
   "inv.items": InventoryItems,
   "inv.stock": InventoryStock,
@@ -181,6 +190,9 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.close": GLPeriodClose,
   "fa.register": FARegister,
   "ap.billing": APBilling,
+  "ap.deposit": APDeposit,
+  "notifications": NotificationsCenter,
+  "petty": PettyCash,
   "ap.pv": APPaymentVoucher,
   "ap.retention": APRetention,
   // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.

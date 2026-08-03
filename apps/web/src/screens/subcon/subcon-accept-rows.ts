@@ -194,14 +194,24 @@ const ACCEPTED_STATUSES = new Set(["passed", "paid"]);
 /** Statuses that count as a period awaiting inspection (the "pending review" KPI). */
 const PENDING_REVIEW_STATUSES = new Set(["delivered", "inspecting"]);
 
+/**
+ * The accepted (passed|paid) periods, in wire order — the rows the handover
+ * certificate lists (subcon.handover, subcon-accept2.jsx SubconHandover L247). The
+ * value KPI + accepted count + the certificate table body all derive from this one
+ * predicate so they can never disagree.
+ */
+export function acceptedPeriods(periods: readonly PeriodRow[]): PeriodRow[] {
+  return periods.filter((p) => ACCEPTED_STATUSES.has(p.status));
+}
+
 /** KPI-2 value — the summed amount of the accepted (passed|paid) periods (FULL units). */
 export function acceptedValue(periods: readonly PeriodRow[]): number {
-  return periods.filter((p) => ACCEPTED_STATUSES.has(p.status)).reduce((s, p) => s + p.amount, 0);
+  return acceptedPeriods(periods).reduce((s, p) => s + p.amount, 0);
 }
 
 /** KPI-2 sub — how many periods are accepted (the "{n}/{count} periods" numerator). */
 export function acceptedCount(periods: readonly PeriodRow[]): number {
-  return periods.filter((p) => ACCEPTED_STATUSES.has(p.status)).length;
+  return acceptedPeriods(periods).length;
 }
 
 /** KPI-4 value — how many periods the contractor has delivered for inspection. */

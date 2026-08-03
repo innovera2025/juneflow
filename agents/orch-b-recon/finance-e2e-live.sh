@@ -20,6 +20,11 @@ trap cleanup EXIT
 echo "== 1. worktree @ ${DEV_REF} + install =="
 git -C "$ROOT" worktree remove --force "$WT" 2>/dev/null || true
 git -C "$ROOT" worktree add --force --detach "$WT" "$DEV_REF"
+# inject the CURRENT (possibly uncommitted) e2e spec(s) matching the filter so a test-only
+# edit is proven against the SHA's backend without first committing an unproven spec.
+for f in "$ROOT"/tests/e2e/*"${FILTER}"*.spec.ts; do
+  [ -f "$f" ] && cp "$f" "$WT/tests/e2e/$(basename "$f")" && echo "  injected $(basename "$f")"
+done
 ( cd "$WT" && pnpm install --frozen-lockfile --prefer-offline )
 ( cd "$WT" && pnpm --dir tests exec playwright install chromium ) 2>/dev/null || true
 
@@ -35,6 +40,6 @@ E2E_LIVE=1 \
   PROXY_PORT="${PROXY_PORT}" \
   PROXY_WEB_TARGET="http://localhost:${WEB_PORT}" \
   PROXY_API_TARGET="http://localhost:${API_PORT}" \
-  pnpm exec playwright test --config e2e/playwright.config.ts "$FILTER" --workers=1 2>&1 | tail -45
+  pnpm exec playwright test --config e2e/playwright.config.ts "$FILTER" --workers=1 --reporter=list 2>&1 | tee /tmp/b231-full.out | tail -70
 
 echo "== done (teardown on exit) =="

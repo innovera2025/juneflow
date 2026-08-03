@@ -722,6 +722,60 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "subcon-handover",
+      "route": "subcon.handover",
+      "ref": "app-baseline/subcon-handover.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "wo-form",
+      "route": "wo.form",
+      "ref": "app-baseline/wo-form.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "po-form",
+      "route": "po.form",
+      "ref": "app-baseline/po-form.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "ap-deposit",
+      "route": "ap.deposit",
+      "ref": "app-baseline/ap-deposit.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "notifications",
+      "route": "notifications",
+      "ref": "app-baseline/notifications.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "petty",
+      "route": "petty",
+      "ref": "app-baseline/petty.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
