@@ -1705,7 +1705,8 @@ async function seed(): Promise<void> {
       await tx.insert(schema.solarOmTickets).values(
         Array.from({ length: 3 }, (_, i) => ({
           id: det(`omt:${i}`), companyId: CO1, inverterId: det(`inv:${i}`), no: `OM-2569-${String(i + 1).padStart(3, "0")}`,
-          title: `แจ้งซ่อม inverter ${i + 1}`, priority: "ปกติ", assigneeUserId: det(`user:${i % 12}`), status: "open",
+          title: `แจ้งซ่อม inverter ${i + 1}`, priority: "ปกติ", assigneeUserId: det(`user:${i % 12}`),
+          team: ["ทีม O&M A", "ทีม O&M A", "ทีม Cleaning"][i] ?? null, status: "open",
         })),
       );
 

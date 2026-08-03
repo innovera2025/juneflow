@@ -141,7 +141,7 @@ const inverter = (id: string, createdAt: Date, extra: Record<string, unknown> = 
 const omTicket = (id: string, createdAt: Date, extra: Record<string, unknown> = {}) =>
   ({
     id, companyId: COMPANY, inverterId: "inv-1", no: "OM-2026-001", title: "แผงสกปรก",
-    priority: "high", assigneeUserId: null, status: "open", createdAt, updatedAt: createdAt, ...extra,
+    priority: "high", assigneeUserId: null, team: "ทีม O&M A", status: "open", createdAt, updatedAt: createdAt, ...extra,
   }) as typeof solarOmTickets.$inferSelect;
 
 const ppaInvoice = (id: string, createdAt: Date, extra: Record<string, unknown> = {}) =>
@@ -330,11 +330,12 @@ describe("POST /api/v1/solar/om-tickets (create)", () => {
         resolveTenant: async () => SESSION,
         db: stubDb({ rows: [[solarOmTickets, []]], inserted }), // empty → allocOmNo = 0001
       })
-    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets", payload: { title: "อินเวอร์เตอร์ offline", priority: "high" } });
+    ).inject({ method: "POST", url: "/api/v1/solar/om-tickets", payload: { title: "อินเวอร์เตอร์ offline", priority: "high", team: "ทีม O&M B" } });
     expect(res.statusCode).toBe(201);
     const v = inserted.find((i) => i.table === solarOmTickets)!.values;
     expect(String(v.no)).toMatch(/^OM-\d{4}-0001$/); // server-generated, not the mock literal
     expect(v.title).toBe("อินเวอร์เตอร์ offline");
+    expect(v.team).toBe("ทีม O&M B"); // B-223: the form's responsible team is stored
     expect(v.status).toBe("open");
     expect(v.companyId).toBe(COMPANY); // TenantDb force-set
     expect(res.json().status).toBe("open");

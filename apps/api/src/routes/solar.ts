@@ -113,6 +113,7 @@ function omTicketWire(r: SolarOmTicketRow): Record<string, unknown> {
     title: r.title,
     priority: r.priority,
     assignee_user_id: r.assigneeUserId,
+    team: r.team,
     status: r.status,
     created_at: r.createdAt,
   };
@@ -243,6 +244,7 @@ async function createSolarOmTicket(
       title,
       priority: str(pick(body, "priority")).trim() || null,
       assigneeUserId,
+      team: str(pick(body, "team")).trim() || null, // B-223: responsible O&M team (RF2OMForm)
       status: "open", // initial state — server-set (the mock create form has no status field; close moves it to 'closed')
     })
     .returning()) as SolarOmTicketRow[];
