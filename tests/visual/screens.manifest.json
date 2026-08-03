@@ -713,6 +713,15 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "subcon-progress",
+      "route": "subcon.progress",
+      "ref": "app-baseline/subcon-progress.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
