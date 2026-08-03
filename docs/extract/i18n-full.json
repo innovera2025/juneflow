@@ -22042,6 +22042,210 @@
       "en": "ทีม Cleaning",
       "zh": "ทีม Cleaning",
       "ar": "ทีม Cleaning"
+    },
+    "mob.tab.field": {
+      "th": "หน้างาน",
+      "en": "หน้างาน",
+      "zh": "หน้างาน",
+      "ar": "หน้างาน"
+    },
+    "mob.approval.inbox.title": {
+      "th": "กล่องอนุมัติ",
+      "en": "กล่องอนุมัติ",
+      "zh": "กล่องอนุมัติ",
+      "ar": "กล่องอนุมัติ"
+    },
+    "mob.approval.inbox.cardAgeAgo": {
+      "th": "{age} ที่แล้ว",
+      "en": "{age} ที่แล้ว",
+      "zh": "{age} ที่แล้ว",
+      "ar": "{age} ที่แล้ว"
+    },
+    "mob.approval.inbox.overBudgetWarn": {
+      "th": "เกินงบ {pct}% — ต้องอนุมัติเพิ่มเติม",
+      "en": "เกินงบ {pct}% — ต้องอนุมัติเพิ่มเติม",
+      "zh": "เกินงบ {pct}% — ต้องอนุมัติเพิ่มเติม",
+      "ar": "เกินงบ {pct}% — ต้องอนุมัติเพิ่มเติม"
+    },
+    "mob.approval.detail.awaitingYou": {
+      "th": "รอคุณอนุมัติ · ชั้นที่ {level} จาก {total}",
+      "en": "รอคุณอนุมัติ · ชั้นที่ {level} จาก {total}",
+      "zh": "รอคุณอนุมัติ · ชั้นที่ {level} จาก {total}",
+      "ar": "รอคุณอนุมัติ · ชั้นที่ {level} จาก {total}"
+    },
+    "mob.approval.detail.waitedFor": {
+      "th": "รอมา {hours} ชม. {minutes} นาที",
+      "en": "รอมา {hours} ชม. {minutes} นาที",
+      "zh": "รอมา {hours} ชม. {minutes} นาที",
+      "ar": "รอมา {hours} ชม. {minutes} นาที"
+    },
+    "mob.approval.detail.netTotal": {
+      "th": "ยอดรวมสุทธิ",
+      "en": "ยอดรวมสุทธิ",
+      "zh": "ยอดรวมสุทธิ",
+      "ar": "ยอดรวมสุทธิ"
+    },
+    "mob.approval.detail.lineCountVat": {
+      "th": "{count} รายการ · รวม VAT {vatPct}%",
+      "en": "{count} รายการ · รวม VAT {vatPct}%",
+      "zh": "{count} รายการ · รวม VAT {vatPct}%",
+      "ar": "{count} รายการ · รวม VAT {vatPct}%"
+    },
+    "mob.approval.detail.yourLimit": {
+      "th": "วงเงินอนุมัติคุณ",
+      "en": "วงเงินอนุมัติคุณ",
+      "zh": "วงเงินอนุมัติคุณ",
+      "ar": "วงเงินอนุมัติคุณ"
+    },
+    "mob.approval.detail.withinLimit": {
+      "th": "อยู่ในวงเงิน",
+      "en": "อยู่ในวงเงิน",
+      "zh": "อยู่ในวงเงิน",
+      "ar": "อยู่ในวงเงิน"
+    },
+    "mob.approval.detail.budgetAfterApproval": {
+      "th": "{pct}% หลังอนุมัติ",
+      "en": "{pct}% หลังอนุมัติ",
+      "zh": "{pct}% หลังอนุมัติ",
+      "ar": "{pct}% หลังอนุมัติ"
+    },
+    "mob.approval.detail.budgetUsed": {
+      "th": "ใช้ {used} / {total}",
+      "en": "ใช้ {used} / {total}",
+      "zh": "ใช้ {used} / {total}",
+      "ar": "ใช้ {used} / {total}"
+    },
+    "mob.approval.detail.budgetLeft": {
+      "th": "เหลือ {left}",
+      "en": "เหลือ {left}",
+      "zh": "เหลือ {left}",
+      "ar": "เหลือ {left}"
+    },
+    "mob.approval.detail.approvalPath": {
+      "th": "เส้นทางอนุมัติ",
+      "en": "เส้นทางอนุมัติ",
+      "zh": "เส้นทางอนุมัติ",
+      "ar": "เส้นทางอนุมัติ"
+    },
+    "mob.approval.detail.youMarker": {
+      "th": "(คุณ)",
+      "en": "(คุณ)",
+      "zh": "(คุณ)",
+      "ar": "(คุณ)"
+    },
+    "mob.approval.detail.approveWithAmount": {
+      "th": "อนุมัติ · {amount} ฿",
+      "en": "อนุมัติ · {amount} ฿",
+      "zh": "อนุมัติ · {amount} ฿",
+      "ar": "อนุมัติ · {amount} ฿"
+    },
+    "mob.approval.approve.title": {
+      "th": "ยืนยันอนุมัติ",
+      "en": "ยืนยันอนุมัติ",
+      "zh": "ยืนยันอนุมัติ",
+      "ar": "ยืนยันอนุมัติ"
+    },
+    "mob.approval.approve.heading": {
+      "th": "ยืนยันการอนุมัติ",
+      "en": "ยืนยันการอนุมัติ",
+      "zh": "ยืนยันการอนุมัติ",
+      "ar": "ยืนยันการอนุมัติ"
+    },
+    "mob.approval.approve.confirmQuestion": {
+      "th": "ต้องการอนุมัติเอกสาร {no}\nมูลค่า {amount} ฿ หรือไม่?",
+      "en": "ต้องการอนุมัติเอกสาร {no}\nมูลค่า {amount} ฿ หรือไม่?",
+      "zh": "ต้องการอนุมัติเอกสาร {no}\nมูลค่า {amount} ฿ หรือไม่?",
+      "ar": "ต้องการอนุมัติเอกสาร {no}\nมูลค่า {amount} ฿ หรือไม่?"
+    },
+    "mob.approval.approve.forwardTo": {
+      "th": "ส่งต่อไปยัง",
+      "en": "ส่งต่อไปยัง",
+      "zh": "ส่งต่อไปยัง",
+      "ar": "ส่งต่อไปยัง"
+    },
+    "mob.approval.approve.chainPosition": {
+      "th": "ชั้น {level} จาก {total}",
+      "en": "ชั้น {level} จาก {total}",
+      "zh": "ชั้น {level} จาก {total}",
+      "ar": "ชั้น {level} จาก {total}"
+    },
+    "mob.approval.approve.noteOptional": {
+      "th": "หมายเหตุ (ไม่บังคับ)",
+      "en": "หมายเหตุ (ไม่บังคับ)",
+      "zh": "หมายเหตุ (ไม่บังคับ)",
+      "ar": "หมายเหตุ (ไม่บังคับ)"
+    },
+    "mob.approval.approve.notePlaceholder": {
+      "th": "ความเห็น / เงื่อนไข...",
+      "en": "ความเห็น / เงื่อนไข...",
+      "zh": "ความเห็น / เงื่อนไข...",
+      "ar": "ความเห็น / เงื่อนไข..."
+    },
+    "mob.approval.reject.sendBackWarn": {
+      "th": "{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล",
+      "en": "{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล",
+      "zh": "{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล",
+      "ar": "{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล"
+    },
+    "mob.approval.reject.commonReasons": {
+      "th": "เหตุผลที่พบบ่อย",
+      "en": "เหตุผลที่พบบ่อย",
+      "zh": "เหตุผลที่พบบ่อย",
+      "ar": "เหตุผลที่พบบ่อย"
+    },
+    "mob.approval.reject.reasonPriceOverBoq": {
+      "th": "ราคาสูงกว่า BOQ ที่ตั้งไว้",
+      "en": "ราคาสูงกว่า BOQ ที่ตั้งไว้",
+      "zh": "ราคาสูงกว่า BOQ ที่ตั้งไว้",
+      "ar": "ราคาสูงกว่า BOQ ที่ตั้งไว้"
+    },
+    "mob.approval.reject.reasonMissingDocs": {
+      "th": "เอกสารแนบไม่ครบ",
+      "en": "เอกสารแนบไม่ครบ",
+      "zh": "เอกสารแนบไม่ครบ",
+      "ar": "เอกสารแนบไม่ครบ"
+    },
+    "mob.approval.reject.reasonWantMoreQuotes": {
+      "th": "ขอเปรียบเทียบราคาเพิ่มเติม",
+      "en": "ขอเปรียบเทียบราคาเพิ่มเติม",
+      "zh": "ขอเปรียบเทียบราคาเพิ่มเติม",
+      "ar": "ขอเปรียบเทียบราคาเพิ่มเติม"
+    },
+    "mob.approval.reject.reasonSpecChange": {
+      "th": "ขอแก้สเปกสินค้า",
+      "en": "ขอแก้สเปกสินค้า",
+      "zh": "ขอแก้สเปกสินค้า",
+      "ar": "ขอแก้สเปกสินค้า"
+    },
+    "mob.approval.reject.reasonOther": {
+      "th": "อื่นๆ (พิมพ์เหตุผล)",
+      "en": "อื่นๆ (พิมพ์เหตุผล)",
+      "zh": "อื่นๆ (พิมพ์เหตุผล)",
+      "ar": "อื่นๆ (พิมพ์เหตุผล)"
+    },
+    "mob.approval.reject.detailPlaceholder": {
+      "th": "โปรดอธิบายเหตุผลเพิ่มเติม...",
+      "en": "โปรดอธิบายเหตุผลเพิ่มเติม...",
+      "zh": "โปรดอธิบายเหตุผลเพิ่มเติม...",
+      "ar": "โปรดอธิบายเหตุผลเพิ่มเติม..."
+    },
+    "mob.approval.reject.submit": {
+      "th": "ส่งกลับให้แก้ไข",
+      "en": "ส่งกลับให้แก้ไข",
+      "zh": "ส่งกลับให้แก้ไข",
+      "ar": "ส่งกลับให้แก้ไข"
+    },
+    "mob.approval.notif.markRead": {
+      "th": "อ่าน",
+      "en": "อ่าน",
+      "zh": "อ่าน",
+      "ar": "อ่าน"
+    },
+    "mob.approval.notif.filterUpdates": {
+      "th": "แจ้งอัปเดต",
+      "en": "แจ้งอัปเดต",
+      "zh": "แจ้งอัปเดต",
+      "ar": "แจ้งอัปเดต"
     }
   },
   "nav_i18n": {
