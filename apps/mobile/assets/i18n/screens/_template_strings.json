@@ -1,0 +1,5 @@
+{
+  "_source": "TEMPLATE — shape reference for per-screen key sidecars (MOB-I18N-01). Copy to <screen>_strings.json and fill it with KEYS ONLY, never translations. Every value must already exist in docs/extract/i18n-full.json: a nav_i18n key or a phrases key is the Thai text itself (read with tn()/tp()), a dict key is a stable id such as common.cancel (read with t()). Verify each one against the file before adding it; a string with no key there goes to BLOCKERS.md and the screen waits (PLAN.md §0 rule 2 and rule 4). Fields beginning with _ are documentation and are skipped by ScreenStrings. This template intentionally declares no keys.",
+  "_layers": "t() = dict (stable key) · tn() = nav_i18n (Thai label is the key) · tp() = phrases (Thai phrase is the key) · tpat() = phrase_patterns, for sentences carrying runtime numbers (BLOCKERS.md B-017 ruling ก)",
+  "_example": "\"title\": \"<the exact Thai phrase, copied byte-for-byte from the phrases block of i18n-full.json>\""
+}

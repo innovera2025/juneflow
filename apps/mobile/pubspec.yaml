@@ -39,3 +39,13 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    # Verbatim copy of the SACRED docs/extract/i18n-full.json, produced by
+    # tool/gen_i18n_asset.sh (MOB-I18N-01). Never hand-edit; never translate a
+    # word here — a missing string goes to BLOCKERS.md (PLAN.md §0 rule 2).
+    - assets/i18n/
+    # Per-screen key sidecars. The nav_i18n/phrases layers use the Thai text as
+    # the key, and .claude/hooks/i18n-guard.sh blocks Thai in lib/**.dart, so the
+    # keys live in JSON here — same pattern as apps/web *-strings.json.
+    - assets/i18n/screens/
