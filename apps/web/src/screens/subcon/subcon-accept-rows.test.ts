@@ -11,6 +11,7 @@ import {
   deriveMethod,
   mapPeriodStatus,
   statusTone,
+  acceptedPeriods,
   acceptedValue,
   acceptedCount,
   pendingReviewCount,
@@ -144,6 +145,13 @@ describe("KPI aggregates", () => {
     period({ id: "f", status: "rejected", amount: 360000 }),
   ];
 
+  it("acceptedPeriods returns only passed|paid rows in wire order (handover body)", () => {
+    expect(acceptedPeriods(periods).map((p) => p.id)).toEqual(["a", "b"]);
+    expect(acceptedPeriods([])).toEqual([]);
+    // acceptedValue/acceptedCount derive from the SAME predicate — they can't disagree
+    expect(acceptedPeriods(periods).reduce((s, p) => s + p.amount, 0)).toBe(acceptedValue(periods));
+    expect(acceptedPeriods(periods).length).toBe(acceptedCount(periods));
+  });
   it("acceptedValue sums only passed|paid amounts (KPI-2)", () => {
     expect(acceptedValue(periods)).toBe(1_075_000);
     expect(acceptedValue([])).toBe(0);

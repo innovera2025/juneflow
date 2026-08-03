@@ -44,6 +44,7 @@ import { WOList } from "./screens/po-wo/wo-list";
 import { SubconProgress } from "./screens/subcon/subcon-progress";
 import { SubconContracts } from "./screens/subcon/subcon-contracts";
 import { SubconAccept } from "./screens/subcon/subcon-accept";
+import { SubconHandover } from "./screens/subcon/subcon-handover";
 import { AcceptanceCenter } from "./screens/accept/accept";
 import { MasterCC } from "./screens/master/master-cc";
 import { MasterDocNum } from "./screens/master/master-docnum";
@@ -151,6 +152,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "subcon.progress": SubconProgress,
   "subcon.contracts": SubconContracts,
   "subcon.accept": SubconAccept,
+  "subcon.handover": SubconHandover,
   accept: AcceptanceCenter,
   "inv.items": InventoryItems,
   "inv.stock": InventoryStock,
