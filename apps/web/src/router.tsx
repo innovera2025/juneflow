@@ -40,6 +40,7 @@ import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
 import { POList } from "./screens/po-wo/po-list";
 import { WOList } from "./screens/po-wo/wo-list";
+import { SubconProgress } from "./screens/subcon/subcon-progress";
 import { SubconContracts } from "./screens/subcon/subcon-contracts";
 import { SubconAccept } from "./screens/subcon/subcon-accept";
 import { AcceptanceCenter } from "./screens/accept/accept";
@@ -145,6 +146,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "pr.list": PRList,
   "po.list": POList,
   "wo.list": WOList,
+  "subcon.progress": SubconProgress,
   "subcon.contracts": SubconContracts,
   "subcon.accept": SubconAccept,
   accept: AcceptanceCenter,
