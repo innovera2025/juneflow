@@ -23,5 +23,7 @@
   "installments": "งวดงาน",
   "vendorField": "ผู้ขาย / Vendor",
   "contractValue": "มูลค่าสัญญา",
-  "startWork": "เริ่มงาน"
+  "startWork": "เริ่มงาน",
+  "deliveryLocation": "สถานที่ส่งของ",
+  "savedDraftToast": "บันทึกร่างเรียบร้อย"
 }
