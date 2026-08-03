@@ -14,14 +14,14 @@
  *   GET /solar/permit-steps -> permit/approval timeline steps.
  *   GET /solar/warranties   -> equipment warranty register.
  *
- * The Wave-1a workflow writes (B-212/B-215/B-219 · money=NONE — no JV/cost, no client
+ * The Wave-1a workflow writes (B-212/B-215/B-219/B-223 · money=NONE — no JV/cost, no client
  * money, no client-derived dates) each invalidate their list on success:
+ *   POST /solar/om-tickets            -> open an O&M ticket (server-gen no · status=open).
  *   POST /solar/om-tickets/{id}/close -> idempotent close (409 on already-closed).
  *   POST /solar/permit-steps          -> add a permit step (server defaults status=pending).
  *   POST /solar/warranties            -> add a warranty item (server defaults status=active).
- * (The open-OM-ticket create, POST /solar/om-tickets, is registered on the door but its
- * form's team dropdown has no i18n keys / no wire column, so the create affordance stays
- * honest-disabled — no hook wired here.)
+ * (The open-OM-ticket create carries a free-text team column — B-223 landed
+ * solar_om_ticket.team — so the RF2OMForm create is now wired via useCreateOmTicket below.)
  */
 import {
   useMutation,
@@ -109,6 +109,20 @@ export function useSolarWarranties() {
 }
 
 /* --- Wave-1a workflow writes (B-212/B-215/B-219 · money=NONE · Entity-opaque bodies) ----- */
+
+/**
+ * POST /solar/om-tickets — open an O&M ticket. The caller composes the opaque body
+ * ({ title, inverter_id, priority, team }); the server generates the running number, checks the
+ * inverter FK in-tenant, and force-sets status="open" (B-223 · money=NONE, no assignee).
+ * Returns the created ticket (its server-assigned `no` feeds the toast). Invalidates the list.
+ */
+export function useCreateOmTicket(): UseMutationResult<Entity, unknown, Entity> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Entity) => unwrap(apiClient.POST("/solar/om-tickets", { body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: OM_TICKETS_KEY }),
+  });
+}
 
 /**
  * POST /solar/om-tickets/{id}/close — idempotently close an O&M ticket (the ticket id is the

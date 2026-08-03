@@ -18,8 +18,9 @@
  *
  * assignee_user_id is a raw uuid, resolved to a name via GET /users (userNameById, the
  * sales-crm precedent); an unresolved/absent assignee em-dashes in the screen (never a
- * leaked uuid). No write logic lives here (solar.ts is GET-only; the open-ticket form is a
- * dropped mock, §0 rule 3).
+ * leaked uuid). No write logic lives in this narrowing module — the OM writes live in
+ * solar-monitor.tsx + use-solar.ts (create/close), wired to POST /solar/om-tickets and
+ * /{id}/close (the OM-create form is wired via B-223, not a dropped mock).
  */
 import { str, num, type StatusKind } from "./solar-shared";
 

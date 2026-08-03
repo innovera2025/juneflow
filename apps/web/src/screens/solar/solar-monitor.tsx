@@ -22,11 +22,12 @@
  * HONEST DIVERGENCES (rule 4 — flagged, never fabricated):
  *   - The per-ticket card is now interactive (Wave-1a): clicking it opens OmTicketView — the
  *     ticket detail + close action (POST /solar/om-tickets/{id}/close, money=NONE, idempotent).
- *   - The header "new ticket" primary stays honest-DISABLED: the create form (RF2OMForm) has a
- *     team dropdown whose 4 option strings (the O&M-team names) have NO i18n key (not in
- *     i18n-full.json — minting is forbidden, B-073) AND no wire column (the door only takes an
- *     assignee_user_id uuid, not a free-text team), so the create affordance is BLOCKED pending
- *     a ruling rather than shipping an unfaithful/unpersisted field.
+ *   - The header "new ticket" primary now opens RF2OMForm (om-ticket-form.tsx) and POSTs
+ *     /solar/om-tickets ({ title, inverter_id, priority, team }, money=NONE, no assignee): B-223
+ *     landed the free-text solar_om_ticket.team column and all option keys, so the create
+ *     affordance is wired (the modal unmounts on submit, so the toast fires off the settled
+ *     promise, fireWithToast). The asset dropdown sources the real inverter register (the
+ *     prototype's 5 mock options are dropped); priority + team persist as their display labels.
  *   - the O&M ticket `priority` is a raw backend value (seed = a Thai word) with NO code
  *     to switch on, so the Tag renders it with a NEUTRAL tone for every row (a code-based
  *     tone is a future round).
@@ -43,6 +44,7 @@
  */
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
+import type { components } from "@juneflow/contracts";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
@@ -50,8 +52,9 @@ import { Page } from "../../shell/page";
 import { TypeBadge } from "../../shell/type-badge";
 import { useShellCtx } from "../../shell/shell-context";
 import { useUserList } from "../master/use-users";
+import { fireWithToast } from "../admin/admin-rows";
 import { SolarKpi, StatusBadge, Tag } from "./solar-kpi";
-import { formatMoney } from "./solar-shared";
+import { formatMoney, str } from "./solar-shared";
 import {
   toInverterRow,
   toTicketRow,
@@ -65,8 +68,11 @@ import {
   type InverterRow,
   type TicketRow,
 } from "./solar-monitor-rows";
-import { useSolarInverters, useSolarOmTickets } from "./use-solar";
+import { useSolarInverters, useSolarOmTickets, useCreateOmTicket } from "./use-solar";
 import { OmTicketView } from "./om-ticket-view";
+import { RF2OMForm, type OmTicketDraft } from "./om-ticket-form";
+
+type Entity = components["schemas"]["Entity"];
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
 const DASH = "—";
@@ -127,6 +133,7 @@ export function SolarMonitoring() {
   const invertersQ = useSolarInverters();
   const ticketsQ = useSolarOmTickets();
   const usersQ = useUserList();
+  const createOmTicket = useCreateOmTicket();
 
   const inverters = useMemo<InverterRow[]>(() => (invertersQ.data ?? []).map(toInverterRow), [invertersQ.data]);
   const tickets = useMemo<TicketRow[]>(() => (ticketsQ.data ?? []).map(toTicketRow), [ticketsQ.data]);
@@ -155,6 +162,53 @@ export function SolarMonitoring() {
     });
   };
 
+  // open the create-O&M-ticket form (real-forms2.jsx openOMTicketForm create branch, L251-256):
+  // the header primary opens RF2OMForm; on submit close it, then POST { title, inverter_id,
+  // priority, team } (money=NONE, no assignee — the door generates the running no + status=open,
+  // B-223) and fire the toast off the settled promise (the modal has unmounted). The toast's {no}
+  // is the SERVER-assigned number from the POST response; {asset} is the inverter id (the code,
+  // the part before " ·", mirroring the prototype's asset.split(" ·")[0]); {pri}/{team} are the
+  // resolved display labels the form emitted.
+  const openCreate = () => {
+    ctx.openModal({
+      title: t("solar.monitor.omModalTitle"),
+      subtitle: t("solar.monitor.omModalSubtitle"),
+      icon: "wrench",
+      // prototype-verbatim icon tone (real-forms2.jsx L254); no matching token (B-037(a)).
+      iconTone: "#B45309",
+      size: "md",
+      body: ({ close }: { close: () => void }) => (
+        <RF2OMForm
+          onClose={close}
+          onSubmit={(draft: OmTicketDraft) => {
+            close();
+            const body = {
+              title: draft.desc,
+              inverter_id: draft.inverterId,
+              priority: draft.priority,
+              team: draft.team,
+            } as Entity;
+            let created: Entity | undefined;
+            fireWithToast(
+              async () => {
+                created = await createOmTicket.mutateAsync(body);
+              },
+              () =>
+                ctx.notify(
+                  t("solar.monitor.omCreateToast")
+                    .replace("{no}", str(created?.no) || DASH)
+                    .replace("{asset}", draft.inverterId)
+                    .replace("{pri}", draft.priority)
+                    .replace("{team}", draft.team),
+                ),
+              () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+            );
+          }}
+        />
+      ),
+    });
+  };
+
   return (
     <Page
       breadcrumbs={[t("solar.monitor.crumbModule"), t("solar.monitor.crumbScreen")]}
@@ -170,9 +224,9 @@ export function SolarMonitoring() {
           <Btn kind="outline" size="md" icon="download" onClick={() => ctx.notify(t("solar.monitor.toastExport"))}>
             {t("solar.monitor.actionExport")}
           </Btn>
-          {/* Honest-DISABLED (BLOCKED, not a dropped mock): the create form's team dropdown has
-              no i18n keys for its options + no wire column — see the file-header divergence note. */}
-          <Btn kind="primary" size="md" icon="plus" disabled>
+          {/* Opens the create form (RF2OMForm); POST /solar/om-tickets, money=NONE (B-223 landed
+              the free-text team column + option keys) — see the file-header divergence note. */}
+          <Btn kind="primary" size="md" icon="plus" onClick={openCreate}>
             {t("solar.monitor.actionNewTicket")}
           </Btn>
         </div>
@@ -268,7 +322,8 @@ export function SolarMonitoring() {
           )}
         </Card>
 
-        {/* O&M ticket card — read-only (the open-ticket form is a dropped mock). */}
+        {/* O&M ticket list card — each row opens the ticket detail/close view; the header
+            primary opens the create form (openCreate). */}
         <Card pad={0}>
           <div style={cardTitle}>{t("solar.monitor.omCardTitle")}</div>
           {ticketsQ.isLoading ? (
