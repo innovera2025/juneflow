@@ -58,6 +58,7 @@ import {
 import { FakeTaxEngine } from "@juneflow/tax-engine/thailand";
 import type { TaxEngine } from "@juneflow/tax-engine";
 import type { TenantDb } from "../db/tenant-db.js";
+import { businessNowMs } from "../business-clock.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 import { has, pick, str, toNum } from "./procurement.js";
@@ -155,7 +156,7 @@ function agingDays(dueDate: unknown): number | null {
   if (dueDate == null) return null;
   const due = new Date(dueDate as string | Date).getTime();
   if (!Number.isFinite(due)) return null;
-  return Math.floor((Date.now() - due) / MS_PER_DAY);
+  return Math.floor((businessNowMs() - due) / MS_PER_DAY); // B-224: businessNow aligns aging with a frozen seed (default Date.now())
 }
 
 // ---------------------------------------------------------------------------

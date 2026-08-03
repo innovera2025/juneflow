@@ -72,6 +72,8 @@ services:
         required: false # create infra/.env locally (never commit it)
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
+      # B-224: pass-through so the G5 visual gate can freeze the seed clock (empty default = no-op -> new Date()).
+      SEED_FROZEN_NOW: ${SEED_FROZEN_NOW:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,6 +92,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
       REDIS_URL: redis://redis:6379
+      # B-224: aligns the aging DISPLAY clock (business-clock.ts) with a frozen seed for the G5 gate (empty default = no-op -> Date.now()).
+      SEED_FROZEN_NOW: ${SEED_FROZEN_NOW:-}
       # Dev-only default secret — real value must come from infra/.env, never committed.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-juneflow-dev-secret}
     ports:
@@ -122,6 +126,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-juneflow}:${POSTGRES_PASSWORD:-juneflow-dev}@postgres:5432/${POSTGRES_DB:-juneflow}
       REDIS_URL: redis://redis:6379
+      # B-224: aligns the aging DISPLAY clock (business-clock.ts) with a frozen seed for the G5 gate (empty default = no-op -> Date.now()).
+      SEED_FROZEN_NOW: ${SEED_FROZEN_NOW:-}
       # Dev-only default secret — real value must come from infra/.env, never committed.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-juneflow-dev-secret}
     depends_on:
