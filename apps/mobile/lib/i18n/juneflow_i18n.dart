@@ -8,18 +8,23 @@
 // RULE (PLAN.md §0 rule 3): the prototype translates via a DOM MutationObserver.
 // That is a mock mechanism and must NOT be ported — production is key-based only.
 //
-// Semantics are a 1:1 port of packages/i18n/src/index.ts (the web/TS loader), so
-// the two platforms cannot drift. The three layers come from
+// Semantics are ported from packages/i18n/src/index.ts (the web/TS loader) so the
+// two platforms agree; nothing enforces that mechanically, so a change to either
+// side has to be mirrored by hand. The three layers come from
 // docs/extract/I18N-KEYS.md §2:
 //
 //   dict     : stable key           -> { th, en, zh, ar }   -> t()
 //   nav_i18n : the Thai label IS the key -> { en, zh, ar, … } -> tn()
 //   phrases  : the Thai phrase IS the key -> { en, zh, ar }   -> tp()
 //
-// plus phrase_patterns (regex + per-language template) for number-bearing
-// sentences, which Wei ruled in BLOCKERS.md B-017 (ก) must live in the JSON —
-// consumers read them from the file and never hardcode a Thai literal. tpat()
-// is that reader.
+// A sentence carrying runtime values is handled TWO ways in this file, and the
+// common one is not the obvious one:
+//   * dict entry with {name} placeholders (421 of them) -> tf(). This is what
+//     nearly every screen needs; apps/web substitutes the same way inline.
+//   * phrase_patterns: a regex + per-language template block -> tpat(). Only two
+//     entries exist, left over from the prototype's DOM-observer translation.
+//     Wei ruled in BLOCKERS.md B-017 (a) that they live in the JSON so consumers
+//     read them from the file instead of hardcoding a Thai literal.
 //
 // Because the Thai text IS the key for the nav_i18n/phrases layers, screens must
 // never write those keys as Dart literals: .claude/hooks/i18n-guard.sh blocks any
@@ -68,7 +73,7 @@ class LangDef {
   final String dir;
 }
 
-/// One entry of the `phrase_patterns` block (BLOCKERS.md B-017 ruling ก).
+/// One entry of the `phrase_patterns` block (BLOCKERS.md B-017 ruling (a)).
 ///
 /// [source] is the raw regex string as written in the file; [templates] maps a
 /// language code to its template, where `$1`, `$2`, … are the capture groups.
@@ -79,18 +84,34 @@ class PhrasePattern {
         caseSensitive: !flags.contains('i'),
         multiLine: flags.contains('m'),
         dotAll: flags.contains('s'),
+        // The patterns were authored as JavaScript regexes in the prototype, so
+        // honour /u too — without it a unicode-mode pattern compiles under
+        // different escape rules than the one the author tested.
+        unicode: flags.contains('u'),
       );
 
-  factory PhrasePattern.fromJson(Map<String, dynamic> json) {
+  /// Parses one entry, or returns null when it carries no usable regex.
+  ///
+  /// An entry with a missing or empty `re` must be DROPPED, not defaulted to '':
+  /// RegExp('') matches every input, so one malformed entry would become a
+  /// catch-all that hijacks [JuneflowI18n.tpat] for every sentence in the app and
+  /// makes [JuneflowI18n.hasPatternFor] report coverage for everything — exactly
+  /// the silent-wrong-copy failure the honest-gap design is meant to prevent.
+  /// The block is hand-edited in the sacred file under B-017 (a), so a typo there
+  /// is a realistic input, not a hypothetical one.
+  static PhrasePattern? tryFromJson(Map<String, dynamic> json) {
+    final dynamic re = json['re'];
+    if (re is! String || re.isEmpty) return null;
     final Map<String, String> templates = <String, String>{};
     for (final MapEntry<String, dynamic> e in json.entries) {
       if (e.key == 're' || e.key == 'flags') continue;
       final dynamic value = e.value;
       if (value is String) templates[e.key] = value;
     }
+    final dynamic flags = json['flags'];
     return PhrasePattern(
-      source: json['re'] as String? ?? '',
-      flags: json['flags'] as String? ?? '',
+      source: re,
+      flags: flags is String ? flags : '',
       templates: templates,
     );
   }
@@ -104,6 +125,12 @@ class PhrasePattern {
   ///
   /// Done by hand rather than via [String.replaceAll] so a captured value that
   /// itself contains `$1` can never be re-expanded.
+  ///
+  /// A token that names a group the pattern does not have is left in place rather
+  /// than deleted — both because that is what JavaScript's `String.replace` does
+  /// with the templates this file inherited, and because a visible `$9` shows the
+  /// author their pattern and template disagree, where a silent deletion just
+  /// ships a sentence with a hole in it.
   static String applyTemplate(String template, RegExpMatch match) {
     final StringBuffer out = StringBuffer();
     for (int i = 0; i < template.length; i++) {
@@ -116,13 +143,13 @@ class PhrasePattern {
       while (j < template.length && _isDigit(template[j])) {
         j++;
       }
-      if (j == i + 1) {
-        out.write(ch); // a lone '$' is literal
-        continue;
-      }
-      final int group = int.parse(template.substring(i + 1, j));
-      if (group >= 1 && group <= match.groupCount) {
+      final String token = template.substring(i, j);
+      // tryParse, not parse: a very long digit run overflows int and would throw.
+      final int? group = j == i + 1 ? null : int.tryParse(template.substring(i + 1, j));
+      if (group != null && group >= 1 && group <= match.groupCount) {
         out.write(match.group(group) ?? '');
+      } else {
+        out.write(token); // lone '$', unknown group, or an unparsable run
       }
       i = j - 1;
     }
@@ -160,17 +187,18 @@ class JuneflowI18n {
     final Map<String, dynamic> root = jsonDecode(source) as Map<String, dynamic>;
     return JuneflowI18n._(
       langs: <LangDef>[
-        for (final dynamic l in (root['langs'] as List<dynamic>? ?? <dynamic>[]))
+        for (final dynamic l in _list(root['langs']))
           if (l is Map<String, dynamic>) LangDef.fromJson(l),
       ],
       dict: _entryMap(root['dict']),
       nav: _entryMap(root['nav_i18n']),
       phrases: _entryMap(root['phrases']),
       patterns: <PhrasePattern>[
-        for (final dynamic p in (root['phrase_patterns'] as List<dynamic>? ?? <dynamic>[]))
-          if (p is Map<String, dynamic>) PhrasePattern.fromJson(p),
+        for (final dynamic p in _list(root['phrase_patterns']))
+          if (p is Map<String, dynamic>)
+            if (PhrasePattern.tryFromJson(p) case final PhrasePattern parsed) parsed,
       ],
-      lang: lang,
+      lang: normalizeLang(lang),
     );
   }
 
@@ -182,6 +210,10 @@ class JuneflowI18n {
     final String source = await (bundle ?? rootBundle).loadString(kI18nAssetPath);
     return JuneflowI18n.fromJsonString(source, lang: lang);
   }
+
+  /// A wrong-typed block is treated as absent rather than thrown from a cast, so
+  /// one malformed section cannot take the whole app down at startup.
+  static List<dynamic> _list(dynamic raw) => raw is List<dynamic> ? raw : const <dynamic>[];
 
   static Map<String, Map<String, dynamic>> _entryMap(dynamic raw) {
     final Map<String, Map<String, dynamic>> out = <String, Map<String, dynamic>>{};
@@ -222,13 +254,15 @@ class JuneflowI18n {
   /// their own "zh-TW" entry (I18N-KEYS.md §2), and that entry must win over the
   /// generic "zh" one. Collapsing happens later, in [fallbackChain].
   static String normalizeLang(String code) {
-    final String trimmed = code.trim();
-    if (trimmed.isEmpty) return kDefaultLang;
-    final int dash = trimmed.indexOf('-');
-    if (dash <= 0) return trimmed.toLowerCase();
-    final String base = trimmed.substring(0, dash).toLowerCase();
-    final String region = trimmed.substring(dash + 1).toUpperCase();
-    return region.isEmpty ? base : '$base-$region';
+    // Accept '_' as well as '-': Dart's own Locale.toString() renders zh-TW as
+    // "zh_TW", so a caller passing a Locale straight through must still resolve.
+    final List<String> parts = code.trim().split(RegExp('[-_]'))
+      ..removeWhere((String p) => p.isEmpty);
+    if (parts.isEmpty) return kDefaultLang;
+    final String base = parts.first.toLowerCase();
+    // Only language + region are meaningful here; any further subtag (script,
+    // variant) is dropped so it falls back through the base language.
+    return parts.length == 1 ? base : '$base-${parts[1].toUpperCase()}';
   }
 
   /// Lookup order for [code], per I18N-KEYS.md §1 langResolve:
@@ -282,6 +316,32 @@ class JuneflowI18n {
     return _resolveEntry(entry, code ?? _lang) ?? key;
   }
 
+  /// DICT + placeholder interpolation.
+  ///
+  /// 421 dict entries carry `{name}` placeholders (sub.mine.usageUsedPct,
+  /// sub.mine.daysLeftBeforeRenew, org.toastAddCompany, …) — that, not
+  /// `phrase_patterns`, is how
+  /// this repo handles a sentence with runtime values. apps/web substitutes them
+  /// ad hoc at each call site (`t("…").replace("{n}", …)`); this keeps the same
+  /// semantics in one place: a literal token swap, no pluralisation and no
+  /// locale-aware number formatting, because inventing either would be inventing
+  /// copy the source file does not have.
+  ///
+  /// A placeholder with no matching entry in [params] is left as-is, so a missing
+  /// value shows up as `{pct}` rather than silently rendering a gap.
+  String tf(String key, Map<String, Object?> params, [String? code]) =>
+      format(t(key, code), params);
+
+  /// Replaces every `{name}` in [template] with `params[name]`.
+  static String format(String template, Map<String, Object?> params) {
+    if (params.isEmpty || !template.contains('{')) return template;
+    return template.replaceAllMapped(RegExp(r'\{([A-Za-z_]\w*)\}'), (Match m) {
+      final String name = m.group(1)!;
+      if (!params.containsKey(name)) return m.group(0)!;
+      return '${params[name]}';
+    });
+  }
+
   /// Layer 2 — NAV: the Thai menu label IS the key. For "th" the key is the text.
   String tn(String key, [String? code]) {
     final String target = code ?? _lang;
@@ -304,7 +364,7 @@ class JuneflowI18n {
   /// whose key IS the Thai text, that means the key is already the translation.
   static bool _isThai(String code) => fallbackChain(code).first.split('-').first == 'th';
 
-  /// PHRASE_PATTERNS — number-bearing sentences (BLOCKERS.md B-017 ruling ก).
+  /// PHRASE_PATTERNS — number-bearing sentences (BLOCKERS.md B-017 ruling (a)).
   ///
   /// [source] is the rendered Thai sentence (built from a screen's JSON sidecar
   /// plus runtime values). The first pattern whose regex matches wins; its

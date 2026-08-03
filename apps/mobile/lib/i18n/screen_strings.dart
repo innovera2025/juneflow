@@ -31,7 +31,14 @@ class ScreenStrings {
   /// Keys starting with `_` are documentation fields (`_source` records where the
   /// strings came from, as the web sidecars do) and are not lookups.
   factory ScreenStrings.fromJsonString(String source, {String assetPath = '<inline>'}) {
-    final Map<String, dynamic> raw = jsonDecode(source) as Map<String, dynamic>;
+    final Map<String, dynamic> raw;
+    try {
+      raw = jsonDecode(source) as Map<String, dynamic>;
+    } on Object catch (e) {
+      // Name the file: without this the failure is a bare FormatException and the
+      // author has no idea which of the 26 screens' sidecars is malformed.
+      throw FormatException('i18n sidecar $assetPath is not a JSON object: $e');
+    }
     final Map<String, String> values = <String, String>{};
     for (final MapEntry<String, dynamic> e in raw.entries) {
       if (e.key.startsWith('_')) continue;

@@ -85,6 +85,59 @@ void main() {
     });
   });
 
+  group('tf() / format() — {placeholder} interpolation', () {
+    // 421 dict entries in the sacred file carry {name} placeholders; this is the
+    // repo's mechanism for runtime values, and apps/web does the same swap inline.
+    test('substitutes every declared placeholder', () {
+      expect(
+        JuneflowI18n.format('ใช้ไป {pct}% · เหลือ {left}', <String, Object?>{'pct': 94.6, 'left': '257K'}),
+        'ใช้ไป 94.6% · เหลือ 257K',
+      );
+    });
+
+    test('repeats a placeholder used more than once', () {
+      expect(JuneflowI18n.format('{n}/{n}', <String, Object?>{'n': 5}), '5/5');
+    });
+
+    test('leaves an unsupplied placeholder visible rather than blank', () {
+      expect(JuneflowI18n.format('ใช้ไป {pct}%', <String, Object?>{}), 'ใช้ไป {pct}%');
+      expect(
+        JuneflowI18n.format('{a} {b}', <String, Object?>{'a': 'x'}),
+        'x {b}',
+      );
+    });
+
+    test('substitutes an explicit null as the word null, not as a gap', () {
+      // containsKey, not a null check: passing null is a caller bug worth seeing.
+      expect(JuneflowI18n.format('{a}', <String, Object?>{'a': null}), 'null');
+    });
+
+    test('ignores braces that are not placeholders', () {
+      expect(JuneflowI18n.format('{ }{1x}{}', <String, Object?>{'a': 1}), '{ }{1x}{}');
+    });
+
+    test('a substituted value containing a placeholder is not re-expanded', () {
+      expect(
+        JuneflowI18n.format('{a}', <String, Object?>{'a': '{a}', 'b': 'boom'}),
+        '{a}',
+      );
+    });
+
+    test('tf() resolves through the dict layer first', () {
+      final JuneflowI18n withPlaceholder = JuneflowI18n.fromJsonString('''
+{
+  "langs": [{"code": "en", "label": "English", "en": "English", "dir": "ltr"}],
+  "dict": {"pct": {"th": "ใช้ไป {pct}%", "en": "used {pct}%"}},
+  "nav_i18n": {}, "phrases": {}, "phrase_patterns": []
+}
+''');
+      expect(withPlaceholder.tf('pct', <String, Object?>{'pct': 94.6}, 'en'), 'used 94.6%');
+      expect(withPlaceholder.tf('pct', <String, Object?>{'pct': 94.6}, 'th'), 'ใช้ไป 94.6%');
+      // Unknown key still degrades to the key itself, placeholders and all.
+      expect(withPlaceholder.tf('missing', <String, Object?>{'pct': 1}, 'en'), 'missing');
+    });
+  });
+
   group('tn() — NAV layer (Thai label is the key)', () {
     test('returns the key unchanged for Thai', () => expect(i18n.tn('งานหลัก', 'th'), 'งานหลัก'));
 
@@ -157,7 +210,7 @@ void main() {
     });
   });
 
-  group('tpat() — PHRASE_PATTERNS (BLOCKERS.md B-017 ruling ก)', () {
+  group('tpat() — PHRASE_PATTERNS (BLOCKERS.md B-017 ruling (a))', () {
     test('substitutes captures into the per-language template', () {
       expect(i18n.tpat('แสดง 10 จาก 240 รายการ', 'en'), 'Showing 10 of 240');
       expect(i18n.tpat('แสดง 10 จาก 240 รายการ', 'zh'), '显示 10 / 共 240');
@@ -187,10 +240,73 @@ void main() {
       expect(i18n.tpat(r'แสดง $1 จาก 240 รายการ', 'en'), r'Showing $1 of 240');
     });
 
-    test(r'applyTemplate leaves a lone $ alone and drops out-of-range groups', () {
+    test('an entry with no usable regex is dropped, not turned into a catch-all', () {
+      // RegExp('') matches everything, so defaulting a missing "re" to '' would let
+      // one malformed entry hijack tpat() for the whole app and make hasPatternFor
+      // report coverage for every sentence. The block is hand-edited in the sacred
+      // file under B-017 (a), so a typo there is a realistic input.
+      final JuneflowI18n broken = JuneflowI18n.fromJsonString('''
+{
+  "langs": [], "dict": {}, "nav_i18n": {}, "phrases": {},
+  "phrase_patterns": [
+    {"flags": "", "en": "CATCHALL \$1"},
+    {"re": "", "flags": "", "en": "ALSO CATCHALL"},
+    {"re": null, "en": "NULL RE"},
+    {"re": "^X (\\\\d+)\$", "flags": "", "en": "X \$1"}
+  ]
+}
+''');
+      expect(broken.patternCount, 1, reason: 'only the well-formed entry survives');
+      expect(broken.tpat('X 7', 'en'), 'X 7');
+      expect(broken.tpat('anything at all', 'en'), 'anything at all');
+      expect(broken.hasPatternFor('anything at all'), isFalse);
+    });
+
+    test('an entry with non-string flags still parses', () {
+      final JuneflowI18n odd = JuneflowI18n.fromJsonString('''
+{
+  "langs": [], "dict": {}, "nav_i18n": {}, "phrases": {},
+  "phrase_patterns": [{"re": "^X (\\\\d+)\$", "flags": 0, "en": "X \$1"}]
+}
+''');
+      expect(odd.patternCount, 1);
+      expect(odd.tpat('X 7', 'en'), 'X 7');
+    });
+
+    test(r'applyTemplate leaves a lone $ and an unknown group visible', () {
       final RegExpMatch match = RegExp(r'^(\d+)$').firstMatch('42')!;
       expect(PhrasePattern.applyTemplate(r'cost $ is $1', match), r'cost $ is 42');
-      expect(PhrasePattern.applyTemplate(r'$1/$9', match), '42/');
+      // $9 names a group this pattern does not have. JavaScript's String.replace —
+      // which authored these templates — leaves such a token alone, and a visible
+      // $9 tells the author the pattern and template disagree, where deleting it
+      // would ship a sentence with a silent hole.
+      expect(PhrasePattern.applyTemplate(r'$1/$9', match), r'42/$9');
+      // A digit run too long for int must not throw.
+      expect(PhrasePattern.applyTemplate(r'$99999999999999999999', match), r'$99999999999999999999');
+    });
+
+    test('an odd language tag still resolves through its base', () {
+      // Dart's Locale.toString() renders zh-TW as "zh_TW"; extra subtags are dropped.
+      expect(JuneflowI18n.normalizeLang('zh_tw'), 'zh-TW');
+      expect(JuneflowI18n.normalizeLang('zh-Hant-TW'), 'zh-HANT');
+      expect(JuneflowI18n.normalizeLang('  '), 'th');
+      expect(i18n.tn('งานหลัก', 'zh_TW'), '主要TW');
+    });
+
+    test('a wrong-typed block is treated as absent instead of throwing', () {
+      final JuneflowI18n odd = JuneflowI18n.fromJsonString(
+        '{"langs": {}, "dict": [], "nav_i18n": null, "phrases": {}, "phrase_patterns": "x"}',
+      );
+      expect(odd.langs, isEmpty);
+      expect(odd.dictCount, 0);
+      expect(odd.patternCount, 0);
+      expect(odd.t('any.key', 'en'), 'any.key');
+    });
+
+    test('the constructor normalises its lang argument, like the setter does', () {
+      final JuneflowI18n scoped = JuneflowI18n.fromJsonString(_fixture, lang: 'zh_tw');
+      expect(scoped.lang, 'zh-TW');
+      expect(scoped.tn('งานหลัก'), '主要TW');
     });
   });
 }

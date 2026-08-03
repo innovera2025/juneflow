@@ -63,9 +63,18 @@ sets. Never hand-edit it.
 ## Open gap
 
 `agents/orch-d-recon/mob-i18n-gap.md`: of the Thai strings in
-`pototype/mobile*.jsx`, only a minority resolve to an existing key. The mobile
-screens need a Wei-approved mint batch (static keys) plus new `phrase_patterns`
-for their number-bearing sentences — the mechanism Wei already ruled in
-`BLOCKERS.md` B-017 (ก). `tpat()` reads whatever patterns the file carries, so the
-runtime is ready the moment they land; `hasPatternFor()` lets a screen assert a
-sentence is covered instead of shipping raw Thai.
+`pototype/mobile*.jsx`, only a minority resolve to an existing key, so the mobile
+screens need Wei-approved mint batches. Batch 1 (the five approval screens) is
+`agents/orch-d-recon/mob-i18n-approval.apply.json` — 25 borrowed, 34 minted,
+**no new `phrase_patterns`**: number-bearing sentences become dict entries with
+`{placeholder}` (`tf()`), which is how the other 421 such strings already work.
+Mint policy is `BLOCKERS.md` B-035 (a) — Thai verbatim in all four languages, real
+translations commissioned later — so nothing is invented at mint time either.
+
+`tpat()` still exists for the two legacy pattern entries and reads whatever the
+file carries; `hasPatternFor()` lets a screen assert a sentence is covered rather
+than shipping raw Thai.
+
+**After any mint lands**, rerun `tool/gen_i18n_asset.sh` and `flutter test` — the
+asset is a third copy of the source (after `docs/extract/` and `packages/i18n/src/`)
+and will otherwise sit silently on the old version.
