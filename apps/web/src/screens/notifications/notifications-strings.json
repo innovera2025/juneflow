@@ -1,0 +1,14 @@
+{
+  "_source": "Verbatim static UI strings for pototype/extra-screens.jsx NotificationsCenter (L171-208), routed through the phrases bucket (tp). Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx/.ts source (B-073) — same pattern as exec-strings.json / dashboard-strings.json. Each value is the Thai phrase that IS the phrases key (tp). SIX are already present in packages/i18n/src/i18n-full.json phrases: 'ระบบ','การแจ้งเตือน','อ่านทั้งหมด','ทั้งหมด','วันนี้','เมื่อวาน'. FIVE are net-new and collected into agents/orch-b-recon/notifications-i18n.apply.json for a Wei sacred round (title/subtitle/filterUnread/filterAccept/markAllToast); they already resolve in Thai today (tp returns the key for lang th) and light up en/zh/ar once applied. 'subtitle' carries a {n} placeholder filled by the view via String.replace (i18n has no interpolation, B-017), like exec's pctOfBudget. The middot in 'title' is U+00B7, byte-exact with the prototype. The per-notification title TEXT is server data the current wire does not carry (contract gap B-039) and is NOT an i18n key — the view renders the real ref/em-dash, never an invented sentence (§0 rule 3).",
+  "crumbSystem": "ระบบ",
+  "crumbNotif": "การแจ้งเตือน",
+  "title": "ศูนย์การแจ้งเตือน · Notifications",
+  "subtitle": "มี {n} รายการที่ยังไม่ได้อ่าน",
+  "markAll": "อ่านทั้งหมด",
+  "markAllToast": "ทำเครื่องหมายอ่านทั้งหมดแล้ว",
+  "filterAll": "ทั้งหมด",
+  "filterUnread": "ยังไม่อ่าน",
+  "filterAccept": "ตรวจรับ",
+  "dayToday": "วันนี้",
+  "dayYesterday": "เมื่อวาน"
+}

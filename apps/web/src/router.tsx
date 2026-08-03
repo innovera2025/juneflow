@@ -73,6 +73,9 @@ import { ARTaxInvoice } from "./screens/ar/ar-tax";
 import { GLPeriodClose } from "./screens/gl/gl-close";
 import { FARegister } from "./screens/fa/fa-register";
 import { APBilling } from "./screens/ap/ap-billing";
+import { APDeposit } from "./screens/ap/ap-deposit";
+import { NotificationsCenter } from "./screens/notifications/notifications";
+import { PettyCash } from "./screens/petty/petty";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
 import { APRetention } from "./screens/ap/ap-retention";
 import { ARAging, APAging } from "./screens/ar/fin-aging";
@@ -187,6 +190,9 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.close": GLPeriodClose,
   "fa.register": FARegister,
   "ap.billing": APBilling,
+  "ap.deposit": APDeposit,
+  "notifications": NotificationsCenter,
+  "petty": PettyCash,
   "ap.pv": APPaymentVoucher,
   "ap.retention": APRetention,
   // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.

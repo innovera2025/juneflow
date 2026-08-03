@@ -45,6 +45,7 @@ type Row = Record<string, unknown>;
 
 const BILLING_KEY = ["ap", "billing"] as const;
 const PV_KEY = ["ap", "pv"] as const;
+const DEPOSIT_KEY = ["ap", "deposit"] as const;
 
 /** True when a bearer token is present — queries stay disabled otherwise. */
 function authed(): boolean {
@@ -66,6 +67,16 @@ export function useApPvList() {
   return useQuery<Row[]>({
     queryKey: PV_KEY,
     queryFn: async () => (await unwrap(apiClient.GET("/ap/pv"))).data ?? [],
+    enabled: authed(),
+    staleTime: 60_000,
+  });
+}
+
+/** GET /ap/deposit — the tenant vendor-deposit register (B-014 envelope `{ data, ... }`). */
+export function useApDepositList() {
+  return useQuery<Row[]>({
+    queryKey: DEPOSIT_KEY,
+    queryFn: async () => (await unwrap(apiClient.GET("/ap/deposit"))).data ?? [],
     enabled: authed(),
     staleTime: 60_000,
   });
@@ -94,6 +105,21 @@ export function useCreateApPv(): UseMutationResult<Entity, unknown, Entity> {
   return useMutation({
     mutationFn: (body: Entity) => unwrap(apiClient.POST("/ap/pv", { body })),
     onSuccess: () => qc.invalidateQueries({ queryKey: PV_KEY }),
+  });
+}
+
+/**
+ * POST /ap/deposit — create a vendor deposit. The caller composes the opaque body
+ * ({ vendor_id, amount, po_id?, wo_id?, pct? }); the server re-validates the
+ * vendor/amount/refs, allocates the DP-no, computes the balance/status, and posts the
+ * balanced JV (Dr 1160 / Cr 1010) from the STORED amount (money=SERVER). Invalidates on
+ * success.
+ */
+export function useCreateApDeposit(): UseMutationResult<Entity, unknown, Entity> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Entity) => unwrap(apiClient.POST("/ap/deposit", { body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: DEPOSIT_KEY }),
   });
 }
 
