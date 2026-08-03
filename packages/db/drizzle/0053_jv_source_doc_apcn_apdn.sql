@@ -1,0 +1,2 @@
+DROP INDEX "jv_source_doc_uq";--> statement-breakpoint
+CREATE UNIQUE INDEX "jv_source_doc_uq" ON "jv" USING btree ("source_doc") WHERE "jv"."source_doc" ~ '^(pv|rv|gr|payroll|fa|cn|apcn|apdn|ret|dep|booking|down|transfer|deal):';

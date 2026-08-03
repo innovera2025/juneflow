@@ -71,6 +71,14 @@ export const ACCT = {
   cash: "1010",
   bank: "1020",
   ar: "1030",
+  // สินทรัพย์ตามสัญญา (Unbilled AR) — recognized-but-not-yet-billed construction
+  // revenue is a contract ASSET (B-230). A revenue-recognition post debits it:
+  // Dr 1130 / Cr 4020 construction-revenue.
+  contractAsset: "1130",
+  // งานระหว่างก่อสร้าง (WIP/CIP) — accumulated project cost held as inventory. A
+  // WIP → COGS transfer credits it (B-230): Dr 5010 COGS / Cr 1140 WIP. (Also the
+  // payroll/labor capitalisation target, POSTING_MAP.payroll — B-144.)
+  wip: "1140",
   // ที่ดินรอการพัฒนา — land acquired and held for development is an asset. A land
   // buy-deal deposit capitalises here: Dr 1150 / Cr 2010 AP (Program-3 land deal,
   // B-159 Wei=ก). Distinct from a construction WIP account.
@@ -89,6 +97,12 @@ export const ACCT = {
   advanceReceived: "2040",
   vatOutput: "2050",
   revenue: "4010",
+  // รายได้ค่าก่อสร้าง (ตามสัญญา) — construction contract revenue, the credit side
+  // of a revenue-recognition post (B-230): Dr 1130 contract-asset / Cr 4020.
+  constructionRevenue: "4020",
+  // ต้นทุนขาย - โอนกรรมสิทธิ์ — cost of sales, the debit side of a WIP → COGS
+  // transfer (B-230): Dr 5010 COGS / Cr 1140 WIP.
+  cogs: "5010",
   materials: "5020",
   labor: "5030",
   adminExpense: "5100",
