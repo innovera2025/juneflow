@@ -116,6 +116,14 @@ export const salesUnits = pgTable("sales_unit", {
  * วัน"; erd.html "cat, project_id, version, expiry, link_module"). link_module is
  * the polymorphic "module:uuid" back-reference to the owning record. Actual bytes
  * live in R2 via POST /files (PLAN.md section 5); url is the stored object ref.
+ *
+ * B-221 (Solar-tail · Wei=ก, dms.jsx DMS list): the DMS list surfaces four more
+ * per-file columns — all additive/nullable (a legacy row without them renders
+ * em-dash). `name` is the display filename; `by_user_id` is a REAL FK to the
+ * uploader (never a name-text — PLAN.md §4), set-null so purging a user keeps the
+ * file; `size` is the display byte-string ("2.4 MB", not a numeric byte count —
+ * the mock shows the formatted value); `status` is the free-text lifecycle code
+ * (active | review | expiring — text, no enum).
  */
 export const documents = pgTable("document", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -130,6 +138,13 @@ export const documents = pgTable("document", {
   expiry: date("expiry"),
   linkModule: text("link_module"),
   url: text("url"),
+  // B-221: DMS list columns (additive, nullable).
+  name: text("name"),
+  byUserId: uuid("by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  size: text("size"),
+  status: text("status"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

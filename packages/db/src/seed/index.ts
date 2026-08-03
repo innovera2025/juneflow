@@ -55,7 +55,7 @@
 // Report-derived §สรุป datasets that have NO backing table are intentionally
 // SKIPPED (documented in REPORT_DERIVED below). Acceptance/Defect stay 0 records
 // per §สรุป line 318/341 + P0-QA-06 (the rejected work period's defect is captured
-// by the 3 DMS `defect`-category documents — the real "defect reports").
+// by the 3 DMS `defect`-category documents — the real "defect reports"; see DMS_SEED).
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql, eq } from "drizzle-orm";
@@ -766,22 +766,30 @@ const INV_ISSUES = [
   { no: "IS-2026-0215", wh: 2, value: 16800, status: "approved" },
 ];
 
-// dms.jsx:14 DMS_SEED (13). The 3 `defect`-cat docs are the real "defect reports"
-// for WO-2026-0055 งวด 3 (P0-BE-10 rework item 5 — Defect table stays 0 per §สรุป).
+// dms.jsx DMS list — B-221 (Solar-tail · Wei=ก) enriches each file with its real
+// display columns: version · `userIdx` (seed index of the uploader) · size ·
+// status · `proj` (project key) · expiry · `link` (link_module module-path). A
+// null `userIdx` = the prototype author (สมพงษ์/สมคิด) has no seed user → em-dash;
+// do NOT fabricate one (B-221 · §0 rule 4). A null `proj` = ส่วนกลาง (no project).
+// The 3 `defect`-cat docs are the real "defect reports" for WO-2026-0055 งวด 3
+// (Acceptance/Defect tables stay 0 records per §สรุป). B-221 supplies the full 13-row
+// enriched set (dms.jsx DMS_SEED); the 13th (รายงานของเสียหาย GR-2569-0448) has its
+// per-file columns reconned from dms.jsx:27 — author "ประยุทธ" → null (not a seed user).
 const DMS_SEED = [
-  { name: "สัญญาจ้างเหมา WO-2569-012 (ทีมสมชาย).pdf", cat: "contract" },
-  { name: "สัญญา PM ลิฟต์ MT-2569-018.pdf", cat: "contract" },
-  { name: "สัญญาเช่าที่ดินโซลาร์ 27 ปี (สระบุรี).pdf", cat: "contract" },
-  { name: "แบบสถาปัตย์ Block B Rev.C.dwg", cat: "drawing" },
-  { name: "โมเดล BIM อาคาร A (IFC).ifc", cat: "drawing" },
-  { name: "ใบอนุญาตก่อสร้าง อ.1 เฟส 2.pdf", cat: "permit" },
-  { name: "ใบอนุญาตจัดสรร (คค.) บางบัวทอง.pdf", cat: "permit" },
-  { name: "งบการเงินสอบทาน Q2-2569.xlsx", cat: "finance" },
-  { name: "โฉนด 11902 ราชพฤกษ์ เฟส 4 (สแกน).pdf", cat: "land" },
-  { name: "ภาพความคืบหน้า Block B - มิ.ย. 69 (86 รูป).zip", cat: "photo" },
-  { name: "Defect List งวด 3 · WO-2026-0055 (ก่ออิฐ-ฉาบ).pdf", cat: "defect" },
-  { name: "รูปจุดบกพร่อง B-06 ก่อน-หลังแก้ (12 รูป).zip", cat: "defect" },
-  { name: "รายงานของเสียหาย GR-2569-0448 (อิฐมวลเบา).pdf", cat: "defect" },
+  { name: "สัญญาจ้างเหมา WO-2569-012 (ทีมสมชาย).pdf", cat: "contract", version: 3, userIdx: 2, size: "2.4 MB", status: "active", proj: "rjp", expiry: null, link: "subcon.contracts" },
+  { name: "สัญญา PM ลิฟต์ MT-2569-018.pdf", cat: "contract", version: 2, userIdx: null, size: "1.8 MB", status: "active", proj: "rjp", expiry: null, link: "pm.contracts" },
+  { name: "สัญญาเช่าที่ดินโซลาร์ 27 ปี (สระบุรี).pdf", cat: "contract", version: 1, userIdx: 1, size: "4.1 MB", status: "active", proj: "slr", expiry: null, link: "land.dd" },
+  { name: "แบบสถาปัตย์ Block B Rev.C.dwg", cat: "drawing", version: 3, userIdx: 0, size: "48 MB", status: "review", proj: "rjp", expiry: null, link: "boq.aiqto" },
+  { name: "โมเดล BIM อาคาร A (IFC).ifc", cat: "drawing", version: 5, userIdx: 0, size: "126 MB", status: "active", proj: "rjp", expiry: null, link: "boq.aiqto" },
+  { name: "ใบอนุญาตก่อสร้าง อ.1 เฟส 2.pdf", cat: "permit", version: 1, userIdx: 1, size: "0.9 MB", status: "expiring", proj: "rjp", expiry: "2026-08-15", link: null },
+  { name: "ใบอนุญาตจัดสรร (คค.) บางบัวทอง.pdf", cat: "permit", version: 1, userIdx: 1, size: "1.2 MB", status: "active", proj: "bbt", expiry: null, link: null },
+  { name: "งบการเงินสอบทาน Q2-2569.xlsx", cat: "finance", version: 2, userIdx: 3, size: "3.6 MB", status: "review", proj: null, expiry: null, link: "gl.statements" },
+  { name: "โฉนด 11902 ราชพฤกษ์ เฟส 4 (สแกน).pdf", cat: "land", version: 1, userIdx: 1, size: "5.2 MB", status: "active", proj: "rjp", expiry: null, link: "land.bank" },
+  { name: "ภาพความคืบหน้า Block B - มิ.ย. 69 (86 รูป).zip", cat: "photo", version: 1, userIdx: null, size: "412 MB", status: "active", proj: "rjp", expiry: null, link: null },
+  { name: "Defect List งวด 3 · WO-2026-0055 (ก่ออิฐ-ฉาบ).pdf", cat: "defect", version: 2, userIdx: 2, size: "1.4 MB", status: "review", proj: "rjp", expiry: null, link: "accept" },
+  { name: "รูปจุดบกพร่อง B-06 ก่อน-หลังแก้ (12 รูป).zip", cat: "defect", version: 1, userIdx: null, size: "38 MB", status: "active", proj: "rjp", expiry: null, link: "accept" },
+  // 13th doc (dms.jsx:27) — by "ประยุทธ" is not a seed user (like สมพงษ์/สมคิด) → userIdx null → em-dash on read (honest, no fabricated user). Restores the prototype DMS_SEED count (13).
+  { name: "รายงานของเสียหาย GR-2569-0448 (อิฐมวลเบา).pdf", cat: "defect", version: 1, userIdx: null, size: "6.8 MB", status: "review", proj: "bbt", expiry: null, link: "accept" },
 ];
 
 // exec-audit.jsx:162 AUDIT_ENTRIES (13). act is free text; obj/detail verbatim.
@@ -1773,8 +1781,13 @@ async function seed(): Promise<void> {
 
       await tx.insert(schema.documents).values(
         DMS_SEED.map((d, i) => ({
-          id: det(`doc:${i}`), companyId: CO1, projectId: det(`project:${at(PROJECTS, i).key}`),
-          cat: d.cat, version: 1, expiry: null, linkModule: `dms:${det(`doc:${i}`)}`,
+          id: det(`doc:${i}`), companyId: CO1,
+          // B-221: per-row FKs — projectId/byUserId are real uuids (null → em-dash /
+          // ส่วนกลาง); userIdx 0 is a valid uploader so guard with `!= null`, not truthiness.
+          projectId: d.proj ? det(`project:${d.proj}`) : null,
+          byUserId: d.userIdx != null ? det(`user:${d.userIdx}`) : null,
+          name: d.name, cat: d.cat, version: d.version, size: d.size, status: d.status,
+          expiry: d.expiry, linkModule: d.link,
           url: `r2://documents/doc-${i + 1}.pdf`,
         })),
       );
