@@ -3,6 +3,8 @@
 > ตาม PLAN.md §10 Review flow: `feature → dev (auto เมื่อ CI เขียว) → main (Wei promote คนเดียว)`
 > Wei ตรวจเป็น batch: อ่านคิวนี้ + `BLOCKERS.md` → คลิกเล่นบน dev เทียบ gallery → ผ่าน = promote / ไม่ผ่าน = rework task
 
+> ✅ **34th 0-drift promote → `main` `0a2224a` (2026-08-03 · pin 4e119e9)** — this-session verify-lane wave: WEB port (admin.overview · labor.payroll money=SERVER · subcon.progress thin-honest · pr.form submit/approve/reject G5-exempt-per-gr-create) + BACKEND finance net-new (gl.revrec Dr1130/Cr4020 · ap.cn/dn Dr2010/Cr5020·Dr5100/Cr2010 · gl.projectpl P&L+opex · petty Dr5100/Cr1010 — migrations 0051-0055, all live money-proven incl 0053/0055 double-post rejection) + MOBILE i18n (B-240 batch-1 34 keys dict→3701 · MOB-I18N-01 Dart runtime flutter 68/68 · asset==sacred adba2e8b drift-gate-real) + G5 baselines + E2E_LIVE specs. orch-B: gate-4.5 each · live money-proof (b231 3/3 · b233 1/1 · labor · b227 2/2) · api 1247/1247 · web 1406/1406 · 0 file-deletion → 0-drift EMPTY. Sacred Wei-approved: openapi (petty/apcn/revrec/projectpl/opex) · i18n×2 (B-240) · migrations 0051-0055. 73 files +103785/-30.
+
 ## วิธีใช้
 
 **ฝั่ง agent:**
