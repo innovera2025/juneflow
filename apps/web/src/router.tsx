@@ -96,6 +96,7 @@ import { LandSurvey } from "./screens/land/land-survey";
 import { LandDueDiligence } from "./screens/land/land-dd";
 import { LaborWorkers } from "./screens/labor/labor-workers";
 import { LaborAttendance } from "./screens/labor/labor-attendance";
+import { LaborPayroll } from "./screens/labor/labor-payroll";
 import { SolarMonitoring } from "./screens/solar/solar-monitor";
 import { SolarPPA } from "./screens/solar/solar-ppa";
 import { SolarROI } from "./screens/solar/solar-roi";
@@ -131,6 +132,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "land.dd": LandDueDiligence,
   "labor.workers": LaborWorkers,
   "labor.attendance": LaborAttendance,
+  "labor.payroll": LaborPayroll,
   "boq.overview": BOQOverview,
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
