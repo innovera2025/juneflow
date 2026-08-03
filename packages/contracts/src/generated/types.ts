@@ -1563,6 +1563,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/petty": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List petty-cash transactions (filters type/status/period) */
+        get: operations["listPettyCash"];
+        put?: never;
+        /** Petty-cash claim ({category,amount,description,txn_date,project_id?}) — caps <= 10,000, posts via the GL inbox */
+        post: operations["createPettyClaim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ar/invoices": {
         parameters: {
             query?: never;
@@ -6153,6 +6171,52 @@ export interface operations {
         };
         responses: {
             200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listPettyCash: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+                /** @description Accounting period selector (e.g. YYYY-MM). */
+                period?: components["parameters"]["Period"];
+                type?: string;
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createPettyClaim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    category?: string;
+                    amount?: number;
+                    description?: string;
+                    txn_date?: string;
+                    /** Format: uuid */
+                    project_id?: string;
+                };
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
             401: components["responses"]["Unauthorized"];
         };
     };

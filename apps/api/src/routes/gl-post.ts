@@ -44,7 +44,7 @@ export function isUniqueViolation(err: unknown): boolean {
 }
 
 /** The posting-inbox source kinds that have a real backing table (gl-posting.ts). */
-export type GlPostableKind = "pv" | "rv" | "gr" | "payroll";
+export type GlPostableKind = "pv" | "rv" | "gr" | "payroll" | "petty";
 
 export interface PostingRule {
   /** Debit account code. */
@@ -64,6 +64,12 @@ export const POSTING_MAP: Record<GlPostableKind, PostingRule> = {
   gr: { dr: "5020", cr: "2010", basis: "amount", real: true, note: "JV-2026-0416 GR auto; gr.amount is null → not postable" },
   pv: { dr: "2010", cr: "1020", basis: "net", real: false, note: "extrapolated — no PV exemplar in JV_BOOKS" },
   payroll: { dr: "1140", cr: "1020", basis: "amount", real: false, note: "B-144: realigned 5030→1140 WIP-labor to match the dedicated POST /labor/payroll/{id}/post (B-140)" },
+  // petty (B-233, Wei C-177): a petty-cash CLAIM debits the admin-expense (5100)
+  // and credits cash-on-hand (1010) — the ONLY existing COA accounts (the
+  // prototype's 52xx/1102 are NOT in COA_SEED, so the claim-MVP posts to real
+  // accounts). REAL exemplar: JV_BOOKS seeds Dr 5100 / Cr 1010 for the 8,400 petty
+  // vehicle-repair claim (seed/index.ts). value is the claim magnitude (stored > 0).
+  petty: { dr: "5100", cr: "1010", basis: "amount", real: true, note: "Dr 5100 admin-exp / Cr 1010 cash-on-hand — REAL JV_BOOKS petty exemplar (Wei C-177: existing accounts only)" },
 };
 
 /** Named COA codes the direct-posting handlers (CN, FA, retention, deposit) reference by intent. */

@@ -34,6 +34,7 @@ import {
   glAccounts,
   jvLines,
   jvs,
+  pettyCashTxns,
   projects,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
@@ -991,6 +992,21 @@ async function postGlDocs(
           })
           .returning();
         await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+        // B-233: a petty claim carries its own status column — flip it to
+        // `posted` in the SAME transaction as its JV so GET /petty reflects the
+        // posted state. Posted-ness for the inbox still derives from the jv
+        // source_doc `petty:<id>` ref (like pv/rv/gr); the 0055 source_doc UNIQUE
+        // index is the concurrent-double-post guard, and this flip rolls back with
+        // the JV on any failure. pv/rv/gr have no such status column → no flip.
+        if (doc.source === "petty") {
+          await tx
+            .update(
+              pettyCashTxns,
+              { status: "posted" },
+              eq(pettyCashTxns.id, doc.id),
+            )
+            .returning();
+        }
       });
       posted.push({ doc_id: doc.id, source: doc.source, jv_no: jvNo, amount });
     } catch (err) {

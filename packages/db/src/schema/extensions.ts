@@ -613,7 +613,9 @@ export const milestones = pgTable("milestone", {
  * PettyCashTxn — a petty-cash movement (petty-alloc.jsx `PETTY_TX`: no,
  * type(claim/clear/topup), l(label), v(value), by, date, status, cat, ref).
  * value is money -> currency_code; cc_id ties the spend to a cost center; ref is
- * the source-document reference string.
+ * the source-document reference string. project_id ties a claim to a project
+ * (petty-alloc.jsx PettyClaimForm "ใช้กับโครงการ" dropdown — B-233); the table
+ * only had cc_id, so the claim's project selection is stored here.
  */
 export const pettyCashTxns = pgTable("petty_cash_txn", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -633,6 +635,9 @@ export const pettyCashTxns = pgTable("petty_cash_txn", {
   cat: text("cat"),
   ref: text("ref"),
   ccId: uuid("cc_id").references(() => costCenters.id, { onDelete: "set null" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
