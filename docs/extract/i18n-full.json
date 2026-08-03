@@ -22024,6 +22024,24 @@
       "en": "เพิ่ม “{item}” รับประกัน {years} ปี เข้าทะเบียน",
       "zh": "เพิ่ม “{item}” รับประกัน {years} ปี เข้าทะเบียน",
       "ar": "เพิ่ม “{item}” รับประกัน {years} ปี เข้าทะเบียน"
+    },
+    "solar.monitor.omTeamOmA": {
+      "th": "ทีม O&M A",
+      "en": "ทีม O&M A",
+      "zh": "ทีม O&M A",
+      "ar": "ทีม O&M A"
+    },
+    "solar.monitor.omTeamOmB": {
+      "th": "ทีม O&M B",
+      "en": "ทีม O&M B",
+      "zh": "ทีม O&M B",
+      "ar": "ทีม O&M B"
+    },
+    "solar.monitor.omTeamCleaning": {
+      "th": "ทีม Cleaning",
+      "en": "ทีม Cleaning",
+      "zh": "ทีม Cleaning",
+      "ar": "ทีม Cleaning"
     }
   },
   "nav_i18n": {
