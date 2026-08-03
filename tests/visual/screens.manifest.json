@@ -678,15 +678,6 @@
       ]
     },
     {
-      "screen": "audit",
-      "route": "audit",
-      "ref": "app-baseline/audit.png",
-      "masks": [
-        "header-update-time-b120",
-        "header-date-chip-b120"
-      ]
-    },
-    {
       "screen": "settings",
       "route": "settings",
       "ref": "app-baseline/settings.png",

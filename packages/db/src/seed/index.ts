@@ -825,7 +825,11 @@ const LAND_PLOTS = [
 // relative date below derives from it so the dashboard's overdue-payable alert
 // (due < today) and 7-day cashflow window (due in [today, today+7d]) light up on
 // ANY seed date — never hardcode calendar literals (they rot as the clock moves).
-const SEED_NOW = new Date();
+// B-224: SEED_FROZEN_NOW freezes the seed clock to a fixed instant so clock-relative
+// data (audit `at`, due dates, EVM periods - all off SEED_TODAY) is byte-stable for the
+// G5 visual gate. UNSET (prod/dev) -> new Date(): recent-activity demo realism preserved.
+const SEED_FROZEN_ = process.env.SEED_FROZEN_NOW ? new Date(process.env.SEED_FROZEN_NOW) : null;
+const SEED_NOW = SEED_FROZEN_ && Number.isFinite(SEED_FROZEN_.getTime()) ? SEED_FROZEN_ : new Date();
 const SEED_TODAY = new Date(SEED_NOW);
 SEED_TODAY.setUTCHours(0, 0, 0, 0);
 /** ISO calendar date (YYYY-MM-DD) exactly n days from the UTC-floored seed today. */
