@@ -38,6 +38,7 @@ import { BOQReports } from "./screens/boq/boq-reports";
 import { AIQuantityTakeoff } from "./screens/boq/aiqto";
 import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
+import { PRForm } from "./screens/pr/pr-form";
 import { POList } from "./screens/po-wo/po-list";
 import { WOList } from "./screens/po-wo/wo-list";
 import { SubconProgress } from "./screens/subcon/subcon-progress";
@@ -144,6 +145,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "boq.aiqto": AIQuantityTakeoff,
   "gr.list": GRList,
   "pr.list": PRList,
+  "pr.form": PRForm,
   "po.list": POList,
   "wo.list": WOList,
   "subcon.progress": SubconProgress,
