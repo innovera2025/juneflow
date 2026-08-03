@@ -527,6 +527,10 @@ export const solarWarranties = pgTable("solar_warranty", {
   brand: text("brand"),
   qty: integer("qty"),
   perf: numeric("perf", { precision: 6, scale: 2 }),
+  // B-219 (Wei=ก): product-warranty duration in years — the RF2Warranty add
+  // form's only quantitative field. The solar.jsx list "รับประกันสินค้า X ปี"
+  // column is backed by this (prod_date stays a separate nullable date).
+  years: integer("years"),
   prodDate: date("prod_date"),
   expiryDate: date("expiry_date"),
   status: text("status"),

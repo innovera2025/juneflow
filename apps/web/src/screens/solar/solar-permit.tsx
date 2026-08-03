@@ -13,40 +13,84 @@
  *
  * KPIs: "all permits" (step count) + "in progress" (pending count) are DERIVED live from
  * the returned steps. COD status is a fixed illustrative figure via its i18n value-key
- * (solar.permit.kpiCodValue — consume-only).
+ * (solar.permit.kpiCodValue — consume-only). Add-permit is REAL (Wave-1a): the header primary
+ * opens PermitForm and POSTs /solar/permit-steps ({ name, org }, status server-set to pending,
+ * money=NONE, B-212); the modal unmounts on submit so the toast fires off the settled promise.
  *
  * HONEST DIVERGENCES (rule 4 — flagged, never fabricated):
- *   - add-permit (header primary) is a dropped mock — no write endpoint — so DISABLED.
  *   - a null step_date falls back to the pending label (solar.permit.statusPending, the
  *     prototype's date="waiting-result" pending row) rather than inventing a date.
  *
- * i18n (rule 2): every visible string is a solar.permit.* dict key (t) — consume-only, no
- * key minted here. No Thai literal lives in source (B-073); tokens back every colour except
- * the KPI accent hex #B45309 (prototype-verbatim, solar.jsx L240, B-037(a)) and the node
- * icon colour #fff (prototype-verbatim, solar.jsx L250, B-037(a)).
+ * i18n (rule 2): every visible string is a solar.permit.* / common.* dict key (t) —
+ * consume-only, no key minted here (the add-modal submit reuses solar.warranty.actionAdd, the
+ * exact "add-item" string the permit modal shows — no solar.permit key holds it). No Thai
+ * literal lives in source (B-073); tokens back every colour except the KPI accent + modal icon
+ * tone hex #B45309 (prototype-verbatim, solar.jsx L240 / real-forms2.jsx L308, B-037(a)) and the
+ * node icon colour #fff (prototype-verbatim, solar.jsx L250, B-037(a)).
  */
 import { useMemo } from "react";
+import type { components } from "@juneflow/contracts";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Icon } from "../../ui/icon";
 import { Page } from "../../shell/page";
 import { TypeBadge } from "../../shell/type-badge";
+import { useShellCtx } from "../../shell/shell-context";
 import { SolarKpi, StatusBadge } from "./solar-kpi";
+import { fireWithToast } from "../admin/admin-rows";
 import { toPermitStep, isPermitApproved, stepCount, pendingCount, type PermitStep } from "./solar-permit-rows";
-import { useSolarPermitSteps } from "./use-solar";
+import { useSolarPermitSteps, useCreatePermitStep } from "./use-solar";
+import { PermitForm, type PermitDraft } from "./permit-form";
+
+type Entity = components["schemas"]["Entity"];
 
 /** Em-dash for an absent org / empty register (never a fabricated value). */
 const DASH = "—";
 
 export function SolarPermit() {
   const { t } = useI18n();
+  const ctx = useShellCtx();
 
   const permitQ = useSolarPermitSteps();
+  const createPermit = useCreatePermitStep();
   const steps = useMemo<PermitStep[]>(() => (permitQ.data ?? []).map(toPermitStep), [permitQ.data]);
 
   const pendingLabel = t("solar.permit.statusPending");
   const stepMeta = t("solar.permit.stepMeta");
+
+  // add permit (real-forms2.jsx openPermitForm L305-310): open the form modal; on submit close
+  // it, then POST { name, org } and fire the toast off the settled promise (the modal has
+  // unmounted). status is server-set to pending (no advance-step, B-212); money = NONE.
+  const openForm = () => {
+    ctx.openModal({
+      title: t("solar.permit.addModalTitle"),
+      subtitle: t("solar.permit.addModalSubtitle"),
+      icon: "paperclip",
+      // prototype-verbatim icon tone (real-forms2.jsx L308); no matching token (B-037(a)).
+      iconTone: "#B45309",
+      size: "sm",
+      body: ({ close }: { close: () => void }) => (
+        <PermitForm
+          onClose={close}
+          onSubmit={(draft: PermitDraft) => {
+            close();
+            const body = { name: draft.name, org: draft.org } as Entity;
+            fireWithToast(
+              () => createPermit.mutateAsync(body),
+              () =>
+                ctx.notify(
+                  t("solar.permit.addToast")
+                    .replace("{name}", draft.name)
+                    .replace("{org}", draft.org),
+                ),
+              () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+            );
+          }}
+        />
+      ),
+    });
+  };
 
   return (
     <Page
@@ -59,8 +103,7 @@ export function SolarPermit() {
         </span>
       }
       actions={
-        // Honest-DISABLED: no write endpoint (add-permit is a dropped mock).
-        <Btn kind="primary" size="md" icon="plus" disabled>
+        <Btn kind="primary" size="md" icon="plus" onClick={openForm}>
           {t("solar.permit.addBtn")}
         </Btn>
       }

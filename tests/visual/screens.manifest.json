@@ -667,6 +667,24 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "reports",
+      "route": "reports",
+      "ref": "app-baseline/reports.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "audit",
+      "route": "audit",
+      "ref": "app-baseline/audit.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }

@@ -330,6 +330,20 @@
       "when": 1785405840298,
       "tag": "0046_right_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1785691928240,
+      "tag": "0047_ar_invoice_no_uq",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785693415594,
+      "tag": "0048_solar_warranty_years",
+      "breakpoints": true
     }
   ]
 }

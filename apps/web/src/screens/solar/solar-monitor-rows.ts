@@ -63,6 +63,8 @@ export interface TicketRow {
   id: string;
   /** Human ticket number (e.g. "OM-2569-001"). */
   no: string;
+  /** Inverter uuid FK — resolved to an asset label via the loaded inverters (omAssetLabel). */
+  inverterId: string;
   /** Ticket title / description (raw). */
   title: string;
   /** Priority — a raw backend value (rendered as the Tag label, neutral tone). */
@@ -78,11 +80,25 @@ export function toTicketRow(e: Record<string, unknown>): TicketRow {
   return {
     id: str(e.id),
     no: str(e.no),
+    inverterId: str(e.inverter_id ?? e.inverterId),
     title: str(e.title),
     priority: str(e.priority),
     assigneeUserId: str(e.assignee_user_id ?? e.assigneeUserId),
     status: str(e.status),
   };
+}
+
+/**
+ * Resolve a ticket's inverter_id to a display label ("<id> · <zone>", or just the id when the
+ * zone is blank), or "" when the FK is absent/unresolved — a real FK join for the O&M view
+ * modal's asset row (never leaks a raw uuid, mirrors the assignee resolver). The middot
+ * separator is the prototype's own asset string (solar.jsx), ASCII-punctuation, not copy.
+ */
+export function omAssetLabel(inverterId: string, inverters: readonly InverterRow[]): string {
+  if (!inverterId) return "";
+  const inv = inverters.find((iv) => iv.id === inverterId);
+  if (!inv) return "";
+  return inv.zone ? `${inv.id} · ${inv.zone}` : inv.id;
 }
 
 /* --------------------------------------------------------------------------- */

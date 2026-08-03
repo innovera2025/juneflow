@@ -357,7 +357,14 @@ export const arInvoices = pgTable("ar_invoice", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("ar_invoice_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("ar_invoice_company_idx").on(t.companyId),
+  // B-217: `no` is unique per tenant. An AR invoice now posts a balanced revenue
+  // JV on create (B-216), so a duplicate (company_id, no) would double-recognize
+  // revenue. This hard guard backs the in-memory dup-`no` pre-check in
+  // createArInvoice (race-safe — a concurrent racer trips 23505 → 409).
+  uniqueIndex("ar_invoice_company_no_uq").on(t.companyId, t.no),
+]);
 
 /**
  * ARInvoiceLine — one billed line of an AR invoice (B-121 Q2, migration 0035).

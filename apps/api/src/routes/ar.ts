@@ -22,11 +22,15 @@
 // Money is SERVER authority (B-107a · Wei C-176): a client-supplied amount/vat is
 // IGNORED for every COMPUTED value. An AR invoice's amount is Σ(line.qty × price),
 // its VAT is the 7% Thai output tax through @juneflow/tax-engine.calcVat, and each
-// stored line's amount is qty × price. An RV's amount is validated against the
-// invoice's outstanding balance and REJECTED (never clamped) when it over-pays. A
-// credit note's VAT is EXTRACTED from its VAT-inclusive amount (amount × 7/107),
-// and the CN-approve reversal JV is balanced from that split (Dr revenue + Dr
-// VAT-output / Cr AR), never from a client figure.
+// stored line's amount is qty × price. On create the invoice recognizes revenue via
+// a balanced accrual JV — Dr AR (gross = amount + vat) / Cr revenue (net = amount) /
+// Cr VAT-output (vat) — to the 4010 revenue account uniformly (B-216 · Wei=ค: every
+// AR invoice posts this JV on create; source_doc `invoice:<id>`, atomic with the
+// header + lines). An RV's amount is validated against the invoice's outstanding
+// balance and REJECTED (never clamped) when it over-pays. A credit note's VAT is
+// EXTRACTED from its VAT-inclusive amount (amount × 7/107), and the CN-approve
+// reversal JV is the inverse split (Dr revenue + Dr VAT-output / Cr AR), never from
+// a client figure.
 //
 // Tenant scope (fail closed): ar_invoice, rv, ar_credit_note and jv all carry
 // company_id → the scoped TenantDb.select()/insert()/update() doors. ar_invoice_
@@ -396,6 +400,15 @@ async function createArInvoice(
   )) as CustomerRow[];
   if (!customer) return badRequest(reply, "customer not found in this tenant");
 
+  // B-217 (Wei=ค): `no` is unique per tenant. A duplicate POST would create a
+  // second invoice + a second balanced revenue JV = double revenue recognition
+  // (P&L overstatement). Reject a dup up front (scoped select → 409); the 0047
+  // ar_invoice(company_id, no) unique index + the tx 23505 catch below close the
+  // concurrent-race window this in-memory pre-check alone cannot (belt-and-
+  // suspenders — mirrors the approveCn / gl-post money-post pattern).
+  const dupNo = (await db.select(arInvoices, eq(arInvoices.no, no))) as ArInvoiceRow[];
+  if (dupNo.length > 0) return conflict(reply, `invoice ${no} already exists`);
+
   // SERVER money authority (B-107a · Wei C-176): compute from the lines; the
   // client's amount/vat are never read.
   const amount = sumLines(rawLines);
@@ -422,7 +435,28 @@ async function createArInvoice(
     };
   });
 
-  // B-097: header + lines are ONE post — a line failure rolls back the header.
+  // B-216 (Wei=ค · uniform 4010): every AR invoice recognizes revenue on create
+  // through a balanced JV — the inverse of the credit-note reversal. Resolve the
+  // posting accounts in THIS tenant's COA first; a missing code is an honest 409
+  // (never post an unbalanced / mis-accounted JV — gl-post.ts C-177). The revenue
+  // account is 4010 uniformly (symmetric with the CN reversal); a per-type split
+  // (e.g. 4040 for PPA electricity) is a deferred finance refinement.
+  const acctIds = await resolveAccountIds(db, [ACCT.ar, ACCT.revenue, ACCT.vatOutput]);
+  const arId = acctIds.get(ACCT.ar);
+  const revenueId = acctIds.get(ACCT.revenue);
+  const vatOutputId = acctIds.get(ACCT.vatOutput);
+  if (!arId || !revenueId || !vatOutputId) {
+    return conflict(
+      reply,
+      "the tenant chart of accounts is missing a required posting account (AR / revenue / VAT-output)",
+    );
+  }
+  const jvNo = await allocJvNo(db);
+
+  // B-097 + B-216: header + lines + the revenue JV are ONE db.transaction — a JV
+  // failure rolls back the invoice (no invoice without its accrual posting). The
+  // JV debits AR the gross and credits net revenue + output VAT:
+  //   Dr AR (amount + vat) / Cr revenue (amount = net) / Cr VAT-output (vat).
   const created = await db.transaction(async (tx) => {
     const [inv] = (await tx
       .insert(arInvoices, {
@@ -440,9 +474,33 @@ async function createArInvoice(
       .returning()) as ArInvoiceRow[];
     const lineRows = lineInputs.map((li) => ({ arInvoiceId: inv!.id, ...li }));
     await tx.insertThrough(arInvoiceLines, arInvoices, inv!.id, lineRows);
+
+    const jvId = randomUUID();
+    const jvLineRows: (typeof jvLines.$inferInsert)[] = [
+      { jvId, accountId: arId, dr: moneyStr(amount + vat), cr: moneyStr(0), currencyCode: "THB" },
+      { jvId, accountId: revenueId, dr: moneyStr(0), cr: moneyStr(amount), currencyCode: "THB" },
+      { jvId, accountId: vatOutputId, dr: moneyStr(0), cr: moneyStr(vat), currencyCode: "THB" },
+    ];
+    await tx
+      .insert(jvs, {
+        id: jvId,
+        no: jvNo,
+        sourceDoc: `invoice:${inv!.id}`,
+        memo: `ar-invoice ${no}`,
+      })
+      .returning();
+    await tx.insertThrough(jvLines, jvs, jvId, jvLineRows);
     return inv!;
+  }).catch((err: unknown) => {
+    // B-217: a concurrent create raced past the in-memory pre-check with the same
+    // (company_id, no) — the 0047 ar_invoice(company_id, no) UNIQUE index tripped
+    // 23505 and the whole tx rolled back (no partial invoice + no orphan JV). Map
+    // to the same 409 as the pre-check (never a 500, never a double revenue JV).
+    if (isUniqueViolation(err)) return null;
+    throw err;
   });
 
+  if (created === null) return conflict(reply, `invoice ${no} already exists`);
   return reply.code(201).send(invoiceWire(created));
 }
 
