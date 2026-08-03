@@ -29,6 +29,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  # sha256 for the asset-drift gate (test/i18n/i18n_asset_drift_test.dart) — proves
+  # assets/i18n/i18n-full.json still matches the sacred docs/extract/ source.
+  crypto: ^3.0.3
   # API-client codegen (P0-MOB-03) — see tool/gen_api_client.sh.
   retrofit_generator: ^10.2.7
   json_serializable: ^6.14.0
@@ -39,3 +42,13 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    # Verbatim copy of the SACRED docs/extract/i18n-full.json, produced by
+    # tool/gen_i18n_asset.sh (MOB-I18N-01). Never hand-edit; never translate a
+    # word here — a missing string goes to BLOCKERS.md (PLAN.md §0 rule 2).
+    - assets/i18n/
+    # Per-screen key sidecars. The nav_i18n/phrases layers use the Thai text as
+    # the key, and .claude/hooks/i18n-guard.sh blocks Thai in lib/**.dart, so the
+    # keys live in JSON here — same pattern as apps/web *-strings.json.
+    - assets/i18n/screens/
