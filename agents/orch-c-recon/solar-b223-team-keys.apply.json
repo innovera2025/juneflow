@@ -1,0 +1,8 @@
+{
+  "override": "wei-approved:B-223",
+  "dict": {
+    "solar.monitor.omTeamOmA": "ทีม O&M A",
+    "solar.monitor.omTeamOmB": "ทีม O&M B",
+    "solar.monitor.omTeamCleaning": "ทีม Cleaning"
+  }
+}

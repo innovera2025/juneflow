@@ -424,6 +424,10 @@ export const solarOmTickets = pgTable("solar_om_ticket", {
   assigneeUserId: uuid("assignee_user_id").references(() => users.id, {
     onDelete: "set null",
   }),
+  // B-223 (Wei=add-team): the responsible O&M team (real-forms2.jsx RF2OMForm team
+  // dropdown · the solar.jsx list "who" column). Free text like priority/status —
+  // there is no teams entity; assignee_user_id above stays the individual technician.
+  team: text("team"),
   status: text("status"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()

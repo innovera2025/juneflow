@@ -685,6 +685,24 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "settings",
+      "route": "settings",
+      "ref": "app-baseline/settings.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "dms",
+      "route": "dms",
+      "ref": "app-baseline/dms.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }

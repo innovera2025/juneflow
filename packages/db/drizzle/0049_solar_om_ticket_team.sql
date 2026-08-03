@@ -1,0 +1,1 @@
+ALTER TABLE "solar_om_ticket" ADD COLUMN "team" text;
