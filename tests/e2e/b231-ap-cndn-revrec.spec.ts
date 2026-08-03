@@ -57,11 +57,13 @@ liveDescribe("B-230/231 revrec + ap.cn/dn JV + idempotency (live, money=SERVER)"
     const vendor = await aVendor();
     test.skip(vendor == null, "no vendor");
     const created = await owner.post("/api/v1/ap/cn", { data: { vendor_id: vendor, amount: "1000.00", reason: "e2e-b231 CN" } });
+    if (created.status() !== 201) console.error("DIAG CN create →", created.status(), await created.text());
     expect(created.status(), "create AP credit note").toBe(201);
     const id = String((await created.json()).id);
     const before = await jvCount(`apcn:${id}`);
 
     const ap1 = await owner.post(`/api/v1/ap/cn/${id}/approve`);
+    if (ap1.status() !== 200) console.error("DIAG CN 1st approve →", ap1.status(), await ap1.text());
     expect(ap1.status(), "first approve posts the JV").toBe(200);
     const after1 = await jvCount(`apcn:${id}`);
     expect(after1, "exactly one CN JV posted (Dr2010/Cr5020)").toBe(before + 1);
