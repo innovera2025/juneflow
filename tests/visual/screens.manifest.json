@@ -694,6 +694,16 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "admin-overview",
+      "route": "admin.overview",
+      "ref": "app-baseline/admin-overview.png",
+      "viewMode": "platform",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
