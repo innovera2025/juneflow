@@ -110,6 +110,7 @@ import { SubMine } from "./screens/subscription/sub-mine";
 import { LineOAPreview } from "./screens/line/line-oa";
 import { ReportsHub } from "./screens/reports/reports";
 import { AuditLog } from "./screens/audit/audit";
+import { SettingsCompany } from "./screens/settings/settings";
 import { ShellProvider } from "./shell/shell-context";
 import { AppShell } from "./shell/app-shell";
 import { Placeholder } from "./shell/page";
@@ -206,6 +207,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   line: LineOAPreview,
   reports: ReportsHub,
   audit: AuditLog,
+  settings: SettingsCompany,
 };
 
 const rootRoute = createRootRoute({
