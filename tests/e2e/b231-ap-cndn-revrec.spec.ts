@@ -52,11 +52,17 @@ liveDescribe("B-230/231 revrec + ap.cn/dn JV + idempotency (live, money=SERVER)"
   async function aVendor(): Promise<string | null> {
     const v = await get("vendors"); return v[0] ? String(v[0].id) : null;
   }
+  /** a credit/debit note must reference an existing AP billing (ref_ap_id required, tenant-scoped). */
+  async function anApBilling(): Promise<{ id: string; vendorId: string | null } | null> {
+    const b = await get("ap/billing");
+    return b[0] ? { id: String(b[0].id), vendorId: b[0].vendor_id != null ? String(b[0].vendor_id) : null } : null;
+  }
 
   test("ap.cn: create+approve → 200 balanced JV · 2nd approve → 409, NO 2nd JV (0053 idempotency)", async () => {
-    const vendor = await aVendor();
-    test.skip(vendor == null, "no vendor");
-    const created = await owner.post("/api/v1/ap/cn", { data: { vendor_id: vendor, amount: "1000.00", reason: "e2e-b231 CN" } });
+    const bill = await anApBilling();
+    const vendor = bill?.vendorId ?? (await aVendor());
+    test.skip(bill == null || vendor == null, "no ap_billing / vendor");
+    const created = await owner.post("/api/v1/ap/cn", { data: { vendor_id: vendor, ref_ap_id: bill!.id, amount: "1000.00", reason: "e2e-b231 CN" } });
     if (created.status() !== 201) console.error("DIAG CN create →", created.status(), await created.text());
     expect(created.status(), "create AP credit note").toBe(201);
     const id = String((await created.json()).id);
@@ -74,9 +80,11 @@ liveDescribe("B-230/231 revrec + ap.cn/dn JV + idempotency (live, money=SERVER)"
   });
 
   test("ap.dn: create+approve → 200 (Dr5100/Cr2010) · 2nd → 409", async () => {
-    const vendor = await aVendor();
-    test.skip(vendor == null, "no vendor");
-    const created = await owner.post("/api/v1/ap/dn", { data: { vendor_id: vendor, amount: "500.00", reason: "e2e-b231 DN" } });
+    const bill = await anApBilling();
+    const vendor = bill?.vendorId ?? (await aVendor());
+    test.skip(bill == null || vendor == null, "no ap_billing / vendor");
+    const created = await owner.post("/api/v1/ap/dn", { data: { vendor_id: vendor, ref_ap_id: bill!.id, amount: "500.00", reason: "e2e-b231 DN" } });
+    if (created.status() !== 201) console.error("DIAG DN create →", created.status(), await created.text());
     expect(created.status()).toBe(201);
     const id = String((await created.json()).id);
     expect((await owner.post(`/api/v1/ap/dn/${id}/approve`)).status(), "DN approve posts JV").toBe(200);
