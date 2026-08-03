@@ -103,6 +103,7 @@ import { SolarPermit } from "./screens/solar/solar-permit";
 import { SolarWarranty } from "./screens/solar/solar-warranty";
 import { SubPlans } from "./screens/subscription/sub-plans";
 import { SubBilling } from "./screens/subscription/sub-billing";
+import { AdminOverview } from "./screens/admin/admin-overview";
 import { AdminSubscribers } from "./screens/admin/admin-subs";
 import { AdminPlans } from "./screens/admin/admin-plans";
 import { AdminInvoices } from "./screens/admin/admin-invoices";
@@ -201,6 +202,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "solar.warranty": SolarWarranty,
   "sub.plans": SubPlans,
   "sub.billing": SubBilling,
+  "admin.overview": AdminOverview,
   "admin.subs": AdminSubscribers,
   "admin.plans": AdminPlans,
   "admin.invoices": AdminInvoices,

@@ -33,6 +33,7 @@ import type { components } from "@juneflow/contracts";
 import { apiClient } from "../../api-client";
 import { unwrap } from "../../query-client";
 import { getAuthToken } from "../../auth-token";
+import { num } from "./admin-rows";
 
 type Entity = components["schemas"]["Entity"];
 /** Opaque list-row shape (the contract types these rows as Entity). */
@@ -40,6 +41,7 @@ type Row = Record<string, unknown>;
 
 const ADMIN_PACKAGES_KEY = ["admin-packages"] as const;
 const ADMIN_SUBSCRIBERS_KEY = ["admin-subscribers"] as const;
+const ADMIN_SUBSCRIBERS_TOTALS_KEY = ["admin-subscribers-totals"] as const;
 const ADMIN_USERS_KEY = ["admin-users"] as const;
 const ADMIN_INVOICES_KEY = ["admin-invoices"] as const;
 
@@ -63,6 +65,26 @@ export function useAdminSubscribers() {
   return useQuery<Row[]>({
     queryKey: ADMIN_SUBSCRIBERS_KEY,
     queryFn: async () => (await unwrap(apiClient.GET("/admin/subscribers"))).data ?? [],
+    enabled: authed(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * GET /admin/subscribers — the SERVER-computed revenue totals off the SAME envelope. The
+ * admin.ts handler (computeMrrArr) attaches `mrr`/`arr` as siblings of `data`; useAdminSubscribers
+ * drops them (its `.data` narrowing), so admin.overview reads the raw envelope here. money =
+ * SERVER: the KPIs DISPLAY these authoritative totals — they are NOT re-derived client-side (the
+ * client deriveMrr is deprecated for the KPI, per admin.ts). The typed 200 is the opaque
+ * EntityList, so mrr/arr are runtime siblings read defensively through num() (0 when absent).
+ */
+export function useAdminOverviewTotals() {
+  return useQuery<{ mrr: number; arr: number }>({
+    queryKey: ADMIN_SUBSCRIBERS_TOTALS_KEY,
+    queryFn: async () => {
+      const env = (await unwrap(apiClient.GET("/admin/subscribers"))) as unknown as Record<string, unknown>;
+      return { mrr: num(env.mrr), arr: num(env.arr) };
+    },
     enabled: authed(),
     staleTime: 5 * 60_000,
   });
