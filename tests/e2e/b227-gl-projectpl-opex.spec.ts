@@ -55,7 +55,9 @@ liveDescribe("B-227 gl.projectpl P&L + opex/budgets (live seeded stack, money=SE
   test("GET /gl/reports/project-pl → 200 and the P&L roll-up identities hold on every project row", async () => {
     const res = await owner.get("/api/v1/gl/reports/project-pl");
     expect(res.status(), "owner may read the per-project P&L").toBe(200);
-    const rows = rowsOf((await res.json()) as Record<string, unknown>);
+    const body = (await res.json()) as Record<string, unknown>;
+    // the P&L envelope is { projects: [...], totals: {...} } (NOT the generic {data:[]}).
+    const rows = (Array.isArray(body.projects) ? body.projects : rowsOf(body)) as Array<Record<string, unknown>>;
     expect(rows.length, "at least one project P&L row (incl unallocated)").toBeGreaterThan(0);
 
     let checkedIdentity = 0;
@@ -65,7 +67,6 @@ liveDescribe("B-227 gl.projectpl P&L + opex/budgets (live seeded stack, money=SE
       const sga = pick(r, "sga");
       const interest = pick(r, "interest");
       const gp = pick(r, "gross_profit", "grossProfit", "gp");
-      const ebit = pick(r, "ebit");
       const preTax = pick(r, "pre_tax", "preTax");
       const tax = pick(r, "tax");
       const net = pick(r, "net_income", "netIncome", "net");
@@ -75,11 +76,10 @@ liveDescribe("B-227 gl.projectpl P&L + opex/budgets (live seeded stack, money=SE
         expect(near(gp, revenue - cogs), `gross_profit == revenue − cogs (${gp} vs ${revenue}-${cogs})`).toBe(true);
         checkedIdentity++;
       }
-      if (Number.isFinite(ebit) && Number.isFinite(gp) && Number.isFinite(sga)) {
-        expect(near(ebit, gp - sga), `ebit == gp − sga`).toBe(true);
-      }
-      if (Number.isFinite(preTax) && Number.isFinite(ebit) && Number.isFinite(interest)) {
-        expect(near(preTax, ebit - interest), `pre_tax == ebit − interest`).toBe(true);
+      // ebit is computed server-side but NOT exposed on the wire; verify pre_tax from the
+      // exposed gp/sga/interest (pre_tax = gp − sga − interest).
+      if (Number.isFinite(preTax) && Number.isFinite(gp) && Number.isFinite(sga) && Number.isFinite(interest)) {
+        expect(near(preTax, gp - sga - interest), `pre_tax == gp − sga − interest`).toBe(true);
       }
       if (Number.isFinite(tax) && Number.isFinite(preTax)) {
         const expectTax = preTax > 0 ? round2(preTax * 0.2) : 0;
