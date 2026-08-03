@@ -481,7 +481,7 @@ export const jvs = pgTable("jv", {
   // "Manual" rows). Manual JVs with a null/free-text source_doc are unconstrained.
   uniqueIndex("jv_source_doc_uq")
     .on(t.sourceDoc)
-    .where(sql`${t.sourceDoc} ~ '^(pv|rv|gr|payroll|fa|cn|ret|dep|booking|down|transfer|deal):'`),
+    .where(sql`${t.sourceDoc} ~ '^(pv|rv|gr|payroll|fa|cn|apcn|apdn|ret|dep|booking|down|transfer|deal|petty):'`),
 ]);
 
 /**

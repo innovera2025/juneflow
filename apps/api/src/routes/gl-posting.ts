@@ -20,15 +20,17 @@
 // number, the GL posting flow / seed must populate source_doc = "pv:<uuid>"
 // etc. — the mechanism exists; only the linking data is absent.
 //
-// Source-doc universe = the four tables the posting inbox draws from that have
-// a real backing table (pv, rv, gr, payroll). The prototype's other sources
-// (FA depreciation, Allocate) have no per-document table in the schema/seed and
-// are therefore not enumerable — omitted rather than fabricated.
+// Source-doc universe = the five tables the posting inbox draws from that have
+// a real backing table (pv, rv, gr, payroll, petty — B-233 claim-MVP). The
+// prototype's other sources (FA depreciation, Allocate) have no per-document
+// table in the schema/seed and are therefore not enumerable — omitted rather
+// than fabricated.
 import { eq } from "drizzle-orm";
 import {
   grs,
   jvs,
   payrolls,
+  pettyCashTxns,
   pos,
   pvs,
   rvs,
@@ -49,15 +51,17 @@ import type { TenantDb } from "../db/tenant-db.js";
 // (P2-BE-52): a depreciation post's source_doc is `fa:<assetId>:<period>` so it is
 // unique per (asset, period) under the jv.source_doc UNIQUE index, while the other
 // kinds stay `<kind>:<uuid>` (one post per document).
-export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn|ret|dep):([0-9a-fA-F-]{36})(:\d{4}-\d{2}|:\d+)?$/;
+export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn|ret|dep|petty):([0-9a-fA-F-]{36})(:\d{4}-\d{2}|:\d+)?$/;
 
 /**
  * Every source-doc kind the shared source_doc convention can reference. The
- * posting INBOX enumerates only the four that have a real backing table here
- * (pv/rv/gr/payroll); fa/cn are valid refs written by their own direct-posting
- * handlers and are never surfaced as inbox rows.
+ * posting INBOX enumerates the FIVE that have a real backing table here
+ * (pv/rv/gr/payroll/petty); fa/cn are valid refs written by their own
+ * direct-posting handlers and are never surfaced as inbox rows. petty (B-233) is
+ * a real inbox row: a pending petty-cash CLAIM surfaces here and posts through
+ * the shared /gl/post path (Dr 5100 / Cr 1010, Wei C-177).
  */
-export type GlSourceKind = "pv" | "rv" | "gr" | "payroll" | "fa" | "cn";
+export type GlSourceKind = "pv" | "rv" | "gr" | "payroll" | "fa" | "cn" | "petty";
 
 /**
  * One posting-inbox row: a source money doc + its resolved posting state. The
@@ -95,7 +99,7 @@ function money(value: unknown): number | null {
  * countGlInbox scope, so the count and the list read the same set).
  */
 export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
-  const [pvRows, rvRows, payrollRows, grRows, jvRows] = await Promise.all([
+  const [pvRows, rvRows, payrollRows, grRows, pettyRows, jvRows] = await Promise.all([
     db.select(pvs),
     db.select(rvs),
     db.select(payrolls),
@@ -107,6 +111,12 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
       { fk: grs.poId, parent: pos },
       { fk: pos.vendorId, parent: vendors },
     ]),
+    // petty (B-233): only CLAIM rows enter the posting inbox (a claim-MVP —
+    // clear/topup are out of scope). petty_cash_txn carries company_id → the
+    // scoped select() door. Posted-ness derives from the jv source_doc
+    // "petty:<id>" ref exactly like pv/rv/gr (NOT from petty.status), so the inbox
+    // and the badge can never drift.
+    db.select(pettyCashTxns, eq(pettyCashTxns.type, "claim")),
     db.select(jvs),
   ]);
 
@@ -176,6 +186,20 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
       id: r.id,
       doc_no: null, // GAP: payroll keys on (worker, period) — no doc-number column.
       amount: money(r.amount),
+      currency_code: r.currencyCode ?? null,
+      posted,
+      jv_no: jvNo,
+      created_at: r.createdAt ?? null,
+    });
+  }
+
+  for (const r of pettyRows) {
+    const { posted, jvNo } = resolvePosting("petty", r.id);
+    docs.push({
+      source: "petty",
+      id: r.id,
+      doc_no: r.no ?? null, // petty.no is a real server-generated PT-YYYY-NNNN.
+      amount: money(r.value), // the claim magnitude (stored > 0) — the JV basis.
       currency_code: r.currencyCode ?? null,
       posted,
       jv_no: jvNo,

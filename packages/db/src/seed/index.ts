@@ -378,6 +378,11 @@ const DOCNUM_SEED = [
 const COA_SEED = [
   { code: "1010", name: "เงินสดในมือ" }, { code: "1020", name: "เงินฝากธนาคาร - กระแสรายวัน (KBANK)" },
   { code: "1030", name: "ลูกหนี้การค้า" }, { code: "1040", name: "ลูกหนี้เงินประกันผลงาน (Retention)" },
+  // B-230 (Wei=ก): the "สินทรัพย์ตามสัญญา (Unbilled AR)" contract-asset a revenue-
+  // recognition post debits — Dr 1130 / Cr 4020 construction-revenue. A current
+  // asset (recognized-but-not-yet-billed revenue), classified 'asset' by the
+  // code-prefix account_type derivation.
+  { code: "1130", name: "สินทรัพย์ตามสัญญา (Unbilled AR)" },
   { code: "1140", name: "งานระหว่างก่อสร้าง (WIP/CIP)" }, { code: "1150", name: "ที่ดินรอการพัฒนา" },
   // P2-BE-54 (B-137 · Wei ratify): the "มัดจำจ่าย" advance-to-supplier ASSET the
   // ap.jsx APDeposit posting ("Dr มัดจำจ่าย / Cr เงินสด") requires — absent from the

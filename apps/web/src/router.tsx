@@ -38,8 +38,10 @@ import { BOQReports } from "./screens/boq/boq-reports";
 import { AIQuantityTakeoff } from "./screens/boq/aiqto";
 import { GRList } from "./screens/gr/gr-list";
 import { PRList } from "./screens/pr/pr-list";
+import { PRForm } from "./screens/pr/pr-form";
 import { POList } from "./screens/po-wo/po-list";
 import { WOList } from "./screens/po-wo/wo-list";
+import { SubconProgress } from "./screens/subcon/subcon-progress";
 import { SubconContracts } from "./screens/subcon/subcon-contracts";
 import { SubconAccept } from "./screens/subcon/subcon-accept";
 import { AcceptanceCenter } from "./screens/accept/accept";
@@ -96,6 +98,7 @@ import { LandSurvey } from "./screens/land/land-survey";
 import { LandDueDiligence } from "./screens/land/land-dd";
 import { LaborWorkers } from "./screens/labor/labor-workers";
 import { LaborAttendance } from "./screens/labor/labor-attendance";
+import { LaborPayroll } from "./screens/labor/labor-payroll";
 import { SolarMonitoring } from "./screens/solar/solar-monitor";
 import { SolarPPA } from "./screens/solar/solar-ppa";
 import { SolarROI } from "./screens/solar/solar-roi";
@@ -103,6 +106,7 @@ import { SolarPermit } from "./screens/solar/solar-permit";
 import { SolarWarranty } from "./screens/solar/solar-warranty";
 import { SubPlans } from "./screens/subscription/sub-plans";
 import { SubBilling } from "./screens/subscription/sub-billing";
+import { AdminOverview } from "./screens/admin/admin-overview";
 import { AdminSubscribers } from "./screens/admin/admin-subs";
 import { AdminPlans } from "./screens/admin/admin-plans";
 import { AdminInvoices } from "./screens/admin/admin-invoices";
@@ -130,6 +134,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "land.dd": LandDueDiligence,
   "labor.workers": LaborWorkers,
   "labor.attendance": LaborAttendance,
+  "labor.payroll": LaborPayroll,
   "boq.overview": BOQOverview,
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
@@ -140,8 +145,10 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "boq.aiqto": AIQuantityTakeoff,
   "gr.list": GRList,
   "pr.list": PRList,
+  "pr.form": PRForm,
   "po.list": POList,
   "wo.list": WOList,
+  "subcon.progress": SubconProgress,
   "subcon.contracts": SubconContracts,
   "subcon.accept": SubconAccept,
   accept: AcceptanceCenter,
@@ -201,6 +208,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "solar.warranty": SolarWarranty,
   "sub.plans": SubPlans,
   "sub.billing": SubBilling,
+  "admin.overview": AdminOverview,
   "admin.subs": AdminSubscribers,
   "admin.plans": AdminPlans,
   "admin.invoices": AdminInvoices,

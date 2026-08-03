@@ -50,7 +50,7 @@ import {
 } from "./project.js";
 import { prs, wos } from "./boq.js";
 import { subconContracts } from "./subcon.js";
-import { arInvoices } from "./finance.js";
+import { apBillings, arInvoices, jvs } from "./finance.js";
 
 // ---------------------------------------------------------------------------
 // Enums (only where the mock enumerates a crisp, closed value set)
@@ -613,7 +613,9 @@ export const milestones = pgTable("milestone", {
  * PettyCashTxn — a petty-cash movement (petty-alloc.jsx `PETTY_TX`: no,
  * type(claim/clear/topup), l(label), v(value), by, date, status, cat, ref).
  * value is money -> currency_code; cc_id ties the spend to a cost center; ref is
- * the source-document reference string.
+ * the source-document reference string. project_id ties a claim to a project
+ * (petty-alloc.jsx PettyClaimForm "ใช้กับโครงการ" dropdown — B-233); the table
+ * only had cc_id, so the claim's project selection is stored here.
  */
 export const pettyCashTxns = pgTable("petty_cash_txn", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -633,6 +635,9 @@ export const pettyCashTxns = pgTable("petty_cash_txn", {
   cat: text("cat"),
   ref: text("ref"),
   ccId: uuid("cc_id").references(() => costCenters.id, { onDelete: "set null" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -819,6 +824,68 @@ export const wips = pgTable("wip", {
 }, (t) => [index("wip_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
+// B-230 — RevRec / WIP posting ledgers (idempotency-safe money event log)
+// ---------------------------------------------------------------------------
+// Each row is ONE recognition / transfer EVENT — NOT a per-doc idempotency key.
+// This is deliberate: a rev_rec row is recognized in multiple periods (pct 20%
+// → 40% → …), and a WIP balance is transferred to COGS in several tranches, so a
+// per-doc unique key would falsely dedupe a legitimate later post. The double-
+// post guard is instead the atomic compare-and-swap on the parent's money column
+// (rev_rec.recognized / wip.transferred) inside the posting transaction; this
+// ledger records every real event (audit trail + a stable source_doc anchor for
+// the JV via the event id). money → currency_code (PLAN.md §4).
+
+/**
+ * RevRecTxn — one revenue-recognition posting event (B-230). Every POST
+ * /gl/revrec/{id}/post that recognizes an incremental amount appends one row.
+ * `amount` = the incremental amount recognized this event; `jv_id` → the
+ * balanced JV posted for it (Dr 1130 contract-asset / Cr 4020 construction-
+ * revenue). rev_rec_id cascades (a deleted rev_rec drops its event log); jv_id
+ * is set null if the JV row is ever removed (the event history survives).
+ */
+export const revRecTxns = pgTable("rev_rec_txn", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  revRecId: uuid("rev_rec_id").references(() => revRecs.id, {
+    onDelete: "cascade",
+  }),
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull(),
+  jvId: uuid("jv_id").references(() => jvs.id, { onDelete: "set null" }),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [index("rev_rec_txn_company_idx").on(t.companyId)]);
+
+/**
+ * WipTransferTxn — one WIP → COGS transfer event (B-230). Every POST
+ * /gl/wip/{id}/transfer appends one row. `amount` = the amount moved out of WIP
+ * this event; `jv_id` → the balanced JV posted for it (Dr 5010 COGS / Cr 1140
+ * WIP). wip_id cascades; jv_id is set null if the JV is removed.
+ */
+export const wipTransferTxns = pgTable("wip_transfer_txn", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  wipId: uuid("wip_id").references(() => wips.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull(),
+  jvId: uuid("jv_id").references(() => jvs.id, { onDelete: "set null" }),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [index("wip_transfer_txn_company_idx").on(t.companyId)]);
+
+// ---------------------------------------------------------------------------
 // Item 11 — AR CreditNote — accounting-extra2.jsx `ARCN_SEED`
 // ---------------------------------------------------------------------------
 
@@ -852,6 +919,80 @@ export const arCreditNotes = pgTable("ar_credit_note", {
     .notNull()
     .defaultNow(),
 }, (t) => [index("ar_credit_note_company_idx").on(t.companyId)]);
+
+// ---------------------------------------------------------------------------
+// B-231 — AP CreditNote / DebitNote (ap.jsx AP credit + debit notes · Wei=ก Model-A)
+// ---------------------------------------------------------------------------
+// The payables-side mirror of ar_credit_note (item 11 above). An AP credit note
+// REDUCES a payable we owe a vendor (approve posts Dr 2010 AP / Cr 5020 materials);
+// an AP debit note INCREASES it (Dr 5100 admin-expense / Cr 2010 AP) — Model-A
+// 2-line NO-VAT posting on the EXISTING chart of accounts (Wei B-231=ก; no new COA
+// account). vendor_id -> vendor, ref_ap_id -> ap_billing (the referenced billing);
+// amount is money -> currency_code. Both notes share one shape; the GL direction is
+// the only difference and lives in the approve handler, not the schema. `no` is a
+// SERVER-generated running number (CN-/DN-<year>-<NNNN>, §0 rule-3) — a display
+// number like jv.no, NOT an idempotency key, so no unique constraint (the approve
+// idempotency key is the reversal JV's source_doc `apcn:`/`apdn:`, migration 0037).
+
+/**
+ * ApCreditNote — a credit note against an AP billing (ap.jsx AP credit note).
+ * Mirrors ar_credit_note on the payables side: vendor_id -> vendor, ref_ap_id ->
+ * ap_billing (the credited billing); amount is money -> currency_code.
+ */
+export const apCreditNotes = pgTable("ap_credit_note", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  no: text("no").notNull(),
+  vendorId: uuid("vendor_id").references(() => vendors.id, {
+    onDelete: "set null",
+  }),
+  refApId: uuid("ref_ap_id").references(() => apBillings.id, {
+    onDelete: "set null",
+  }),
+  reason: text("reason"),
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull(),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  status: text("status"),
+  noteDate: date("note_date"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [index("ap_credit_note_company_idx").on(t.companyId)]);
+
+/**
+ * ApDebitNote — a debit note against an AP billing (ap.jsx AP debit note).
+ * Identical shape to ap_credit_note; the approve GL direction is the inverse (Dr
+ * admin-expense / Cr AP). vendor_id -> vendor, ref_ap_id -> ap_billing.
+ */
+export const apDebitNotes = pgTable("ap_debit_note", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  no: text("no").notNull(),
+  vendorId: uuid("vendor_id").references(() => vendors.id, {
+    onDelete: "set null",
+  }),
+  refApId: uuid("ref_ap_id").references(() => apBillings.id, {
+    onDelete: "set null",
+  }),
+  reason: text("reason"),
+  amount: numeric("amount", { precision: 16, scale: 2 }).notNull(),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  status: text("status"),
+  noteDate: date("note_date"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+}, (t) => [index("ap_debit_note_company_idx").on(t.companyId)]);
 
 // ---------------------------------------------------------------------------
 // Item 12 — BidComparison — real-forms2.jsx `rows` (vendor bid compare)

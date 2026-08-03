@@ -17,6 +17,7 @@ import {
   jvLines,
   jvs,
   payrolls,
+  projects,
   pvs,
   roles,
   rvs,
@@ -665,6 +666,97 @@ describe("GET /api/v1/gl/posting-inbox", () => {
     const pvRead = captured.find((c) => c.table === pvs);
     expect(pvRead).toBeTruthy();
     expect(paramsOf(pvRead!.where)).toContain(COMPANY);
+  });
+});
+
+// ===========================================================================
+// GET /gl/reports/project-pl — P&L per project (B-227 F-GL1)
+// ===========================================================================
+describe("GET /api/v1/gl/reports/project-pl", () => {
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/gl/reports/project-pl" });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+  });
+
+  it("computes a per-project P&L from real jv_line (revenue/cogs/sga/interest → gp/tax/net) + resolves the project name", async () => {
+    const PROJ = "proj-a";
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [
+              glAccounts,
+              [
+                glAcc("acc-rev", "4010", "รายได้จากการขายอสังหาริมทรัพย์", null), // → revenue
+                glAcc("acc-cogs", "5020", "ต้นทุนวัสดุก่อสร้าง", null), // → cogs (50xx)
+                glAcc("acc-sga", "5100", "ค่าใช้จ่ายในการบริหาร", null), // → sga (other expense)
+                glAcc("acc-int", "5200", "ดอกเบี้ยจ่าย", null), // → interest (52xx)
+                glAcc("acc-ar", "1030", "ลูกหนี้การค้า", null), // asset → NOT part of a P&L
+              ],
+            ],
+            [
+              jvLines,
+              [
+                { ...jvLine("jvR", "acc-rev", 0, 1_000_000), projectId: PROJ }, // revenue 1,000,000 (credit-normal)
+                { ...jvLine("jvR", "acc-ar", 1_000_000, 0), projectId: PROJ }, // AR (asset) — must NOT leak into the P&L
+                { ...jvLine("jvC", "acc-cogs", 600_000, 0), projectId: PROJ }, // cogs 600,000
+                { ...jvLine("jvS", "acc-sga", 100_000, 0), projectId: PROJ }, // sga 100,000
+                { ...jvLine("jvI", "acc-int", 50_000, 0), projectId: PROJ }, // interest 50,000
+              ],
+            ],
+            [projects, [{ id: PROJ, companyId: COMPANY, name: "โครงการ A", createdAt: D, updatedAt: D }]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/reports/project-pl" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.projects).toHaveLength(1);
+    const p = body.projects[0];
+    expect(p.project_id).toBe(PROJ);
+    expect(p.project_name).toBe("โครงการ A"); // FK resolved to the name, never the uuid
+    expect(p.revenue).toBe(1_000_000); // the AR (asset) line did NOT leak in
+    expect(p.cogs).toBe(600_000);
+    expect(p.gross_profit).toBe(400_000); // 1,000,000 − 600,000
+    expect(p.sga).toBe(100_000);
+    expect(p.interest).toBe(50_000);
+    expect(p.pre_tax).toBe(250_000); // 400,000 − 100,000 − 50,000
+    expect(p.tax).toBe(50_000); // 20% of 250,000
+    expect(p.net_income).toBe(200_000); // 250,000 − 50,000
+    expect(p.gross_margin).toBe(40);
+    expect(p.net_margin).toBe(20);
+    expect(body.totals.revenue).toBe(1_000_000);
+    expect(body.totals.net_income).toBe(200_000);
+    expect(body.totals.project_count).toBe(1);
+    expect(body.totals.losing_count).toBe(0);
+    expect(body.currency_code).toBe("THB");
+  });
+
+  it("honest-null margins when a project has 0 revenue (never a divide-by-zero)", async () => {
+    const PROJ = "proj-b";
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [glAccounts, [glAcc("acc-c2", "5020", "ต้นทุน", null)]],
+            [jvLines, [{ ...jvLine("jvC2", "acc-c2", 300_000, 0), projectId: PROJ }]],
+            [projects, [{ id: PROJ, companyId: COMPANY, name: "โครงการ B", createdAt: D, updatedAt: D }]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/reports/project-pl" });
+    expect(res.statusCode).toBe(200);
+    const p = res.json().projects[0];
+    expect(p.revenue).toBe(0);
+    expect(p.cogs).toBe(300_000);
+    expect(p.net_income).toBe(-300_000); // a real loss (300k cost, no revenue)
+    expect(p.gross_margin).toBeNull(); // honest-null, not NaN/Infinity
+    expect(p.net_margin).toBeNull();
+    expect(res.json().totals.losing_count).toBe(1);
   });
 });
 

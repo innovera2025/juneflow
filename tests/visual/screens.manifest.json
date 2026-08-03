@@ -694,6 +694,34 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "admin-overview",
+      "route": "admin.overview",
+      "ref": "app-baseline/admin-overview.png",
+      "viewMode": "platform",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "labor-payroll",
+      "route": "labor.payroll",
+      "ref": "app-baseline/labor-payroll.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "subcon-progress",
+      "route": "subcon.progress",
+      "ref": "app-baseline/subcon-progress.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }

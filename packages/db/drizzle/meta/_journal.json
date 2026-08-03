@@ -358,6 +358,41 @@
       "when": 1785732508598,
       "tag": "0050_dms_documents_cols",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1785760869684,
+      "tag": "0051_gl_revrec_txn_ledgers",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1785762486025,
+      "tag": "0052_ap_cn_dn",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1785763476667,
+      "tag": "0053_jv_source_doc_apcn_apdn",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1785764621679,
+      "tag": "0054_petty_cash_project_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1785764648663,
+      "tag": "0055_jv_source_doc_petty",
+      "breakpoints": true
     }
   ]
 }

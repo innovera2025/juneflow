@@ -62,11 +62,14 @@ import { registerAuditLogRoute } from "./routes/audit-log.js";
 import { registerBoqReportsRoute } from "./routes/boq-reports.js";
 import { registerAnalyticsRoute } from "./routes/analytics.js";
 import { registerGlRoute } from "./routes/gl.js";
+import { registerRevRecRoute } from "./routes/revrec.js";
+import { registerOpexRoute } from "./routes/opex.js";
 import { registerArRoute } from "./routes/ar.js";
 import { registerCustomersRoute } from "./routes/customers.js";
 import { registerEtaxRoute } from "./routes/etax.js";
 import { registerFaRoute } from "./routes/fa.js";
 import { registerApRoute } from "./routes/ap.js";
+import { registerApCnDnRoute } from "./routes/ap-cndn.js";
 import { registerBankRoute } from "./routes/bank.js";
 import { registerTaxRoute } from "./routes/tax.js";
 import { registerRetentionRoute } from "./routes/retention.js";
@@ -76,6 +79,7 @@ import { registerInventoryRoute } from "./routes/inventory.js";
 import { registerLandSalesRoute } from "./routes/land-sales.js";
 import { registerSalesServiceRoute } from "./routes/sales-service.js";
 import { registerSolarRoute } from "./routes/solar.js";
+import { registerPettyRoute } from "./routes/petty.js";
 import type { SignIn } from "./auth.js";
 
 export interface AppDeps {
@@ -219,11 +223,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerBoqReportsRoute(v1);
       registerAnalyticsRoute(v1);
       registerGlRoute(v1);
+      registerRevRecRoute(v1);
+      registerOpexRoute(v1);
       registerArRoute(v1);
       registerCustomersRoute(v1);
       registerEtaxRoute(v1);
       registerFaRoute(v1);
       registerApRoute(v1);
+      registerApCnDnRoute(v1);
       registerBankRoute(v1);
       registerTaxRoute(v1);
       registerRetentionRoute(v1);
@@ -233,6 +240,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerLandSalesRoute(v1);
       registerSalesServiceRoute(v1);
       registerSolarRoute(v1);
+      registerPettyRoute(v1);
       await registerFilesRoute(v1, {
         storage: deps.storage,
         quota: deps.quota,

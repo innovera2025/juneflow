@@ -1563,6 +1563,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/petty": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List petty-cash transactions (filters type/status/period) */
+        get: operations["listPettyCash"];
+        put?: never;
+        /** Petty-cash claim ({category,amount,description,txn_date,project_id?}) — caps <= 10,000, posts via the GL inbox */
+        post: operations["createPettyClaim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ar/invoices": {
         parameters: {
             query?: never;
@@ -1628,6 +1646,76 @@ export interface paths {
         put?: never;
         /** Approve AR credit note → post to GL via posting inbox */
         post: operations["approveArCn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ap/cn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List AP credit notes */
+        get: operations["listApCn"];
+        put?: never;
+        /** Create AP credit note ({vendor_id,ref_ap_id,amount,reason}) — server-generated no; reduces payable */
+        post: operations["createApCn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ap/cn/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve AP credit note → post Model-A JV (Dr 2010 AP / Cr 5020 materials) */
+        post: operations["approveApCn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ap/dn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List AP debit notes */
+        get: operations["listApDn"];
+        put?: never;
+        /** Create AP debit note ({vendor_id,ref_ap_id,amount,reason}) — server-generated no; increases payable */
+        post: operations["createApDn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ap/dn/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve AP debit note → post Model-A JV (Dr 5100 admin-expense / Cr 2010 AP) */
+        post: operations["approveApDn"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1850,6 +1938,78 @@ export interface paths {
         get: operations["getGlCashflow"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gl/revrec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List revenue-recognition rows (per project, unbilled = recognized - billed) */
+        get: operations["listGlRevRec"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gl/revrec/{id}/post": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recognize revenue — post the incremental JV (Dr 1130 contract-asset / Cr 4020 construction-revenue). Amount is SERVER-computed (contract x pct - already-recognized); nothing left to recognize 409s. */
+        post: operations["postGlRevRec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gl/wip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List work-in-progress cost balances (per project, balance = mat+sub+oh - transferred) */
+        get: operations["listGlWip"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gl/wip/{id}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transfer WIP to COGS — post the JV (Dr 5010 COGS / Cr 1140 WIP {amount}). Amount validated against the remaining WIP balance (over-balance 409). */
+        post: operations["transferGlWip"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6014,6 +6174,52 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    listPettyCash: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+                /** @description Accounting period selector (e.g. YYYY-MM). */
+                period?: components["parameters"]["Period"];
+                type?: string;
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createPettyClaim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    category?: string;
+                    amount?: number;
+                    description?: string;
+                    txn_date?: string;
+                    /** Format: uuid */
+                    project_id?: string;
+                };
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     listArInvoices: {
         parameters: {
             query?: {
@@ -6155,6 +6361,124 @@ export interface operations {
         responses: {
             200: components["responses"]["ActionOk"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listApCn: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createApCn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    vendor_id?: string;
+                    /** Format: uuid */
+                    ref_ap_id?: string;
+                    amount?: number;
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    approveApCn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listApDn: {
+        parameters: {
+            query?: {
+                /** @description Free-text/structured filter (GET /x?filter&page pattern). */
+                filter?: components["parameters"]["Filter"];
+                /** @description 1-based page index (GET /x?filter&page pattern). */
+                page?: components["parameters"]["Page"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createApDn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    vendor_id?: string;
+                    /** Format: uuid */
+                    ref_ap_id?: string;
+                    amount?: number;
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            201: components["responses"]["EntityCreated"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    approveApDn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getArAging: {
@@ -6382,6 +6706,72 @@ export interface operations {
         responses: {
             200: components["responses"]["EntityOk"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listGlRevRec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    postGlRevRec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listGlWip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityList"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    transferGlWip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            200: components["responses"]["ActionOk"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
         };
     };
     importBankStatements: {
