@@ -785,6 +785,24 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "gl-projectpl",
+      "route": "gl.projectpl",
+      "ref": "app-baseline/gl-projectpl.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
+    },
+    {
+      "screen": "ap-cn-dn",
+      "route": "ap.cn-dn",
+      "ref": "app-baseline/ap-cn-dn.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
