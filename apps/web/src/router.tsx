@@ -118,6 +118,7 @@ import { AdminPlans } from "./screens/admin/admin-plans";
 import { AdminInvoices } from "./screens/admin/admin-invoices";
 import { SubMine } from "./screens/subscription/sub-mine";
 import { LineOAPreview } from "./screens/line/line-oa";
+import { OpexBudget } from "./screens/opex/opex-budget";
 import { ReportsHub } from "./screens/reports/reports";
 import { DMSCenter } from "./screens/dms/dms";
 import { AuditLog } from "./screens/audit/audit";
@@ -193,6 +194,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "ap.deposit": APDeposit,
   "notifications": NotificationsCenter,
   "petty": PettyCash,
+  "opex": OpexBudget,
   "ap.pv": APPaymentVoucher,
   "ap.retention": APRetention,
   // FinAging is one shared component (side param); ar.aging + ap.aging both map to it.
