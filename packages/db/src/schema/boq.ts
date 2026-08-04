@@ -29,6 +29,7 @@ import {
   date,
   timestamp,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { companies, users } from "./platform.js";
 import { projects, costCenters, vendors } from "./project.js";
 import { subconContracts } from "./subcon.js";
@@ -484,6 +485,13 @@ export const grs = pgTable("gr", {
     .default("0"),
   photos: jsonb("photos").$type<string[]>().notNull().default([]),
   status: text("status").notNull().default("received"),
+  // B-261 (migration 0056): the client-supplied idempotency key for the mobile
+  // offline SyncProcessor's at-least-once replay. A CREATE generates a new gr id
+  // per replay, so the natural-key JV guard (which only covers ACTION posts) does
+  // NOT protect this money-write — this key + the gr_idempotency_uq partial unique
+  // index below is the dedup point (mirrors B-167's client-key contract). NULLABLE:
+  // old rows and web clients that omit it carry none and never collide.
+  idempotencyKey: text("idempotency_key"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -495,6 +503,14 @@ export const grs = pgTable("gr", {
   // FKs are selectThrough hops (findGr walks the po chain then the wo chain).
   index("gr_po_idx").on(t.poId),
   index("gr_wo_idx").on(t.woId),
+  // B-261 (migration 0056): PARTIAL unique index — a replayed POST /gr carrying a
+  // previously-seen idempotency_key trips 23505 → the handler returns the ORIGINAL
+  // receipt (no duplicate). Partial (WHERE idempotency_key IS NOT NULL) so the many
+  // pre-existing / key-less GRs (idempotency_key null) are exempt and never collide
+  // (mirrors the jv_source_doc_uq / down_payment_txn_unit_seq_uq partial idiom).
+  uniqueIndex("gr_idempotency_uq")
+    .on(t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
 ]);
 
 /**

@@ -47,8 +47,8 @@
 // State machine (return/cancel):
 //   received --return--> returned      received --cancel--> cancelled
 // A GR that is already returned/cancelled cannot be re-actioned → 409.
-import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import { and, eq } from "drizzle-orm";
 import {
   grs,
   grItems,
@@ -62,6 +62,7 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
 import { round2 } from "./money.js";
+import { isUniqueViolation } from "./gl-post.js";
 import { has, pick, prOrderedQty, str, toNum } from "./procurement.js";
 
 type GrRow = typeof grs.$inferSelect;
@@ -100,6 +101,21 @@ const GR_ITEM_PO_HOPS = [
 ];
 const GR_ITEM_WO_HOPS = [
   { fk: grItems.grId, parent: grs },
+  { fk: grs.woId, parent: wos },
+  { fk: wos.prId, parent: prs },
+  { fk: prs.projectId, parent: projects },
+];
+// defect_report anchors exactly like gr_item — defect_report → gr → po/wo → pr →
+// project — so an idempotency REPLAY (B-261) re-reads the ORIGINAL receipt's
+// defect through the tenant-scoped chain (never a bare global select).
+const DEFECT_PO_HOPS = [
+  { fk: defectReports.grId, parent: grs },
+  { fk: grs.poId, parent: pos },
+  { fk: pos.prId, parent: prs },
+  { fk: prs.projectId, parent: projects },
+];
+const DEFECT_WO_HOPS = [
+  { fk: defectReports.grId, parent: grs },
   { fk: grs.woId, parent: wos },
   { fk: wos.prId, parent: prs },
   { fk: prs.projectId, parent: projects },
@@ -206,6 +222,109 @@ async function findGr(db: TenantDb, id: string): Promise<GrRow | null> {
   return viaWo ?? null;
 }
 
+/** The derived pieces of a GR create/replay response beyond the receipt itself. */
+type GrEnvelopeParts = {
+  vendor: string | null;
+  items: GrItemRow[];
+  ordered: number;
+  receivedTotal: number;
+  full: boolean;
+  defect?: Record<string, unknown>;
+};
+
+/**
+ * The 201 create/replay response shape: grWire (the receipt — id, no,
+ * received/rejected, vendor, per-line items, derived money) plus the cumulative
+ * partial / ordered_total / received_total envelope and any defect_report. Shared
+ * by the fresh create AND the B-261 idempotency REPLAY so a replayed POST returns
+ * the SAME shape as the original — the client sees its own receipt, never a dup.
+ */
+function grCreateEnvelope(
+  gr: GrRow,
+  parts: GrEnvelopeParts,
+): Record<string, unknown> {
+  return {
+    ...grWire(gr, { vendor: parts.vendor, items: parts.items }),
+    partial: !parts.full,
+    ordered_total: parts.ordered,
+    received_total: parts.receivedTotal,
+    ...(parts.defect ? { defect_report: parts.defect } : {}),
+  };
+}
+
+/**
+ * The ORIGINAL receipt's defect_report (tenant-scoped), for a B-261 replay — READ,
+ * never re-created: a replay is the same logical receipt, not a new rejection.
+ */
+async function existingGrDefect(
+  db: TenantDb,
+  gr: GrRow,
+): Promise<Record<string, unknown> | undefined> {
+  const hops = gr.poId ? DEFECT_PO_HOPS : DEFECT_WO_HOPS;
+  const [dr] = await db.selectThrough(
+    defectReports,
+    hops,
+    eq(defectReports.grId, gr.id),
+  );
+  return dr ? { id: dr.id, gr_id: dr.grId, note: dr.note } : undefined;
+}
+
+/**
+ * B-261 idempotency REPLAY. The gr insert tripped gr_idempotency_uq (23505): a
+ * POST /gr carrying a previously-seen idempotency_key is the mobile SyncProcessor's
+ * at-least-once retry, NOT a new receipt. Resolve the ORIGINAL gr by its client key
+ * scoped through the SAME po/wo→project chain the create used (defense in depth: a
+ * foreign tenant's colliding key must NEVER resolve our GR), then rebuild the exact
+ * 201 create envelope from persisted state — same id, same received/rejected, money
+ * re-read not recomputed, never a second write. A key that collided at the DB layer
+ * but resolves to nothing in THIS tenant/anchor (a cross-tenant clash) is a 409 —
+ * never a leak, never a fabricated receipt.
+ */
+async function replayExistingGr(
+  db: TenantDb,
+  reply: FastifyReply,
+  args: { idempotencyKey: string; poId: string; woId: string; prId: string },
+): Promise<FastifyReply> {
+  const { idempotencyKey, poId, woId, prId } = args;
+  const hops = poId ? GR_PO_HOPS : GR_WO_HOPS;
+  const anchorEq = poId ? eq(grs.poId, poId) : eq(grs.woId, woId);
+  const [existing] = await db.selectThrough(
+    grs,
+    hops,
+    and(eq(grs.idempotencyKey, idempotencyKey), anchorEq),
+  );
+  if (!existing) {
+    return reply.code(409).send({
+      code: "INVALID_STATE",
+      message: "idempotency_key already used",
+    });
+  }
+  // Re-derive the envelope from persisted state (never a second write): the
+  // per-line items, the resolved vendor, the cumulative partial/full against the
+  // source PR, and the receipt's existing defect_report (if a rejection).
+  const items = await grItemsFor(db, existing);
+  const vendor = await grVendorName(db, existing);
+  const ordered = await prOrderedQty(db, prId);
+  const anchorGrs = poId
+    ? await db.selectThrough(grs, GR_PO_HOPS, eq(grs.poId, poId))
+    : await db.selectThrough(grs, GR_WO_HOPS, eq(grs.woId, woId));
+  const receivedTotal = anchorGrs
+    .filter((g) => g.status === "received")
+    .reduce((sum, g) => sum + Number(g.received), 0);
+  const full = ordered > 0 && receivedTotal >= ordered;
+  const defect = await existingGrDefect(db, existing);
+  return reply.code(201).send(
+    grCreateEnvelope(existing, {
+      vendor,
+      items,
+      ordered,
+      receivedTotal,
+      full,
+      defect,
+    }),
+  );
+}
+
 /** Register the GR routes on the given (already /api/v1-prefixed) scope. */
 export function registerGrRoute(app: FastifyInstance): void {
   // GET /gr — the tenant's goods receipts (gr.jsx GRList). A GR hangs off EITHER
@@ -276,6 +395,11 @@ export function registerGrRoute(app: FastifyInstance): void {
     const poId = str(pick(body, "po_id", "poId")).trim();
     const woId = str(pick(body, "wo_id", "woId")).trim();
     const no = has(body, "no") ? str(pick(body, "no")).trim() || null : null;
+    // B-261: the client's idempotency key for the mobile offline SyncProcessor's
+    // at-least-once replay. Absent / blank → null (web clients are unchanged; the
+    // partial unique index exempts nulls, so no dedup path fires without a key).
+    const idempotencyKey =
+      str(pick(body, "idempotency_key", "idempotencyKey")).trim() || null;
     const rawLines = pick(body, "lines");
 
     // Exactly one anchor.
@@ -397,17 +521,33 @@ export function registerGrRoute(app: FastifyInstance): void {
     }
     const projectId = pr.projectId;
 
-    const [created] = await db.insertThrough(grs, projects, projectId, [
-      {
-        poId: poId || null,
-        woId: woId || null,
-        no,
-        received: String(received),
-        rejected: String(rejected),
-        photos,
-        status: "received",
-      },
-    ]);
+    // B-261: the receipt insert carries the client idempotency_key. A REPLAY (the
+    // SyncProcessor retrying a create it never heard back on) trips the
+    // gr_idempotency_uq partial unique index → 23505; we catch it and return the
+    // ORIGINAL receipt instead of creating a duplicate. A 23505 can ONLY come from
+    // that index (gr has no other unique constraint) and only when a key is present
+    // (the partial index exempts nulls), so a keyless insert never enters the replay
+    // branch; any other error rethrows.
+    let created: GrRow | undefined;
+    try {
+      [created] = await db.insertThrough(grs, projects, projectId, [
+        {
+          poId: poId || null,
+          woId: woId || null,
+          no,
+          received: String(received),
+          rejected: String(rejected),
+          photos,
+          status: "received",
+          idempotencyKey,
+        },
+      ]);
+    } catch (err) {
+      if (idempotencyKey && isUniqueViolation(err)) {
+        return replayExistingGr(db, reply, { idempotencyKey, poId, woId, prId });
+      }
+      throw err;
+    }
 
     // Persist the per-line detail (B-078 / F1) — anchored on the same tenant-owned
     // project as the gr, so the write is fail-closed by construction.
@@ -470,13 +610,18 @@ export function registerGrRoute(app: FastifyInstance): void {
       }
     }
 
-    return reply.code(201).send({
-      ...grWire(created!, { vendor: vendorName, items: createdItems }),
-      partial: !full,
-      ordered_total: ordered,
-      received_total: receivedTotal,
-      ...(defect ? { defect_report: defect } : {}),
-    });
+    // B-261: the fresh create and the replay share ONE envelope shape — a replayed
+    // POST returns byte-for-byte what the original create returned.
+    return reply.code(201).send(
+      grCreateEnvelope(created!, {
+        vendor: vendorName,
+        items: createdItems,
+        ordered,
+        receivedTotal,
+        full,
+        defect,
+      }),
+    );
   });
 
   // POST /gr/:id/return — received → returned (gr.jsx "คืนสินค้า"). Only a

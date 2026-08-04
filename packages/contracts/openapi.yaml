@@ -1596,6 +1596,13 @@ paths:
                   type: string
                   format: uuid
                   description: Alternative to po_id — GR against a work order (B-070 GR-from-WO)
+                idempotency_key:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Client-generated idempotency key (B-261). A create whose key was
+                    already seen returns the ORIGINAL receipt (2xx, no duplicate row) —
+                    makes the mobile offline-queue at-least-once replay safe. Omit → no dedup.
                 lines:
                   type: array
                   items:
