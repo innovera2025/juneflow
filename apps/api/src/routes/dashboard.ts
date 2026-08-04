@@ -479,6 +479,10 @@ async function approvalsInbox(
     level != null && level >= requiredLevel(amount);
 
   type InboxRow = {
+    // The doc id — the mobile approvals inbox (B-259) navigates to the doc detail
+    // (GET /pr/:id) with this; the web dashboard ignores the extra field. Opaque
+    // Entity in openapi (no declared fields) → additive, no contract change.
+    id: string;
     kind: string;
     doc_no: string | null;
     title: null;
@@ -496,6 +500,7 @@ async function approvalsInbox(
     // lines) even though the displayed amount stays null in that case.
     if (!canApprove(derived?.amount ?? 0, prRequiredLevel)) continue;
     rows.push({
+      id: pr.id,
       kind: "PR",
       doc_no: pr.no,
       title: null, // GAP: pr has no title/name column.
@@ -511,6 +516,7 @@ async function approvalsInbox(
     const amount = num(po.total); // real stored total (po has no line table).
     if (!canApprove(amount, poWoRequiredLevel)) continue;
     rows.push({
+      id: po.id,
       kind: "PO",
       doc_no: po.no, // real column, nullable → may be null (GAP-free honest null).
       title: null, // GAP: po has no title column.
@@ -526,6 +532,7 @@ async function approvalsInbox(
     const amount = num(wo.value); // real stored contract value.
     if (!canApprove(amount, poWoRequiredLevel)) continue;
     rows.push({
+      id: wo.id,
       kind: "WO",
       doc_no: wo.no, // real column, nullable → may be null.
       title: null, // GAP: wo has no title column.

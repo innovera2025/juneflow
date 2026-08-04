@@ -355,13 +355,14 @@ describe("GET /api/v1/dashboard/approvals-inbox", () => {
       b.data.map((r: { kind: string }) => [r.kind, r]),
     );
     // PR: 5×280000 + 6×850 = 1,405,100 (real derived line total); title/requester/urgent honest null.
+    // id is the doc id the mobile inbox (B-259) navigates to detail with — carried per kind.
     expect(byKind.PR).toMatchObject({
-      kind: "PR", doc_no: "PR-0418", title: null, requester: null,
+      id: "pr-0", kind: "PR", doc_no: "PR-0418", title: null, requester: null,
       amount: 1405100, currency_code: "THB", urgent: null,
     });
     // PO: stored total (po has no line table). WO: stored value; its null `no` → null doc_no.
-    expect(byKind.PO).toMatchObject({ kind: "PO", doc_no: "PO-2201", amount: 2000000, currency_code: "THB" });
-    expect(byKind.WO).toMatchObject({ kind: "WO", doc_no: null, amount: 1000000, currency_code: "THB", urgent: null });
+    expect(byKind.PO).toMatchObject({ id: "po-0", kind: "PO", doc_no: "PO-2201", amount: 2000000, currency_code: "THB" });
+    expect(byKind.WO).toMatchObject({ id: "wo-0", kind: "WO", doc_no: null, amount: 1000000, currency_code: "THB", urgent: null });
   });
 
   it("scopes pr(1)/po(2)/wo(2)/pr_item(2)/boq_item(3) + pending filter + tenant scope on every read", async () => {
