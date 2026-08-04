@@ -1,0 +1,9 @@
+{
+  "_source": "Net-new phrases-layer keys for the mobile store awaiting-PO-receipt list (route st-grlist, pototype/mobile-field.jsx MStGRList L6-35, feature/mobile-st-grlist). Each key IS the Thai phrase (phrases layer, read with tp). All three are byte-exact with the prototype and absent from docs/extract/i18n-full.json today (grep-verified count 0). They already render in Thai (tp returns the key for lang th); this handoff seeds en/zh/ar when Wei runs the sacred round. Do NOT hand-edit i18n-full.json outside that round (sacred file). NOTE (C-024 collision lesson): B-257 is the id this handoff was assigned by the orchestrator; grep the live BLOCKERS.md high-water mark and reconcile before the sacred round (B-251..253 were previously renumbered off 257..259).",
+  "override": "wei-approved:B-257",
+  "phrases": {
+    "สโตร์ไซต์": "สโตร์ไซต์",
+    "รอรับของ (PO)": "รอรับของ (PO)",
+    "ตรวจนับ-รับของ": "ตรวจนับ-รับของ"
+  }
+}

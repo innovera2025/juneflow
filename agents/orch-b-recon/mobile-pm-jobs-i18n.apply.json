@@ -1,0 +1,9 @@
+{
+  "_source": "Net-new phrases-layer keys for the mobile 'my PM jobs' screen (route pm-jobs, pototype/mobile-pm.jsx MPMJobs L7-49, feature/mobile-pm-jobs). Each key IS the Thai phrase (phrases layer, read with tp). All three are byte-exact with the prototype and absent from docs/extract/i18n-full.json today. They already render in Thai (tp returns the key for lang th); this handoff seeds en/zh/ar when Wei runs the sacred round. Do NOT hand-edit i18n-full.json outside that round (sacred file). 'ช่าง PM' is the header eyebrow role (the prototype's '· สมพงษ์ ก.' technician name is mock session-user data, dropped). 'งาน PM ของฉัน' is the screen title. 'กำลังทำ' is the derived in-progress status label (the file has 'กำลังทำ…' with an ellipsis and 'กำลังทำงาน {n} ราย', both different strings).",
+  "override": "wei-approved:B-258",
+  "phrases": {
+    "ช่าง PM": "ช่าง PM",
+    "งาน PM ของฉัน": "งาน PM ของฉัน",
+    "กำลังทำ": "กำลังทำ"
+  }
+}

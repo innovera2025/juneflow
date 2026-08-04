@@ -67,15 +67,17 @@ void main() {
   testWidgets('the router renders an honest placeholder for an unbuilt route', (
     WidgetTester tester,
   ) async {
+    // `pm-checkin` is a known route whose screen is not built yet (pm-jobs, the
+    // sibling that used to stand in here, is now a real ported screen).
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
           builder: (BuildContext context) =>
-              resolveMobileScreen(context, 'pm-jobs'),
+              resolveMobileScreen(context, 'pm-checkin'),
         ),
       ),
     );
     expect(find.byType(ScreenPlaceholder), findsOneWidget);
-    expect(find.text('pm-jobs'), findsOneWidget);
+    expect(find.text('pm-checkin'), findsOneWidget);
   });
 }

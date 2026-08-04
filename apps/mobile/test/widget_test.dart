@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/app/app_services.dart';
 import 'package:juneflow_mobile/main.dart';
+import 'package:juneflow_mobile/screens/pm_jobs/pm_jobs_screen.dart';
 import 'package:juneflow_mobile/shell/mobile_shell.dart';
 import 'package:juneflow_mobile/shell/screen_placeholder.dart';
 import 'package:juneflow_mobile/widgets/m_tab_bar.dart';
@@ -66,10 +67,13 @@ void main() {
     await tester.pump();
     expect(find.widgetWithText(ScreenPlaceholder, 'inbox'), findsOneWidget);
 
-    // Tapping หน้างาน (field) lands on its section entry route, pm-jobs.
+    // Tapping หน้างาน (field) lands on its section entry route, pm-jobs — now a
+    // real ported screen (feature/mobile-pm-jobs), so its host mounts instead of a
+    // placeholder, and the inbox placeholder is gone.
     await tester.tap(find.text('หน้างาน'));
     await tester.pump();
-    expect(find.widgetWithText(ScreenPlaceholder, 'pm-jobs'), findsOneWidget);
+    expect(find.byType(PmJobsScreenHost), findsOneWidget);
+    expect(find.widgetWithText(ScreenPlaceholder, 'pm-jobs'), findsNothing);
     expect(find.widgetWithText(ScreenPlaceholder, 'inbox'), findsNothing);
   });
 }

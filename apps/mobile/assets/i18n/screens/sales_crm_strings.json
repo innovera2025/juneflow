@@ -1,0 +1,14 @@
+{
+  "_source": "Static UI keys for the mobile Sales CRM screen (route sales-crm, pototype/mobile-screens.jsx MSalesCRM L722-771). KEYS ONLY — never a translation. `title` is the ONE net-new key: it IS the Thai title phrase (phrases layer, read with tp) and is collected in agents/orch-b-recon/mobile-sales-crm-i18n.apply.json for a Wei sacred round (B-256); it already resolves in Thai today (tp returns the key for lang th) and lights up en/zh/ar once applied. Every OTHER field is an EXISTING dict stable key already in docs/extract/i18n-full.json (read with t) — the 5 real funnel-stage labels + the 3 warmth badges + the empty-column line — so no mint is needed for them. The mock's per-lead call/LINE/visit buttons and the mock sales-rep header identity (a fabricated name) carry no honest read-only wire and are OMITTED (not represented here); the per-lead name/interest/note are real server columns (rendered from the wire / an em-dash), not i18n keys (§0 rule 3).",
+  "_layers": "title = tp (phrases — the Thai phrase IS the key). stage*/warmth*/empty = t (dict stable keys, resolved by JuneflowI18n.t).",
+  "title": "Pipeline ของฉัน",
+  "stageLead": "sales.crm.stageLead",
+  "stageVisit": "sales.crm.stageVisit",
+  "stageQuote": "sales.crm.stageQuote",
+  "stageBooking": "sales.crm.stageBooking",
+  "stageContract": "sales.crm.stageContract",
+  "warmthHot": "sales.crm.hotHot",
+  "warmthWarm": "sales.crm.hotWarm",
+  "warmthCold": "sales.crm.hotCold",
+  "empty": "sales.crm.emptyNoLead"
+}

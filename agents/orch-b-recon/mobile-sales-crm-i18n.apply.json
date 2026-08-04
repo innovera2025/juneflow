@@ -1,0 +1,7 @@
+{
+  "_source": "Net-new phrases-layer key for the mobile Sales CRM screen (route sales-crm, pototype/mobile-screens.jsx MSalesCRM L722-771, feature/mobile-sales-crm). The single key IS the Thai title phrase (phrases layer, read with tp). Byte-exact with the prototype and absent from docs/extract/i18n-full.json today. It already renders in Thai (tp returns the key for lang th); this handoff seeds en/zh/ar when Wei runs the sacred round. Every OTHER visible string on the screen reuses an EXISTING dict key already in i18n-full.json (sales.crm.stageLead/stageVisit/stageQuote/stageBooking/stageContract, sales.crm.hotHot/hotWarm/hotCold, sales.crm.emptyNoLead) — no mint needed for them. Do NOT hand-edit i18n-full.json outside that round (sacred file).",
+  "override": "wei-approved:B-256",
+  "phrases": {
+    "Pipeline ของฉัน": "Pipeline ของฉัน"
+  }
+}

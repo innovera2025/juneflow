@@ -1,0 +1,7 @@
+{
+  "_source": "Static UI keys for the mobile store awaiting-PO-receipt list (route st-grlist, pototype/mobile-field.jsx MStGRList L6-35). KEYS ONLY — every value is the Thai phrase that IS the phrases-layer key (read with tp). All THREE are net-new (absent from docs/extract/i18n-full.json today) and collected into agents/orch-b-recon/mobile-st-grlist-i18n.apply.json for a Wei sacred round (override wei-approved:B-257); they already resolve in Thai today (tp returns the key for lang th) and light up en/zh/ar once applied. Each value is byte-exact with the prototype. 'eyebrow' is the STATIC part of the prototype header sub 'สโตร์ไซต์ · ประยุทธ ม.' — the mock storekeeper name after the U+00B7 middot is dropped (§0 rule 3, no session-name wire on this screen). The per-PO items/due/truck/urgent/warehouse the mock denormalises are not on the /po wire (po.ts GAP 1 / no due/truck/urgent/warehouse column) — they are NOT i18n keys; the view omits them or renders an em-dash, never an invented value.",
+  "_layers": "all tp() = phrases (the Thai phrase is the key)",
+  "eyebrow": "สโตร์ไซต์",
+  "title": "รอรับของ (PO)",
+  "ctaReceive": "ตรวจนับ-รับของ"
+}
