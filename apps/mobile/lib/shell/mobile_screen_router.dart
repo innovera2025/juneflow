@@ -7,6 +7,7 @@
 // crashing. Each screen port adds one builder here and its id to kBuiltRouteIds.
 import 'package:flutter/widgets.dart';
 
+import '../screens/approvals_inbox/approvals_inbox_screen.dart';
 import '../screens/notif/notif_screen.dart';
 import '../screens/pm_jobs/pm_jobs_screen.dart';
 import '../screens/pr_action/approve_screen.dart';
@@ -15,6 +16,12 @@ import '../screens/sales_crm/sales_crm_screen.dart';
 import '../screens/st_grlist/st_grlist_screen.dart';
 import 'mobile_routes.dart';
 import 'screen_placeholder.dart';
+
+/// Builds the `inbox` screen (the caller's pending-approvals list). Its host
+/// resolves services + the i18n sidecar from [AppScope]. A read-only list whose PR
+/// rows push the PR detail (the approval seam). A top-level tearoff so
+/// [mobileScreenBuilders] stays const.
+Widget _buildInbox(BuildContext context) => const ApprovalsInboxScreenHost();
 
 /// Builds the `notif` screen (its host resolves services + the i18n sidecar from
 /// [AppScope]). A top-level tearoff so [mobileScreenBuilders] stays const.
@@ -33,6 +40,7 @@ Widget _buildReject(BuildContext context) => const RejectScreenHost();
 /// Builds the `sales-crm` pipeline read (its host resolves services + the i18n
 /// sidecar from [AppScope]). Read-only: the leads come from GET /sales/leads.
 Widget _buildSalesCrm(BuildContext context) => const SalesCrmScreenHost();
+
 /// Builds the `st-grlist` store awaiting-PO-receipt list (its host resolves
 /// services + the i18n sidecar from [AppScope]).
 Widget _buildStGrList(BuildContext context) => const StGrListScreenHost();
@@ -40,6 +48,7 @@ Widget _buildStGrList(BuildContext context) => const StGrListScreenHost();
 /// Builders for the routes that have a real ported screen. A screen port adds
 /// `'<id>': _buildX` here (a const-tearoff) and its id to [kBuiltRouteIds].
 const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
+  'inbox': _buildInbox,
   'notif': _buildNotif,
   'pm-jobs': _buildPmJobs,
   'approve': _buildApprove,

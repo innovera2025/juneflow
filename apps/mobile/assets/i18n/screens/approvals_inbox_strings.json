@@ -1,0 +1,13 @@
+{
+  "_source": "Static UI keys for the mobile approvals inbox (route inbox, pototype/mobile.jsx MobileApprovalInbox L24-177). KEYS ONLY — every value is the Thai phrase that IS the phrases-layer key (read with tp). ZERO-MINT: every key already exists in the sacred docs/extract/i18n-full.json phrases block (recon af5d76df, mint=[]), so tp() echoes it for Thai today and en/zh/ar resolve from the file with no sacred round. The header title กล่องอนุมัติ is the dict key mob.approval.inbox.title (read via i18n.t directly, not here). The relative card age is the dict template mob.approval.inbox.cardAgeAgo '{age} ที่แล้ว' — the screen substitutes {age} = a REAL number + the unit phrase below (unitMinute/unitHour/unitDay). HONEST-OMIT per §2: the row title/requester/urgent, the project line, and the overBudget banner have no honest wire and are simply not read here.",
+  "_layers": "all tp() = phrases (the Thai phrase is the key); header title + card age = dict (mob.approval.inbox.*, read via t/tf); ฿ = dict subcon.unitBaht",
+  "sub": "รออนุมัติ",
+  "chipPending": "รออนุมัติ",
+  "chipUrgent": "ด่วน",
+  "chipTotal": "มูลค่ารวม",
+  "filterAll": "ทั้งหมด",
+  "filterUrgent": "ด่วน",
+  "unitMinute": "นาที",
+  "unitHour": "ชม.",
+  "unitDay": "วัน"
+}
