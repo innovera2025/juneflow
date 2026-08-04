@@ -13,6 +13,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Material/Cupertino/Widgets localizations for the app's locales (th/en/zh/ar,
+  # incl. ar RTL) — MOB-SHELL-00 drives MaterialApp.locale from the i18n runtime,
+  # which requires a delegate that supports those locales (SDK, no pub version).
+  flutter_localizations:
+    sdk: flutter
   # HTTP client that the GENERATED OpenAPI client (lib/api/**) runs on — retrofit
   # builds on dio. Client is codegen'd from packages/contracts/openapi.yaml
   # (P0-MOB-03); models are never hand-written (root CLAUDE.md).

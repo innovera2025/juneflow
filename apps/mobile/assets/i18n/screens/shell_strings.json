@@ -1,0 +1,8 @@
+{
+  "_source": "MTabBar labels (MOB-SHELL-00). KEYS ONLY — every value already exists in docs/extract/i18n-full.json. Layer is fixed in lib/shell/mobile_tabs.dart: tabApprove/tabField/tabProfile => dict (t); tabService/tabDashboard => phrases (tp). th renders byte-exact to pototype/mobile-screens.jsx MTabBar labels.",
+  "tabApprove": "common.approve",
+  "tabField": "mob.tab.field",
+  "tabService": "แจ้งซ่อม",
+  "tabDashboard": "Dashboard",
+  "tabProfile": "common.profile"
+}
