@@ -1,0 +1,11 @@
+{
+  "_source": "Static UI keys for the mobile Notifications screen (route notif, pototype/mobile.jsx MobileNotifications L543-609). KEYS ONLY — every value is the Thai phrase that IS the phrases-layer key (read with tp). FIVE already exist in docs/extract/i18n-full.json phrases: 'แจ้งเตือน','ของฉัน','ทั้งหมด','รออนุมัติ','ระบบ'. TWO are net-new and collected into agents/orch-b-recon/mobile-notif-i18n.apply.json for a Wei sacred round (markRead 'อ่าน', filterUpdate 'แจ้งอัปเดต'); they already resolve in Thai today (tp returns the key for lang th) and light up en/zh/ar once applied. Each value is byte-exact with the prototype. The per-notification title/by/body text the mock denormalises is server data the wire does not carry (contract gap B-039) — it is NOT an i18n key; the view renders the real ref / an em-dash, never an invented sentence (§0 rule 3).",
+  "_layers": "all tp() = phrases (the Thai phrase is the key)",
+  "eyebrow": "แจ้งเตือน",
+  "title": "ของฉัน",
+  "markRead": "อ่าน",
+  "filterAll": "ทั้งหมด",
+  "filterApproval": "รออนุมัติ",
+  "filterUpdate": "แจ้งอัปเดต",
+  "filterSystem": "ระบบ"
+}

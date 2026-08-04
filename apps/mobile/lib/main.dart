@@ -1,35 +1,64 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'app/app_scope.dart';
+import 'app/app_services.dart';
+import 'i18n/i18n.dart';
+import 'shell/mobile_shell.dart';
 import 'theme/juneflow_theme.dart';
 
-// Juneflow mobile — Phase 0 skeleton (P0-MOB-01). Structure only.
+// Juneflow mobile — app shell (MOB-SHELL-00).
 //
-// TODO(P4): screens start Phase 4 (PLAN.md §7). Real screens are ported from
-// pototype/mobile*.jsx (31 screens — see apps/mobile/docs/screen-map.md once
-// P0-MOB-04 lands). Design Fidelity Protocol (PLAN.md §0) applies: never
-// design new screens, never "improve" the prototype visuals.
-void main() {
-  runApp(const JuneflowApp());
+// Boots the runtime services (i18n, Dio + generated API client, offline queue
+// spine — see AppServices), then runs the 5-tab shell. Screens are ported one by
+// one from pototype/mobile*.jsx under the Design Fidelity Protocol (PLAN.md §0);
+// until a screen lands the router shows an honest placeholder.
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final AppServices services = await AppServices.bootstrap();
+  runApp(JuneflowApp(services: services));
 }
 
 class JuneflowApp extends StatelessWidget {
-  const JuneflowApp({super.key});
+  const JuneflowApp({super.key, required this.services});
+
+  final AppServices services;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Juneflow',
-      // ThemeData GENERATED from packages/tokens/src/tokens.json via the
-      // gen-flutter-theme pipeline of packages/tokens (fiori theme). The source
-      // file lib/theme/juneflow_theme.dart must NEVER be hand-edited — change
-      // tokens at the source and regenerate (apps/mobile/CLAUDE.md). No hardcoded
-      // color/font/spacing values are allowed here (PLAN.md §0 rule 2).
-      theme: juneflowFioriTheme(),
-      home: const Scaffold(
-        body: Center(
-          // TODO(P4): placeholder only — screens start Phase 4.
-          child: Text('Juneflow mobile — scaffold (screens start Phase 4)'),
+    // Locale + layout direction come from the i18n runtime (langs[].dir in the
+    // sacred source), never hardcoded (PLAN.md §0 rule 2). Thai is ltr today; an
+    // Arabic tenant would flip the whole app to rtl through this one path.
+    final TextDirection direction = services.i18n.isRTL()
+        ? TextDirection.rtl
+        : TextDirection.ltr;
+
+    return AppScope(
+      services: services,
+      child: MaterialApp(
+        title: 'Juneflow',
+        debugShowCheckedModeBanner: false,
+        // ThemeData GENERATED from packages/tokens (fiori). Never hand-edited —
+        // change tokens at the source and regenerate (apps/mobile/CLAUDE.md).
+        theme: juneflowFioriTheme(),
+        locale: Locale(services.i18n.lang),
+        // The app's languages come from the i18n runtime (langs in the sacred
+        // source). The Global delegates supply Material/Cupertino strings for
+        // each, so forcing a non-en locale never leaves a widget without
+        // localizations.
+        supportedLocales: <Locale>[
+          for (final LangDef l in services.i18n.langs) Locale(l.code),
+        ],
+        localizationsDelegates: const <LocalizationsDelegate<Object>>[
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        builder: (BuildContext context, Widget? child) => Directionality(
+          textDirection: direction,
+          child: child ?? const SizedBox.shrink(),
         ),
+        home: const MobileShell(),
       ),
     );
   }

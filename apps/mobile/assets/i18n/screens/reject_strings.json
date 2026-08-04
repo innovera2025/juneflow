@@ -1,0 +1,17 @@
+{
+  "_source": "Static UI keys for the mobile PR reject action sheet (route reject, pototype/mobile.jsx MobileRejectSheet L460-541). KEYS ONLY — every value is the Thai phrase that IS the phrases-layer key (read with tp). `title` (ปฏิเสธเอกสาร) and `cancel` (ยกเลิก) ALREADY exist in docs/extract/i18n-full.json phrases; the rest are NEW and collected in mobile-approve-reject-i18n.apply.json (B-255) — they resolve in Thai today, light up en/zh/ar once applied. `banner` carries a leading {no} slot substituted with the REAL PR no via a split-on-token Text.rich (Wei's en/zh/ar MUST keep {no}). The 5 reasonN presets are STATIC UI copy (like the notif filter pills) ported verbatim; tapping one FILLS the required reason field. The prototype's mock textarea prefill is DROPPED (§0 rule 3).",
+  "_layers": "all tp() = phrases (the Thai phrase is the key)",
+  "eyebrow": "กลับ",
+  "title": "ปฏิเสธเอกสาร",
+  "banner": "{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล",
+  "commonReasons": "เหตุผลที่พบบ่อย",
+  "reason1": "ราคาสูงกว่า BOQ ที่ตั้งไว้",
+  "reason2": "เอกสารแนบไม่ครบ",
+  "reason3": "ขอเปรียบเทียบราคาเพิ่มเติม",
+  "reason4": "ขอแก้สเปกสินค้า",
+  "reason5": "อื่นๆ (พิมพ์เหตุผล)",
+  "detailLabel": "รายละเอียดเพิ่มเติม",
+  "detailPlaceholder": "โปรดอธิบายเหตุผลเพิ่มเติม...",
+  "cancel": "ยกเลิก",
+  "submit": "ส่งกลับให้แก้ไข"
+}

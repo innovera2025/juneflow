@@ -1,0 +1,8 @@
+{
+  "_source": "Net-new phrases-layer keys for the mobile Notifications screen (route notif, pototype/mobile.jsx MobileNotifications L543-609, feature/mobile-notif). Each key IS the Thai phrase (phrases layer, read with tp). Both are byte-exact with the prototype and absent from docs/extract/i18n-full.json today. They already render in Thai (tp returns the key for lang th); this handoff seeds en/zh/ar when Wei runs the sacred round. Do NOT hand-edit i18n-full.json outside that round (sacred file).",
+  "override": "wei-approved:B-254",
+  "phrases": {
+    "อ่าน": "อ่าน",
+    "แจ้งอัปเดต": "แจ้งอัปเดต"
+  }
+}
