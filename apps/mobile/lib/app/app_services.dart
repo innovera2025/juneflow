@@ -13,6 +13,7 @@ import '../i18n/i18n.dart';
 import '../offline/offline.dart';
 import 'app_env.dart';
 import 'auth_interceptor.dart';
+import 'gps_source.dart';
 
 /// Immutable bag of the shell's runtime services.
 class AppServices {
@@ -23,6 +24,7 @@ class AppServices {
     required this.api,
     required this.syncQueue,
     required this.tokenProvider,
+    required this.gpsSource,
   });
 
   /// Key-based translator over the sacred i18n source.
@@ -47,6 +49,10 @@ class AppServices {
   /// Current bearer token source (see [AuthInterceptor]).
   final TokenProvider tokenProvider;
 
+  /// Device geolocation for offline-write screens that need a real coordinate (the
+  /// PM check-in). Behind the [GpsSource] seam so tests never touch a sensor.
+  final GpsSource gpsSource;
+
   /// Builds the container: loads i18n + the shell sidecar, wires Dio with the
   /// auth interceptor, and constructs the API client and the offline queue.
   ///
@@ -56,6 +62,7 @@ class AppServices {
   static Future<AppServices> bootstrap({
     String lang = kDefaultLang,
     SyncQueue? syncQueue,
+    GpsSource? gpsSource,
   }) async {
     final JuneflowI18n i18n = await JuneflowI18n.load(lang: lang);
     final ScreenStrings shellStrings = await ScreenStrings.load('shell');
@@ -73,6 +80,7 @@ class AppServices {
       api: api,
       syncQueue: syncQueue ?? InMemorySyncQueue(),
       tokenProvider: tokenProvider,
+      gpsSource: gpsSource ?? const GeolocatorGpsSource(),
     );
   }
 }

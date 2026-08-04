@@ -80,17 +80,29 @@ void main() {
   testWidgets('the router renders an honest placeholder for an unbuilt route', (
     WidgetTester tester,
   ) async {
-    // `pm-checkin` is a known route whose screen is not built yet (pm-jobs, the
-    // sibling that used to stand in here, is now a real ported screen).
+    // `pm-checklist` is a known route whose screen is not built yet (pm-checkin,
+    // the sibling that used to stand in here, is now a real ported screen).
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
           builder: (BuildContext context) =>
-              resolveMobileScreen(context, 'pm-checkin'),
+              resolveMobileScreen(context, 'pm-checklist'),
         ),
       ),
     );
     expect(find.byType(ScreenPlaceholder), findsOneWidget);
-    expect(find.text('pm-checkin'), findsOneWidget);
+    expect(find.text('pm-checklist'), findsOneWidget);
   });
+
+  test(
+    'pm-checkin is a built route in lockstep (feature/mobile-write-checkin)',
+    () {
+      // The first offline-write screen: a built tab route (honest-empty with no
+      // selection) that pm-jobs also pushes with a real work-order id. Its builder +
+      // built id must stay in lockstep (keys==kBuiltRouteIds, asserted above).
+      expect(kBuiltRouteIds, contains('pm-checkin'));
+      expect(mobileScreenBuilders.containsKey('pm-checkin'), isTrue);
+      expect(kMobileRouteIds, contains('pm-checkin'));
+    },
+  );
 }

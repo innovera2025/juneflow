@@ -67,8 +67,10 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// CRM pipeline (feature/mobile-sales-crm, GET /sales/leads); `inbox` is the
 /// approvals inbox (feature/mobile-inbox-detail, GET /dashboard/approvals-inbox) —
 /// its PR rows push the PR detail (a PUSHED route, so `detail` has no builder here).
-/// Every further screen port adds its id here and its widget in
-/// [mobileScreenBuilders] (mobile_screen_router.dart).
+/// `pm-checkin` is the first offline-WRITE screen (feature/mobile-write-checkin): it
+/// is a built tab route (honest-empty with no selection) that pm-jobs also pushes
+/// with a real work-order id. Every further screen port adds its id here and its
+/// widget in [mobileScreenBuilders] (mobile_screen_router.dart).
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -77,6 +79,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'sales-crm',
   'st-grlist',
   'pm-jobs',
+  'pm-checkin',
 };
 
 /// The set of all known route ids.

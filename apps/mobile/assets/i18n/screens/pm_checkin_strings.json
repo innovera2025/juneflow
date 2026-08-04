@@ -1,0 +1,14 @@
+{
+  "_source": "Static UI keys for the mobile PM check-in screen (route pm-checkin, pototype/mobile-pm.jsx MPMCheckin L51-89). KEYS ONLY. ZERO-MINT: every value is a DICT stable-id that ALREADY exists in docs/extract/i18n-full.json (resolved with i18n.t/tf, exactly like the screen_strings_test 'cancel':'common.cancel' precedent) — nothing new was minted and i18n-full.json is untouched. The prototype's screen title / service labels / check-in button map 1:1 to the merged web PM screen's own dict keys (pm.*). The three HONEST offline-write states the spec requires are copy the MOCK prototype never had (it only flips to an optimistic success), so they borrow existing GENERIC dict strings rather than inventing wording: online-confirmed=pm.toastCheckedIn (has {time}, filled with the honest client submit time — the checkin ActionOk carries no timestamp); offline-queued=tax.etax.statusPending 'รอส่ง' (waiting-to-send); permanently-failed=admin.common.actionFailedToast 'ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง' (generic action-failed + retry). gpsLabel=subcon.photoGps 'พิกัด GPS' captions the map with the REAL device coordinate (F-1: geolocator wired) or an em-dash when unavailable — and the gps-unavailable / permission-denied state reuses `failed` (generic action-failed + retry) since no location-specific error key exists (zero-mint); the em-dash coordinate surfaces the real reason. The prototype's hardcoded map lat/long (13.8076,100.4519) + distance + zone/SLA/contract VALUES are mock data — NOT keys; the real coordinate is shown once obtained, service values em-dash (§0 rule 3). checklistNext=pm.checklistTitle labels the on-success onward affordance, which is honest-DISABLED (pm-checklist is a future screen, out of this slice).",
+  "_layers": "all t()/tf() = dict (a stable id resolved from i18n-full.json). NO phrases-layer (Thai-as-key) entries here.",
+  "title": "pm.checkinTitle",
+  "serviceZone": "pm.serviceZone",
+  "sla": "pm.sla",
+  "contractRef": "pm.contractRef",
+  "gpsLabel": "subcon.photoGps",
+  "checkinBtn": "pm.checkinBtn",
+  "successAt": "pm.toastCheckedIn",
+  "queued": "tax.etax.statusPending",
+  "failed": "admin.common.actionFailedToast",
+  "checklistNext": "pm.checklistTitle"
+}

@@ -24,9 +24,9 @@
 // The three filter pills are FUNCTIONLESS chrome: their today/urgent axes have no
 // honest wire (the WO carries no schedule date and no priority), so — as the notif
 // port did for its wire-gap filters — none is invented; the first shows active.
-// Tapping a card would open pm-checkin in the prototype, but pm-checkin is not
-// built and the shell has no route-param navigation yet, so the "start" affordance
-// is visual chrome only (documented gap) — no fabricated navigation.
+// Tapping a card opens pm-checkin (the prototype's onClick → "pm-checkin"),
+// pushing the real work-order id via the Navigator.push seam (the inbox → PR-detail
+// precedent) — the first offline-write screen.
 import 'package:flutter/material.dart';
 
 import '../../app/app_scope.dart';
@@ -34,6 +34,7 @@ import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/mobile_header.dart';
+import '../pm_checkin/pm_checkin_screen.dart';
 import 'pm_jobs_agg.dart';
 import 'pm_jobs_repository.dart';
 
@@ -200,75 +201,92 @@ class _PmJobsScreenState extends State<PmJobsScreen> {
   /// footer with a clock meta (em-dash — no scheduled time) and the "start"
   /// affordance. The type pill + distance are omitted (no honest wire).
   Widget _card(PmJobRow row) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: JuneflowTokens.surfaceCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: JuneflowTokens.surfaceBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          // Row 1: the brand WO-number slot (em-dash) + the derived status badge.
-          Row(
-            children: <Widget>[
-              const Text(
-                _dash,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: JuneflowTokens.brandPrimary,
-                ),
-              ),
-              const Spacer(),
-              _statusBadge(row.status),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // The joined asset name (em-dash when the asset is absent).
-          Text(
-            row.name.isEmpty ? _dash : row.name,
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w700,
-              color: JuneflowTokens.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 3),
-          // The joined asset site with a pin icon (em-dash when absent).
-          Row(
-            children: <Widget>[
-              const Icon(
-                Icons.place_outlined,
-                size: 12,
-                color: JuneflowTokens.textTertiary,
-              ),
-              const SizedBox(width: 5),
-              Expanded(
-                child: Text(
-                  row.site.isEmpty ? _dash : row.site,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    color: JuneflowTokens.textTertiary,
+    return GestureDetector(
+      onTap: () => _openCheckin(row),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: JuneflowTokens.surfaceCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: JuneflowTokens.surfaceBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            // Row 1: the brand WO-number slot (em-dash) + the derived status badge.
+            Row(
+              children: <Widget>[
+                const Text(
+                  _dash,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: JuneflowTokens.brandPrimary,
                   ),
                 ),
+                const Spacer(),
+                _statusBadge(row.status),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // The joined asset name (em-dash when the asset is absent).
+            Text(
+              row.name.isEmpty ? _dash : row.name,
+              style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+                color: JuneflowTokens.textPrimary,
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Divider(
-            height: 1,
-            thickness: 1,
-            color: JuneflowTokens.surfaceBorder,
-          ),
-          const SizedBox(height: 8),
-          _cardFooter(),
-        ],
+            ),
+            const SizedBox(height: 3),
+            // The joined asset site with a pin icon (em-dash when absent).
+            Row(
+              children: <Widget>[
+                const Icon(
+                  Icons.place_outlined,
+                  size: 12,
+                  color: JuneflowTokens.textTertiary,
+                ),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    row.site.isEmpty ? _dash : row.site,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: JuneflowTokens.textTertiary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Divider(
+              height: 1,
+              thickness: 1,
+              color: JuneflowTokens.surfaceBorder,
+            ),
+            const SizedBox(height: 8),
+            _cardFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Push the check-in screen for [row], carrying the real work-order id + the
+  /// joined asset name (for the header). The seam the inbox → PR-detail wave set.
+  void _openCheckin(PmJobRow row) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext _) => PmCheckinScreenHost(
+          workOrderId: row.id,
+          assetName: row.name.isEmpty ? null : row.name,
+        ),
       ),
     );
   }
