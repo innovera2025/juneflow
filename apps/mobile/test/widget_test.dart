@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/app/app_services.dart';
 import 'package:juneflow_mobile/main.dart';
+import 'package:juneflow_mobile/screens/approvals_inbox/approvals_inbox_screen.dart';
 import 'package:juneflow_mobile/screens/pm_jobs/pm_jobs_screen.dart';
 import 'package:juneflow_mobile/shell/mobile_shell.dart';
 import 'package:juneflow_mobile/shell/screen_placeholder.dart';
@@ -30,7 +31,7 @@ Future<void> _pumpShell(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('boots to the inbox placeholder with the canonical 5-tab bar', (
+  testWidgets('boots to the inbox screen with the canonical 5-tab bar', (
     WidgetTester tester,
   ) async {
     await _pumpShell(tester);
@@ -39,8 +40,10 @@ void main() {
     expect(find.byType(MobileShell), findsOneWidget);
     expect(find.byType(MTabBar), findsOneWidget);
 
-    // Initial route = inbox → honest placeholder (no screen built yet).
-    expect(find.widgetWithText(ScreenPlaceholder, 'inbox'), findsOneWidget);
+    // Initial route = inbox → the real ported approvals-inbox host mounts
+    // (feature/mobile-inbox-detail), no longer an honest placeholder.
+    expect(find.byType(ApprovalsInboxScreenHost), findsOneWidget);
+    expect(find.widgetWithText(ScreenPlaceholder, 'inbox'), findsNothing);
 
     // The 5 tab labels render byte-exact for th (pototype/mobile-screens.jsx:3-26).
     for (final String label in <String>[
@@ -62,18 +65,18 @@ void main() {
   ) async {
     await _pumpShell(tester);
 
-    // Tapping โปรไฟล์ (honest-disabled) does nothing — still on inbox.
+    // Tapping โปรไฟล์ (honest-disabled) does nothing — still on the inbox host.
     await tester.tap(find.text('โปรไฟล์'), warnIfMissed: false);
     await tester.pump();
-    expect(find.widgetWithText(ScreenPlaceholder, 'inbox'), findsOneWidget);
+    expect(find.byType(ApprovalsInboxScreenHost), findsOneWidget);
 
-    // Tapping หน้างาน (field) lands on its section entry route, pm-jobs — now a
-    // real ported screen (feature/mobile-pm-jobs), so its host mounts instead of a
-    // placeholder, and the inbox placeholder is gone.
+    // Tapping หน้างาน (field) lands on its section entry route, pm-jobs — a real
+    // ported screen (feature/mobile-pm-jobs), so its host mounts (the shell swaps
+    // the route, so the inbox host is gone).
     await tester.tap(find.text('หน้างาน'));
     await tester.pump();
     expect(find.byType(PmJobsScreenHost), findsOneWidget);
     expect(find.widgetWithText(ScreenPlaceholder, 'pm-jobs'), findsNothing);
-    expect(find.widgetWithText(ScreenPlaceholder, 'inbox'), findsNothing);
+    expect(find.byType(ApprovalsInboxScreenHost), findsNothing);
   });
 }

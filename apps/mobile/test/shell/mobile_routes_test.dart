@@ -64,6 +64,19 @@ void main() {
     },
   );
 
+  test('inbox is a built tab route (feature/mobile-inbox-detail)', () {
+    // The approvals inbox is registered as a tab screen; its builder + built id
+    // must stay in lockstep (the graft bug: a builder with no kBuiltRouteIds id
+    // would break the keys==kBuiltRouteIds invariant above).
+    expect(kBuiltRouteIds, contains('inbox'));
+    expect(mobileScreenBuilders.containsKey('inbox'), isTrue);
+    // `detail` is a PUSHED route (constructed at the inbox's push site), so it has
+    // no tab builder and is NOT in the built set.
+    expect(mobileScreenBuilders.containsKey('detail'), isFalse);
+    expect(kBuiltRouteIds, isNot(contains('detail')));
+    expect(kMobileRouteIds, contains('detail')); // still a known route
+  });
+
   testWidgets('the router renders an honest placeholder for an unbuilt route', (
     WidgetTester tester,
   ) async {

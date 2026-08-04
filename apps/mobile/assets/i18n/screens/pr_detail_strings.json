@@ -1,0 +1,15 @@
+{
+  "_source": "Static UI keys for the mobile PR detail (route detail, pototype/mobile.jsx MobileApprovalDetail L179-385). KEYS ONLY — every value is the Thai phrase that IS the phrases-layer key (read with tp). ZERO-MINT: every key already exists in the sacred docs/extract/i18n-full.json phrases block, so tp() echoes it for Thai and en/zh/ar resolve from the file. The netTotal label, the '{count} รายการ' line, the 'อนุมัติ · {amount} ฿' button caption and the pending 'รอคุณอนุมัติ · ชั้นที่ {level}' banner are dict keys (mob.approval.detail.netTotal / lineCountVat / approveWithAmount / awaitingYou, read via i18n.t/tf directly, not here); ฿ = dict subcon.unitBaht. The banner uses the REAL approval_step for {level} and DROPS the 'จาก {total}' clause + the precise elapsed (not on the wire — never fabricated). REAL wire fields rendered (orch-B ruling): title (title-card heading, falls back to `no`), need_date (needDateLabel field), phase (beside the project name). HONEST-OMIT (no honest wire): your-limit card, BOQ budget bar, the full approver timeline, and attachments. Project NAME resolves via the GET /projects join (em-dash when unresolved, never the raw uuid); item material names em-dash (only boq_item_id on the wire).",
+  "_layers": "all tp() = phrases (the Thai phrase is the key); netTotal/lineCountVat/approveWithAmount/awaitingYou = dict (mob.approval.detail.*); ฿ = dict subcon.unitBaht",
+  "sub": "ใบขอซื้อ",
+  "statusPending": "รออนุมัติ",
+  "statusApproved": "อนุมัติแล้ว",
+  "statusRejected": "ปฏิเสธ",
+  "statusDraft": "ฉบับร่าง",
+  "requesterLabel": "ผู้ขอ",
+  "projectLabel": "โครงการ",
+  "needDateLabel": "วันที่ต้องการ",
+  "vendorLabel": "ผู้ขาย",
+  "materialsLabel": "รายการวัสดุ",
+  "viewAll": "ดูทั้งหมด"
+}
