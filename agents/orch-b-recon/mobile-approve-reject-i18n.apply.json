@@ -1,0 +1,20 @@
+{
+  "_source": "Net-new phrases-layer keys for the mobile PR approve + reject action sheets (routes approve/reject, pototype/mobile.jsx MobileApproveSheet L393-458 + MobileRejectSheet L460-541, feature/mobile-approve-reject). Each key IS the Thai phrase (phrases layer, read with tp) and is byte-exact with the prototype. All 14 are absent from docs/extract/i18n-full.json today (ยกเลิก + ปฏิเสธเอกสาร already exist and are NOT reminted). They already render in Thai (tp returns the key for lang th); this handoff seeds en/zh/ar when Wei runs the sacred round. NOTE: 'ต้องการอนุมัติเอกสาร {no} มูลค่า {amount} หรือไม่?' and '{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล' carry {no}/{amount} placeholder slots — the app substitutes the real PR no + server amount at render; Wei's en/zh/ar translations MUST preserve those tokens verbatim. Do NOT hand-edit i18n-full.json outside that round (sacred file).",
+  "override": "wei-approved:B-255",
+  "phrases": {
+    "กลับ": "กลับ",
+    "ยืนยันอนุมัติ": "ยืนยันอนุมัติ",
+    "ยืนยันการอนุมัติ": "ยืนยันการอนุมัติ",
+    "ต้องการอนุมัติเอกสาร {no} มูลค่า {amount} หรือไม่?": "ต้องการอนุมัติเอกสาร {no} มูลค่า {amount} หรือไม่?",
+    "{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล": "{no} จะถูกส่งกลับให้ผู้ขอแก้ไข — กรุณาระบุเหตุผล",
+    "เหตุผลที่พบบ่อย": "เหตุผลที่พบบ่อย",
+    "รายละเอียดเพิ่มเติม": "รายละเอียดเพิ่มเติม",
+    "โปรดอธิบายเหตุผลเพิ่มเติม...": "โปรดอธิบายเหตุผลเพิ่มเติม...",
+    "ส่งกลับให้แก้ไข": "ส่งกลับให้แก้ไข",
+    "ราคาสูงกว่า BOQ ที่ตั้งไว้": "ราคาสูงกว่า BOQ ที่ตั้งไว้",
+    "เอกสารแนบไม่ครบ": "เอกสารแนบไม่ครบ",
+    "ขอเปรียบเทียบราคาเพิ่มเติม": "ขอเปรียบเทียบราคาเพิ่มเติม",
+    "ขอแก้สเปกสินค้า": "ขอแก้สเปกสินค้า",
+    "อื่นๆ (พิมพ์เหตุผล)": "อื่นๆ (พิมพ์เหตุผล)"
+  }
+}
