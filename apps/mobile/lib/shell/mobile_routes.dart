@@ -61,10 +61,11 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
   MobileRoute('sales-crm', MobileSection.exec),
 ];
 
-/// Screen ids that have a real ported screen wired into the router. Empty at
-/// MOB-SHELL-00 (this task ships the shell only); every screen port adds its id
-/// here and its widget in [mobileScreenBuilders] (mobile_screen_router.dart).
-const Set<String> kBuiltRouteIds = <String>{};
+/// Screen ids that have a real ported screen wired into the router. `notif` is
+/// the first ported screen (feature/mobile-notif); every further screen port
+/// adds its id here and its widget in [mobileScreenBuilders]
+/// (mobile_screen_router.dart).
+const Set<String> kBuiltRouteIds = <String>{'notif'};
 
 /// The set of all known route ids.
 final Set<String> kMobileRouteIds = kMobileRoutes

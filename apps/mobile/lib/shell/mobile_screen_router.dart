@@ -4,18 +4,22 @@
 // the matching screen out. A BUILT screen (registered in [mobileScreenBuilders])
 // renders itself; every other KNOWN route (kMobileRoutes) renders an honest
 // [ScreenPlaceholder]; an UNKNOWN id also renders a placeholder rather than
-// crashing. This task registers no screens — each screen port adds one builder
-// here and its id to kBuiltRouteIds.
+// crashing. Each screen port adds one builder here and its id to kBuiltRouteIds.
 import 'package:flutter/widgets.dart';
 
+import '../screens/notif/notif_screen.dart';
 import 'mobile_routes.dart';
 import 'screen_placeholder.dart';
 
-/// Builders for the routes that have a real ported screen. Empty at
-/// MOB-SHELL-00; a screen port adds `'<id>': (context) => const XScreen()` here
-/// and its id to [kBuiltRouteIds].
-const Map<String, WidgetBuilder> mobileScreenBuilders =
-    <String, WidgetBuilder>{};
+/// Builds the `notif` screen (its host resolves services + the i18n sidecar from
+/// [AppScope]). A top-level tearoff so [mobileScreenBuilders] stays const.
+Widget _buildNotif(BuildContext context) => const NotifScreenHost();
+
+/// Builders for the routes that have a real ported screen. A screen port adds
+/// `'<id>': _buildX` here (a const-tearoff) and its id to [kBuiltRouteIds].
+const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
+  'notif': _buildNotif,
+};
 
 /// Resolves [routeId] to its widget: the built screen if registered, otherwise an
 /// honest placeholder. Pure lookup, usable without pumping a widget.

@@ -51,10 +51,16 @@ void main() {
   });
 
   test(
-    'no screen is registered yet — every route resolves to a placeholder',
+    'notif is the first registered screen; every built id is a known route',
     () {
-      expect(kBuiltRouteIds, isEmpty);
-      expect(mobileScreenBuilders, isEmpty);
+      // feature/mobile-notif ports the first real screen.
+      expect(kBuiltRouteIds, contains('notif'));
+      expect(mobileScreenBuilders.containsKey('notif'), isTrue);
+      // A builder is registered for exactly the built ids, and each is known.
+      expect(mobileScreenBuilders.keys.toSet(), kBuiltRouteIds);
+      for (final String id in kBuiltRouteIds) {
+        expect(kMobileRouteIds, contains(id));
+      }
     },
   );
 
