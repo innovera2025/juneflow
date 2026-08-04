@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../screens/approvals_inbox/approvals_inbox_screen.dart';
 import '../screens/notif/notif_screen.dart';
+import '../screens/pm_checkin/pm_checkin_screen.dart';
 import '../screens/pm_jobs/pm_jobs_screen.dart';
 import '../screens/pr_action/approve_screen.dart';
 import '../screens/pr_action/reject_screen.dart';
@@ -31,6 +32,13 @@ Widget _buildNotif(BuildContext context) => const NotifScreenHost();
 /// host resolves services + the i18n sidecar from [AppScope]. A read-only list.
 Widget _buildPmJobs(BuildContext context) => const PmJobsScreenHost();
 
+/// Builds the `pm-checkin` screen (the first offline-WRITE screen). Its host
+/// resolves services + the i18n sidecar from [AppScope]; the shell has no
+/// route-param mechanism, so a bare tab route mounts it with workOrderId=null → an
+/// honest "no work order selected" state (the approve/reject precedent). pm-jobs
+/// pushes it with a REAL work-order id via the Navigator.push seam.
+Widget _buildPmCheckin(BuildContext context) => const PmCheckinScreenHost();
+
 /// Builds the `approve` / `reject` PR action sheets. Each host resolves services +
 /// its i18n sidecar from [AppScope]; the shell has no route-param mechanism yet, so
 /// prId is null → an honest "no PR selected" state (never a fabricated PR).
@@ -51,6 +59,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'inbox': _buildInbox,
   'notif': _buildNotif,
   'pm-jobs': _buildPmJobs,
+  'pm-checkin': _buildPmCheckin,
   'approve': _buildApprove,
   'reject': _buildReject,
   'sales-crm': _buildSalesCrm,

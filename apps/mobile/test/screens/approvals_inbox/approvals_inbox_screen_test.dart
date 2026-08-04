@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/api/generated/juneflow_api_client.dart';
 import 'package:juneflow_mobile/app/app_scope.dart';
 import 'package:juneflow_mobile/app/app_services.dart';
+import 'package:juneflow_mobile/app/gps_source.dart';
 import 'package:juneflow_mobile/i18n/i18n.dart';
 import 'package:juneflow_mobile/offline/offline.dart';
 import 'package:juneflow_mobile/screens/approvals_inbox/approvals_inbox_agg.dart';
@@ -208,6 +209,8 @@ Future<void> _pumpUnderScope(WidgetTester tester, _FakeRepo repo) async {
     api: JuneflowApiClient(dio),
     syncQueue: InMemorySyncQueue(),
     tokenProvider: () => null,
+    // Inert const source — this inbox test never checks in, so it is never called.
+    gpsSource: const GeolocatorGpsSource(),
   );
   await tester.pumpWidget(
     AppScope(
