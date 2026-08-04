@@ -776,6 +776,15 @@
         "header-update-time-b120",
         "header-date-chip-b120"
       ]
+    },
+    {
+      "screen": "opex-budget",
+      "route": "opex",
+      "ref": "app-baseline/opex-budget.png",
+      "masks": [
+        "header-update-time-b120",
+        "header-date-chip-b120"
+      ]
     }
   ]
 }
