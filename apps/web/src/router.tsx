@@ -74,6 +74,8 @@ import { GLPeriodClose } from "./screens/gl/gl-close";
 import { FARegister } from "./screens/fa/fa-register";
 import { APBilling } from "./screens/ap/ap-billing";
 import { APDeposit } from "./screens/ap/ap-deposit";
+import { APCreditDebit } from "./screens/ap/ap-cn-dn";
+import { GLProjectPL } from "./screens/gl/gl-projectpl";
 import { NotificationsCenter } from "./screens/notifications/notifications";
 import { PettyCash } from "./screens/petty/petty";
 import { APPaymentVoucher } from "./screens/ap/ap-pv";
@@ -192,6 +194,8 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "fa.register": FARegister,
   "ap.billing": APBilling,
   "ap.deposit": APDeposit,
+  "ap.cn-dn": APCreditDebit,
+  "gl.projectpl": GLProjectPL,
   "notifications": NotificationsCenter,
   "petty": PettyCash,
   "opex": OpexBudget,
