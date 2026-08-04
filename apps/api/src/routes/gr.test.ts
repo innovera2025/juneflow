@@ -68,11 +68,15 @@ interface StubOpts {
   // When true, an UPDATE … RETURNING yields 0 rows — models a B-156 optimistic guard
   // whose folded pre-state matched nothing (a concurrent flip / already-advanced doc).
   updateEmpty?: boolean;
+  // B-261: make an insert into a table throw (models a 23505 unique-violation on the
+  // gr_idempotency_uq partial index). Receives the table and the running 0-based
+  // insert count for that table; return an Error to throw, else null/undefined.
+  insertThrows?: (table: unknown, nth: number) => unknown;
 }
 
 /** Base Db stub: canned rows per table (join-aware); capture of write ops. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false } = opts;
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false, insertThrows } = opts;
   const rowsFor = (table: unknown, joins: unknown[]): unknown[] => {
     // Most specific first: a [table, requiredJoin] key whose join is present.
     for (const [key, r] of rows) {
@@ -101,11 +105,16 @@ function stubDb(opts: StubOpts): Db {
     return builder;
   };
   let seq = 0;
+  const insertCalls = new Map<unknown, number>();
   return {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
       values: (values: unknown) => ({
         returning: () => {
+          const nth = insertCalls.get(table) ?? 0;
+          insertCalls.set(table, nth + 1);
+          const thrown = insertThrows?.(table, nth);
+          if (thrown) return Promise.reject(thrown);
           const list = Array.isArray(values) ? values : [values];
           inserted.push({ table, rows: list });
           return Promise.resolve(
@@ -940,5 +949,174 @@ describe("GR return/cancel state machine", () => {
     });
     expect(res.statusCode).toBe(401);
     expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-261 — idempotency contract (client key + partial unique index + replay)
+// The mobile offline SyncProcessor replays a create it never heard back on; the
+// same idempotency_key must return the ORIGINAL receipt (money=SERVER), never a
+// duplicate. A 23505 on gr_idempotency_uq is the dedup point (mirrors B-167).
+// ---------------------------------------------------------------------------
+
+const IDEMP_KEY = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+/** A Postgres unique-violation (23505) — what the gr_idempotency_uq index throws. */
+const uniqueViolation = (): Error =>
+  Object.assign(new Error("duplicate key value violates unique constraint \"gr_idempotency_uq\""), {
+    code: "23505",
+  });
+
+describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
+  it("same idempotency_key twice → ONE receipt: the replay returns the ORIGINAL byte-for-byte, no 2nd insert", async () => {
+    const inserted: Inserted[] = [];
+    // The ORIGINAL receipt the replay must resolve. createdAt undefined mirrors the
+    // fresh insert's RETURNING (the handler never sets it — the DB defaults it), so
+    // the two responses serialize identically (a real replay reads the DB-stamped row).
+    const original = { ...gr("new-0", { poId: PO, received: 300 }), createdAt: undefined };
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]], // ordered 1000 → partial
+        [grs, [original]],
+        [vendors, [vendorRow]],
+      ],
+      inserted,
+      // the 2nd create (the replay) trips the idempotency index; the 1st inserts fine.
+      insertThrows: (table, nth) => (table === grs && nth >= 1 ? uniqueViolation() : null),
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const payload = { po_id: PO, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 300, qty_rejected: 0 }] };
+    const res1 = await app.inject({ method: "POST", url: "/api/v1/gr", payload });
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/gr", payload });
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    // The replay is idempotent — the client sees its OWN receipt (same id, same money),
+    // never a 409, never a duplicate.
+    expect(res2.json()).toEqual(res1.json());
+    expect(res1.json().id).toBe("new-0");
+    expect(res2.json().id).toBe("new-0");
+    expect(res2.json().received).toBe(300);
+    // exactly ONE gr row written across BOTH requests — the replay tripped 23505 before any write.
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(1);
+    // and the persisted receipt carries the client key.
+    expect((inserted.find((w) => w.table === grs)!.rows[0] as { idempotencyKey: string }).idempotencyKey).toBe(IDEMP_KEY);
+  });
+
+  it("the replay dedup SELECT is tenant-scoped (binds company_id + the key — a foreign key never resolves our GR)", async () => {
+    const captured: Captured[] = [];
+    const original = { ...gr("new-0", { poId: PO, received: 300 }), createdAt: undefined };
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, [original]],
+        [vendors, [vendorRow]],
+      ],
+      captured,
+      insertThrows: (table) => (table === grs ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 300 }] },
+    });
+    expect(res.statusCode).toBe(201);
+    // the dedup resolve filtered grs by the client key — and every such read is
+    // company-scoped on the project root (no cross-tenant leak).
+    const keyed = captured.filter((c) => c.table === grs && paramsOf(c.where).includes(IDEMP_KEY));
+    expect(keyed.length).toBeGreaterThan(0);
+    for (const c of keyed) {
+      expect(paramsOf(c.where)).toContain(COMPANY);
+      expect(paramsOf(c.where)).not.toContain(OTHER_COMPANY);
+    }
+  });
+
+  it("409s when a key collision resolves to NO receipt in this tenant (a cross-tenant clash — never a leak or a fabricated success)", async () => {
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, []], // the colliding gr belongs to ANOTHER tenant → invisible through our chain
+        [vendors, [vendorRow]],
+      ],
+      insertThrows: (table) => (table === grs ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 300 }] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+  });
+
+  it("different idempotency_keys → two distinct receipts (no dedup path)", async () => {
+    const inserted: Inserted[] = [];
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, [gr("g", { poId: PO, received: 300 })]],
+        [vendors, [vendorRow]],
+      ],
+      inserted,
+      // distinct keys never collide on a real DB → the stub never throws.
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const r1 = await app.inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: "key-A", lines: [{ qty_ok: 300 }] },
+    });
+    const r2 = await app.inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: "key-B", lines: [{ qty_ok: 300 }] },
+    });
+    expect(r1.statusCode).toBe(201);
+    expect(r2.statusCode).toBe(201);
+    const grInserts = inserted.filter((w) => w.table === grs);
+    expect(grInserts).toHaveLength(2); // two real receipts, each with its own key
+    expect((grInserts[0]!.rows[0] as { idempotencyKey: string }).idempotencyKey).toBe("key-A");
+    expect((grInserts[1]!.rows[0] as { idempotencyKey: string }).idempotencyKey).toBe("key-B");
+  });
+
+  it("no idempotency_key → a normal single create; the key persists as null (web clients unchanged, no dedup path)", async () => {
+    const inserted: Inserted[] = [];
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, [gr("new-0", { poId: PO, received: 300 })]],
+        [vendors, [vendorRow]],
+      ],
+      inserted,
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, lines: [{ qty_ok: 300 }] },
+    });
+    expect(res.statusCode).toBe(201);
+    const grInserts = inserted.filter((w) => w.table === grs);
+    expect(grInserts).toHaveLength(1);
+    expect((grInserts[0]!.rows[0] as { idempotencyKey: string | null }).idempotencyKey).toBe(null);
   });
 });
