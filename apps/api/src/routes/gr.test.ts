@@ -60,8 +60,14 @@ interface Updated {
 // so the two grs reads in GET /gr (PO chain vs WO chain) can return DIFFERENT
 // rows — the stub cannot otherwise tell the INNER-JOIN chains apart.
 type RowKey = unknown | [unknown, unknown];
+// B-264: a rows VALUE may also be a function of the read's WHERE. POST /gr now runs
+// an idempotency PRE-CHECK — a grs read whose WHERE binds the client key — ALONGSIDE
+// the handler's other (unkeyed) grs reads, and the row-blind stub cannot otherwise
+// tell "resolve the client's own receipt" from "the anchor's cumulative receipts".
+// See keyedGrs() below.
+type RowSource = unknown[] | ((where: SQL | undefined) => unknown[]);
 interface StubOpts {
-  rows: Array<[RowKey, unknown[]]>;
+  rows: Array<[RowKey, RowSource]>;
   captured?: Captured[];
   inserted?: Inserted[];
   updated?: Updated[];
@@ -78,12 +84,20 @@ interface StubOpts {
 /** Base Db stub: canned rows per table (join-aware); capture of write ops. */
 function stubDb(opts: StubOpts): Db {
   const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false, insertThrows } = opts;
-  const rowsFor = (table: unknown, joins: unknown[]): unknown[] => {
+  const resolve = (src: RowSource, where: SQL | undefined): unknown[] =>
+    typeof src === "function" ? src(where) : src;
+  const rowsFor = (
+    table: unknown,
+    joins: unknown[],
+    where: SQL | undefined,
+  ): unknown[] => {
     // Most specific first: a [table, requiredJoin] key whose join is present.
     for (const [key, r] of rows) {
-      if (Array.isArray(key) && key[0] === table && joins.includes(key[1])) return r;
+      if (Array.isArray(key) && key[0] === table && joins.includes(key[1])) {
+        return resolve(r, where);
+      }
     }
-    for (const [key, r] of rows) if (key === table) return r;
+    for (const [key, r] of rows) if (key === table) return resolve(r, where);
     return [];
   };
   const builderFor = (table: unknown) => {
@@ -96,11 +110,11 @@ function stubDb(opts: StubOpts): Db {
       },
       where: (where: SQL) => {
         captured.push({ table, where });
-        return Promise.resolve(rowsFor(table, joins));
+        return Promise.resolve(rowsFor(table, joins, where));
       },
       then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
         captured.push({ table, where: undefined });
-        return Promise.resolve(rowsFor(table, joins)).then(onOk, onErr);
+        return Promise.resolve(rowsFor(table, joins, undefined)).then(onOk, onErr);
       },
     };
     return builder;
@@ -988,6 +1002,31 @@ const pgUniqueViolation = (constraint: string | null = GR_IDEMP_UQ): Error =>
 const uniqueViolation = (constraint: string | null = GR_IDEMP_UQ): Error =>
   Object.assign(new Error("Failed query"), { cause: pgUniqueViolation(constraint) });
 
+/**
+ * B-264: POST /gr resolves the client's OWN receipt by idempotency_key BEFORE the
+ * anchor status gate, so a keyed create issues TWO kinds of grs read — the keyed
+ * resolve (pre-check, and again in the 23505 catch) and the unkeyed anchor reads
+ * (the cumulative received_total). The row-blind stub answers every grs read the
+ * same, so this splits them: a read whose WHERE binds one of `byKey`'s keys gets
+ * that key's rows (what the key resolves to — [] = not stored yet, or another
+ * tenant's/anchor's key we cannot see); every other grs read gets `unkeyed`.
+ * Pass a MUTABLE array as a key's rows to model a row that lands mid-flight (the
+ * original committing between our pre-check and our insert = the real race).
+ */
+const keyedGrs =
+  (byKey: Record<string, unknown[]>, unkeyed: unknown[] = []) =>
+  (where: SQL | undefined): unknown[] => {
+    const params = paramsOf(where);
+    for (const [key, rows] of Object.entries(byKey)) {
+      if (params.includes(key)) return rows;
+    }
+    return unkeyed;
+  };
+
+/** Every grs read this request made whose WHERE bound the client key. */
+const keyedReads = (captured: Captured[], key = IDEMP_KEY): Captured[] =>
+  captured.filter((c) => c.table === grs && paramsOf(c.where).includes(key));
+
 describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
   it("same idempotency_key twice → ONE receipt: the replay returns the ORIGINAL byte-for-byte, no 2nd insert", async () => {
     const inserted: Inserted[] = [];
@@ -995,13 +1034,15 @@ describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
     // fresh insert's RETURNING (the handler never sets it — the DB defaults it), so
     // the two responses serialize identically (a real replay reads the DB-stamped row).
     const original = { ...gr("new-0", { poId: PO, received: 300 }), createdAt: undefined };
+    // What the client key resolves to: nothing before the first create commits.
+    const stored: unknown[] = [];
     const db = stubDb({
       rows: [
         [pos, [poRow("approved")]],
         [prs, [prRow]],
         [projects, [project]],
         [prItems, [prLine("l0", "1000")]], // ordered 1000 → partial
-        [grs, [original]],
+        [grs, keyedGrs({ [IDEMP_KEY]: stored }, [original])],
         [vendors, [vendorRow]],
       ],
       inserted,
@@ -1011,6 +1052,7 @@ describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
     const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
     const payload = { po_id: PO, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 300, qty_rejected: 0 }] };
     const res1 = await app.inject({ method: "POST", url: "/api/v1/gr", payload });
+    stored.push(original); // the first receipt is now committed — the key resolves
     const res2 = await app.inject({ method: "POST", url: "/api/v1/gr", payload });
 
     expect(res1.statusCode).toBe(201);
@@ -1091,7 +1133,8 @@ describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
         [prs, [prRow]],
         [projects, [project]],
         [prItems, [prLine("l0", "1000")]],
-        [grs, [gr("g", { poId: PO, received: 300 })]],
+        // neither key is stored → both pre-checks miss → two real creates.
+        [grs, keyedGrs({ "key-A": [], "key-B": [] }, [gr("g", { poId: PO, received: 300 })])],
         [vendors, [vendorRow]],
       ],
       inserted,
@@ -1144,6 +1187,290 @@ describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// B-264 — the replay must survive an ORDER-CLOSING receipt.
+// B-261's replay lived only in the insert's 23505 catch, which sits BELOW the
+// anchor status gate — and a FULL receipt closes the PO/WO in this same handler.
+// So the exact scenario the key exists for (commit succeeded → response lost →
+// SyncProcessor replays) hit `po.status !== "approved"` and got 409 INVALID_STATE
+// for goods that WERE received; sync_processor.dart dead-letters every 4xx
+// permanently, so the storekeeper saw FAILED with no in-app recovery. This is
+// st-receive's HAPPY path (mobile-field.jsx defaults recv = ordered), yet every
+// B-261 test seeded a PARTIAL receipt (qty_ok 300 of 1000) — which is precisely
+// why it survived. The fix resolves the client's own receipt BEFORE that gate.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayable)", () => {
+  const PO2 = "dddddddd-dddd-dddd-dddd-dddddddddd02";
+  const FRESH_KEY = "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a";
+
+  it("FULL receipt closes the PO — replaying the same key STILL returns the original 201 (not 409), with ONE gr + ONE line + ONE defect written", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    // The persisted rows the replay re-reads. They mirror what request 1's inserts
+    // RETURNed (the stub ids run new-0 gr → new-1 gr_item → new-2 defect, in handler
+    // order), so the replay rebuilds a byte-identical envelope from real state.
+    const original = {
+      ...gr("new-0", { poId: PO, received: 1000, rejected: 50 }),
+      createdAt: undefined,
+    };
+    const originalItem = {
+      id: "new-1",
+      grId: "new-0",
+      boqItemId: null,
+      name: "ปูนซีเมนต์",
+      orderedQty: "1000",
+      receivedQty: "1000",
+      unit: "ถุง",
+      price: "300.00",
+      currencyCode: "THB",
+      createdAt: undefined,
+      updatedAt: undefined,
+    };
+    const originalDefect = {
+      id: "new-2",
+      grId: "new-0",
+      note: "GR new-0: 50 rejected (ตีกลับ)",
+    };
+    // The PO the receipt closes — MUTABLE, because closing it is the whole defect.
+    const po = poRow("approved");
+    const stored: unknown[] = []; // what the client key resolves to (nothing yet)
+    const db = stubDb({
+      rows: [
+        [pos, [po]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]], // ordered 1000 → a 1000 receipt is FULL
+        [grs, keyedGrs({ [IDEMP_KEY]: stored }, [original])],
+        [grItems, [originalItem]],
+        [defectReports, [originalDefect]],
+        [vendors, [vendorRow]],
+      ],
+      inserted,
+      updated,
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const payload = {
+      po_id: PO,
+      idempotency_key: IDEMP_KEY,
+      lines: [
+        {
+          name: "ปูนซีเมนต์",
+          ordered_qty: 1000,
+          qty_ok: 1000, // the whole order — st-receive's default recv = ordered
+          qty_rejected: 50,
+          unit: "ถุง",
+          price: 300,
+        },
+      ],
+    };
+
+    const res1 = await app.inject({ method: "POST", url: "/api/v1/gr", payload });
+    expect(res1.statusCode).toBe(201);
+    expect(res1.json().partial).toBe(false); // the order is fully received…
+    // …so this very handler closed the PO — the state that used to strand the replay.
+    const closes = updated.filter((u) => u.table === pos);
+    expect(closes).toHaveLength(1);
+    expect(closes[0]!.set).toEqual({ status: "closed" });
+
+    // The response never reached the client (the SyncProcessor's lost 201). The
+    // world moved on exactly as the handler left it: the PO is closed, the receipt
+    // and its key are committed.
+    po.status = "closed";
+    stored.push(original);
+
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/gr", payload });
+
+    // THE FIX: the storekeeper's replay is answered with their OWN receipt.
+    expect(res2.statusCode).toBe(201); // was 409 INVALID_STATE → permanent dead-letter
+    expect(res2.json()).toEqual(res1.json()); // byte-identical, same envelope builder
+    expect(res2.json().id).toBe("new-0");
+    expect(res2.json().received).toBe(1000);
+    expect(res2.json().money).toBe(300000); // 1000 × 300.00 — money re-read, not re-derived
+    // …and NOTHING was written twice across the two requests.
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(1);
+    expect(inserted.filter((w) => w.table === grItems)).toHaveLength(1);
+    expect(inserted.filter((w) => w.table === defectReports)).toHaveLength(1);
+    expect(updated.filter((u) => u.table === pos)).toHaveLength(1); // no second close
+  });
+
+  it("the same key against a DIFFERENT PO does NOT hand back the first PO's receipt (409, never someone else's document)", async () => {
+    const original = { ...gr("new-0", { poId: PO, received: 1000 }), createdAt: undefined };
+    const po2 = { ...poRow("approved"), id: PO2 };
+    const db = stubDb({
+      rows: [
+        [pos, [po2]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        // The keyed resolve binds the key AND the anchor po_id. The ORIGINAL hangs
+        // off PO, so a resolve anchored on PO2 matches nothing — that anchor filter
+        // is the assertion here; a key-ONLY lookup would return the wrong receipt.
+        [
+          grs,
+          (where) => {
+            const p = paramsOf(where);
+            if (!p.includes(IDEMP_KEY)) return [];
+            return p.includes(PO) ? [original] : [];
+          },
+        ],
+        [vendors, [vendorRow]],
+      ],
+      // the key is globally taken (gr_idempotency_uq is a partial index on the key
+      // ALONE), so the insert collides even though the anchor differs.
+      insertThrows: (table) => (table === grs ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO2, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 1000 }] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().id).toBeUndefined(); // PO's receipt was NOT leaked onto PO2
+  });
+
+  it("cross-tenant: company B replaying company A's key gets nothing of A's — both keyed resolves bind B's company_id", async () => {
+    const captured: Captured[] = [];
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        // A's receipt is invisible through B's chain — the keyed resolve (pre-check
+        // AND catch) is a selectThrough, not a bare `where idempotency_key = …`.
+        [grs, keyedGrs({ [IDEMP_KEY]: [] }, [])],
+        [vendors, [vendorRow]],
+      ],
+      captured,
+      insertThrows: (table) => (table === grs ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 1000 }] },
+    });
+    expect(res.statusCode).toBe(409); // an honest refusal, never A's receipt
+    expect(res.json().id).toBeUndefined();
+    // both keyed resolves ran (pre-check, then the catch) and BOTH were scoped to B.
+    const keyed = keyedReads(captured);
+    expect(keyed).toHaveLength(2);
+    for (const c of keyed) {
+      expect(paramsOf(c.where)).toContain(COMPANY);
+      expect(paramsOf(c.where)).not.toContain(OTHER_COMPANY);
+    }
+  });
+
+  it("a FRESH receipt against a CLOSED PO is still 409 — the pre-check only excuses a key that resolves", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("closed")]], // already fully received
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, keyedGrs({ [FRESH_KEY]: [] }, [])], // the new key resolves to nothing
+        [vendors, [vendorRow]],
+      ],
+      captured,
+      inserted,
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    for (const body of [
+      { po_id: PO, lines: [{ qty_ok: 10 }] }, // no key at all (a web client)
+      { po_id: PO, idempotency_key: FRESH_KEY, lines: [{ qty_ok: 10 }] }, // a NEW key
+    ]) {
+      const res = await app.inject({ method: "POST", url: "/api/v1/gr", payload: body });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("INVALID_STATE");
+      expect(res.json().message).toMatch(/approved \(open\) PO/);
+    }
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(0); // nothing received
+  });
+
+  it("a blank / whitespace / absent key never enters the replay branch (and never matches a stored NULL)", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        // a pre-existing key-less receipt on this PO (idempotency_key IS NULL) —
+        // a blank key must never resolve to it.
+        [grs, [gr("g-null", { poId: PO, received: 100 })]],
+        [vendors, [vendorRow]],
+      ],
+      captured,
+      inserted,
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    for (const body of [
+      { po_id: PO, idempotency_key: "   ", lines: [{ qty_ok: 10 }] },
+      { po_id: PO, idempotency_key: "", lines: [{ qty_ok: 10 }] },
+      { po_id: PO, lines: [{ qty_ok: 10 }] },
+    ]) {
+      const res = await app.inject({ method: "POST", url: "/api/v1/gr", payload: body });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().id).not.toBe("g-null"); // a real create, not the NULL-key row
+    }
+    // three real receipts, each persisting a NULL key — and no read ever bound a blank.
+    const grInserts = inserted.filter((w) => w.table === grs);
+    expect(grInserts).toHaveLength(3);
+    for (const w of grInserts) {
+      expect((w.rows[0] as { idempotencyKey: string | null }).idempotencyKey).toBe(null);
+    }
+    for (const c of captured.filter((c) => c.table === grs)) {
+      expect(paramsOf(c.where)).not.toContain("   ");
+      expect(paramsOf(c.where)).not.toContain("");
+    }
+  });
+
+  it("the 23505 backstop still fires when the pre-check MISSES (two simultaneous replays of the full receipt)", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const original = { ...gr("new-0", { poId: PO, received: 1000 }), createdAt: undefined };
+    const stored: unknown[] = []; // our pre-check reads BEFORE the other replay commits
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, keyedGrs({ [IDEMP_KEY]: stored }, [original])],
+        [vendors, [vendorRow]],
+      ],
+      inserted,
+      captured,
+      // …and it commits between our pre-check and our insert. The pre-check is NOT a
+      // substitute for the unique index (money-post-idempotency lesson).
+      insertThrows: (table) => {
+        if (table !== grs) return null;
+        stored.push(original);
+        return uniqueViolation();
+      },
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 1000 }] },
+    });
+    expect(res.statusCode).toBe(201); // the loser is answered with the winner's receipt
+    expect(res.json().id).toBe("new-0");
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(0); // no duplicate row
+    expect(keyedReads(captured)).toHaveLength(2); // pre-check missed, catch resolved
+  });
+});
+
+// ---------------------------------------------------------------------------
 // B-263 — the B-261 replay catch gates on the CONSTRAINT NAME, not on SQLSTATE
 // alone. 23505 says "some unique constraint was violated"; it does not say which.
 // Today gr carries only its PK + gr_idempotency_uq, so the old SQLSTATE-only gate
@@ -1155,14 +1482,28 @@ describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
 
 describe("POST /api/v1/gr — B-263 (the 23505 replay gate is constraint-name-specific)", () => {
   /** The ORIGINAL receipt a replay must resolve (createdAt mirrors a fresh RETURNING). */
-  const baseRows = (): StubOpts["rows"] => [
+  const ORIGINAL = { ...gr("new-0", { poId: PO, received: 300 }), createdAt: undefined };
+  /**
+   * B-264: this describe's subject is the 23505 CATCH, so the pre-check must MISS —
+   * `stored` (what the client key resolves to) starts EMPTY. That is also the real
+   * race: our pre-check read nothing, then the other writer committed. A static
+   * [grs, [ORIGINAL]] would let the pre-check answer first and the constraint-name
+   * gate below would never be exercised at all.
+   */
+  const baseRows = (stored: unknown[] = []): StubOpts["rows"] => [
     [pos, [poRow("approved")]],
     [prs, [prRow]],
     [projects, [project]],
     [prItems, [prLine("l0", "1000")]], // ordered 1000 → partial receipt
-    [grs, [{ ...gr("new-0", { poId: PO, received: 300 }), createdAt: undefined }]],
+    [grs, keyedGrs({ [IDEMP_KEY]: stored }, [ORIGINAL])],
     [vendors, [vendorRow]],
   ];
+  /** An insert that LOSES the race: the other writer's row lands, then we 23505. */
+  const raced = (stored: unknown[], err: Error) => (table: unknown) => {
+    if (table !== grs) return null;
+    stored.push(ORIGINAL);
+    return err;
+  };
   const postKeyed = async (db: Db) =>
     (await buildTestApp({ resolveTenant: async () => SESSION, db })).inject({
       method: "POST",
@@ -1172,11 +1513,12 @@ describe("POST /api/v1/gr — B-263 (the 23505 replay gate is constraint-name-sp
 
   it("(a) 23505 naming gr_idempotency_uq → the REPLAY still runs: the ORIGINAL receipt, no 2nd write", async () => {
     const inserted: Inserted[] = [];
+    const stored: unknown[] = [];
     const db = stubDb({
-      rows: baseRows(),
+      rows: baseRows(stored),
       inserted,
       // drizzle-wrapped (the production shape): DrizzleQueryError → cause → DatabaseError.
-      insertThrows: (table) => (table === grs ? uniqueViolation(GR_IDEMP_UQ) : null),
+      insertThrows: raced(stored, uniqueViolation(GR_IDEMP_UQ)),
     });
     const res = await postKeyed(db);
     expect(res.statusCode).toBe(201);
@@ -1186,9 +1528,10 @@ describe("POST /api/v1/gr — B-263 (the 23505 replay gate is constraint-name-sp
   });
 
   it("(a) the same violation UNWRAPPED (raw pg DatabaseError, constraint at the top level) replays too", async () => {
+    const stored: unknown[] = [];
     const db = stubDb({
-      rows: baseRows(),
-      insertThrows: (table) => (table === grs ? pgUniqueViolation(GR_IDEMP_UQ) : null),
+      rows: baseRows(stored),
+      insertThrows: raced(stored, pgUniqueViolation(GR_IDEMP_UQ)),
     });
     const res = await postKeyed(db);
     expect(res.statusCode).toBe(201);
@@ -1199,7 +1542,7 @@ describe("POST /api/v1/gr — B-263 (the 23505 replay gate is constraint-name-sp
     const captured: Captured[] = [];
     const inserted: Inserted[] = [];
     const db = stubDb({
-      rows: baseRows(),
+      rows: baseRows(), // the key resolves to nothing — this collision is not a replay
       captured,
       inserted,
       // a hypothetical future `unique(no)` on gr — a real collision, but NOT a replay.
@@ -1210,10 +1553,10 @@ describe("POST /api/v1/gr — B-263 (the 23505 replay gate is constraint-name-sp
     // a 201 nor a fabricated "idempotency_key already used" 409.
     expect(res.statusCode).toBe(500);
     expect(res.json().code).toBe("INTERNAL_ERROR");
-    // and the replay path never even started: no dedup SELECT bound the client key…
-    expect(
-      captured.filter((c) => c.table === grs && paramsOf(c.where).includes(IDEMP_KEY)),
-    ).toHaveLength(0);
+    // and the CATCH's replay never started: the only keyed resolve was the B-264
+    // pre-check (which found nothing) — a second one would mean the constraint-name
+    // gate let an unrelated collision into the replay path.
+    expect(keyedReads(captured)).toHaveLength(1);
     expect(inserted.filter((w) => w.table === grs)).toHaveLength(0); // …and no receipt was written
   });
 
@@ -1227,9 +1570,7 @@ describe("POST /api/v1/gr — B-263 (the 23505 replay gate is constraint-name-sp
     const res = await postKeyed(db);
     expect(res.statusCode).toBe(500);
     expect(res.json().code).toBe("INTERNAL_ERROR");
-    expect(
-      captured.filter((c) => c.table === grs && paramsOf(c.where).includes(IDEMP_KEY)),
-    ).toHaveLength(0);
+    expect(keyedReads(captured)).toHaveLength(1); // the pre-check only, never the catch
   });
 });
 

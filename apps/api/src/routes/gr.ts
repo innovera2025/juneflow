@@ -277,22 +277,26 @@ async function existingGrDefect(
 }
 
 /**
- * B-261 idempotency REPLAY. The gr insert tripped gr_idempotency_uq (23505): a
- * POST /gr carrying a previously-seen idempotency_key is the mobile SyncProcessor's
- * at-least-once retry, NOT a new receipt. Resolve the ORIGINAL gr by its client key
- * scoped through the SAME po/wo→project chain the create used (defense in depth: a
- * foreign tenant's colliding key must NEVER resolve our GR), then rebuild the exact
- * 201 create envelope from persisted state — same id, same received/rejected, money
- * re-read not recomputed, never a second write. A key that collided at the DB layer
- * but resolves to nothing in THIS tenant/anchor (a cross-tenant clash) is a 409 —
- * never a leak, never a fabricated receipt.
+ * Resolve the ORIGINAL receipt behind a client idempotency_key, scoped through the
+ * SAME po/wo → pr → project chain every other read in this file uses (selectThrough
+ * with GR_PO_HOPS / GR_WO_HOPS — identical to findGr / grItemsFor / the create's own
+ * anchorGrs read). Two filters, BOTH load-bearing:
+ *   - the tenant chain — a key-only lookup would let one company's replay resolve
+ *     ANOTHER company's receipt (gr_idempotency_uq is a GLOBAL partial index on
+ *     idempotency_key alone, so a cross-tenant key clash is physically possible);
+ *   - the ANCHOR (po_id / wo_id) — the same key replayed against a DIFFERENT PO must
+ *     NOT hand back the first PO's receipt. Handing back someone else's document is
+ *     worse than a 409, so a non-matching anchor deliberately resolves to null: the
+ *     caller falls through to the insert, trips the global index, and the catch
+ *     answers the honest 409 "idempotency_key already used".
+ * Used by BOTH the B-264 pre-check and the B-261 23505 catch — one resolver, so the
+ * two paths can never diverge on what counts as "the client's own receipt".
  */
-async function replayExistingGr(
+async function findGrByIdempotencyKey(
   db: TenantDb,
-  reply: FastifyReply,
-  args: { idempotencyKey: string; poId: string; woId: string; prId: string },
-): Promise<FastifyReply> {
-  const { idempotencyKey, poId, woId, prId } = args;
+  args: { idempotencyKey: string; poId: string; woId: string },
+): Promise<GrRow | null> {
+  const { idempotencyKey, poId, woId } = args;
   const hops = poId ? GR_PO_HOPS : GR_WO_HOPS;
   const anchorEq = poId ? eq(grs.poId, poId) : eq(grs.woId, woId);
   const [existing] = await db.selectThrough(
@@ -300,12 +304,23 @@ async function replayExistingGr(
     hops,
     and(eq(grs.idempotencyKey, idempotencyKey), anchorEq),
   );
-  if (!existing) {
-    return reply.code(409).send({
-      code: "INVALID_STATE",
-      message: "idempotency_key already used",
-    });
-  }
+  return existing ?? null;
+}
+
+/**
+ * Rebuild and send the 201 create envelope for an ALREADY-PERSISTED receipt — same
+ * id, same received/rejected, money re-read not recomputed, never a second write.
+ * The ONLY place a replay 201 is produced (both the B-264 pre-check and the B-261
+ * 23505 catch call it), so a replayed POST is byte-identical to the original create
+ * BY CONSTRUCTION rather than by two hand-built shapes happening to agree today.
+ */
+async function sendExistingGr(
+  db: TenantDb,
+  reply: FastifyReply,
+  existing: GrRow,
+  args: { poId: string; woId: string; prId: string },
+): Promise<FastifyReply> {
+  const { poId, woId, prId } = args;
   // Re-derive the envelope from persisted state (never a second write): the
   // per-line items, the resolved vendor, the cumulative partial/full against the
   // source PR, and the receipt's existing defect_report (if a rejection).
@@ -330,6 +345,32 @@ async function replayExistingGr(
       defect,
     }),
   );
+}
+
+/**
+ * B-261 idempotency REPLAY, reached from the 23505 CATCH. The gr insert tripped
+ * gr_idempotency_uq: a POST /gr carrying a previously-seen idempotency_key is the
+ * mobile SyncProcessor's at-least-once retry, NOT a new receipt. This is the
+ * CONCURRENCY BACKSTOP for the B-264 pre-check — the pre-check read nothing, then a
+ * racing replay of the same key committed before our insert. A key that collided at
+ * the DB layer but resolves to nothing in THIS tenant/anchor (a cross-tenant clash,
+ * or the same key against a different PO) is a 409 — never a leak, never a
+ * fabricated receipt. Kept deliberately: a pre-check is NOT a substitute for the
+ * unique index + catch (money-post-idempotency lesson).
+ */
+async function replayExistingGr(
+  db: TenantDb,
+  reply: FastifyReply,
+  args: { idempotencyKey: string; poId: string; woId: string; prId: string },
+): Promise<FastifyReply> {
+  const existing = await findGrByIdempotencyKey(db, args);
+  if (!existing) {
+    return reply.code(409).send({
+      code: "INVALID_STATE",
+      message: "idempotency_key already used",
+    });
+  }
+  return sendExistingGr(db, reply, existing, args);
 }
 
 /** Register the GR routes on the given (already /api/v1-prefixed) scope. */
@@ -486,9 +527,10 @@ export function registerGrRoute(app: FastifyInstance): void {
     }
 
     // Resolve the anchor doc (scoped) + its source PR — a foreign/absent id
-    // resolves to nothing. Only an APPROVED (issued, still-open) PO/WO may be
-    // received against; a draft/pending/rejected/already-closed one is 409.
+    // resolves to nothing (404 regardless of any idempotency key: a replay against
+    // an anchor that is not ours must never be answered from our data).
     let prId: string;
+    let anchorStatus: string;
     if (poId) {
       const [po] = await db.selectThrough(pos, PO_HOPS, eq(pos.id, poId));
       if (!po) {
@@ -496,13 +538,8 @@ export function registerGrRoute(app: FastifyInstance): void {
           .code(404)
           .send({ code: "NOT_FOUND", message: "po not found" });
       }
-      if (po.status !== "approved") {
-        return reply.code(409).send({
-          code: "INVALID_STATE",
-          message: "goods can only be received against an approved (open) PO",
-        });
-      }
       prId = po.prId!;
+      anchorStatus = po.status;
     } else {
       const [wo] = await db.selectThrough(wos, WO_HOPS, eq(wos.id, woId));
       if (!wo) {
@@ -510,13 +547,42 @@ export function registerGrRoute(app: FastifyInstance): void {
           .code(404)
           .send({ code: "NOT_FOUND", message: "wo not found" });
       }
-      if (wo.status !== "approved") {
-        return reply.code(409).send({
-          code: "INVALID_STATE",
-          message: "work can only be received against an approved (open) WO",
-        });
-      }
       prId = wo.prId!;
+      anchorStatus = wo.status;
+    }
+
+    // B-264: the idempotency PRE-CHECK, deliberately placed BEFORE the anchor
+    // status gate below. A FULL (order-closing) receipt — st-receive's default,
+    // since mobile-field.jsx defaults recv = ordered — sets the PO/WO to `closed`
+    // in this very handler, so a SyncProcessor replay of that receipt would hit the
+    // gate and be told 409 INVALID_STATE for goods that were actually received;
+    // sync_processor.dart dead-letters every 4xx permanently, so the storekeeper
+    // saw FAILED with no in-app recovery. Resolving the client's OWN receipt first
+    // makes the replay reachable on the happy path. Fall through when nothing
+    // resolves — a key that is new (or belongs to another anchor/tenant) still
+    // meets the full gate below, so a FRESH receipt against a closed PO is still
+    // 409, and the 23505 catch remains the concurrency backstop.
+    if (idempotencyKey) {
+      const existing = await findGrByIdempotencyKey(db, { idempotencyKey, poId, woId });
+      if (existing) {
+        return sendExistingGr(db, reply, existing, { poId, woId, prId });
+      }
+    }
+
+    // Only an APPROVED (issued, still-open) PO/WO may be received against; a
+    // draft/pending/rejected/already-closed one is 409.
+    if (anchorStatus !== "approved") {
+      return reply.code(409).send(
+        poId
+          ? {
+              code: "INVALID_STATE",
+              message: "goods can only be received against an approved (open) PO",
+            }
+          : {
+              code: "INVALID_STATE",
+              message: "work can only be received against an approved (open) WO",
+            },
+      );
     }
 
     // The source PR's project anchors the scoped gr + defect insert.
