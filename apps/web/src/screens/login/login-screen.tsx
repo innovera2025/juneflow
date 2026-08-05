@@ -18,14 +18,19 @@
  * the generated client and persists the token (setAuthToken), then we navigate.
  * The auth-failure branch stays silent: the prototype mock always succeeds, so
  * i18n-full.json carries no "wrong credentials" copy — inventing one is forbidden.
+ * The reset modal's submit was the SECOND mock mechanic here (it toasted "link
+ * sent" with no request at all) and is now wired to POST /auth/forgot — see
+ * forgot-form.tsx. Its failure path is why the local toast host now honours a
+ * tone, exactly as the prototype's notify already did (shell.jsx:82).
  */
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useI18n } from "../../i18n";
+import type { ToastTone } from "../../shell/shell-context";
 import { Btn } from "../../ui/button";
 import { Field } from "../../ui/field";
-import { Icon } from "../../ui/icon";
+import { Icon, type IconName } from "../../ui/icon";
 import { Modal } from "../../ui/modal";
 import { apiClient } from "../../api-client";
 import { setAuthToken } from "../../auth-token";
@@ -34,6 +39,29 @@ import { ForgotForm } from "./forgot-form";
 
 /** Toast auto-dismiss delay — shell.jsx notify() (2400ms). */
 const TOAST_MS = 2400;
+
+/*
+ * Tone -> colour + icon for the local toast host. The prototype's notify already
+ * takes a tone (shell.jsx:82 `notify = (msg, tone = "ok")`) and the app shell's
+ * port maps all four (shell/toast-host.tsx). Login renders BEFORE the shell so it
+ * cannot mount ToastHost (that hook reads useShellCtx); it keeps this local copy
+ * of the same mapping, and the type-only import leaves the screen with no runtime
+ * dependency on the shell. "ok" remains the default, so every toast that existed
+ * before renders exactly the pixels it did before.
+ */
+const TONE_BG: Record<ToastTone, string> = {
+  ok: "var(--ok)",
+  info: "var(--info)",
+  warn: "var(--warn)",
+  danger: "var(--danger)",
+};
+
+const TONE_ICON: Record<ToastTone, IconName> = {
+  ok: "check",
+  info: "info",
+  warn: "warn",
+  danger: "x",
+};
 
 /** Input field style, ported from ScreenLogin.fld(bad) — red border on error. */
 function fieldStyle(bad: boolean): CSSProperties {
@@ -56,15 +84,16 @@ export function LoginScreen() {
   const [email, setEmail] = useState("somchai@rungrueang.co.th");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; tone: ToastTone } | null>(null);
   const [forgotOpen, setForgotOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  // ctx.notify equivalent (shell.jsx) — success/reset toasts are the "ok" tone.
-  const notify = (msg: string) => {
-    setToast(msg);
+  // ctx.notify equivalent (shell.jsx:82) — tone defaults to "ok"; the reset form
+  // passes "danger" when POST /auth/forgot did not go through.
+  const notify = (msg: string, tone: ToastTone = "ok") => {
+    setToast({ msg, tone });
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setToast(null), TOAST_MS);
   };
@@ -249,7 +278,14 @@ export function LoginScreen() {
           size="sm"
           onClose={() => setForgotOpen(false)}
         >
-          <ForgotForm initial={email} onClose={() => setForgotOpen(false)} onNotify={notify} />
+          <ForgotForm
+            initial={email}
+            onClose={() => setForgotOpen(false)}
+            onNotify={notify}
+            // Generated client only (apps/web/CLAUDE.md) — /auth/forgot is public
+            // (security: []), so the bearer middleware simply adds no header.
+            forgot={(body) => apiClient.POST("/auth/forgot", { body })}
+          />
         </Modal>
       )}
 
@@ -262,7 +298,7 @@ export function LoginScreen() {
             left: "50%",
             transform: "translateX(-50%)",
             padding: "12px 18px",
-            background: "var(--ok)",
+            background: TONE_BG[toast.tone],
             color: "#fff",
             borderRadius: 10,
             boxShadow: "0 12px 32px rgba(15,23,42,0.18)",
@@ -274,8 +310,8 @@ export function LoginScreen() {
             zIndex: 6000,
           }}
         >
-          <Icon name="check" size={16} />
-          {toast}
+          <Icon name={TONE_ICON[toast.tone]} size={16} />
+          {toast.msg}
         </div>
       )}
     </div>
