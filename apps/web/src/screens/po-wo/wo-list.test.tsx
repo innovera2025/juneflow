@@ -156,6 +156,25 @@ const render = () => renderToStaticMarkup(<WOList />);
 /** Visible text of a static render — tags (and therefore style attributes) stripped. */
 const text = (html: string) => html.replace(/<[^>]*>/g, "");
 
+/*
+ * CELL-SCOPED readers. A page-wide `text(html)).toContain(DASH)` cannot pin a single cell's
+ * em-dash branch: this screen renders four other em-dashes (KPI strip, progress, detail
+ * panel) that satisfy it whichever way the cell under test goes. These two match the ONE td
+ * whose inline style is unique to that column, so the assertion fails when that cell alone
+ * changes. If a style there is edited the match returns "" and the test goes red rather than
+ * silently passing — a fixture-drift alarm, not a false green.
+ */
+
+/** The scope column's td (the only `max-width:280px` in the render). */
+const scopeCell = (html: string) => html.match(/<td style="[^"]*max-width:280px">(.*?)<\/td>/)?.[1] ?? "";
+
+/**
+ * The retention column's td. Distinguished from the value column beside it, which is the
+ * same `text-align:right` td plus `font-weight:600`.
+ */
+const retentionCell = (html: string) =>
+  html.match(/<td style="padding:14px;vertical-align:middle;text-align:right" class="num">(.*?)<\/td>/)?.[1] ?? "";
+
 beforeEach(() => {
   h.wo = { data: [], isLoading: false };
   h.vendors = [{ id: "v-1", name: "Rungrueang Construction" }];
@@ -192,12 +211,51 @@ describe("WOList <-> GET /wo scope + progress (B-277)", () => {
     expect(shown).toContain(`${TAB_CLOSED}0`);
   });
 
+  /*
+   * The scope assertion is read out of the scope CELL, not the page. `scope` is the source
+   * PR's title (wo.ts) and the column is `text` — a WO whose PR carries no title serves ""
+   * / null, and `{r.scope || DASH}` is what keeps that cell from rendering blank. A page-wide
+   * toContain(DASH) cannot see that guard go: the KPI strip's own em-dashes satisfy it either
+   * way. Blank vs em-dash is cosmetic (no wrong number either way) but it is still the
+   * screen's honest-unknown marker, so it is pinned where it lives.
+   */
   it("em-dashes scope and progress for a WO the server reports plan-less (no bar drawn)", () => {
     h.wo = { data: [SERVED_PLANLESS], isLoading: false };
     const html = render();
     expect(html).not.toContain("border-radius:999px;overflow:hidden"); // no progress bar
     expect(text(html)).not.toContain("0%"); //                            no fabricated 0%
+    expect(scopeCell(html)).toBe(DASH); //                                the cell itself, not the page
     expect(text(html)).toContain(DASH);
+  });
+
+  /* The same cell with a scope served — the marker is the absence branch, not the column. */
+  it("puts the served scope in the scope cell rather than the em-dash marker", () => {
+    h.wo = { data: [SERVED_WO], isLoading: false };
+    expect(scopeCell(render())).toBe("exterior paint Block A");
+  });
+
+  /*
+   * retention_amount is a real derived server column (value x retention_pct / 100), so a 0 is
+   * a TRUE 0, not an unknown — both renderings are honest and neither can print a wrong
+   * number. What the `> 0` test buys is the prototype's distinction between "this WO holds
+   * retention" (the --info money figure) and "it holds none" (the em-dash marker); without it
+   * every retention-free WO prints a bare "0" in the money column. Pinned as a cell, since
+   * `var(--info)` also appears on the KPI strip and the detail StatBlock regardless.
+   */
+  it("marks a WO with no retention held with the em-dash, not a bare money 0", () => {
+    h.wo = { data: [{ ...SERVED_PLANLESS, retention_pct: 0, retention_amount: 0 }], isLoading: false };
+    const cell = retentionCell(render());
+    expect(cell).toContain(DASH);
+    expect(cell).not.toContain("var(--info)"); // not the "money held" rendering
+    expect(text(cell)).not.toBe("0");
+  });
+
+  /* ...and a WO that DOES hold retention still prints the server's figure in that cell. */
+  it("prints the served retention_amount in the retention cell when there is retention", () => {
+    h.wo = { data: [SERVED_WO], isLoading: false };
+    const cell = retentionCell(render());
+    expect(text(cell)).toBe("215,000"); // the wire's retention_amount verbatim
+    expect(cell).toContain("var(--info)");
   });
 });
 
@@ -322,24 +380,38 @@ describe("WOList <-> GET /wo installments[] (B-277)", () => {
     expect(text(render())).not.toContain("at="); // not "at=150" / "at=250"
   });
 
+  /*
+   * pct carries no contract share for a milestone installment, so accumulating would mix
+   * populations.
+   *
+   * FIXTURE DISCIPLINE — the milestone row carries pct 40 ON PURPOSE; do not reset it to 0.
+   * work_period.pct is `numeric(6,3) NOT NULL DEFAULT '0'` and POST /subcon/contracts writes
+   * it for every basis unvalidated, so a milestone row with a stray pct is contract-legal.
+   * With pct 0 the per-element `pct > 0` guard fires first, the basis guard becomes dead
+   * weight the suite would not miss, and this test's name outruns its data. Everything else
+   * here is deliberately valid (seqs 1/2 distinct, both pcts > 0, Sigma 80 <= 100), so the
+   * basis guard is the only thing standing between this render and "at=40" / "at=80" —
+   * where 40 is a milestone's fixed-amount field misread as a share and 80 is two different
+   * populations added together.
+   */
   it("em-dashes the installment caption when the plan is not entirely percent-basis", () => {
-    // pct carries no contract share for a milestone installment, so accumulating would mix populations.
     h.wo = {
       data: [
         {
           ...SERVED_WO,
           installments: [
             period({ id: "a", seq: 1, pct: 40, status: "passed" }),
-            period({ id: "b", seq: 2, basis: "milestone", pct: 0, amount: 500000 }),
+            period({ id: "b", seq: 2, basis: "milestone", pct: 40, amount: 500000 }),
           ],
         },
       ],
       isLoading: false,
     };
     const shown = text(render());
-    expect(shown).not.toContain("at=40");
-    expect(shown).not.toContain("at=0");
+    expect(shown).not.toContain("at="); // neither "at=40" nor the mixed-population "at=80"
+    // Only the unestablishable share is withheld — the rows and their real amounts stay.
     expect(shown).toContain("period 1");
+    expect(shown).toContain("500,000");
   });
 });
 

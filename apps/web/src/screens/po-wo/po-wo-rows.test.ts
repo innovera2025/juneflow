@@ -315,11 +315,29 @@ describe("cumulativeContractPct", () => {
    * uses the fixed amount, distance/unit use perPeriodQty x ratePerUnit and leave pct
    * 0). Accumulating across a mixed plan would add two different populations and
    * silently omit the non-percent installments, so it em-dashes instead.
+   *
+   * FIXTURE DISCIPLINE — do NOT "tidy" the milestone row's pct back to 0. The column is
+   * `numeric(6,3) NOT NULL DEFAULT '0'` and POST /subcon/contracts writes
+   * `pct: String(toNum(pick(p,"pct")) ?? 0)` for EVERY basis with no per-basis check
+   * (apps/api/src/routes/subcon.ts), so a milestone row carrying a stray pct=40 is
+   * contract-legal — and it is the only fixture that reaches the basis guard. With pct 0
+   * the per-element `pct > 0` guard on the line BELOW short-circuits first, the basis
+   * guard becomes deletable with the suite green, and this test's name asserts more than
+   * its data supports. Every other precondition is deliberately satisfied here (seqs 1/2
+   * distinct, both pcts > 0, Sigma 80 <= 100) so `basis === "percent"` is the ONLY line
+   * that can return null.
    */
   it("returns null for a plan that is not entirely percent-basis", () => {
-    const mixed = [period({ id: "a", seq: 1, pct: 40 }), period({ id: "b", seq: 2, basis: "milestone", amount: 500 })];
+    const mixed = [
+      period({ id: "a", seq: 1, pct: 40 }),
+      period({ id: "b", seq: 2, basis: "milestone", pct: 40, amount: 500 }),
+    ];
     expect(cumulativeContractPct(mixed, 1)).toBe(null);
     expect(cumulativeContractPct(mixed, 2)).toBe(null);
+    // The same plan minus the mixed basis IS computed — proving the null above is the
+    // basis guard's doing and not some other precondition this fixture happens to trip.
+    const allPercent = [period({ id: "a", seq: 1, pct: 40 }), period({ id: "b", seq: 2, pct: 40 })];
+    expect(cumulativeContractPct(allPercent, 2)).toBe(80);
   });
 
   it("returns null for an empty plan and for a percent plan with no pct data", () => {
