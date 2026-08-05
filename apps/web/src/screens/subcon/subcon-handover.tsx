@@ -70,6 +70,7 @@ import {
 import {
   toPeriodRow,
   deriveMethod,
+  hasOrdinalSeq,
   acceptedPeriods,
   acceptedValue,
   retentionHeld,
@@ -172,7 +173,18 @@ export function SubconHandover() {
 
   const vendorName = vendorNames.get(contract.vendorId) ?? "";
   const projectName = projectNames.get(contract.projectId) ?? "";
+  // The certificate's method row names the CONTRACT's basis, so deriveMethod only answers
+  // when every period agrees; a mixed plan em-dashes the row instead of naming one row's.
   const methodKey = methodLabelKey(deriveMethod(periods));
+
+  /**
+   * Is the served plan's `seq` a usable ordinal (see hasOrdinalSeq — work_period.seq is
+   * `integer NOT NULL DEFAULT 0`, no unique(contract_id, seq), unvalidated on POST)? The
+   * check runs over the WHOLE plan, not over `accepted`: the printed number claims a
+   * position in the CONTRACT's period plan, so a plan whose duplicates happen to fall
+   * outside the accepted subset still cannot license it.
+   */
+  const seqOk = hasOrdinalSeq(periods);
 
   // Accepted (passed|paid) periods = the certificate body rows + the money summary.
   const accepted = acceptedPeriods(periods);
@@ -297,8 +309,9 @@ export function SubconHandover() {
                 ) : (
                   accepted.map((p) => (
                     <tr key={p.id} style={{ borderTop: "1px solid var(--border)" }}>
+                      {/* period ordinal — withheld when the plan's seq is not one (seqOk). */}
                       <td style={{ ...td, fontWeight: 700 }} className="num">
-                        {p.seq}
+                        {seqOk ? p.seq : DASH}
                       </td>
                       {/* delivered-item work label: no wire -> em-dash */}
                       <td style={td}>{DASH}</td>

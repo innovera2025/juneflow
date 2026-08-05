@@ -59,7 +59,7 @@ import { Icon, type IconName } from "../../ui/icon";
 import { Avatar } from "../../ui/avatar";
 import { Page } from "../../shell/page";
 import { toContractRow, totalValue, millionsValue, formatMoney } from "./subcon-rows";
-import { mapPeriodStatus, statusTone, type PeriodBadge } from "./subcon-accept-rows";
+import { mapPeriodStatus, statusTone, hasOrdinalSeq, type PeriodBadge } from "./subcon-accept-rows";
 import {
   toSubconVendor,
   subconVendors,
@@ -301,6 +301,17 @@ export function SubconProgress() {
     () => sortPeriodsBySeq((periodsQ.data ?? []).map(toProgressPeriod)),
     [periodsQ.data],
   );
+
+  /**
+   * Is this plan's `seq` the distinct ordinal the timeline's period column reads it as?
+   * work_period.seq is `integer NOT NULL DEFAULT 0` with no unique(contract_id, seq) and
+   * POST /subcon/contracts writes it unvalidated (see hasOrdinalSeq), so an all-zero plan
+   * is contract-legal — and "seq 0 = the down-payment row" would then stamp DP on EVERY
+   * row of it. That is a per-element claim, so the precondition is checked over the whole
+   * SERVED plan; when it fails the column em-dashes. Array position is deliberately NOT a
+   * fallback: that fabricates an ordinal the plan never recorded.
+   */
+  const seqOk = useMemo(() => hasOrdinalSeq(periods), [periods]);
 
   // KPI-1/2 (REAL, money-safe): subcon count + working count + Σ contract value.
   const subconCount = vendors.length;
@@ -648,8 +659,12 @@ export function SubconProgress() {
                                     background: disp.rowWarn ? "var(--warn-soft)" : "transparent",
                                   }}
                                 >
+                                  {/* period ordinal — the "seq 0 = DP" reading is only made
+                                      when the served plan's seq is a usable ordinal (seqOk);
+                                      otherwise the column withholds rather than stamp DP on
+                                      a defaulted all-zero plan. */}
                                   <td style={{ ...td, fontWeight: 700 }} className="num">
-                                    {p.seq === 0 ? t("subcon.rowDp") : p.seq}
+                                    {!seqOk ? DASH : p.seq === 0 ? t("subcon.rowDp") : p.seq}
                                   </td>
                                   <td style={{ ...td, fontWeight: 500 }}>{p.title || DASH}</td>
                                   <td style={{ ...td, color: "var(--text-3)" }} className="num">
