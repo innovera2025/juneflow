@@ -75,8 +75,13 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// `pm-notes` is the PM flow's third write screen (feature/mobile-pm-notes): the
 /// maintenance log (cause / fix / advice), which pm-checklist pushes with the same
 /// work-order id once the checklist save is confirmed, and which is honest-empty as a
-/// bare tab route. Every further screen port adds its id here and its widget in
-/// [mobileScreenBuilders] (mobile_screen_router.dart).
+/// bare tab route. `fm-accept`, `field-progress` and `field-pr` are the FOREMAN /
+/// FIELD group (feature/mobile-field-group); each resolves its own subject from a
+/// real read, so none needs a pushed id: fm-accept IS the queue (GET
+/// /acceptance-center), field-progress lists the tenant's subcon contracts when no
+/// contract id is pushed and loads the tapped one's periods, and field-pr picks a BOQ
+/// then one of its lines. Every further screen port adds its id here and its widget
+/// in [mobileScreenBuilders] (mobile_screen_router.dart).
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -88,6 +93,9 @@ const Set<String> kBuiltRouteIds = <String>{
   'pm-checkin',
   'pm-checklist',
   'pm-notes',
+  'fm-accept',
+  'field-progress',
+  'field-pr',
 };
 
 /// The set of all known route ids.

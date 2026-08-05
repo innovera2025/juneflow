@@ -1,0 +1,17 @@
+{
+  "_source": "Static UI keys for the mobile foreman acceptance queue (route fm-accept, pototype/mobile-field.jsx MFmAccept L145-187). KEYS ONLY — never a translation. MIXED LAYERS (the approvals_inbox / pm_checklist / pm_notes precedent): fields marked dict below are stable ids read with t(); the rest are the Thai phrase that IS the phrases-layer key, read with tp(). ZERO-MINT WHERE POSSIBLE: centre=accept.crumbSelf 'ศูนย์ตรวจรับ' is the web Acceptance Center's own crumb and is byte-exact with the first half of the prototype eyebrow (L153 — its second half, the single site name 'ไซต์ราชพฤกษ์', is DROPPED, not keyed: the queue is tenant-wide and every row carries its own project_name, so pinning one site would be a fabrication). tabAll=common.all 'ทั้งหมด' (L155) · unitPeriod=accept.unitPhase 'งวด' — the client composes the period ordinal around the REAL seq because the server deliberately refuses to (apps/api/src/routes/subcon.ts L513-518: 'งวดที่' is UI copy with no key, so it is not invented server-side) · failed=admin.common.actionFailedToast, the same honest failure copy pm_checkin/pm_checklist/pm_notes borrowed under BLOCKERS.md B-268(ก) · empty=boq.edEmptyRowsFilter 'ไม่พบรายการที่ตรงกับตัวกรอง', a genuinely-empty filtered list (distinct from an UNREADABLE queue, which renders an em-dash and no key at all). Two phrase slots ALREADY EXIST in the sacred phrases layer and are reused zero-mint: tabWait 'รอตรวจ' (L155) and pillPeriod 'งวดงาน' (L164). FOUR values are net-new and are staged in agents/orch-d-recon/field-group-i18n.apply.json for a Wei sacred round (docs/extract/i18n-full.json is untouched by this slice): title 'รอตรวจรับ' (L153), pillGr 'รับของ' (L164), pillRejected/tabRejected/btnReject 'ตีกลับ' (L165/L155/L177 — ONE value behind three slots), btnPass 'ตรวจรับผ่าน' (L176). Each already resolves in Thai today (tp returns the key for lang th — the pm_jobs / st_grlist / notif / approve / pm_checklist / pm_notes precedent) and lights up en/zh/ar once applied. NOT REPRESENTED HERE: the prototype's done-state banner '✓ ตรวจแล้ว · ส่งผลเข้าระบบ' (L173) is DROPPED rather than keyed — it is set by a LOCAL boolean (setDone, L150/L176) that claims the result reached the system while nothing was sent, and this port proves a successful inspection by RE-READING the queue instead. 'รอ {n} วัน' (L166), the bold description line (L168), the money on the meta line and the attachment count (L170) are likewise not keyed: each is a VALUE with no wire column, so the slot renders an em-dash under the prototype's own chrome (see fm_accept_screen.dart).",
+  "_layers": "dict (t): centre · tabAll · unitPeriod · failed · empty. phrases (tp): title · tabWait · tabRejected · pillPeriod · pillGr · pillRejected · btnPass · btnReject.",
+  "centre": "accept.crumbSelf",
+  "title": "รอตรวจรับ",
+  "tabAll": "common.all",
+  "tabWait": "รอตรวจ",
+  "tabRejected": "ตีกลับ",
+  "pillPeriod": "งวดงาน",
+  "pillGr": "รับของ",
+  "pillRejected": "ตีกลับ",
+  "unitPeriod": "accept.unitPhase",
+  "btnPass": "ตรวจรับผ่าน",
+  "btnReject": "ตีกลับ",
+  "failed": "admin.common.actionFailedToast",
+  "empty": "boq.edEmptyRowsFilter"
+}
