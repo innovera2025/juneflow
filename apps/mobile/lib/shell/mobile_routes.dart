@@ -107,6 +107,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'tech-jobs',
   'srv-new',
   'tech-close',
+  'exec',
 };
 
 /// The set of all known route ids.

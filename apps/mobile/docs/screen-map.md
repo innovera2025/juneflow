@@ -100,7 +100,7 @@
 
 | id | label | component @ source | โครงจอ (จาก .jsx) | โครง Flutter (structural) | ภาพอ้างอิง |
 |---|---|---|---|---|---|
-| `exec` | Executive Dashboard | `MExecDashboard` @ mobile-screens.jsx:647 | hero gradient ยอดขายสะสม + KPI grid 2×2 + S-Curve (SVG แผน/จริง + เส้นวันนี้) + "รออนุมัติของฉัน" 3 แถว พร้อมปุ่มอนุมัติ + `MTabBar(exec)` | Scaffold + hero card + GridView KPI + chart (custom painter/chart lib · สีจาก token) + list อนุมัติ | — |
+| `exec` | Executive Dashboard | `MExecDashboard` @ mobile-screens.jsx:647-716 | hero gradient ยอดขายสะสม + KPI grid 2×2 + S-Curve (SVG แผน/จริง + เส้นวันนี้) + "รออนุมัติของฉัน" 3 แถว พร้อมปุ่มอนุมัติ + `MTabBar(exec)` | **PORTED** (feature/mobile-exec) — `lib/screens/exec/`: `exec_screen.dart` (hero + KPI grid + S-Curve card + approvals card) · `exec_scurve_painter.dart` (CustomPainter — ไม่เพิ่ม chart package) · `exec_agg.dart` (pure) · `exec_repository.dart` (GET /dashboard/summary → project scope · GET /boq/reports/evm · GET /dashboard/approvals-inbox ใช้ repository ของจอ `inbox` ซ้ำ). REAL = S-Curve + การ์ดรออนุมัติ (นับจริง · เลขเอกสารจริง · ยอดจาก SERVER) · em-dash = hero 3 ค่า + KPI 4 ใบ + % ใน legend (B-299) · ปุ่มอนุมัติรายแถว **ตัดออก** (จอนี้อ่านอย่างเดียว — B-299) | `tests/visual/reference/mobile/exec.png` (มีจริงบนดิสก์ — ข้อความ §6 ที่ว่า "ไม่มีภาพต่อจอ" **ล้าสมัย**) |
 | `sales-crm` | Sales CRM Mobile | `MSalesCRM` @ mobile-screens.jsx:722 | pipeline stage chips (Lead/นัดชม/จอง/สัญญา/โอน) + การ์ด lead (hot/warm) + ปุ่ม 3 โทร/LINE/นัดชม + `MTabBar(exec)` | Scaffold + แถบ chip เลื่อนนอน + ListView การ์ด + action row | — |
 
 ---

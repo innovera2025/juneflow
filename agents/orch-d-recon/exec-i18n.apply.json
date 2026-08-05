@@ -1,0 +1,55 @@
+{
+  "override": "wei-approved:B-298",
+  "_note": "mobile exec (executive dashboard) NEW phrase-layer strings (phrase-as-key, referenced via tp() + the assets/i18n/screens/exec_strings.json sidecar). Thai verbatim from pototype/mobile-screens.jsx MExecDashboard L647-716 — every value below was GREPPED out of the raw .jsx this round, dumped codepoint-by-codepoint, and is asserted byte-exact by test/screens/exec/exec_sidecar_test.dart. Glyph audit of this set: no curly quotes, no U+00B7 middot and no U+2191 arrow inside any minted VALUE — the separator on L694 and the arrow on L687 are chrome composed in Dart, not part of a key. The screen ALREADY renders honest Thai without this file (tp() returns the key itself for lang=th — the merged pm_jobs / st_grlist / notif / approve / pm_checklist / pm_notes precedent, B-254..B-258, B-273, B-280); this handoff lets the sacred round mint the entries into i18n-full.json.phrases so en/zh/ar light up. docs/extract/i18n-full.json is UNTOUCHED by feature/mobile-exec. en/zh/ar are intentionally NOT fabricated here (Juneflow: never translate anew) — the translator fills them, per the en=zh=ar=th fallback convention of B-247/B-248.",
+  "_verify": [
+    "grep -n 'ยูนิตขายแล้ว' pototype/mobile-screens.jsx   -> L660:  <span>148/240 ยูนิตขายแล้ว</span>",
+    "grep -n 'กระแสเงินสด 7 วัน' pototype/mobile-screens.jsx -> L666:  { l: \"กระแสเงินสด 7 วัน\", v: \"-18.4\", u: \"M ฿\", c: \"var(--danger)\" },",
+    "grep -n 'Project ใกล้กำหนด' pototype/mobile-screens.jsx -> L668:  { l: \"Project ใกล้กำหนด\", v: \"3\", u: \"งาน\", c: \"var(--accent)\" },",
+    "grep -n 'ขายเดือนนี้' pototype/mobile-screens.jsx      -> L669:  { l: \"ขายเดือนนี้\", v: \"54.2\", u: \"M ฿\", c: \"var(--ok)\" },",
+    "grep -n 'S-Curve ความคืบหน้า' pototype/mobile-screens.jsx -> L680:  <MSection title=\"S-Curve ความคืบหน้า\">",
+    "grep -n 'จริง 62%' pototype/mobile-screens.jsx         -> L691:  ...background: \"var(--brand)\" }}/>จริง 62%</span>   (the minted value is the LABEL 'จริง' only — the 62% is a mock literal, see _not_minted_deliberately.legendPercents)",
+    "grep -n 'รออนุมัติของฉัน' pototype/mobile-screens.jsx   -> L694:  <MSection title=\"รออนุมัติของฉัน · 3 ฉบับ\">   (the minted value is the TITLE only — ' · 3 ฉบับ' is the count, composed at runtime from the real row count)"
+  ],
+  "layer": "phrases",
+  "_zero_mint_reused": {
+    "_comment": "NOT minted — already resolvable, so the sidecar points at these instead. Listed so a reviewer can see the mint was minimised rather than skipped; each th was re-read from docs/extract/i18n-full.json this round and asserted byte-exact against its .jsx line by the sidecar test. 9 of the sidecar's 16 slots (the remaining 7 are the minted set below).",
+    "title": "phrases 'Dashboard' (also a nav_i18n key) — byte-identical to the prototype header title (L650)",
+    "kpiPending": "phrases 'เอกสารรออนุมัติ' — byte-identical to tile 2's label (L667)",
+    "unitMBaht": "phrases 'M ฿' — byte-identical to the unit on tiles 1 and 4 (L666/L669)",
+    "unitDocs": "phrases 'ฉบับ' — byte-identical to tile 2's unit (L667) and to the approvals-section count unit (L694)",
+    "legendPlan": "phrases 'แผน' — the plan legend label (L690)",
+    "unitJobs": "dict pm.unitJobs 'งาน' — byte-identical to tile 3's unit (L668); the PM module's own job-count unit",
+    "today": "dict sales.common.today 'วันนี้' — byte-identical to the axis marker label (L687, where the prototype prefixes U+2191)",
+    "heroLabel": "dict sales.dashboard.kpiSalesCumulative 'ยอดขายสะสม' — the web sales dashboard's own cumulative-sales KPI label. See _text_deviation.heroYear: this is the prototype's L657 label MINUS its hardcoded mock year",
+    "unitBaht": "dict subcon.unitBaht '฿' — the THB currency glyph on the approvals rows (L705). U+0E3F is a THAI codepoint, so it cannot be a Dart literal (.claude/hooks/i18n-guard.sh); the merged approvals-inbox screen resolves it through this same key. NOTE the glyph is CONDITIONAL, not the constant the prototype hardcodes: the wire row carries `currency_code` beside `amount`, so this key renders only when the server says THB; another code renders as the code itself ('645,000 USD') and a null code renders the number alone. money = SERVER applies to the unit as much as to the number — stamping a USD purchase order with a baht glyph is the same class of error as fabricating the amount"
+  },
+  "_text_deviation": {
+    "heroYear": "L657 reads 'ยอดขายสะสมปี 2569' and the port renders 'ยอดขายสะสม'. 2569 is a MOCK CONSTANT typed into the source — nothing computes it, and no feed supplies the figure it would qualify, so the hero value is an em-dash (BLOCKERS.md B-299). Labelling an unknown number as belonging to a specific fiscal year would assert a period the screen cannot substantiate, so the year is stripped as a mock mechanic (PLAN.md §0 rule 3) and the existing zero-mint dict id carries the rest of the label verbatim. Filed in BLOCKERS.md B-298 for a ruling: if Wei rules that reference-image fidelity wins, mint 'ยอดขายสะสมปี 2569' as a phrases key and repoint the heroLabel slot — noting that the value under it stays an em-dash either way, and that a year baked into a key will be wrong next year."
+  },
+  "_not_minted_deliberately": {
+    "yoyDelta": "'+12% YoY ↑' (L661) is DROPPED, not keyed. It is a growth CLAIM, and no feed carries a year-over-year figure — the three wired endpoints return budget KPIs, an approvals list and an EVM series. Note the dict ALREADY holds a template for it (dashboard.tplDeltaYoY '+{p}% YoY') and it is deliberately NOT used: rendering it requires a p that does not exist, and a template with an em-dashed placeholder ('+—% YoY ↑') would still assert a direction. The sidecar test forbids any slot resolving to text containing 'YoY'.",
+    "headerEyebrow": "'ผอ.สมพร เพชรชัย' (L650) is mock DATA, not a key — a person's name. AppServices exposes a bearer token, not a user profile, so there is no honest current-user name to render; the eyebrow is omitted (the merged sales-crm precedent, whose header drops the same salesperson eyebrow).",
+    "rowApproveLabel": "'อนุมัติ' (L708) is DROPPED, not keyed — and note it WOULD have been zero-mint (phrases 'อนุมัติ' and dict common.approve both exist), so this is a scope decision, not an i18n one. It labels a green one-tap APPROVE button on every approvals row. This screen is read-only: it originates no write, holds no approval-tier logic, and the merged approve/reject sheets own that action. A button that names an approval it does not perform is a promise, so it is dropped rather than rendered inert. The sidecar test forbids any slot resolving to 'อนุมัติ'. BLOCKERS.md B-299 files it for a ruling.",
+    "legendPercents": "'65%' (L690) and '62%' (L691) are mock literals, not keys. Percent-complete in EVM is EV/BAC, and BAC is a REAL stored column (packages/db/src/schema/finance.ts L922) that loadEvmSeries already loads (apps/api/src/routes/evm-series.ts L49) — but GET /boq/reports/evm does not put it in its response body (it returns series/spi/cpi/currency_code). So the legend labels ship over em-dashes. B-299 files the one-field response gap.",
+    "kpiValues": "'-18.4' / '17' / '3' / '54.2' (L666-669) and '284.5 M ฿' / '148/240' (L658/L660) are mock DATA, not keys. Every one of them renders as an em-dash — see exec_agg.dart ExecKpis for the per-slot verified reason and BLOCKERS.md B-299.",
+    "axisMonths": "'ม.ค.' / 'พ.ค.' / 'ส.ค.' (L687) are mock literals and are NOT minted as month names. The axis now renders the SERVER's own period_label ('YYYY-MM', the real first and last plotted periods), so there is nothing to translate: a Thai month-abbreviation table would be new copy AND would have to invent a mapping the wire does not ask for."
+  },
+  "dict": {
+    "heroUnits": "ยูนิตขายแล้ว",
+    "kpiCash": "กระแสเงินสด 7 วัน",
+    "kpiDue": "Project ใกล้กำหนด",
+    "kpiSalesMonth": "ขายเดือนนี้",
+    "scurveTitle": "S-Curve ความคืบหน้า",
+    "legendActual": "จริง",
+    "approvalsTitle": "รออนุมัติของฉัน"
+  },
+  "_net_new": "The seven values above are absent from the 1065 phrases on dev AND from every dict.*.th entry (verified programmatically against docs/extract/i18n-full.json on this branch). Near-misses were checked and REJECTED per the B-061 ruling that a near-miss label gets a new verbatim key rather than a substitution — see _rejected_near_misses.",
+  "_rejected_near_misses": {
+    "_comment": "Existing entries that are semantically adjacent but NOT byte-identical to the prototype's copy. Recorded so Wei can alias/consolidate instead of minting, if preferred; the B-061 ruling (near-miss labels = new verbatim keys) is why they were not simply reused.",
+    "kpiCash": "phrases 'กระแสเงินสด 7 วันถัดไป' ('next 7 days') — the prototype says 'กระแสเงินสด 7 วัน' (L666)",
+    "kpiSalesMonth": "dict sales.dashboard.kpiSalesMonth 'ยอดขายเดือนนี้' — the prototype says 'ขายเดือนนี้' (L669)",
+    "scurveTitle": "phrases 'S-Curve · ความคืบหน้าสะสม (Plan vs Actual)' — the web report's fuller title; the prototype says 'S-Curve ความคืบหน้า' (L680)",
+    "legendActual": "phrases 'จริง (Actual)' — carries a parenthetical the prototype legend does not (L691)",
+    "kpiDue": "dict dashboard.phaseSoon '● ใกล้กำหนด' — a phase-status pill carrying a bullet glyph, not tile 3's label (L668)"
+  }
+}
