@@ -33,6 +33,11 @@
 //     is withheld.
 //   So the screen renders the period's REAL `status` where the prototype renders a
 //   percentage, and an em-dash where the number itself would go. BLOCKERS.md B-297.
+//   That status is a WIRE value — `pending|delivered|inspecting|passed|rejected|paid`
+//   are English machine codes — and it is NEVER printed raw: [statusLabelField] maps
+//   it to an EXISTING dict key (the merged web port's own 6→4 collapse), or to null,
+//   which the view renders as an em-dash. An untranslated enum in a Thai-only field
+//   app is not a port (§0 rule 2).
 //
 // The real wires:
 //   GET /subcon-contracts                (subcon.ts L584-593) → contractWire
@@ -149,6 +154,40 @@ List<FieldProgressContract> parseContracts(
 /// promise, not a control.
 const String kDeliverableStatus = 'pending';
 
+/// The sidecar field whose dict key labels a work-period status, or null when the
+/// status has no label — the view then renders an em-dash.
+///
+/// `status` is a WIRE column: `pending | delivered | inspecting | passed | rejected
+/// | paid` are English machine codes, and this app's only language is Thai. Printing
+/// one raw would put an untranslated enum in front of a foreman, which §0 rule 2
+/// forbids (every word of UI copy must be a key from i18n-full.json), so each is
+/// mapped to an EXISTING dict key — nothing minted (B-296 mints no status label).
+///
+/// The 6 wire statuses collapse onto 4 labels, and the collapse is not invented
+/// here: it is exactly the merged WEB port's `mapPeriodStatus`
+/// (apps/web/src/screens/subcon/subcon-accept-rows.ts L196-217) with its own key map
+/// (subcon-accept.tsx L108-113), so the two clients cannot describe the same period
+/// differently:
+///   pending              → subcon.statusNotReached
+///   delivered|inspecting → subcon.statusRequested
+///   passed|paid          → subcon.kpiAccepted
+///   rejected             → subcon.rejectBtn
+/// (the resolved Thai of each is asserted byte-exact against the sacred dict in
+/// test/screens/field_progress/field_progress_sidecar_test.dart — this file states
+/// only the key, never a translation.)
+///
+/// One deliberate departure from the web: the web's `default:` folds an UNKNOWN
+/// status into `notReached`. Here an unknown status returns null → em-dash. "Not
+/// reached yet" is a claim about the period, and a status this build does not know
+/// is not evidence for it.
+String? statusLabelField(String? status) => switch (status) {
+  'pending' => 'statusNotReached',
+  'delivered' || 'inspecting' => 'statusRequested',
+  'passed' || 'paid' => 'statusAccepted',
+  'rejected' => 'statusRejected',
+  _ => null,
+};
+
 /// One work period (typed projection of the opaque enrichPeriodRow).
 class FieldProgressPeriod {
   const FieldProgressPeriod({
@@ -167,7 +206,9 @@ class FieldProgressPeriod {
 
   /// Real `status` column: pending | delivered | inspecting | passed | rejected |
   /// paid. This is what the screen shows WHERE THE PROTOTYPE SHOWS A PERCENTAGE —
-  /// see the file header. Null → em-dash.
+  /// see the file header. It is a WIRE value and is NEVER rendered raw: the view
+  /// resolves it through [statusLabelField] to an existing dict key, or em-dashes
+  /// it. Null → em-dash.
   final String? status;
 
   /// Real `project_name` resolved server-side, or null → em-dash.

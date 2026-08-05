@@ -13,7 +13,10 @@
 //   on deserialisation. Inventing contract fields is forbidden (PLAN.md §0), so this
 //   reads the raw JSON maps off the shared Dio — the merged-screen precedent.
 //
-// WRITE — ONLINE, not queued. `POST /periods/{id}/inspect` (subcon.ts L798-925).
+// WRITE — ONLINE, not queued, and PASS-ONLY. `POST /periods/{id}/inspect`
+// (subcon.ts L798-925). The endpoint's reject half is withheld by this port
+// (BLOCKERS.md B-297 item 1; the argument lives on [kInspectPassPayload]), so this
+// interface has no way to express one.
 //   This is the one place this slice differs from the pm_checkin / pm_checklist /
 //   pm_notes offline-write precedent, and the reason is the SCREEN SHAPE, so it is
 //   stated here rather than left implicit:
@@ -58,11 +61,14 @@ abstract class FmAcceptRepository {
   /// this screen has no endpoint that inspects a receipt (see [FmAcceptRow.actionable]).
   Future<List<FmAcceptEnt>> listGrQueue();
 
-  /// Inspect the work period [periodId] with [result].
-  Future<FmInspectOutcome> inspect({
-    required String periodId,
-    required FmInspectResult result,
-  });
+  /// PASS the work period [periodId].
+  ///
+  /// There is deliberately no reject counterpart on this interface: the reject half
+  /// of the endpoint is withheld by this port ([kInspectPassPayload] carries the
+  /// whole argument — `rejected` is terminal and there is no defect form to record
+  /// WHY). Keeping the parameter would leave the irreversible door one argument
+  /// away; removing it means no caller, present or future, can open it by accident.
+  Future<FmInspectOutcome> inspectPass({required String periodId});
 }
 
 /// [FmAcceptRepository] over the app's shared Dio (the generated client's own
@@ -83,14 +89,12 @@ class DioFmAcceptRepository implements FmAcceptRepository {
   );
 
   @override
-  Future<FmInspectOutcome> inspect({
-    required String periodId,
-    required FmInspectResult result,
-  }) async {
+  Future<FmInspectOutcome> inspectPass({required String periodId}) async {
     try {
       final Response<Object?> res = await _dio.post<Object?>(
         '/periods/$periodId/inspect',
-        data: inspectPayload(result),
+        // The one body this port can send. Never `reject` — see kInspectPassPayload.
+        data: kInspectPassPayload,
       );
       final int? code = res.statusCode;
       // Only a real 2xx is a success. Anything else — including the 409 the C3

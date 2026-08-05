@@ -387,6 +387,88 @@ void main() {
       expect(repo.submits, 0);
       expect(find.text('บันทึกร่างแล้ว'), findsOneWidget);
     });
+
+    testWidgets('an id-less DRAFT-ONLY never RE-CREATES on the next tap', (
+      WidgetTester tester,
+    ) async {
+      // The state's own comment says "without its id no retry is possible". It
+      // must therefore also be impossible to tap again: there is no retry branch
+      // to take, so a live CTA falls straight through to the CREATE path and
+      // raises a SECOND purchase requisition. POST /pr has no idempotency key
+      // (B-295) and the requester can edit the document number, so the server's
+      // read-then-insert `no` check would not catch it either.
+      final _FakeRepo repo = _FakeRepo(
+        boqs: <FieldPrEnt>[_boq()],
+        items: <FieldPrEnt>[_item()],
+        created: _createdPr(id: null),
+      );
+      await _pump(tester, repo);
+      await _fillForm(tester);
+      await tester.tap(find.text('ส่งอนุมัติ'));
+      await tester.pumpAndSettle();
+      expect(repo.creates, 1);
+
+      await tester.tap(find.text('ส่งอนุมัติ'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ส่งอนุมัติ'));
+      await tester.pumpAndSettle();
+
+      // Still exactly one PR, and no submit was invented for an unknown id.
+      expect(repo.creates, 1);
+      expect(repo.submits, 0);
+      expect(find.text('บันทึกร่างแล้ว'), findsOneWidget);
+    });
+
+    testWidgets('a SUBMITTED PR cannot be re-created by tapping again', (
+      WidgetTester tester,
+    ) async {
+      // The whole two-step flow succeeded. Another tap on an unchanged form used
+      // to run the create path again — a second POST /pr for the same site
+      // request. (Editing a field still clears the outcome and re-opens the CTA;
+      // that is the deliberate "raise ANOTHER PR" seam, tested below.)
+      final _FakeRepo repo = _FakeRepo(
+        boqs: <FieldPrEnt>[_boq()],
+        items: <FieldPrEnt>[_item()],
+        created: _createdPr(),
+      );
+      await _pump(tester, repo);
+      await _fillForm(tester);
+      await tester.tap(find.text('ส่งอนุมัติ'));
+      await tester.pumpAndSettle();
+      expect(repo.creates, 1);
+      expect(repo.submits, 1);
+
+      await tester.tap(find.text('ส่งอนุมัติ'));
+      await tester.pumpAndSettle();
+
+      expect(repo.creates, 1);
+      expect(repo.submits, 1);
+    });
+
+    testWidgets('editing after a success re-opens the CTA for a NEW PR', (
+      WidgetTester tester,
+    ) async {
+      // The counterpart to the test above: the gate closes on the finished PR, it
+      // does not brick the screen. A real edit is a real new request.
+      final _FakeRepo repo = _FakeRepo(
+        boqs: <FieldPrEnt>[_boq()],
+        items: <FieldPrEnt>[_item()],
+        created: _createdPr(),
+      );
+      await _pump(tester, repo);
+      await _fillForm(tester);
+      await tester.tap(find.text('ส่งอนุมัติ'));
+      await tester.pumpAndSettle();
+      expect(repo.creates, 1);
+
+      await tester.enterText(find.byType(TextField).first, 'PR-2026-0778');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ส่งอนุมัติ'));
+      await tester.pumpAndSettle();
+
+      expect(repo.creates, 2);
+      expect(repo.lastBody?['no'], 'PR-2026-0778');
+    });
   });
 
   group('honest nothing', () {

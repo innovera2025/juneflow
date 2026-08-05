@@ -230,6 +230,17 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   String _t(String field) => widget.i18n.t(widget.strings[field]);
   String _tp(String field) => widget.i18n.tp(widget.strings[field]);
 
+  /// The localized label for a work-period [status], or null → the caller renders an
+  /// em-dash. NEVER the raw wire value: `pending | delivered | inspecting | passed |
+  /// rejected | paid` are English machine codes and this is a Thai-only field app
+  /// (§0 rule 2). The 6→4 collapse and its four EXISTING dict keys are the merged
+  /// web port's own (field_progress_agg.dart statusLabelField) — nothing is minted,
+  /// and an unknown status resolves to null rather than to a guessed label.
+  String? _statusText(String? status) {
+    final String? field = statusLabelField(status);
+    return field == null ? null : _t(field);
+  }
+
   /// Generate a fresh client key (uuid-free — no package), the same scheme
   /// pm-checkin / pm-checklist / pm-notes use.
   String _newOpId() =>
@@ -437,7 +448,12 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Expanded(child: _labelledLine(_t('statusLabel'), p.status)),
+              // The status is a WIRE enum (English machine codes). It resolves
+              // through an EXISTING dict key — never printed raw — and em-dashes
+              // when this build has no label for it (statusLabelField).
+              Expanded(
+                child: _labelledLine(_t('statusLabel'), _statusText(p.status)),
+              ),
               // L331 — the percentage slot. No column backs it and no count-based
               // ratio may stand in for it (field_progress_agg.dart).
               const Text(

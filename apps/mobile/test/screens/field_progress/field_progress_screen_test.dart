@@ -131,6 +131,10 @@ final JuneflowI18n _i18n = JuneflowI18n.fromJsonString('''
     "subcon.colProgressLong": {"th":"ความคืบหน้า"},
     "accept.unitPhase": {"th":"งวด"},
     "common.status": {"th":"สถานะ"},
+    "subcon.statusNotReached": {"th":"ยังไม่ถึง"},
+    "subcon.statusRequested": {"th":"ขอตรวจรับ"},
+    "subcon.kpiAccepted": {"th":"ตรวจรับแล้ว"},
+    "subcon.rejectBtn": {"th":"ตีกลับแก้ไข"},
     "wo.form.deliverWork": {"th":"ส่งมอบงาน"},
     "labor.att.savedBadge": {"th":"บันทึกแล้ว"},
     "tax.etax.statusPending": {"th":"รอส่ง"},
@@ -152,6 +156,10 @@ final ScreenStrings _strings = ScreenStrings.fromJsonString('''
   "progressTitle": "subcon.colProgressLong",
   "unitPeriod": "accept.unitPhase",
   "statusLabel": "common.status",
+  "statusNotReached": "subcon.statusNotReached",
+  "statusRequested": "subcon.statusRequested",
+  "statusAccepted": "subcon.kpiAccepted",
+  "statusRejected": "subcon.rejectBtn",
   "deliver": "wo.form.deliverWork",
   "sent": "labor.att.savedBadge",
   "queued": "tax.etax.statusPending",
@@ -248,12 +256,70 @@ void main() {
         ),
         contractId: 'c1',
       );
-      expect(find.text('สถานะ: pending'), findsOneWidget);
+      // The Thai LABEL for the wire's `pending`, never the English enum itself.
+      expect(find.text('สถานะ: ยังไม่ถึง'), findsOneWidget);
       final String all = _texts(tester).join('|');
       // The row carries pct=78. It must not surface as progress anywhere.
       expect(all.contains('78'), isFalse);
       expect(all.contains('%'), isFalse);
       expect(find.text('—'), findsWidgets);
+    });
+
+    // The status is this screen's load-bearing value — it stands where the
+    // prototype puts a percentage. Rendering the wire column verbatim would put
+    // `pending` / `delivered` in front of a Thai-speaking foreman (§0 rule 2).
+    // One test per status: each pumps its own tree, so the row is really built and
+    // the assertion cannot be weakened by a reused State or a lazy list.
+    const Map<String, String> statusLabels = <String, String>{
+      'pending': 'สถานะ: ยังไม่ถึง',
+      'delivered': 'สถานะ: ขอตรวจรับ',
+      'inspecting': 'สถานะ: ขอตรวจรับ',
+      'passed': 'สถานะ: ตรวจรับแล้ว',
+      'paid': 'สถานะ: ตรวจรับแล้ว',
+      'rejected': 'สถานะ: ตีกลับแก้ไข',
+    };
+    for (final MapEntry<String, String> e in statusLabels.entries) {
+      testWidgets(
+        'the wire status "${e.key}" renders its Thai label, not itself',
+        (WidgetTester tester) async {
+          await _pump(
+            tester,
+            _FakeRepo(
+              contracts: <FieldProgressEnt>[_contract()],
+              vendors: _vendors,
+              periods: <FieldProgressEnt>[_period(status: e.key)],
+            ),
+            contractId: 'c1',
+          );
+          final String all = _texts(tester).join('|');
+          expect(
+            all.contains(e.key),
+            isFalse,
+            reason: 'raw wire enum ${e.key}',
+          );
+          expect(find.text(e.value), findsOneWidget, reason: e.key);
+        },
+      );
+    }
+
+    testWidgets('an UNKNOWN status renders an em-dash, never a guessed label', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        _FakeRepo(
+          contracts: <FieldProgressEnt>[_contract()],
+          vendors: _vendors,
+          periods: <FieldProgressEnt>[_period(status: 'archived')],
+        ),
+        contractId: 'c1',
+      );
+      final String all = _texts(tester).join('|');
+      expect(all.contains('archived'), isFalse);
+      // Not folded into "ยังไม่ถึง" (which the web's default: would do) — that is
+      // a claim about the period this build has no evidence for.
+      expect(find.text('สถานะ: ยังไม่ถึง'), findsNothing);
+      expect(find.text('สถานะ: —'), findsOneWidget);
     });
 
     testWidgets('a mix of delivered periods produces no ratio anywhere', (
@@ -337,7 +403,7 @@ void main() {
       expect(find.text('บันทึกแล้ว'), findsOneWidget);
       // The server moved the period, so the re-read shows its new status and the
       // action is no longer offered.
-      expect(find.text('สถานะ: delivered'), findsOneWidget);
+      expect(find.text('สถานะ: ขอตรวจรับ'), findsOneWidget);
       expect(find.text('ส่งมอบงาน'), findsNothing);
     });
 

@@ -2,6 +2,8 @@
 //
 // Pure Dart — no Flutter, no network. Each test pins ONE honest rule, so reverting
 // that rule turns exactly this test red.
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/screens/fm_accept/fm_accept_agg.dart';
 
@@ -215,31 +217,69 @@ void main() {
 
   group('inspect payload', () {
     test('a pass sends only the result', () {
-      expect(inspectPayload(FmInspectResult.pass), <String, Object?>{
-        'result': 'pass',
-      });
+      expect(kInspectPassPayload, <String, Object?>{'result': 'pass'});
     });
 
-    test('a reject sends an EMPTY defect list, never an invented item', () {
-      // The prototype's reject captures no defect either (L177 — it toasts). An
-      // invented defect line would be a fabricated record against a subcontractor.
-      final Map<String, Object?> body = inspectPayload(FmInspectResult.reject);
-      expect(body['result'], 'reject');
-      expect(body['defects'], isEmpty);
+    test('the ONE payload this port can send is never a reject', () {
+      // B-297 item (1). `rejected` is terminal (no transition out of it in
+      // subcon.ts) and this screen has no defect form, so a reject would
+      // permanently fail the period carrying an EMPTY Defect List. The guarantee is
+      // structural: this is the only body in the slice, and it is a `pass`.
+      expect(kInspectPassPayload['result'], 'pass');
+      expect(kInspectPassPayload.containsKey('defects'), isFalse);
     });
 
     test('no monetary field is ever sent', () {
-      for (final FmInspectResult r in FmInspectResult.values) {
-        final Map<String, Object?> body = inspectPayload(r);
-        for (final String moneyKey in <String>[
-          'amount',
-          'value',
-          'currency_code',
-          'gross',
-          'retention',
-        ]) {
-          expect(body.containsKey(moneyKey), isFalse, reason: moneyKey);
-        }
+      for (final String moneyKey in <String>[
+        'amount',
+        'value',
+        'currency_code',
+        'gross',
+        'retention',
+      ]) {
+        expect(
+          kInspectPassPayload.containsKey(moneyKey),
+          isFalse,
+          reason: moneyKey,
+        );
+      }
+    });
+  });
+
+  group('no reject door exists anywhere in the slice (B-297 item 1)', () {
+    // The strongest available proof that the irreversible action cannot be issued:
+    // read the slice's own SOURCE and assert nothing builds a reject body or names
+    // a reject result. A future round that re-adds the door without a defect form
+    // (and without Wei's B-297 ruling) turns this red.
+    const List<String> sources = <String>[
+      'lib/screens/fm_accept/fm_accept_agg.dart',
+      'lib/screens/fm_accept/fm_accept_repository.dart',
+      'lib/screens/fm_accept/fm_accept_screen.dart',
+    ];
+
+    test("no source builds a {'result': 'reject'} body", () {
+      for (final String path in sources) {
+        final String src = File(path).readAsStringSync();
+        // Strip comments — the withholding is ARGUED at length in prose, and that
+        // prose legitimately contains the word. Only executable code is checked.
+        final String code = src
+            .split('\n')
+            .where(
+              (String l) =>
+                  !l.trimLeft().startsWith('//') &&
+                  !l.trimLeft().startsWith('///'),
+            )
+            .join('\n');
+        expect(
+          code.contains("'reject'"),
+          isFalse,
+          reason: "$path builds a reject result — B-297 item (1) withholds it",
+        );
+        expect(
+          code.contains('FmInspectResult'),
+          isFalse,
+          reason: '$path still carries the removed pass/reject selector',
+        );
       }
     });
   });

@@ -29,6 +29,9 @@
 // The write is `POST /periods/{id}/inspect` (subcon.ts L798-925):
 //   { result: "pass" }              → delivered|inspecting → passed
 //   { result: "reject", defects[] } → delivered|inspecting → rejected + Defect List
+// ONLY the pass half is ported. `rejected` is a TERMINAL state with no way back and
+// this screen has no defect form to fill the record with — see [kInspectPassPayload]
+// for the whole argument and BLOCKERS.md B-297 item (1) for the ruling asked.
 // money = NONE on this door: the PAYMENT of an inspected period is a different
 // office action (`POST /periods/{id}/approve-payment`, subcon.ts L927+, which
 // server-computes the gross and writes the AP billing). This screen never calls it,
@@ -242,24 +245,43 @@ List<FmAcceptRow> filterAcceptRows(List<FmAcceptRow> rows, FmAcceptTab tab) {
   }
 }
 
-/// The two inspect results the server accepts (subcon.ts L810-814).
-enum FmInspectResult { pass, reject }
-
-/// Body for `POST /periods/{id}/inspect`.
+/// The ONLY body this screen can produce for `POST /periods/{id}/inspect`.
 ///
-/// A REJECT sends an EMPTY defects list. The prototype's reject button captures no
-/// defect either (L177 — it toasts and nothing else), and this screen has no defect
-/// form, so there is no described item to send; the server drops defect entries with
-/// no `item` anyway (subcon.ts L871). An invented defect line would be a fabricated
-/// record against a subcontractor, which is exactly what must never happen. The
-/// period still moves to `rejected` and its (empty) acceptance is ensured
-/// (subcon.ts L887-897).
-Map<String, Object?> inspectPayload(FmInspectResult result) => switch (result) {
-  FmInspectResult.pass => <String, Object?>{'result': 'pass'},
-  FmInspectResult.reject => <String, Object?>{
-    'result': 'reject',
-    'defects': const <Object?>[],
-  },
+/// The server accepts two results (subcon.ts L810-814): `pass` and
+/// `reject` + a Defect List. **This port can only send `pass`**, and that is a
+/// structural guarantee, not a convention: there is no code path anywhere in this
+/// slice that builds `{'result': 'reject'}`.
+///
+/// Why the reject is WITHHELD (BLOCKERS.md B-297 item 1):
+///
+///   1. `rejected` is a TERMINAL state. Every write of `work_period.status` in
+///      subcon.ts is at L666 (`pending`, on create), L784 (`delivered`), L845
+///      (`passed`), L891 (`rejected`) and L1020/L1037 (`paid`) — there is no
+///      transition OUT of `rejected`, and each door refuses it: deliver needs
+///      `pending` (L754-759), inspect needs `delivered|inspecting` (L819-826),
+///      approve-payment needs `passed` (L951-957). `POST /defects/{id}/recheck`
+///      (L1091-1120) closes a DEFECT row and never touches the period. So a reject
+///      permanently ends that work period — it can never be re-delivered,
+///      re-inspected or paid, and nothing in the app can undo it.
+///   2. A reject with an EMPTY `defects[]` writes NO defect rows — the handler's
+///      own loop drops every entry with no `item` (subcon.ts L864-871). The record
+///      of WHY the period failed would not exist.
+///   3. The prototype provides no way to enter one. Its reject button
+///      (mobile-field.jsx L177) only fires a toast whose own wording claims a Defect
+///      List was recorded ("reject + record Defect (from mobile)") while capturing
+///      nothing at all. That is the mock mechanic §0 rule 3 forbids reproducing, and
+///      inventing a defect form the prototype does not have is forbidden by rule 1.
+///
+/// A one-tap, confirmation-free, record-free action that permanently fails a
+/// subcontractor's work period is therefore not shippable in either direction: with
+/// an invented defect it fabricates a record, without one it destroys recoverability
+/// silently. The button keeps its place in the prototype's two-button row as an
+/// honest-DISABLED affordance (the merged pm-close B-288 / pm-checklist precedent),
+/// and B-297 asks for the ruling. The merged WEB port
+/// (apps/web/src/screens/subcon/accept-form.tsx) does send a real Defect List — it
+/// has an inspection checklist to derive one from; this screen does not.
+const Map<String, Object?> kInspectPassPayload = <String, Object?>{
+  'result': 'pass',
 };
 
 /// The honest lifecycle of ONE row's inspect action.

@@ -241,10 +241,30 @@ class _FieldPrScreenState extends State<FieldPrScreen> {
   String _t(String field) => widget.i18n.t(widget.strings[field]);
   String _tp(String field) => widget.i18n.tp(widget.strings[field]);
 
-  /// Everything `POST /pr` needs is present and valid.
+  /// Everything `POST /pr` needs is present and valid — AND tapping now cannot
+  /// raise a second purchase requisition.
+  ///
+  /// `POST /pr` has no idempotency key: it takes a CLIENT-supplied `no` and guards
+  /// duplicates with a read-then-insert check in JS (pr.ts L396-405, no unique
+  /// index behind it — B-295). So every state in which a create has already
+  /// succeeded must close this gate, or one more tap is one more real PR:
+  ///
+  ///   * [FieldPrState.submitted] — the PR exists AND is submitted. There is nothing
+  ///     left to do here. (Editing any field clears the outcome via [_onEdited] and
+  ///     re-opens the gate — that is the honest "raise ANOTHER PR" seam, and it
+  ///     forces the requester past the document-number field on the way.)
+  ///   * [FieldPrState.draftOnly] WITHOUT an id — the PR was created and the
+  ///     response carried no `id`, so the submit step cannot be retried. The gate
+  ///     stays shut: falling through to the create path (which is exactly what a
+  ///     blanket `return true` here did) posts a SECOND requisition for the same
+  ///     site request, and because the requester can edit `no` the server's
+  ///     read-then-insert check would not catch it.
+  ///   * [FieldPrState.draftOnly] WITH an id — the only retryable case, and
+  ///     [_submit] retries the SUBMIT step against that id. It never re-creates.
   bool get _canSubmit {
     if (_state == FieldPrState.sending) return false;
-    if (_state == FieldPrState.draftOnly) return true; // retry the submit step
+    if (_state == FieldPrState.submitted) return false;
+    if (_state == FieldPrState.draftOnly) return _draftPrId != null;
     return _boq != null &&
         _item != null &&
         _no.text.trim().isNotEmpty &&
@@ -297,7 +317,9 @@ class _FieldPrScreenState extends State<FieldPrScreen> {
     if (prId == null) {
       // Created, but the response carried no id to submit with. The PR exists as a
       // draft; without its id no retry is possible, so this is reported as
-      // draft-only with no retry rather than as a success.
+      // draft-only with no retry rather than as a success — and [_canSubmit]
+      // KEEPS THE CTA SHUT in this state (a `draftOnly` with a null id used to fall
+      // through to the create path on the next tap and raise a second PR).
       setState(() {
         _state = FieldPrState.draftOnly;
         _draftPrId = null;

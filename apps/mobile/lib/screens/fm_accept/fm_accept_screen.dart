@@ -47,7 +47,14 @@
 //     gr.ts L646/L692). Those rows still show — they are genuinely in the acceptance
 //     centre, and the prototype lists them — but read-only. The same withholding
 //     applies to an already-`rejected` period, which the endpoint's own guard would
-//     409 (subcon.ts L819-826). BLOCKERS.md B-297 records both.
+//     409 (subcon.ts L819-826). BLOCKERS.md B-297 records both;
+//   - the REJECT ACTION ITSELF is withheld on every row — the button renders
+//     honest-DISABLED, with no tap handler. `rejected` is a TERMINAL work-period
+//     state (no door in subcon.ts leaves it) and this screen has no defect form, so
+//     the reject it could send would carry an EMPTY Defect List: one tap would
+//     permanently fail a subcontractor's period with no record of why and no way
+//     back. The whole argument is on kInspectPassPayload (fm_accept_agg.dart);
+//     BLOCKERS.md B-297 item (1) asks for the ruling.
 //
 // The write is the REAL POST /periods/{id}/inspect, ONLINE (fm_accept_repository.dart
 // explains why this screen is not enrolled in the offline queue). money = NONE.
@@ -178,16 +185,18 @@ class _FmAcceptScreenState extends State<FmAcceptScreen> {
   String _t(String field) => widget.i18n.t(widget.strings[field]);
   String _tp(String field) => widget.i18n.tp(widget.strings[field]);
 
-  /// Run one inspection, then RE-READ the queue — the only honest confirmation
+  /// Run one PASS inspection, then RE-READ the queue — the only honest confirmation
   /// (see FmRowActionState). A failure keeps the row addressable and marked failed;
   /// the re-read still runs, so a 409 caused by another inspector shows up as that
   /// inspector's real result rather than as a stale row.
-  Future<void> _inspect(FmAcceptRow row, FmInspectResult result) async {
+  ///
+  /// There is no reject counterpart: that half of the endpoint is withheld
+  /// (kInspectPassPayload / B-297 item 1) and the repository cannot express it.
+  Future<void> _inspectPass(FmAcceptRow row) async {
     if (_rowState[row.id] == FmRowActionState.sending) return;
     setState(() => _rowState[row.id] = FmRowActionState.sending);
-    final FmInspectOutcome outcome = await widget.repo.inspect(
+    final FmInspectOutcome outcome = await widget.repo.inspectPass(
       periodId: row.id,
-      result: result,
     );
     if (!mounted) return;
     setState(() {
@@ -425,8 +434,18 @@ class _FmAcceptScreenState extends State<FmAcceptScreen> {
     );
   }
 
-  /// L171-180 — the two inspect actions. While one is in flight the pair is replaced
-  /// by a spinner so a second tap cannot double-post.
+  /// L171-180 — the prototype's two-button row. The PASS button is live; the REJECT
+  /// button is an honest-DISABLED affordance with no tap handler at all.
+  ///
+  /// Why (BLOCKERS.md B-297 item 1, argued in full on [kInspectPassPayload]):
+  /// `rejected` is a TERMINAL work-period state — no door in subcon.ts transitions
+  /// out of it — and this screen has no defect form, so the reject it could send
+  /// would carry an EMPTY Defect List and write no record of what was wrong. One
+  /// unconfirmed tap would permanently fail a subcontractor's work period, with no
+  /// reason attached and nothing able to undo it. It is rendered rather than removed
+  /// because the two-button row is the prototype's shape and the disabled control
+  /// names where rejecting will live; a disabled control makes no claim (the merged
+  /// pm-close B-288 sticky-bar and pm-checklist inert-photo-slot precedent).
   Widget _actions(FmAcceptRow row, FmRowActionState state) {
     if (state == FmRowActionState.sending) {
       return const SizedBox(
@@ -446,52 +465,54 @@ class _FmAcceptScreenState extends State<FmAcceptScreen> {
     return Row(
       children: <Widget>[
         Expanded(
-          child: _actionButton(
-            label: _tp('btnPass'),
-            filled: true,
-            color: JuneflowTokens.statusOkFg,
-            onTap: () => _inspect(row, FmInspectResult.pass),
+          child: GestureDetector(
+            onTap: () => _inspectPass(row),
+            behavior: HitTestBehavior.opaque,
+            child: _buttonBody(
+              label: _tp('btnPass'),
+              fill: JuneflowTokens.statusOkFg,
+              border: null,
+              textColor: JuneflowTokens.shellTextStrong,
+            ),
           ),
         ),
         const SizedBox(width: 6),
+        // WITHHELD — no GestureDetector, no handler, nothing to tap. Muted fill +
+        // tertiary text is the merged honest-disabled treatment (pm_close L415-453).
         Expanded(
-          child: _actionButton(
+          child: _buttonBody(
             label: _tp('btnReject'),
-            filled: false,
-            color: JuneflowTokens.statusDangerFg,
-            onTap: () => _inspect(row, FmInspectResult.reject),
+            fill: JuneflowTokens.surfaceMuted,
+            border: null,
+            textColor: JuneflowTokens.textTertiary,
           ),
         ),
       ],
     );
   }
 
-  Widget _actionButton({
+  Widget _buttonBody({
     required String label,
-    required bool filled,
-    required Color color,
-    required VoidCallback onTap,
+    required Color fill,
+    required Color? border,
+    required Color textColor,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: filled ? color : JuneflowTokens.surfaceCard,
-          borderRadius: BorderRadius.circular(8),
-          border: filled ? null : Border.all(color: color),
-        ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700,
-            color: filled ? JuneflowTokens.shellTextStrong : color,
-          ),
+    return Container(
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(8),
+        border: border == null ? null : Border.all(color: border),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: textColor,
         ),
       ),
     );

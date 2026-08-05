@@ -35,7 +35,6 @@ class _FakeRepo implements FmAcceptRepository {
   int periodReads = 0;
   int inspects = 0;
   String? lastPeriodId;
-  FmInspectResult? lastResult;
 
   @override
   Future<List<FmAcceptEnt>> listPeriodQueue() async {
@@ -52,13 +51,9 @@ class _FakeRepo implements FmAcceptRepository {
   }
 
   @override
-  Future<FmInspectOutcome> inspect({
-    required String periodId,
-    required FmInspectResult result,
-  }) async {
+  Future<FmInspectOutcome> inspectPass({required String periodId}) async {
     inspects++;
     lastPeriodId = periodId;
-    lastResult = result;
     return outcome;
   }
 }
@@ -246,11 +241,13 @@ void main() {
   });
 
   group('the actions', () {
-    testWidgets('a delivered period offers both actions', (
+    testWidgets('a delivered period offers PASS live and REJECT disabled', (
       WidgetTester tester,
     ) async {
       await _pump(tester, _FakeRepo(periods: <FmAcceptEnt>[_period()]));
       expect(find.text('ตรวจรับผ่าน'), findsOneWidget);
+      // Still rendered (the prototype's two-button row), but inert — see the
+      // two tests below.
       expect(find.text('ตีกลับ'), findsOneWidget);
     });
 
@@ -289,7 +286,6 @@ void main() {
 
       expect(repo.inspects, 1);
       expect(repo.lastPeriodId, 'p1');
-      expect(repo.lastResult, FmInspectResult.pass);
       // The proof of success is the SERVER's answer, not a local flag: the row is
       // gone because the re-read says so.
       expect(repo.periodReads, 2);
@@ -297,12 +293,52 @@ void main() {
       expect(find.text('ไม่พบรายการที่ตรงกับตัวกรอง'), findsOneWidget);
     });
 
-    testWidgets('a reject posts result=reject', (WidgetTester tester) async {
-      final _FakeRepo repo = _FakeRepo(periods: <FmAcceptEnt>[_period()]);
-      await _pump(tester, repo);
-      await tester.tap(find.text('ตีกลับ'));
-      await tester.pumpAndSettle();
-      expect(repo.lastResult, FmInspectResult.reject);
+    testWidgets(
+      'the REJECT button is inert — tapping it sends NOTHING (B-297 item 1)',
+      (WidgetTester tester) async {
+        // The one-tap reject is withheld: `rejected` is a TERMINAL work-period
+        // state (no door in subcon.ts leaves it) and this screen has no defect
+        // form, so the reject it could send would carry an EMPTY Defect List —
+        // one tap would permanently fail a subcontractor's period with no record
+        // of why. The button keeps the prototype's two-button shape, disabled.
+        final _FakeRepo repo = _FakeRepo(periods: <FmAcceptEnt>[_period()]);
+        await _pump(tester, repo);
+
+        // It is rendered — the affordance names where rejecting will live.
+        expect(find.text('ตีกลับ'), findsOneWidget);
+
+        await tester.tap(find.text('ตีกลับ'));
+        await tester.pumpAndSettle();
+
+        // No request, and no re-read triggered by one.
+        expect(repo.inspects, 0);
+        expect(repo.lastPeriodId, isNull);
+        expect(repo.periodReads, 1);
+        // The row is untouched — no failure line, no state change.
+        expect(find.text('ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง'), findsNothing);
+        expect(find.text('SC-2026-001 · งวด 3'), findsOneWidget);
+      },
+    );
+
+    testWidgets('the reject button carries NO tap handler at all', (
+      WidgetTester tester,
+    ) async {
+      // Stronger than "the tap did nothing": there is no GestureDetector around
+      // it, so no future wiring can make it fire by accident.
+      await _pump(tester, _FakeRepo(periods: <FmAcceptEnt>[_period()]));
+      final Finder rejectLabel = find.text('ตีกลับ');
+      expect(
+        find.ancestor(of: rejectLabel, matching: find.byType(GestureDetector)),
+        findsNothing,
+      );
+      // The PASS button, by contrast, has one.
+      expect(
+        find.ancestor(
+          of: find.text('ตรวจรับผ่าน'),
+          matching: find.byType(GestureDetector),
+        ),
+        findsWidgets,
+      );
     });
 
     testWidgets('a failed inspect is shown as a failure, never as done', (

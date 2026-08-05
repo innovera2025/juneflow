@@ -268,4 +268,42 @@ void main() {
       );
     });
   });
+
+  group('the wire status is never rendered raw', () {
+    // `pending | delivered | inspecting | passed | rejected | paid` are ENGLISH
+    // machine codes and this is a Thai-only field app. The status is the screen's
+    // load-bearing value (it stands where the prototype puts a percentage), so a
+    // raw enum there is the whole screen reading as untranslated. Each maps to an
+    // EXISTING dict key — the merged web port's own 6→4 collapse.
+    test('every wire status maps to a sidecar field, none to itself', () {
+      expect(statusLabelField('pending'), 'statusNotReached');
+      expect(statusLabelField('delivered'), 'statusRequested');
+      expect(statusLabelField('inspecting'), 'statusRequested');
+      expect(statusLabelField('passed'), 'statusAccepted');
+      expect(statusLabelField('paid'), 'statusAccepted');
+      expect(statusLabelField('rejected'), 'statusRejected');
+    });
+
+    test('no mapping returns the wire value itself', () {
+      for (final String s in <String>[
+        'pending',
+        'delivered',
+        'inspecting',
+        'passed',
+        'rejected',
+        'paid',
+      ]) {
+        expect(statusLabelField(s), isNot(s));
+      }
+    });
+
+    test('an UNKNOWN status maps to nothing → the view em-dashes it', () {
+      // Deliberately stricter than the web, whose `default:` folds an unknown
+      // status into "ยังไม่ถึง". That is a claim about the period; a status this
+      // build does not know is not evidence for it.
+      expect(statusLabelField('archived'), isNull);
+      expect(statusLabelField(''), isNull);
+      expect(statusLabelField(null), isNull);
+    });
+  });
 }

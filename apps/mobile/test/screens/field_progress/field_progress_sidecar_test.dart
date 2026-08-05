@@ -21,6 +21,14 @@ const List<String> _dictFields = <String>[
   'progressTitle',
   'unitPeriod',
   'statusLabel',
+  // The four labels the WIRE status resolves through — zero-mint, reused from the
+  // merged web port's own badge map so both clients say the same thing about the
+  // same period. The status column is an English machine code and must never be
+  // rendered raw (§0 rule 2); see field_progress_agg.dart statusLabelField.
+  'statusNotReached',
+  'statusRequested',
+  'statusAccepted',
+  'statusRejected',
   'deliver',
   'sent',
   'queued',
@@ -39,6 +47,12 @@ const Map<String, String> _phraseFields = <String, String>{
 const Map<String, String> _verbatimDict = <String, String>{
   'labelSubcon': 'ผู้รับเหมา', // L323 (the label before the colon)
   'unitPeriod': 'งวด', // the ordinal word the view composes around the real seq
+  // The status labels, byte-exact with what the merged web port renders for the
+  // same wire values (apps/web subcon-accept.tsx BADGE_LABEL).
+  'statusNotReached': 'ยังไม่ถึง', // pending
+  'statusRequested': 'ขอตรวจรับ', // delivered | inspecting
+  'statusAccepted': 'ตรวจรับแล้ว', // passed | paid
+  'statusRejected': 'ตีกลับแก้ไข', // rejected
 };
 
 void main() {
