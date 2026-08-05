@@ -159,6 +159,11 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "wo.form": WOForm,
   "po.form": POForm,
   "wo.list": WOList,
+  // NAV-ROUTES.md "RouteView-only" row `subcon` is the SAME component as subcon.progress
+  // ("route id ซ้ำกับ subcon.progress"), and registry.ts EXTRA_ROUTES declares it as
+  // component "SubconProgress" — but this map had only the dotted id, so a direct hit on
+  // /subcon fell through to <Placeholder> ("under development") while the screen existed.
+  subcon: SubconProgress,
   "subcon.progress": SubconProgress,
   "subcon.contracts": SubconContracts,
   "subcon.accept": SubconAccept,
