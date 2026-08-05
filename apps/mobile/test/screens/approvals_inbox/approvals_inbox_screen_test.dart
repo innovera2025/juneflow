@@ -202,12 +202,16 @@ void main() {
 /// fetch is deterministic + offline; the inbox itself is driven by the fake repo.
 Future<void> _pumpUnderScope(WidgetTester tester, _FakeRepo repo) async {
   final Dio dio = Dio()..httpClientAdapter = _Fake404Adapter();
+  final InMemorySyncQueue queue = InMemorySyncQueue();
   final AppServices services = AppServices(
     i18n: _i18n,
     shellStrings: _strings,
     dio: dio,
     api: JuneflowApiClient(dio),
-    syncQueue: InMemorySyncQueue(),
+    syncQueue: queue,
+    // The app-wide drain processor (B-262). Inert here — this inbox test enqueues
+    // nothing — but it must drain THE app queue (AppServices asserts it).
+    syncProcessor: QueueDrainProcessor(queue, DioSyncApiClient(dio)),
     tokenProvider: () => null,
     // Inert const source — this inbox test never checks in, so it is never called.
     gpsSource: const GeolocatorGpsSource(),

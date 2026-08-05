@@ -3,14 +3,17 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app/app_scope.dart';
 import 'app/app_services.dart';
+import 'app/sync_resume_drain.dart';
 import 'i18n/i18n.dart';
 import 'shell/mobile_shell.dart';
 import 'theme/juneflow_theme.dart';
 
 // Juneflow mobile — app shell (MOB-SHELL-00).
 //
-// Boots the runtime services (i18n, Dio + generated API client, offline queue
-// spine — see AppServices), then runs the 5-tab shell. Screens are ported one by
+// Boots the runtime services (i18n, Dio + generated API client, the durable
+// offline queue + its one shared drain processor — see AppServices), wraps the home
+// in the queue's resume-drain trigger, then runs the 5-tab shell. Screens are ported
+// one by
 // one from pototype/mobile*.jsx under the Design Fidelity Protocol (PLAN.md §0);
 // until a screen lands the router shows an honest placeholder.
 Future<void> main() async {
@@ -58,7 +61,14 @@ class JuneflowApp extends StatelessWidget {
           textDirection: direction,
           child: child ?? const SizedBox.shrink(),
         ),
-        home: const MobileShell(),
+        // The offline queue's app-lifecycle drain trigger (B-262). It wraps the
+        // HOME rather than a screen: that is what makes a queued write replay on
+        // app resume regardless of which screen is showing — or whether any screen
+        // that can enqueue is mounted at all.
+        home: SyncResumeDrain(
+          processor: services.syncProcessor,
+          child: const MobileShell(),
+        ),
       ),
     );
   }
