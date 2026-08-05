@@ -1,5 +1,5 @@
 {
-  "override": "wei-approved:B-270",
+  "override": "wei-approved:B-273",
   "_note": "mobile pm-checklist NEW phrase-layer strings (phrase-as-key, referenced via tp() + the assets/i18n/screens/pm_checklist_strings.json sidecar). Thai verbatim from pototype/mobile-pm.jsx MPMChecklist L92-146 — each value was GREPPED out of the raw .jsx this round and asserted byte-exact by test/screens/pm_checklist/pm_checklist_sidecar_test.dart (no curly quotes, no middot, no U+00B7 in this set; the '/' and '+' are plain ASCII). The screen ALREADY renders honest Thai without this file (tp() returns the key itself for lang=th — the merged pm_jobs / st_grlist / notif / approve precedent, B-254..B-258); this handoff lets the sacred round mint the entries into i18n-full.json.phrases so en/zh/ar light up. docs/extract/i18n-full.json is UNTOUCHED by feature/mobile-pm-checklist. en/zh/ar are intentionally NOT fabricated here (Juneflow: never translate anew) — the translator fills them, per the en=zh=ar=th fallback convention of B-247/B-248.",
   "layer": "phrases",
   "_zero_mint_reused": {
