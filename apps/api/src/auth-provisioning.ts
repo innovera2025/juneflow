@@ -81,8 +81,8 @@ const AUTH_USER_EMAIL_UNIQUE = "auth_user_email_unique";
 
 /**
  * THE canonical account form of an address: trimmed + lowercased. ONE function,
- * used by EVERY email-keyed lookup and write in apps/api, because the whole
- * chain is only correct if all of them agree.
+ * used by EVERY client-supplied address in apps/api, because the whole chain is
+ * only correct if all of them agree.
  *
  * WHY THIS EXISTS AS A HELPER RATHER THAN AN INLINE `.trim().toLowerCase()`.
  * The first cut of B-282 lowercased the address on the WRITE side (POST /users)
@@ -94,6 +94,17 @@ const AUTH_USER_EMAIL_UNIQUE = "auth_user_email_unique";
  * "can never log in" bug B-282 exists to fix, one endpoint over. A single
  * shared function makes the invariant greppable and makes a new email-keyed
  * site an obvious omission rather than an invisible one.
+ *
+ * WHERE IT APPLIES — the boundary matters. Canonicalize CLIENT INPUT, at every
+ * entry point that keys on an address: POST /auth/login, POST /auth/forgot, and
+ * the POST /users write (which stores the one canonical string in BOTH the
+ * dictionary `user` row and auth_user). Do NOT rewrite a STORED address on its
+ * way into a lookup of another STORED address — e.g. the admin reset's
+ * dictionary user.email → auth_user.email, or loadUserByEmail's session
+ * auth_user.email → dictionary user.email. Every path that writes such a pair
+ * writes both halves from one string, so they cannot disagree; canonicalizing
+ * one side would instead BREAK a pair that is consistently mixed-case, in order
+ * to defend a state that cannot arise.
  *
  * Safe against the data that exists: every auth_user today comes from
  * packages/db/src/seed/index.ts, whose addresses are all lowercase already.

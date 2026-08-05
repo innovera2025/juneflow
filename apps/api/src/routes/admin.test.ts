@@ -1079,37 +1079,6 @@ describe("POST /admin/users/{id}/reset-password — B-282", () => {
     expect(store.tokens.size).toBe(0);
   });
 
-  it("finds the credential when the DICTIONARY row stores a different case", async () => {
-    // The stored dictionary address is the key into a case-SENSITIVE auth_user
-    // lookup. A row written before the invite path became canonical would
-    // otherwise be reported as "has no credential to reset" — a 404 for an
-    // account that exists, on the one surface an owner uses to rescue a user.
-    const store = new FakeCredentialStore();
-    store.seed({ authUserId: "au-other", companyId: OTHER_COMPANY, email: "someone@other.co.th" });
-    const legacy = { ...otherUser("u-other"), email: "Someone@Other.CO.TH" };
-    const res = await (
-      await buildTestApp({
-        resolveTenant: async () => SESSION,
-        db: stubDb({
-          rows: [
-            [
-              users,
-              (where: SQL | undefined) =>
-                paramsOf(where).includes("u-other") ? [legacy] : [caller(true)],
-            ],
-          ],
-        }),
-        credentials: store,
-      })
-    ).inject({ method: "POST", url: RESET_URL });
-
-    expect(res.statusCode).toBe(200);
-    expect(store.tokens.size).toBe(1);
-    // Delivered to the address on the ACCOUNT, never to the dictionary spelling.
-    expect(delivered).toHaveLength(1);
-    expect(delivered[0]!.to).toBe("someone@other.co.th");
-  });
-
   it("404s a user that has no credential at all (a pre-B-282 invite)", async () => {
     const store = new FakeCredentialStore(); // nothing seeded
     const res = await (
