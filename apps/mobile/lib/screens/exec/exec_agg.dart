@@ -21,8 +21,31 @@
 //   GET /boq/reports/evm              (apps/api/src/routes/boq-reports.ts L519)
 //
 // REAL (drawn from the wire):
-//   * the S-curve            → /boq/reports/evm `series[]` (pv + ev per period).
-//   * the approvals section  → /dashboard/approvals-inbox rows + their count.
+//   * the S-curve            → /boq/reports/evm `series[]` (pv + ev per period),
+//     scoped to ONE project — the same project /dashboard/summary describes, and
+//     NAMED on the card so the reader knows whose curve it is. READ THE NEXT
+//     PARAGRAPH: on the current seed that project has no snapshots at all.
+//   * the approvals section  → /dashboard/approvals-inbox rows + the ENVELOPE's
+//     own `total` (not the rendered row count — see [ExecDashboard.approvalsCount]).
+//
+// THE S-CURVE IS EMPTY ON THE SEEDED STACK — verified live, not assumed.
+// `/dashboard/summary` with no ?project_id resolves the caller's PRIMARY project
+// as first-by-(created_at ASC, id ASC) (dashboard.ts resolvePrimaryProject). The
+// seed inserts all 7 projects in ONE statement and `project.created_at` is
+// `defaultNow()` (Postgres now() = the transaction timestamp), so all 7 share an
+// identical created_at and the tiebreak is id ASC → `13ed4a49-…` = the seed's
+// BBT project. `evm_snapshot` is seeded ONLY for project:rjp (12 rows,
+// seed/index.ts). So the real request the screen makes —
+// GET /boq/reports/evm?project_id=13ed4a49-… — answers `{"series":[],"spi":null,
+// "cpi":null,"currency_code":"THB"}` and the card renders its honest EMPTY state.
+// That is a true statement about BBT, not a broken chart: the curve draws the
+// moment the dashboard's project has snapshots (RJP has 12). It is NOT fixed by
+// dropping the project scope — an unscoped read merges every project's snapshots
+// into one list (evm-series.ts loadEvmSeries), which would interleave two
+// projects' PV/EV under one period key and draw a curve belonging to no project.
+// Which project an EXECUTIVE dashboard should chart (and whether the server
+// should expose a portfolio-level EVM at all) is a product/backend decision —
+// filed in BLOCKERS.md B-299.
 //
 // HONEST em-dash (no feed exists — NEVER fabricated, see BLOCKERS.md B-299):
 //   * the hero's cumulative-sales figure, its units-sold ratio and its YoY delta
@@ -82,18 +105,20 @@ double? execNum(ExecEnt e, List<String> keys) {
 // GET /dashboard/summary
 // ---------------------------------------------------------------------------
 
-/// The ONE field this screen reads from `GET /dashboard/summary`: the id of the
-/// project the dashboard is about (the caller's PRIMARY project when no
-/// ?project_id is passed — dashboard.ts summary → resolvePrimaryProject).
+/// The FIRST of the two fields this screen reads from `GET /dashboard/summary`
+/// (the other is [parseSummaryProjectName]): the id of the project the dashboard
+/// is about — the caller's PRIMARY project when no ?project_id is passed
+/// (dashboard.ts summary → resolvePrimaryProject).
 ///
-/// WHY ONLY THIS FIELD. The summary payload is a BUDGET KPI set —
+/// WHY ONLY AN ID AND A NAME. The summary payload is a BUDGET KPI set —
 /// budget_total / actual_total / committed_total / remaining_total / health_score
 /// plus project meta (name, type, active phase, status, as_of). The exec
-/// prototype displays no budget figure and no project meta: its hero is a SALES
-/// total and its tiles are cash-flow / pending-docs / deadlines / monthly sales.
-/// Rendering budget_total under the hero's "cumulative sales" label would be
-/// relabelling one quantity as another — a fabrication, not a port — so no
-/// summary money reaches the screen.
+/// prototype displays no budget figure: its hero is a SALES total and its tiles
+/// are cash-flow / pending-docs / deadlines / monthly sales. Rendering
+/// budget_total under the hero's "cumulative sales" label would be relabelling
+/// one quantity as another — a fabrication, not a port — so NO summary money
+/// reaches the screen. The project name is not money and is not a figure at all:
+/// it names the subject of the chart the id scopes.
 ///
 /// It is still a load-bearing read, and not an ornamental one: `GET
 /// /boq/reports/evm` WITHOUT a project_id returns every owned project's snapshots
@@ -108,6 +133,27 @@ double? execNum(ExecEnt e, List<String> keys) {
 String? parseSummaryProjectId(ExecEnt? body) {
   if (body == null) return null;
   return execStr(body, <String>['project_id', 'projectId']);
+}
+
+/// The SECOND field this screen reads from `GET /dashboard/summary`: the name of
+/// the project the dashboard — and therefore the S-curve — is about
+/// (`project_name`, dashboard.ts header; live: the seed's BBT project name).
+///
+/// This is not decoration. The S-curve covers ONE project while the approvals
+/// card directly beneath it is TENANT-WIDE (the inbox request sends no
+/// project_id), so two adjacent blocks describe different populations. An
+/// unlabelled S-curve title on an EXECUTIVE dashboard reads as portfolio
+/// progress when it is 1-of-7 projects, and the project was not chosen by the
+/// user — it is the API's primary-project default. Naming it on the card is what
+/// makes the curve (and its EMPTY state) a statement about a knowable subject
+/// rather than an unattributed claim about the business.
+///
+/// It is server DATA rendered verbatim, not new copy: no i18n key is minted for
+/// it and nothing is translated. Null when the payload is unreadable or the
+/// tenant has no project → the card ships its bare title, claiming no scope.
+String? parseSummaryProjectName(ExecEnt? body) {
+  if (body == null) return null;
+  return execStr(body, <String>['project_name', 'projectName']);
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +357,48 @@ EvmChartGeometry evmChartGeometry(List<EvmPoint> points, DateTime now) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /dashboard/approvals-inbox — the envelope
+// ---------------------------------------------------------------------------
+
+/// One read of `GET /dashboard/approvals-inbox`: the B-014 envelope's `data`
+/// rows AND its own `total`.
+///
+/// The total is carried separately BECAUSE it is not recoverable from the rows.
+/// [parseInbox] DROPS any row with no `id` (there is nothing honest to navigate
+/// to), so `parseInbox(rows).length` is the count of rows that survived a CLIENT
+/// filter — a different quantity from the server's count, and the smaller of the
+/// two whenever they differ. The title on this screen says "awaiting MY approval
+/// · N docs", which is a claim about the SERVER's backlog, so it must render the
+/// server's number.
+class ExecApprovals {
+  const ExecApprovals({required this.rows, required this.total});
+
+  /// The envelope's `data` array as opaque wire rows.
+  final List<InboxEnt> rows;
+
+  /// The envelope's own `total`, or null when the payload does not carry a
+  /// readable one — in which case the count is UNKNOWN and the view em-dashes
+  /// it rather than substituting a client-side length.
+  final int? total;
+}
+
+/// Nothing read (the feed failed or answered an unexpected shape).
+const ExecApprovals kEmptyExecApprovals = ExecApprovals(
+  rows: <InboxEnt>[],
+  total: null,
+);
+
+/// The B-014 envelope's `total` as a non-negative whole number, else null.
+/// Never derived from `data.length` — that is precisely the substitution this
+/// field exists to avoid.
+int? parseEnvelopeTotal(ExecEnt? body) {
+  if (body == null) return null;
+  final double? n = execNum(body, <String>['total']);
+  if (n == null || n < 0 || n != n.roundToDouble()) return null;
+  return n.toInt();
+}
+
+// ---------------------------------------------------------------------------
 // The KPI tiles + hero
 // ---------------------------------------------------------------------------
 
@@ -385,43 +473,60 @@ class ExecDashboard {
     required this.kpis,
     required this.chart,
     required this.approvals,
+    required this.approvalsCount,
+    required this.scopeLabel,
   });
 
   /// Hero + tile figures (all honestly unknown today — see [ExecKpis]).
   final ExecKpis kpis;
 
-  /// The S-curve geometry, from the REAL EVM series.
+  /// The S-curve geometry, from the REAL EVM series of ONE project — the project
+  /// [scopeLabel] names. Empty is a real answer (see the module header).
   final EvmChartGeometry chart;
 
   /// The caller's pending-and-actionable docs, server order (newest first),
-  /// parsed by the merged inbox agg — same payload, one reading.
+  /// parsed by the merged inbox agg — one payload, one parser.
   final List<InboxRow> approvals;
 
-  /// The approvals section's count. This is the list length, which is exactly the
-  /// envelope's `total`: listEnvelope sets `total = rows.length` for these
-  /// single-page handlers (apps/api/src/routes/list-envelope.ts L32-38), so
-  /// reading the length is not an approximation of the server's count — it IS it.
-  int get approvalsCount => approvals.length;
+  /// The approvals section's count: the SERVER's own envelope `total`, or null
+  /// when the payload carried no readable one (the view em-dashes it).
+  ///
+  /// It is deliberately NOT `approvals.length`. [parseInbox] drops rows with no
+  /// `id`, so the rendered list is a client-filtered subset; publishing its
+  /// length under a title that says how many docs await the caller would
+  /// UNDERSTATE the backlog and present a client-derived number as a server
+  /// fact. When the two differ, this screen shows the server's count and renders
+  /// the rows it can honestly render — the count and the list answer different
+  /// questions and the count's question belongs to the server.
+  final int? approvalsCount;
+
+  /// The name of the project the S-curve covers (`summary.project_name`), or
+  /// null when unknown. Server data rendered verbatim; never invented.
+  final String? scopeLabel;
 }
 
 /// Assemble the screen state from the payloads the three feeds return. Pure: no
 /// clock of its own ([now] is injected so the "today" marker is testable and
 /// never ambient).
 ///
-/// There is no `summary` parameter on purpose. The summary payload's ONE job on
-/// this screen is to yield the project id that SCOPES the EVM read
-/// ([parseSummaryProjectId]), which happens in the repository before the series
-/// is fetched; none of its own fields reach the view (see
-/// [parseSummaryProjectId] for why its budget figures must not).
+/// TWO fields of the summary payload reach this function, both as
+/// [scopeLabel]-shaped facts rather than figures: the project id scopes the EVM
+/// read (in the repository, before the series is fetched) and the project NAME
+/// labels the chart. None of the summary's MONEY reaches the screen — see
+/// [parseSummaryProjectId] for why its budget figures must not be relabelled as
+/// the hero's sales total.
 ExecDashboard buildExecDashboard({
   required Object? evmSeries,
-  required List<InboxEnt> approvalRows,
+  required ExecApprovals approvals,
   required DateTime now,
+  String? scopeLabel,
 }) {
-  final List<InboxRow> approvals = parseInbox(approvalRows);
   return ExecDashboard(
     kpis: const ExecKpis(),
     chart: evmChartGeometry(parseEvmSeries(evmSeries), now),
-    approvals: approvals,
+    approvals: parseInbox(approvals.rows),
+    // The SERVER's count, never the length of the parsed list.
+    approvalsCount: approvals.total,
+    scopeLabel: scopeLabel,
   );
 }

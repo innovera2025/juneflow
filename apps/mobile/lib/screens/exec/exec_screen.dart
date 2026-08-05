@@ -27,10 +27,22 @@
 //     tests/visual/reference/mobile/exec.png.
 //
 // WHAT IS REAL AND WHAT IS AN HONEST EM-DASH (§0 rule 3 + rule 4):
-//   REAL — the S-curve (GET /boq/reports/evm, scoped to the summary's project) and
-//   the whole approvals card: its count, each row's kind, document number and
-//   SERVER amount (GET /dashboard/approvals-inbox, parsed by the merged inbox
-//   agg).
+//   REAL — the S-curve (GET /boq/reports/evm, scoped to the summary's project and
+//   NAMED after it) and the whole approvals card: its count (the envelope's own
+//   `total`, not the rendered row count), each row's kind, document number, SERVER
+//   amount and the SERVER's currency (GET /dashboard/approvals-inbox, rows parsed
+//   by the merged inbox agg).
+//
+//   ON THE CURRENT SEED THE S-CURVE RENDERS ITS EMPTY STATE, verified live rather
+//   than assumed: /dashboard/summary resolves the primary project to BBT
+//   (`13ed4a49-…`, the seed's BBT project) and only project:rjp has evm_snapshot
+//   so GET /boq/reports/evm?project_id=13ed4a49-… answers `{"series":[],…}`. The
+//   card therefore shows its title + the named project + an em-dash. That is a
+//   true statement about BBT — the curve draws as soon as the dashboard's project
+//   has snapshots — and it is NOT fixed by dropping the scope (an unscoped read
+//   merges every project's snapshots into one curve belonging to no project).
+//   exec_agg.dart's header carries the full derivation; BLOCKERS.md B-299 files
+//   the product question of which project an executive dashboard should chart.
 //   EM-DASH — the hero's three figures and all four KPI values. Each has a
 //   verified reason recorded on exec_agg.ExecKpis and filed in BLOCKERS.md B-299;
 //   none of them is derivable from the three wired feeds without inventing a
@@ -55,6 +67,10 @@ import '../approvals_inbox/approvals_inbox_agg.dart';
 import 'exec_agg.dart';
 import 'exec_repository.dart';
 import 'exec_scurve_painter.dart';
+
+/// The currency code the `unitBaht` glyph (U+0E3F) actually denotes. Any OTHER
+/// code the wire carries is rendered as the code itself — see [_amountText].
+const String _thb = 'THB';
 
 /// Honest placeholder for any value the wire does not carry (never invented).
 const String _dash = '—'; // em dash
@@ -135,17 +151,23 @@ class _ExecScreenState extends State<ExecScreen> {
 
   /// Load the three feeds.
   ///
-  /// The summary is fetched FIRST and only for its project id, because that id
-  /// scopes the EVM read (see exec_agg.parseSummaryProjectId — an unscoped read
-  /// interleaves every project's snapshots into one curve). A summary that fails
-  /// is NOT fatal: it degrades to the tenant-wide series rather than blanking the
-  /// screen, and the approvals card does not depend on it at all.
+  /// The summary is fetched FIRST, for exactly two fields: the project id, which
+  /// SCOPES the EVM read (an unscoped read interleaves every project's snapshots
+  /// into one curve), and the project NAME, which labels the resulting chart so
+  /// the reader knows whose curve it is. None of its money is displayed — see
+  /// exec_agg.parseSummaryProjectId. A summary that fails is NOT fatal: the EVM
+  /// read degrades to the tenant-wide series, the chart then carries NO project
+  /// label (it cannot honestly claim one), and the approvals card is unaffected.
   Future<ExecDashboard> _load() async {
     String? projectId;
+    String? projectName;
     try {
-      projectId = parseSummaryProjectId(await widget.repo.summary());
+      final ExecEnt? summary = await widget.repo.summary();
+      projectId = parseSummaryProjectId(summary);
+      projectName = parseSummaryProjectName(summary);
     } on Object {
       projectId = null;
+      projectName = null;
     }
     // Independent reads, so they go in parallel.
     final List<Object> both = await Future.wait(<Future<Object>>[
@@ -154,8 +176,9 @@ class _ExecScreenState extends State<ExecScreen> {
     ]);
     return buildExecDashboard(
       evmSeries: both[0] as List<ExecEnt>,
-      approvalRows: both[1] as List<InboxEnt>,
+      approvals: both[1] as ExecApprovals,
       now: widget.now ?? DateTime.now(),
+      scopeLabel: projectName,
     );
   }
 
@@ -197,10 +220,13 @@ class _ExecScreenState extends State<ExecScreen> {
     );
   }
 
-  /// The header bell (L651-654): a 34px surface-3 circle. The prototype paints a
-  /// red UNREAD DOT on it (L653); no unread-count feed is read here, and a dot is
-  /// the assertion "you have unread notifications", so the dot is dropped and the
-  /// button is honest-DISABLED (the merged sales-crm add-lead precedent).
+  /// The header bell (L651-654): a 34px surface-3 circle. It is STATIC — a
+  /// Container and an Icon, with no tap target, no Semantics and no disabled
+  /// state. That matches the prototype's own behaviour: L651 is a `<button>`
+  /// ELEMENT, but it carries no onClick, so it does nothing there either. The
+  /// prototype paints a red UNREAD DOT on it (L653); no unread-count feed is read
+  /// here and a dot IS the assertion "you have unread notifications", so the dot
+  /// is dropped rather than drawn over an unknown.
   Widget _bell() {
     return Container(
       width: 34,
@@ -393,10 +419,24 @@ class _ExecScreenState extends State<ExecScreen> {
   // S-curve (L680-693)
   // -------------------------------------------------------------------------
 
+  /// The S-curve card (L680-693).
+  ///
+  /// The title NAMES ITS PROJECT when the summary supplied one — the prototype's
+  /// bare scurveTitle plus the same U+00B7 middot separator the
+  /// prototype itself uses for the "title · detail" pattern on L694, then the
+  /// SERVER's own `project_name`. No key is minted for this and nothing is
+  /// translated: it is one server string appended to an existing label. Without
+  /// it the card is one project's curve sitting directly above a TENANT-WIDE
+  /// approvals card, on an EXECUTIVE dashboard where an unattributed progress
+  /// curve reads as the whole portfolio. With no readable project name the bare
+  /// title ships, claiming no scope at all.
   Widget _scurveCard(ExecDashboard d) {
     final EvmChartGeometry g = d.chart;
+    final String? scope = d.scopeLabel;
     return MSection(
-      title: _tp('scurveTitle'),
+      title: scope == null
+          ? _tp('scurveTitle')
+          : '${_tp('scurveTitle')}$_mid$scope',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -406,9 +446,12 @@ class _ExecScreenState extends State<ExecScreen> {
             height: 100,
             width: double.infinity,
             child: g.isEmpty
-                // No snapshots for this project (or nothing plottable in them):
-                // an honest empty state, NEVER an axis with a flat zero line
-                // drawn across it (that would assert real zero progress).
+                // No snapshots for the project named in the title above (or
+                // nothing plottable in them) — the state EVERY seeded caller
+                // reaches today, because the primary project BBT has zero
+                // evm_snapshot rows. An honest empty state, NEVER an axis with a
+                // flat zero line drawn across it (that would assert real zero
+                // progress), and never a curve borrowed from another project.
                 ? const Center(
                     child: Text(
                       _dash,
@@ -504,14 +547,20 @@ class _ExecScreenState extends State<ExecScreen> {
   // -------------------------------------------------------------------------
 
   /// "Awaiting my approval · N docs" (L694). The title's count and every row are
-  /// REAL: the count is the list length, which IS the envelope's `total` for these
-  /// single-page handlers, and the endpoint's own semantics ("pending AND
-  /// actionable by the caller") are exactly what this title claims.
+  /// REAL, and the count is the SERVER's: the envelope's own `total`, never the
+  /// length of the list rendered below it. Those are different quantities —
+  /// parseInbox drops rows with no `id`, so the rendered list is a client-filtered
+  /// subset and publishing ITS length under this title would understate the
+  /// backlog while presenting a client-derived number as a server fact. The
+  /// endpoint's semantics ("pending AND actionable by the caller") are exactly
+  /// what the title claims. A payload with no readable total leaves the count
+  /// UNKNOWN — an em-dash, never a substituted length and never a zero.
   Widget _approvalsCard(ExecDashboard d) {
     final List<InboxRow> rows = d.approvals;
+    final int? count = d.approvalsCount;
     return MSection(
       title:
-          '${_tp('approvalsTitle')}$_mid${d.approvalsCount} ${_tp('unitDocs')}',
+          '${_tp('approvalsTitle')}$_mid${count ?? _dash} ${_tp('unitDocs')}',
       child: rows.isEmpty
           ? const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -567,9 +616,7 @@ class _ExecScreenState extends State<ExecScreen> {
                       ),
                     ),
                     Text(
-                      row.amount == null
-                          ? _dash
-                          : '${formatMoney(row.amount!)} ${_t('unitBaht')}',
+                      _amountText(row),
                       style: const TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
@@ -584,6 +631,35 @@ class _ExecScreenState extends State<ExecScreen> {
         ),
       ],
     );
+  }
+
+  /// One row's amount, in THE CURRENCY THE SERVER SENT.
+  ///
+  /// money = SERVER applies to the unit as much as to the number: the wire row
+  /// carries `currency_code` beside `amount` (dashboard.ts emits po.currencyCode /
+  /// wo.currencyCode / the PR's derived ccy, and every money column carries a
+  /// currency by iron rule), so the glyph cannot be a constant. Rendering a fixed
+  /// baht glyph would print a USD purchase order as baht — the same class of error as
+  /// fabricating the number.
+  ///
+  ///   * no amount              → em-dash (legitimately nullable: a PR with no
+  ///                              priced lines has neither amount nor currency).
+  ///   * amount + 'THB'         → the prototype's baht glyph (unitBaht, U+0E3F — the
+  ///                              glyph that IS THB), exactly as L705 renders it.
+  ///   * amount + another code  → the SERVER's code verbatim ('645,000 USD'). Not
+  ///                              a translation and not a glyph table: one wire
+  ///                              value, printed.
+  ///   * amount, currency null  → the number ALONE. The amount is a server fact
+  ///                              and stays; the currency is unknown, and naming
+  ///                              one would be the invention.
+  String _amountText(InboxRow row) {
+    final double? amount = row.amount;
+    if (amount == null) return _dash;
+    final String money = formatMoney(amount);
+    final String? ccy = row.currencyCode;
+    if (ccy == null) return money;
+    if (ccy.toUpperCase() == _thb) return '$money ${_t('unitBaht')}';
+    return '$money $ccy';
   }
 
   /// Per-kind pill tone. The prototype maps PR->brand, BOQ->accent, WO->warn

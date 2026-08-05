@@ -12,7 +12,7 @@
   ],
   "layer": "phrases",
   "_zero_mint_reused": {
-    "_comment": "NOT minted — already resolvable, so the sidecar points at these instead. Listed so a reviewer can see the mint was minimised rather than skipped; each th was re-read from docs/extract/i18n-full.json this round and asserted byte-exact against its .jsx line by the sidecar test. 8 of 15 slots.",
+    "_comment": "NOT minted — already resolvable, so the sidecar points at these instead. Listed so a reviewer can see the mint was minimised rather than skipped; each th was re-read from docs/extract/i18n-full.json this round and asserted byte-exact against its .jsx line by the sidecar test. 9 of the sidecar's 16 slots (the remaining 7 are the minted set below).",
     "title": "phrases 'Dashboard' (also a nav_i18n key) — byte-identical to the prototype header title (L650)",
     "kpiPending": "phrases 'เอกสารรออนุมัติ' — byte-identical to tile 2's label (L667)",
     "unitMBaht": "phrases 'M ฿' — byte-identical to the unit on tiles 1 and 4 (L666/L669)",
@@ -21,7 +21,7 @@
     "unitJobs": "dict pm.unitJobs 'งาน' — byte-identical to tile 3's unit (L668); the PM module's own job-count unit",
     "today": "dict sales.common.today 'วันนี้' — byte-identical to the axis marker label (L687, where the prototype prefixes U+2191)",
     "heroLabel": "dict sales.dashboard.kpiSalesCumulative 'ยอดขายสะสม' — the web sales dashboard's own cumulative-sales KPI label. See _text_deviation.heroYear: this is the prototype's L657 label MINUS its hardcoded mock year",
-    "unitBaht": "dict subcon.unitBaht '฿' — the currency glyph on the approvals rows (L705). U+0E3F is a THAI codepoint, so it cannot be a Dart literal (.claude/hooks/i18n-guard.sh); the merged approvals-inbox screen resolves it through this same key"
+    "unitBaht": "dict subcon.unitBaht '฿' — the THB currency glyph on the approvals rows (L705). U+0E3F is a THAI codepoint, so it cannot be a Dart literal (.claude/hooks/i18n-guard.sh); the merged approvals-inbox screen resolves it through this same key. NOTE the glyph is CONDITIONAL, not the constant the prototype hardcodes: the wire row carries `currency_code` beside `amount`, so this key renders only when the server says THB; another code renders as the code itself ('645,000 USD') and a null code renders the number alone. money = SERVER applies to the unit as much as to the number — stamping a USD purchase order with a baht glyph is the same class of error as fabricating the amount"
   },
   "_text_deviation": {
     "heroYear": "L657 reads 'ยอดขายสะสมปี 2569' and the port renders 'ยอดขายสะสม'. 2569 is a MOCK CONSTANT typed into the source — nothing computes it, and no feed supplies the figure it would qualify, so the hero value is an em-dash (BLOCKERS.md B-299). Labelling an unknown number as belonging to a specific fiscal year would assert a period the screen cannot substantiate, so the year is stripped as a mock mechanic (PLAN.md §0 rule 3) and the existing zero-mint dict id carries the rest of the label verbatim. Filed in BLOCKERS.md B-298 for a ruling: if Wei rules that reference-image fidelity wins, mint 'ยอดขายสะสมปี 2569' as a phrases key and repoint the heroLabel slot — noting that the value under it stays an em-dash either way, and that a year baked into a key will be wrong next year."

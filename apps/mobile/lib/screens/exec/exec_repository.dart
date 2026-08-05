@@ -17,11 +17,19 @@
 //     L49), which would interleave two projects under one period key.
 //
 //   GET /dashboard/approvals-inbox  dashboard.ts L862
-//     The approvals section. NOT re-implemented here: the merged `inbox` screen
-//     already reads this exact payload, so this repository DELEGATES to
-//     DioApprovalsInboxRepository. One payload, one reading — a second parser
-//     could drift from the first, and the rows are parsed by the same
-//     approvals_inbox_agg the inbox screen uses.
+//     The approvals section. The rows are parsed by the merged inbox screen's own
+//     `approvals_inbox_agg.parseInbox` — one payload, ONE parser, so the two
+//     screens can never drift on what a row means.
+//
+//     The GET itself is local rather than delegated to
+//     DioApprovalsInboxRepository.list(), for one reason: this screen renders the
+//     envelope's `total` in its section title, and `list()` returns only the
+//     `data` array — the total is discarded before it can be read. Widening that
+//     merged repository was rejected as a MERGE hazard: feature/mobile-inbox-detail
+//     is editing approvals_inbox_repository.dart concurrently this round. So the
+//     transport read (unwrap `data` + `total` from the B-014 envelope) is
+//     duplicated here; the PARSING — the part that could drift semantically — is
+//     not.
 //
 // Why raw Dio rather than the generated typed client (the merged-screen rule):
 // the contract models these payloads as the OPAQUE `Entity`
@@ -33,7 +41,6 @@
 import 'package:dio/dio.dart';
 
 import '../approvals_inbox/approvals_inbox_agg.dart';
-import '../approvals_inbox/approvals_inbox_repository.dart';
 import 'exec_agg.dart';
 
 /// Read access to the three executive-dashboard feeds.
@@ -45,20 +52,16 @@ abstract class ExecRepository {
   /// is known. Opaque rows; the agg parses them.
   Future<List<ExecEnt>> evmSeries(String? projectId);
 
-  /// The caller's pending-and-actionable approval docs as opaque wire rows.
-  Future<List<InboxEnt>> approvals();
+  /// The caller's pending-and-actionable approval docs: the envelope's rows AND
+  /// its own `total`, which is the count the section title publishes.
+  Future<ExecApprovals> approvals();
 }
 
 /// [ExecRepository] over the app's shared Dio.
 class DioExecRepository implements ExecRepository {
-  DioExecRepository(Dio dio)
-    : _dio = dio,
-      _approvals = DioApprovalsInboxRepository(dio);
+  const DioExecRepository(this._dio);
 
   final Dio _dio;
-
-  /// The merged inbox screen's own reader — reused verbatim, not re-implemented.
-  final ApprovalsInboxRepository _approvals;
 
   @override
   Future<ExecEnt?> summary() async {
@@ -96,5 +99,29 @@ class DioExecRepository implements ExecRepository {
   }
 
   @override
-  Future<List<InboxEnt>> approvals() => _approvals.list();
+  Future<ExecApprovals> approvals() async {
+    final Response<Object?> res = await _dio.get<Object?>(
+      '/dashboard/approvals-inbox',
+    );
+    final Object? body = res.data;
+    // An unexpected shape yields honest-empty with an UNKNOWN total — never a
+    // zero, which would read as a real "nothing is awaiting you".
+    if (body is! Map) return kEmptyExecApprovals;
+    final ExecEnt env = body.map<String, Object?>(
+      (Object? k, Object? v) => MapEntry<String, Object?>('$k', v),
+    );
+    final Object? data = env['data'];
+    return ExecApprovals(
+      rows: <InboxEnt>[
+        if (data is List)
+          for (final Object? item in data)
+            if (item is Map)
+              item.map<String, Object?>(
+                (Object? k, Object? v) => MapEntry<String, Object?>('$k', v),
+              ),
+      ],
+      // The SERVER's own count, read straight off the envelope.
+      total: parseEnvelopeTotal(env),
+    );
+  }
 }

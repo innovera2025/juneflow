@@ -277,11 +277,66 @@ void main() {
     });
   });
 
+  group('parseSummaryProjectName', () {
+    test('reads the project name that LABELS the chart', () {
+      expect(
+        parseSummaryProjectName(<String, Object?>{
+          'project_name': 'juneflow บางบัวทอง',
+        }),
+        'juneflow บางบัวทอง',
+      );
+      expect(
+        parseSummaryProjectName(<String, Object?>{'projectName': 'RJP'}),
+        'RJP',
+      );
+    });
+
+    test('an absent / blank name is null — a scope is never invented', () {
+      expect(parseSummaryProjectName(null), isNull);
+      expect(parseSummaryProjectName(<String, Object?>{}), isNull);
+      expect(
+        parseSummaryProjectName(<String, Object?>{'project_name': ''}),
+        isNull,
+      );
+      // The id is NOT a fallback label: a uuid names nothing to a reader.
+      expect(
+        parseSummaryProjectName(<String, Object?>{'project_id': 'p1'}),
+        isNull,
+      );
+    });
+  });
+
+  group('parseEnvelopeTotal', () {
+    test('reads the B-014 envelope total', () {
+      expect(parseEnvelopeTotal(<String, Object?>{'total': 5}), 5);
+      expect(parseEnvelopeTotal(<String, Object?>{'total': 0}), 0);
+      // drizzle numerics can arrive as text.
+      expect(parseEnvelopeTotal(<String, Object?>{'total': '12'}), 12);
+    });
+
+    test('an absent or nonsensical total is UNKNOWN, never 0 and never a '
+        'row count', () {
+      expect(parseEnvelopeTotal(null), isNull);
+      expect(parseEnvelopeTotal(<String, Object?>{}), isNull);
+      expect(parseEnvelopeTotal(<String, Object?>{'total': -1}), isNull);
+      expect(parseEnvelopeTotal(<String, Object?>{'total': 1.5}), isNull);
+      expect(parseEnvelopeTotal(<String, Object?>{'total': 'many'}), isNull);
+      // A payload carrying rows but no total still yields null: the count is a
+      // server fact or it is unknown.
+      expect(
+        parseEnvelopeTotal(<String, Object?>{
+          'data': <Object?>[1, 2, 3],
+        }),
+        isNull,
+      );
+    });
+  });
+
   group('buildExecDashboard', () {
     test('every KPI and hero figure is honestly unknown', () {
       final ExecDashboard d = buildExecDashboard(
         evmSeries: <Object?>[_row('2026-05', 1, 1)],
-        approvalRows: const <InboxEnt>[],
+        approvals: kEmptyExecApprovals,
         now: _may2026,
       );
       // No feed backs any of these; the screen em-dashes each one. If a future
@@ -296,13 +351,16 @@ void main() {
       expect(d.kpis.salesMonth, isNull);
     });
 
-    test('the approvals count is the real row count', () {
+    test('the approvals count is the SERVER envelope total', () {
       final ExecDashboard d = buildExecDashboard(
         evmSeries: null,
-        approvalRows: <InboxEnt>[
-          <String, Object?>{'id': 'a', 'kind': 'PR', 'amount': 902475},
-          <String, Object?>{'id': 'b', 'kind': 'WO', 'amount': 645000},
-        ],
+        approvals: const ExecApprovals(
+          rows: <InboxEnt>[
+            <String, Object?>{'id': 'a', 'kind': 'PR', 'amount': 902475},
+            <String, Object?>{'id': 'b', 'kind': 'WO', 'amount': 645000},
+          ],
+          total: 2,
+        ),
         now: _may2026,
       );
       expect(d.approvalsCount, 2);
@@ -312,28 +370,85 @@ void main() {
       expect(d.approvals[1].amount, 645000);
     });
 
-    test('rows with no id are dropped (nothing honest to show)', () {
+    test('rows with no id are dropped, but the COUNT stays the server total', () {
       final ExecDashboard d = buildExecDashboard(
         evmSeries: null,
-        approvalRows: <InboxEnt>[
-          <String, Object?>{'kind': 'PR'},
-          <String, Object?>{'id': 'b', 'kind': 'PO'},
-        ],
+        approvals: const ExecApprovals(
+          rows: <InboxEnt>[
+            <String, Object?>{'kind': 'PR'},
+            <String, Object?>{'id': 'b', 'kind': 'PO'},
+          ],
+          total: 2,
+        ),
         now: _may2026,
       );
-      expect(d.approvalsCount, 1);
+      // One row is renderable...
+      expect(d.approvals.length, 1);
+      // ...but two docs await the caller, and that is the server's fact. Taking
+      // the list length here would publish a CLIENT filter's result as the
+      // server's count and understate the backlog.
+      expect(d.approvalsCount, 2);
+    });
+
+    test('a missing envelope total leaves the count UNKNOWN, never the row '
+        'count and never zero', () {
+      final ExecDashboard d = buildExecDashboard(
+        evmSeries: null,
+        approvals: const ExecApprovals(
+          rows: <InboxEnt>[
+            <String, Object?>{'id': 'a', 'kind': 'PR'},
+          ],
+          total: null,
+        ),
+        now: _may2026,
+      );
+      expect(d.approvals.length, 1);
+      expect(d.approvalsCount, isNull);
+    });
+
+    test('the chart carries the project name that scopes it', () {
+      final ExecDashboard d = buildExecDashboard(
+        evmSeries: <Object?>[_row('2026-05', 1, 1)],
+        approvals: kEmptyExecApprovals,
+        now: _may2026,
+        scopeLabel: 'juneflow บางบัวทอง',
+      );
+      expect(d.scopeLabel, 'juneflow บางบัวทอง');
     });
 
     test('an unreadable series still yields a usable dashboard', () {
       final ExecDashboard d = buildExecDashboard(
         evmSeries: 'nonsense',
-        approvalRows: <InboxEnt>[
-          <String, Object?>{'id': 'a', 'kind': 'PR'},
-        ],
+        approvals: const ExecApprovals(
+          rows: <InboxEnt>[
+            <String, Object?>{'id': 'a', 'kind': 'PR'},
+          ],
+          total: 1,
+        ),
         now: _may2026,
       );
       expect(d.chart.isEmpty, isTrue);
       expect(d.approvalsCount, 1, reason: 'the feeds are independent');
+    });
+
+    test('THE SEEDED STACK: the primary project serves an empty series, so the '
+        'chart is empty and the scope is still named', () {
+      // Reproduced from the payloads captured LIVE against the seeded stack:
+      //   GET /boq/reports/evm?project_id=13ed4a49-… -> {"series":[], …}
+      // Only project:rjp has evm_snapshot rows; the primary project is BBT.
+      final ExecDashboard d = buildExecDashboard(
+        evmSeries: const <Object?>[],
+        approvals: const ExecApprovals(rows: <InboxEnt>[], total: 0),
+        now: _may2026,
+        scopeLabel: 'juneflow บางบัวทอง',
+      );
+      expect(d.chart.isEmpty, isTrue);
+      expect(d.chart.plan, isEmpty);
+      expect(d.chart.actual, isEmpty);
+      expect(d.chart.firstLabel, isNull);
+      expect(d.chart.todayX, isNull);
+      // The reader is still told WHOSE curve is missing.
+      expect(d.scopeLabel, 'juneflow บางบัวทอง');
     });
   });
 }
