@@ -17,20 +17,29 @@
  * colour is a real row field, never bom.jsx's hard-coded BOM_MODELS (B-1..D-1). The KPI
  * item-count is the real bom_item_count.
  *
- * WIRE GAP (reported honestly, never fabricated — boq-overview GR precedent):
- *   • BOM LINE DETAIL — the per-house line items (cat/code/name/qty/price) live in the
- *     boms.items jsonb (packages/db `bom`, keyed by unit_type = model code), but NO endpoint
- *     returns them: GET /models exposes only bom_item_count (the length), and there is no
- *     GET /models/{id}/bom · GET /bom in the contract. There is also NO model↔boq-doc link
- *     in the schema, so the line detail CANNOT be sourced from GET /boq items either (that
- *     would fabricate a relationship — §0 rule 3). So every line-level figure is honestly
- *     em-dashed: the cost-per-house KPI value, the three category %/amount subs, every table
- *     row (the M/S/L bands render from a real BomLine[] that is empty until such an endpoint
- *     lands — boq-bom-agg.ts, unit-tested for that day), the footer total, and the
- *     info-formula total/grand. Only the units multiplier in the formula/gen-dialog is real
- *     (unit_count). Flagged to Wei: expose boms.items to light the table up.
- *   • model version ("v4") + updated-date — mock decoration with no column on `model`; the
- *     KPI version tail and the "updated {date}" line render an em-dash (never the mock string).
+ * BOM LINE DETAIL — WIRED. (This header previously claimed "NO endpoint returns them"; that
+ * was true at the original port and is now factually STALE.) The per-house line items
+ * (cat/code/name/detail/unit/qty/price) come from GET /models/{id}/bom — contract operationId
+ * getModelBom (packages/contracts/openapi.yaml `/models/{id}/bom`), handler
+ * apps/api/src/routes/models.ts, generated client — fetched by useModelBom (use-model-bom.ts)
+ * and narrowed by parseBomLines (boq-bom-agg.ts). The handler resolves the model in tenant
+ * scope, then returns the boms.items of the `bom` row whose unit_type equals the model's code,
+ * in the B-014 envelope; a model with no BOM returns an empty list. So the table rows, each
+ * row amount, the category bands + band subtotals, the cost-per-house KPI, the three category
+ * %/amount KPIs, the footer total and the info-formula now render REAL server data.
+ *
+ * MONEY (rule: money = SERVER) — every monetary INPUT is a server field (line `price`, line
+ * `qty`, the derived `unit_count`). The wire exposes no server-computed BOM total / category
+ * subtotal / block value, so those sums are pure read-only DISPLAY derivations living in the
+ * unit-tested boq-bom-agg module (the prototype's own arithmetic, bom.jsx L52-57) — nothing is
+ * originated, written back or posted. Same precedent as boq-editor-agg.sumLineTotals.
+ *
+ * STILL EM-DASHED (honest, never fabricated — boq-overview GR precedent):
+ *   • model version ("v4") + updated-date — mock decoration with no column on `model`, and
+ *     getModelBom returns only the items array (not the bom row's updated_at); the KPI version
+ *     tail and the "updated {date}" line render an em-dash (never the mock string).
+ *   • every cost figure falls back to an em-dash whenever the BOM resolves to zero parseable
+ *     lines (empty payload / failed read) — never a fabricated 0.
  *
  * i18n (rule 2): every string is a boq.bom* DICT key (t), nav.sec.boq / block.fieldModel /
  * vendor.btnExport / common.edit / boq.edCardMaterial / boq.bomCatSubcon / boq.edCardLabor
@@ -60,7 +69,9 @@ import { formatMoney } from "./boq-overview-agg";
 import {
   BOM_CAT_ORDER,
   groupByCat,
+  parseBomLines,
   bomTotal,
+  bomBlockValue,
   bomCatTotal,
   bomCatPct,
   millions2,
@@ -68,6 +79,7 @@ import {
   type BomCat,
   type BomLine,
 } from "./boq-bom-agg";
+import { useModelBom } from "./use-model-bom";
 import bomStrings from "./boq-bom-strings.json" with { type: "json" };
 
 const P = (k: keyof typeof bomStrings) => bomStrings[k] as PhraseKey;
@@ -200,12 +212,15 @@ export function BOMTemplates() {
   const selected = models.find((m) => m.code === activeCode);
   const modelHasBom = selected ? hasBom(selected) : false;
 
-  // BOM line detail — WIRE GAP (header): no endpoint returns boms.items, so this stays
-  // empty (the M/S/L bands + every money figure em-dash). When such an endpoint lands, feed
-  // it here (parseBomLines) and the unit-tested agg lights the table up unchanged.
-  const lines: BomLine[] = [];
+  // BOM line detail — GET /models/{id}/bom (header). Only queried for a model the server
+  // says HAS a BOM (bom_item_count > 0); the no-BOM model renders its empty state without
+  // firing a read. The opaque rows are narrowed by the unit-tested agg.
+  const bomQ = useModelBom(selected && modelHasBom ? selected.id : undefined);
+  const lines: BomLine[] = parseBomLines(bomQ.data);
   const linesAvailable = lines.length > 0;
   const groups = groupByCat(lines);
+  // Lines still in flight — render the skeleton rather than a flash of em-dashes.
+  const linesLoading = !!selected && modelHasBom && bomQ.isLoading;
 
   const genBOQ = () => {
     if (!selected) return;
@@ -220,8 +235,8 @@ export function BOMTemplates() {
           {fill(t("boq.bomGenMsgLine2"), {
             n: String(selected.bom_item_count),
             units: String(selected.unit_count),
-            // total × units — total is unwired (no line prices), so the product em-dashes.
-            value: linesAvailable ? formatMoney(bomTotal(lines) * selected.unit_count) : DASH,
+            // total × units — both server-sourced; em-dashes only if the BOM read yielded no lines.
+            value: linesAvailable ? formatMoney(bomBlockValue(lines, selected.unit_count)) : DASH,
           })}
         </span>
       ),
@@ -328,7 +343,7 @@ export function BOMTemplates() {
 
         {/* BOM detail */}
         <div>
-          {!selected ? (
+          {!selected || linesLoading ? (
             <Card pad={0}>
               <div style={{ padding: 20 }}>
                 {[0, 1, 2, 3, 4].map((n) => (
@@ -371,9 +386,9 @@ export function BOMTemplates() {
             </Card>
           ) : (
             <>
-              {/* KPIs — cost-per-house + the three category shares. Every value/amount is a
-                  line-level figure the wire does not expose (header), so it em-dashes; only
-                  the item count (bom_item_count) is real. */}
+              {/* KPIs — cost-per-house + the three category shares, derived from the real
+                  GET /models/{id}/bom lines (header); the item count is the server's
+                  bom_item_count. Only the version tail stays an em-dash (no column). */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
                 <KpiCard
                   label={t("boq.bomKpiCostPerHouse")}
@@ -396,7 +411,8 @@ export function BOMTemplates() {
               <Card pad={0}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
                   <ListHeader tpl={t("boq.bomListHeader")} type={selected.type} code={selected.code} />
-                  {/* updated date — no `updated` column on `model`, so em-dash (never the mock). */}
+                  {/* updated date — no `updated` column on `model`, and getModelBom returns only
+                      the items array (not the bom row's updated_at), so em-dash (never the mock). */}
                   <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
                     {fill(t("boq.bomUpdatedAt"), { date: DASH })}
                   </span>
@@ -423,9 +439,8 @@ export function BOMTemplates() {
                       <th scope="col" style={bomTh(130, "right")}>{tp(P("thTotal"))}</th>
                     </tr>
                   </thead>
-                  {/* Category bands render from the real BomLine[] (empty until boms.items is
-                      exposed — header). The band/row markup is the prototype's, so the table
-                      lights up unchanged the day the endpoint lands. */}
+                  {/* Category bands render from the real BomLine[] parsed off
+                      GET /models/{id}/bom (header); markup is the prototype's, verbatim. */}
                   {groups.map((g) => (
                     <tbody key={g.cat}>
                       <tr style={{ background: "var(--surface)" }}>
@@ -492,7 +507,14 @@ export function BOMTemplates() {
                   }}
                 >
                   <Icon name="info" size={15} color="var(--accent)" />
-                  <span>{renderInfoFormula(t("boq.bomInfoFormula"), linesAvailable ? formatMoney(bomTotal(lines)) : DASH, String(selected.unit_count), linesAvailable ? formatMoney(bomTotal(lines) * selected.unit_count) : DASH)}</span>
+                  <span>
+                    {renderInfoFormula(
+                      t("boq.bomInfoFormula"),
+                      linesAvailable ? formatMoney(bomTotal(lines)) : DASH,
+                      String(selected.unit_count),
+                      linesAvailable ? formatMoney(bomBlockValue(lines, selected.unit_count)) : DASH,
+                    )}
+                  </span>
                 </div>
               </Card>
             </>

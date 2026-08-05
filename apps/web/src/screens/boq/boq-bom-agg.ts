@@ -10,11 +10,19 @@
  * `bom`); parseBomLines() narrows that opaque jsonb into the typed BomLine[] this module
  * aggregates over.
  *
- * WIRE GAP (see boq-bom.tsx header): no endpoint currently RETURNS boms.items — GET /models
- * exposes only bom_item_count (the length), not the lines. So these aggregators run on real
- * data only once such an endpoint lands; they are unit-tested here with representative lines
- * so the derivation (total / per-category total / percentage / grouping) is proven correct
- * for that day, and the view em-dashes the money it cannot yet source rather than inventing it.
+ * WIRE (corrected): the lines ARE served — GET /models/{id}/bom (contract operationId
+ * getModelBom, handler apps/api/src/routes/models.ts) returns boms.items in the B-014
+ * envelope; use-model-bom.ts fetches it and parseBomLines() narrows the rows here. An earlier
+ * header in this file and in boq-bom.tsx claimed no such endpoint existed — that was true when
+ * the screen was first ported and is stale now, so the aggregators below run on the real server
+ * record. GET /models still exposes only bom_item_count (the length), which stays the
+ * server-derived has-BOM / item-count source.
+ *
+ * MONEY: the wire carries per-line `qty` + `price` only — it exposes NO server-computed BOM
+ * total, per-category subtotal, or block value. Every figure below is therefore a pure DISPLAY
+ * derivation of those server fields (the prototype's own arithmetic, bom.jsx L52-57), never an
+ * originated amount: nothing here is written back, posted, or sent to the server. Same pattern
+ * as the sibling boq-editor-agg.sumLineTotals. Prefer a server-computed total the day one lands.
  */
 
 /** BOM line category — Material / Subcontractor / Labor (bom.jsx BOM_CAT L4-8). */
@@ -103,6 +111,17 @@ export function lineAmount(line: BomLine): number {
 /** Total cost per 1 house = sum of every line amount (bom.jsx bomTotal L52-54). */
 export function bomTotal(lines: BomLine[]): number {
   return lines.reduce((sum, l) => sum + lineAmount(l), 0);
+}
+
+/**
+ * Block value = the per-house BOM total x the block's unit count (bom.jsx L207 info-formula
+ * `total * model.units`, reused by the generate-BOQ confirm L110). Both inputs are server
+ * fields (line qty/price + the derived unit_count); this is display arithmetic only.
+ * A non-positive / non-finite unit count contributes nothing -> 0 (never NaN).
+ */
+export function bomBlockValue(lines: BomLine[], unitCount: number): number {
+  if (!Number.isFinite(unitCount) || unitCount <= 0) return 0;
+  return bomTotal(lines) * unitCount;
 }
 
 /** Cost of one category = sum of its lines (bom.jsx bomCatTotal L55-57). */
