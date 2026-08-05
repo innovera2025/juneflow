@@ -92,6 +92,31 @@ function only(log: Statement[], pattern: RegExp): Statement {
   return hits[0]!;
 }
 
+/**
+ * Assert `log` is ONE transaction that contains every statement in `inside`.
+ *
+ * WHY THIS IS NOT `log[0] === "begin" && log.at(-1) === "commit"`. That
+ * endpoints-only pair is satisfied just as well by `[begin … commit begin …
+ * commit]`, so a method split into two sequential transactions passed it
+ * unchanged — the three tests that named atomicity proved only that the log
+ * starts and ends on a boundary. Counting the boundaries is what fails a split:
+ * two `begin`s, two `commit`s. The window check then pins each named statement
+ * strictly BETWEEN them, so moving one out of the transaction fails too.
+ */
+function expectOneTransaction(log: Statement[], inside: RegExp[]): void {
+  const order = texts(log);
+  expect(order.filter((t) => t === "begin"), "exactly one begin").toHaveLength(1);
+  expect(order.filter((t) => t === "commit"), "exactly one commit").toHaveLength(1);
+  expect(order.filter((t) => t === "rollback"), "no rollback").toHaveLength(0);
+  const opened = order.indexOf("begin");
+  const closed = order.indexOf("commit");
+  for (const pattern of inside) {
+    const at = order.findIndex((t) => pattern.test(t));
+    expect(at, `${pattern} must be issued after begin`).toBeGreaterThan(opened);
+    expect(at, `${pattern} must be issued before commit`).toBeLessThan(closed);
+  }
+}
+
 // ---------------------------------------------------------------------------
 describe("DbCredentialStore.provision", () => {
   it("creates auth_user + a PASSWORDLESS credential account in ONE transaction", async () => {
@@ -102,9 +127,13 @@ describe("DbCredentialStore.provision", () => {
       name: "นภา ศรีสุข",
     });
 
-    // Both inserts inside one begin/commit — never a half-created identity.
-    expect(texts(log)[0]).toBe("begin");
-    expect(texts(log).at(-1)).toBe("commit");
+    // Both inserts inside ONE begin/commit — never a half-created identity. A
+    // split here (auth_user in tx1, auth_account in tx2) would leave, on a
+    // failure between the commits, an auth_user holding the address under the
+    // platform-wide auth_user_email_unique with no credential and no dictionary
+    // row: users.ts compensates by deleting the dictionary row and does not call
+    // deprovision, because it is written on the assumption provision is atomic.
+    expectOneTransaction(log, [/insert into "auth_user"/, /insert into "auth_account"/]);
 
     const identity = only(log, /insert into "auth_user"/);
     expect(identity.values).toContain(account.authUserId);
@@ -263,9 +292,11 @@ describe("DbCredentialStore.setPassword", () => {
     );
     await new DbCredentialStore(db).setPassword("au-1", "correct-horse");
 
+    // ONE transaction, not two: a crash between two commits would leave the new
+    // password live with every old session still valid — the stolen bearer the
+    // session kill exists to revoke.
+    expectOneTransaction(log, [/update "auth_account"/, /delete from "auth_session"/]);
     const order = texts(log);
-    expect(order[0]).toBe("begin");
-    expect(order.at(-1)).toBe("commit");
     const kill = only(log, /delete from "auth_session"/);
     expect(kill.values).toEqual(["au-1"]);
     expect(order.indexOf(kill.text)).toBeGreaterThan(
@@ -296,9 +327,15 @@ describe("DbCredentialStore.deprovision", () => {
     const { db, log } = recordingDb();
     await new DbCredentialStore(db).deprovision("au-1");
 
+    // All four deletes in ONE transaction: a compensator that half-runs leaves
+    // exactly the orphan it was added to clear.
+    expectOneTransaction(log, [
+      /delete from "auth_verification"/,
+      /delete from "auth_session"/,
+      /delete from "auth_account"/,
+      /delete from "auth_user"/,
+    ]);
     const order = texts(log);
-    expect(order[0]).toBe("begin");
-    expect(order.at(-1)).toBe("commit");
     expect(only(log, /delete from "auth_verification"/).values).toEqual([
       `${RESET_IDENTIFIER_PREFIX}au-1`,
     ]);

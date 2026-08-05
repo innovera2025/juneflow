@@ -166,6 +166,30 @@ describe("secrets never reach audit_log", () => {
     expect(serialized).not.toContain("raw-reset-token");
   });
 
+  it("redacts a secret nested BELOW any fixed depth bound — 'at any depth' means any", async () => {
+    // The first cut of redactSecrets stopped at `depth > 8` and returned
+    // everything under it VERBATIM, while the test above — which nests two
+    // levels — already called itself "at any depth". This body is the
+    // counter-example that reached audit_log.after in the clear: no route
+    // registers a body schema, so any mutating route accepts it and the hook
+    // records the whole body.
+    const { app, records } = await buildApp();
+    let payload: Record<string, unknown> = { password: "correct-horse" };
+    for (let i = 0; i < 12; i += 1) payload = { n: payload };
+
+    const res = await app.inject({ method: "POST", url: "/projects", payload });
+    expect(res.statusCode).toBe(200);
+
+    expect(records).toHaveLength(1);
+    const after = JSON.stringify(records[0]!.after);
+    expect(after).not.toContain("correct-horse");
+    expect(after).toContain("[redacted]");
+    // Redaction COPIES the whole tree — it does not truncate it. A cap that
+    // dropped the tail instead of leaking it would also hide the password, so
+    // assert the 12 wrappers all survived.
+    expect(after.match(/"n":/g)).toHaveLength(12);
+  });
+
   it("leaves request.body itself intact for anything running after the hook", async () => {
     // Redaction copies; it must not overwrite the parsed body in place, or a
     // later hook would see a request that no longer says what the client sent.

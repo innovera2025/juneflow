@@ -80,19 +80,47 @@ const SECRET_KEYS = new Set([
 const REDACTED = "[redacted]";
 
 /**
- * Deep-copy `value` with every secret-named property replaced by [redacted].
- * Depth-bounded (a request body is JSON, but a hostile one can be deeply
- * nested) and non-mutating — `request.body` must stay intact for anything that
+ * Deep-copy `value` with every secret-named property replaced by [redacted], at
+ * ANY depth. Non-mutating — `request.body` must stay intact for anything that
  * runs after this hook.
+ *
+ * WHY THERE IS NO DEPTH CAP. The first cut stopped at `depth > 8` and returned
+ * the sub-tree VERBATIM below it, so a body nesting `password` ten levels down
+ * was written to audit_log.after in the clear — the exact leak this function
+ * exists to prevent, and reachable on every mutating route because no route
+ * registers a body schema, so `request.body` is recorded wholesale. A cap can
+ * only ever choose between leaking the tail and dropping it; walking the tree
+ * with an explicit stack removes the choice. The cap's real job — never
+ * recursing without bound on hostile input — is done by being ITERATIVE: there
+ * is no call stack to overflow. `request.body` is JSON.parse output, a finite
+ * acyclic tree bounded by Fastify's bodyLimit, so the walk terminates in
+ * O(size).
  */
-function redactSecrets(value: unknown, depth = 0): unknown {
-  if (depth > 8 || value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map((v) => redactSecrets(v, depth + 1));
-  const out: Record<string, unknown> = {};
-  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = SECRET_KEYS.has(key.toLowerCase()) ? REDACTED : redactSecrets(v, depth + 1);
+function redactSecrets(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  /** An empty copy of the same KIND — an array stays an array in the audit row. */
+  const emptyLike = (src: object): Record<string, unknown> =>
+    (Array.isArray(src) ? [] : {}) as Record<string, unknown>;
+
+  const root = emptyLike(value);
+  // [source, its copy] pairs still to walk. LIFO: order of writes does not
+  // matter, only that every node is visited exactly once.
+  const pending: Array<[object, Record<string, unknown>]> = [[value, root]];
+  while (pending.length > 0) {
+    const [src, dst] = pending.pop()!;
+    for (const [key, v] of Object.entries(src)) {
+      if (SECRET_KEYS.has(key.toLowerCase())) {
+        dst[key] = REDACTED;
+      } else if (v === null || typeof v !== "object") {
+        dst[key] = v;
+      } else {
+        const child = emptyLike(v);
+        dst[key] = child;
+        pending.push([v, child]);
+      }
+    }
   }
-  return out;
+  return root;
 }
 
 /** Logical action derived from the HTTP method of a mutating request. */
