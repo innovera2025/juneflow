@@ -131,15 +131,13 @@ class _PmNotesScreenHostState extends State<PmNotesScreenHost> {
           if (strings == null) {
             return const ColoredBox(color: JuneflowTokens.surfaceBg);
           }
-          // The save replays through the shared offline queue (services.syncQueue)
-          // via the level-(a) processor over the shared Dio (auth + tenant scope);
-          // the read goes straight to that same Dio.
-          final QueueDrainProcessor processor = QueueDrainProcessor(
-            services.syncQueue,
-            DioSyncApiClient(services.dio),
-          );
+          // The save replays through the app's ONE offline queue + drain processor
+          // (AppServices.syncProcessor, B-262) over the shared Dio (auth + tenant
+          // scope); the read goes straight to that same Dio. Taking the shared
+          // instance rather than building a processor here is what lets a queued
+          // save drain on app resume, not only while this screen is mounted.
           return PmNotesScreen(
-            repo: DioPmNotesRepository(services.dio, processor),
+            repo: DioPmNotesRepository(services.dio, services.syncProcessor),
             strings: strings,
             i18n: services.i18n,
             workOrderId: widget.workOrderId,

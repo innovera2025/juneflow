@@ -87,14 +87,13 @@ class _PmCheckinScreenHostState extends State<PmCheckinScreenHost> {
           if (strings == null) {
             return const ColoredBox(color: JuneflowTokens.surfaceBg);
           }
-          // The check-in replays through the shared offline queue (services.syncQueue)
-          // via the level-(a) processor over the shared Dio (auth + tenant scope).
-          final QueueDrainProcessor processor = QueueDrainProcessor(
-            services.syncQueue,
-            DioSyncApiClient(services.dio),
-          );
+          // The check-in replays through the app's ONE offline queue + drain
+          // processor (AppServices.syncProcessor, B-262) over the shared Dio (auth +
+          // tenant scope). Taking the shared instance rather than building a
+          // processor here is what lets a queued check-in drain on app resume, not
+          // only while this screen happens to be mounted.
           return PmCheckinScreen(
-            repo: QueueBackedPmCheckinRepository(processor),
+            repo: QueueBackedPmCheckinRepository(services.syncProcessor),
             gpsSource: services.gpsSource,
             strings: strings,
             i18n: services.i18n,

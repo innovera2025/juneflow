@@ -94,10 +94,14 @@ abstract class PmNotesRepository {
 /// transport, so it inherits the auth interceptor + tenant scope) for the read, and
 /// the shared offline queue + its (a) processor for the write.
 class DioPmNotesRepository implements PmNotesRepository {
-  const DioPmNotesRepository(this._dio, this._processor);
+  const DioPmNotesRepository(this._dio, this.processor);
 
   final Dio _dio;
-  final QueueDrainProcessor _processor;
+
+  /// The app's shared drain processor (`AppServices.syncProcessor`, B-262). Public
+  /// so the host wiring is assertable: a repository handed a screen-local processor
+  /// instead of the shared one is the regression this slice removed.
+  final QueueDrainProcessor processor;
 
   @override
   Future<List<PmNotesEnt>> listWorkOrders() async {
@@ -131,13 +135,13 @@ class DioPmNotesRepository implements PmNotesRepository {
       payload: body,
       createdAt: now,
     );
-    await _processor.queue.enqueue(op);
-    return _processor.drain();
+    await processor.queue.enqueue(op);
+    return processor.drain();
   }
 
   @override
-  Future<DrainReport> drain() => _processor.drain();
+  Future<DrainReport> drain() => processor.drain();
 
   @override
-  Future<List<SyncOperation>> due() => _processor.queue.pending();
+  Future<List<SyncOperation>> due() => processor.queue.pending();
 }

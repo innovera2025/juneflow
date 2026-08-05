@@ -83,10 +83,21 @@ class LocalDb extends _$LocalDb {
 
 /// [SyncQueue] backed by a drift [LocalDb]. Thin adapter: it maps the queue
 /// contract onto SQL and holds no policy of its own.
+///
+/// Constructed by `sync_queue_store_io.dart` (the platform-conditional opener that
+/// `AppServices.bootstrap` calls); see sync_queue_store.dart for why the executor
+/// choice lives there and not here.
 class DriftSyncQueue implements SyncQueue {
   DriftSyncQueue(this._db);
 
   final LocalDb _db;
+
+  /// Closes the underlying database handle.
+  ///
+  /// Every queue mutation is committed by the time its Future completes, so closing
+  /// never drops a queued write — this only releases the connection (sign-out, app
+  /// teardown, and the "app was killed" step in the durability tests).
+  Future<void> close() => _db.close();
 
   @override
   Future<void> enqueue(SyncOperation op) async {
