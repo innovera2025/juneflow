@@ -81,6 +81,12 @@ import { registerSalesServiceRoute } from "./routes/sales-service.js";
 import { registerSolarRoute } from "./routes/solar.js";
 import { registerPettyRoute } from "./routes/petty.js";
 import type { SignIn } from "./auth.js";
+import {
+  DbCredentialStore,
+  noopResetDelivery,
+  type CredentialStore,
+  type ResetDelivery,
+} from "./auth-provisioning.js";
 
 export interface AppDeps {
   /** Base (un-scoped) DB handle — only plugins/TenantDb construction see it. */
@@ -100,6 +106,20 @@ export interface AppDeps {
   /** Dunning-notification seam (W1d). Default no-op; tests record it; real LINE
    *  delivery (P0-INT-03) lands later as a default-swap. */
   notify?: DunningNotifier;
+  /**
+   * Credential/reset seam (B-282). Defaults to the REAL DbCredentialStore over
+   * the base handle, so production is wired by construction and a test opts out
+   * by injecting a fake — never the other way round (a no-op default here would
+   * silently restore the "invited users can never log in" bug).
+   */
+  credentials?: CredentialStore;
+  /**
+   * Reset/invite token delivery seam (B-282). Defaults to a NO-OP: apps/api has
+   * no mail dependency and @juneflow/notifications ships no concrete
+   * SmtpTransport (B-269), so nothing here can send a message yet. index.ts
+   * warns at boot; see auth-provisioning.ts for the exact wiring steps.
+   */
+  deliverReset?: ResetDelivery;
   /** Fastify logger toggle (tests turn it off). */
   logger?: boolean;
 }
@@ -188,11 +208,22 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // W1d dunning notifier — no-op by default (the real LINE adapter's send() throws
   // a TODO until P0-INT-03; the remind never depends on it). Test-overridable.
   const notify: DunningNotifier = deps.notify ?? (() => {});
+  // B-282 credential seam. Like platformDb/platformWriteDb this wraps the
+  // un-scoped base handle privately and is injected ONLY into the three
+  // handlers that provision or reset a credential — never attached to `request`.
+  const credentials: CredentialStore =
+    deps.credentials ?? new DbCredentialStore(deps.db);
+  const deliverReset: ResetDelivery = deps.deliverReset ?? noopResetDelivery;
 
   // Contract routes under the contract server prefix /api/v1.
   await app.register(
     async (v1) => {
-      await registerAuthRoutes(v1, { db: deps.db, signIn: deps.signIn });
+      await registerAuthRoutes(v1, {
+        db: deps.db,
+        signIn: deps.signIn,
+        credentials,
+        deliverReset,
+      });
       registerMeRoute(v1);
       registerProjectsRoute(v1, { quota: deps.quota });
       registerCountsRoute(v1);
@@ -203,9 +234,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerDocumentsRoute(v1);
       registerModelsRoute(v1);
       registerVendorsRoute(v1);
-      registerUsersRoute(v1);
+      registerUsersRoute(v1, { credentials, deliverReset });
       registerRolesRoute(v1);
-      registerAdminRoutes(v1, { platformDb, platformWriteDb, notify });
+      registerAdminRoutes(v1, {
+        platformDb,
+        platformWriteDb,
+        notify,
+        credentials,
+        deliverReset,
+      });
       registerSubscriptionRoutes(v1);
       registerOrgUnitsRoute(v1);
       registerProjectNodesRoute(v1);

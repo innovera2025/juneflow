@@ -2,7 +2,9 @@
 // UsersPermissions/UserAddForm). Covers the B-014 envelope + wire shape with the
 // username DERIVED from email, tenant scope (no leak), the invite create
 // (status starts `invited`, department normalized, duplicate email 409, canSave
-// validation), and the B-082 F1 function-level authorization guard.
+// validation), the B-082 F1 function-level authorization guard, and — B-282 —
+// the credential the invite now provisions (without which the invited user
+// could never log in at all).
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
@@ -10,6 +12,8 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { users, roles } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
+import type { ResetDeliveryMessage } from "../auth-provisioning.js";
+import { FakeCredentialStore } from "../auth-provisioning-fake.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -27,6 +31,10 @@ interface Inserted {
   table: unknown;
   values: Record<string, unknown>;
 }
+interface Deleted {
+  table: unknown;
+  where: SQL | undefined;
+}
 
 // Realistic stub: rows keyed by table, filtered by the captured WHERE. The
 // company_id predicate is always present; a non-company param (id/email/role_id)
@@ -37,6 +45,7 @@ function stubDb(
   companyId: string,
   captured: Captured[] = [],
   inserted: Inserted[] = [],
+  deleted: Deleted[] = [],
 ): Db {
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
@@ -80,6 +89,14 @@ function stubDb(
         },
       }),
     }),
+    // B-282: the invite compensates a failed credential provision by deleting
+    // the dictionary row it just wrote, so the stub has to record deletes.
+    delete: (table: unknown) => ({
+      where: (where: SQL) => {
+        deleted.push({ table, where });
+        return Promise.resolve([]);
+      },
+    }),
   } as unknown as Db;
 }
 
@@ -93,7 +110,14 @@ afterEach(async () => {
   await app?.close();
 });
 
+// B-282: buildApp defaults `credentials` to the REAL DbCredentialStore, so every
+// test that reaches the invite must opt into the in-memory fake explicitly.
+let credentials: FakeCredentialStore;
+let delivered: ResetDeliveryMessage[];
+
 async function buildTestApp(overrides: Partial<AppDeps> = {}): Promise<FastifyInstance> {
+  credentials = (overrides.credentials as FakeCredentialStore | undefined) ?? new FakeCredentialStore();
+  delivered = [];
   app = await buildApp({
     db: overrides.db ?? stubDb([], COMPANY),
     resolveTenant: overrides.resolveTenant ?? (async () => null),
@@ -101,6 +125,8 @@ async function buildTestApp(overrides: Partial<AppDeps> = {}): Promise<FastifyIn
     storage: overrides.storage ?? createFakeR2Storage("https://r2.test"),
     quota: overrides.quota ?? new QuotaGuard({ resolver: unlimitedQuotaResolver, upgradeUrl: "https://upgrade.test" }),
     auditSink: overrides.auditSink ?? (async () => {}),
+    credentials,
+    deliverReset: overrides.deliverReset ?? ((m) => void delivered.push(m)),
     logger: false,
   });
   return app;
@@ -227,6 +253,220 @@ describe("POST /api/v1/users — email invite", () => {
     // role_id present but not a role of this tenant (scoped select → empty).
     const badRole = await (await build([[roles, [roleRow]], [users, [caller]]])).inject({ method: "POST", url: "/api/v1/users", payload: { name: "A B", email: "a@b.co", role_id: "ghost" } });
     expect(badRole.statusCode).toBe(400);
+  });
+});
+
+// --- B-282: the invite must actually provision a credential -----------------
+// Before this, POST /users wrote the dictionary row and stopped: no auth_user,
+// no auth_account, no token, nothing sent. The invited user could never log in.
+describe("POST /api/v1/users — B-282 credential provisioning", () => {
+  const invite = async (payload: Record<string, unknown>, store?: FakeCredentialStore) =>
+    (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY),
+        credentials: store,
+      })
+    ).inject({ method: "POST", url: "/api/v1/users", payload });
+
+  it("creates the auth account bound to THIS tenant, with no password yet", async () => {
+    const res = await invite({ name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" });
+    expect(res.statusCode).toBe(201);
+
+    const account = await credentials.findByEmail("napha@juneflow.co.th");
+    expect(account).not.toBeNull();
+    expect(account!.companyId).toBe(COMPANY);
+    // Passwordless on purpose — better-auth refuses to sign in such an account,
+    // so an invite cannot be used until it is completed via /auth/reset.
+    expect(credentials.accounts.get(account!.authUserId)!.password).toBeNull();
+    expect(credentials.signInWith("napha@juneflow.co.th", "anything")).toBeNull();
+  });
+
+  it("issues a set-your-password token and hands it to delivery — never to the client", async () => {
+    const res = await invite({ name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" });
+
+    expect(credentials.tokens.size).toBe(1);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.kind).toBe("invite");
+    expect(delivered[0]!.to).toBe("napha@juneflow.co.th");
+    // The 201 body must not carry the token in any form.
+    expect(res.body).not.toContain(delivered[0]!.token);
+    expect(res.json().token).toBeUndefined();
+  });
+
+  it("canonicalizes the email so the credential and the dictionary row agree", async () => {
+    // A mixed-case invite must not provision a credential nobody can sign in
+    // with — that is the same "can never log in" failure in a different disguise.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY, [], inserted),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "  Napha@Juneflow.CO.TH ", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(inserted[0]!.values.email).toBe("napha@juneflow.co.th");
+    expect(await credentials.findByEmail("napha@juneflow.co.th")).not.toBeNull();
+  });
+
+  it("still invites an address another TENANT holds — the B-283 block is NOT shipped", async () => {
+    // auth_user.email is unique platform-wide (migration 0008), so this invite
+    // cannot be credentialed. That is a schema fact, not a licence to refuse:
+    // before B-282 tenant B could invite an address tenant A held, a
+    // subcontractor's PM legitimately appears in two companies, and a 409 that
+    // echoes the address would make any tenant admin a cross-tenant existence
+    // oracle. Narrowing the index needs a SACRED migration → Wei's ruling
+    // (B-283). Until then POST /users keeps its PER-COMPANY behaviour.
+    const store = new FakeCredentialStore();
+    store.seed({ authUserId: "au-other", companyId: "99999999-9999-9999-9999-999999999999", email: "napha@juneflow.co.th" });
+    const deleted: Deleted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY, [], [], deleted),
+        credentials: store,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json().status).toBe("invited");
+    // The dictionary row stands — exactly the pre-B-282 outcome.
+    expect(deleted.find((d) => d.table === users)).toBeUndefined();
+    // What is genuinely new is only that this one invite has no credential yet
+    // and so cannot be completed until B-283 is answered.
+    expect(store.accounts.size).toBe(1); // still just the OTHER tenant's account
+    expect(store.tokens.size).toBe(0);
+    expect(delivered).toHaveLength(0);
+  });
+
+  it("rolls the dictionary row back when provisioning fails outright", async () => {
+    const store = new FakeCredentialStore();
+    store.provisionError = new Error("connection reset");
+    const deleted: Deleted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY, [], [], deleted),
+        credentials: store,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    // The dictionary row it had already written is removed, tenant-scoped — no
+    // orphan user with no way in.
+    const del = deleted.find((d) => d.table === users);
+    expect(del).toBeDefined();
+    expect(paramsOf(del!.where)).toContain(COMPANY);
+  });
+
+  it("rolls back BOTH halves when the token cannot be stored — no orphaned credential", async () => {
+    // The compensator used to delete only the dictionary row, leaving auth_user
+    // + auth_account behind. auth_user_email_unique is platform-wide, so that
+    // address could then never be invited again in ANY tenant, and no endpoint
+    // existed that could clear it — a permanent, unrecoverable brick from one
+    // dropped connection.
+    const store = new FakeCredentialStore();
+    store.issueError = new Error("verification insert failed");
+    const deleted: Deleted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY, [], [], deleted),
+        credentials: store,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(deleted.find((d) => d.table === users)).toBeDefined();
+    // The credential is gone too — the address can be invited again.
+    expect(store.deprovisioned).toHaveLength(1);
+    expect(await store.findByEmail("napha@juneflow.co.th")).toBeNull();
+    expect(store.accounts.size).toBe(0);
+  });
+
+  it("still removes the dictionary row when the credential cleanup ITSELF fails", async () => {
+    // A compensator that throws must not swallow the original failure or skip
+    // the rest of the rollback; the orphan it could not clear is logged, loudly.
+    const store = new FakeCredentialStore();
+    store.issueError = new Error("verification insert failed");
+    store.deprovisionError = new Error("connection reset");
+    const deleted: Deleted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY, [], [], deleted),
+        credentials: store,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(deleted.find((d) => d.table === users)).toBeDefined();
+  });
+
+  it("still creates the user when only DELIVERY fails (recoverable via forgot)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY),
+        deliverReset: () => {
+          throw new Error("smtp is down");
+        },
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    // The account and its token are valid; only the mail was lost.
+    expect(await credentials.findByEmail("napha@juneflow.co.th")).not.toBeNull();
+    expect(credentials.tokens.size).toBe(1);
+  });
+
+  it("provisions nothing when the invite is rejected (403 / 400 / same-company 409)", async () => {
+    // A rejected invite must leave no credential behind.
+    const lowRole = { ...roleRow, id: "role-low", perms: { pr: { view: true, create: true, edit: false, approve: false, cancel: false } } };
+    const lowUser = { ...caller, id: "u-low", roleId: "role-low" };
+    const forbidden = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [lowRole]], [users, [lowUser]]], COMPANY),
+      })
+    ).inject({ method: "POST", url: "/api/v1/users", payload: { name: "X", email: "x@y.co", role_id: "role-low" } });
+    expect(forbidden.statusCode).toBe(403);
+    expect(credentials.accounts.size).toBe(0);
+    await app.close();
+
+    const badEmail = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY),
+      })
+    ).inject({ method: "POST", url: "/api/v1/users", payload: { name: "X", email: "no-at", role_id: "role-pm" } });
+    expect(badEmail.statusCode).toBe(400);
+    expect(credentials.accounts.size).toBe(0);
   });
 });
 

@@ -24,12 +24,36 @@
 // (user_company_email_uq), so a duplicate invite answers 409. Without a resolved
 // tenant, request.db is absent and the handler answers 401.
 //
+// B-282 — WHAT THE INVITE USED TO LEAVE UNDONE. This handler wrote the
+// dictionary `user` row and stopped there: no better-auth credential was ever
+// created and nothing was sent, so "the user sets their own password later" had
+// no mechanism behind it and an invited user could never log in. POST now also
+// provisions the auth_user + a passwordless "credential" auth_account and issues
+// a reset token, which the invitee redeems through POST /auth/reset (that route
+// also flips this row invited → active). The token goes to the delivery seam
+// and is never logged or returned in the 201.
+//
 // filter/page query params are accepted per the contract but not interpreted.
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { users, roles } from "@juneflow/db/schema";
+import {
+  canonicalEmail,
+  CredentialEmailTakenError,
+  newResetToken,
+  RESET_TOKEN_TTL_MS,
+  type CredentialStore,
+  type ResetDelivery,
+} from "../auth-provisioning.js";
 import { listEnvelope } from "./list-envelope.js";
 import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
+
+export interface UsersRouteOptions {
+  /** Credential/reset seam (prod: DbCredentialStore over the base handle). */
+  credentials: CredentialStore;
+  /** Invite-token delivery seam (default: no-op — see auth-provisioning.ts). */
+  deliverReset: ResetDelivery;
+}
 
 /** Department codes accepted on invite (master.jsx:1025 UserAddForm dropdown). */
 const DEPARTMENTS = ["CONS", "PROC", "FIN", "SLS", "ADM", "WH"] as const;
@@ -70,7 +94,10 @@ function parseDepartment(value: unknown): Department | null | "invalid" {
 }
 
 /** Register GET + POST /users on the given (already /api/v1-prefixed) scope. */
-export function registerUsersRoute(app: FastifyInstance): void {
+export function registerUsersRoute(
+  app: FastifyInstance,
+  options: UsersRouteOptions,
+): void {
   app.get("/users", async (request, reply) => {
     const db = request.db;
     if (!db) {
@@ -115,7 +142,13 @@ export function registerUsersRoute(app: FastifyInstance): void {
       typeof body.name === "string" && body.name.trim()
         ? body.name.trim()
         : [first, last].filter(Boolean).join(" ");
-    const email = typeof body.email === "string" ? body.email.trim() : "";
+    // Canonical account form (auth-provisioning.ts canonicalEmail). NOT
+    // cosmetic: the same address must resolve to ONE identity across the
+    // dictionary `user` row, the globally-unique auth_user.email, login and
+    // forgot — every one of which now uses this same helper. It also makes the
+    // duplicate pre-check below correct: before this, "A@x.co" and "a@x.co"
+    // both inserted.
+    const email = canonicalEmail(body.email);
     const roleId =
       typeof body.role_id === "string"
         ? body.role_id
@@ -160,6 +193,19 @@ export function registerUsersRoute(app: FastifyInstance): void {
       });
     }
 
+    // NO platform-wide pre-check here, deliberately — see B-283. auth_user.email
+    // is unique across the WHOLE platform (migration 0008), so a first cut of
+    // B-282 asked `credentials.findByEmail(email)` before inserting and answered
+    // 409. That would have been a NEW behaviour this slice is not entitled to
+    // ship: an address tenant A holds could no longer be invited by tenant B at
+    // all — and a construction ERP genuinely has one subcontractor PM working
+    // for two companies — while the 409 echoing the address turned an
+    // authenticated tenant admin into a cross-tenant existence oracle that did
+    // not exist before. Narrowing the index to UNIQUE(company_id, email) needs a
+    // SACRED migration, so the decision is Wei's. Until then this endpoint keeps
+    // its PER-COMPANY behaviour: the check above (scoped to this tenant) is the
+    // only duplicate rule, and a cross-tenant address is invited exactly as it
+    // was before B-282 — see the CredentialEmailTakenError branch below.
     const [created] = await db
       .insert(users, {
         name,
@@ -170,6 +216,84 @@ export function registerUsersRoute(app: FastifyInstance): void {
         status: "invited",
       })
       .returning();
+
+    // Provision the credential the invite promises. A failure here must not
+    // leave a dictionary user with no way in, so the row is rolled back by hand
+    // (the dictionary row and the auth_* rows sit behind two different handles —
+    // TenantDb cannot reach auth_account, which has no company_id column — so a
+    // single transaction is not available without a schema change).
+    let account;
+    try {
+      account = await options.credentials.provision({
+        companyId: db.companyId,
+        email,
+        name,
+      });
+    } catch (err) {
+      if (err instanceof CredentialEmailTakenError) {
+        // The platform-wide index rejected the address, so it is credentialed in
+        // ANOTHER tenant — a same-company duplicate cannot reach here, having
+        // been answered 409 by the scoped pre-check above.
+        //
+        // KEEP the dictionary row. That is precisely what POST /users did BEFORE
+        // B-282: the invite succeeds and the user sits `invited` with no
+        // credential yet. Answering 409 would ship the cross-tenant block (and
+        // its existence oracle) without Wei's ruling; rolling back would ship the
+        // same refusal behind a 500. The only genuinely new fact is that this
+        // particular invite cannot be COMPLETED until B-283 is decided, and that
+        // is what this line records. No PII in the log — the row id identifies it.
+        request.log.warn(
+          { kind: "invite", userId: created!.id },
+          "invited user provisioned NO credential: the address is already credentialed in another tenant (auth_user_email_unique is platform-wide — BLOCKERS.md B-283)",
+        );
+        return reply.code(201).send(toWire(created!));
+      }
+      await db.delete(users, eq(users.id, created!.id));
+      throw err;
+    }
+
+    // The set-your-password token. Issued inside the same guarded block: an
+    // invite whose token could not be stored is an invite nobody can complete.
+    const { token, hash } = newResetToken();
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+    try {
+      await options.credentials.issueResetToken(account.authUserId, hash, expiresAt);
+    } catch (err) {
+      // Compensate BOTH halves, credential FIRST. Deleting only the dictionary
+      // row left auth_user + auth_account behind, and auth_user_email_unique is
+      // platform-wide (B-283): that address could then never be invited again in
+      // ANY tenant, and no endpoint exists that could clear the orphan. The
+      // unrecoverable half therefore goes first, and if it fails the orphan is
+      // real — say so loudly rather than let it disappear into the rethrow.
+      try {
+        await options.credentials.deprovision(account.authUserId);
+      } catch (cleanupErr) {
+        request.log.error(
+          {
+            kind: "invite",
+            authUserId: account.authUserId,
+            error: (cleanupErr as { name?: string })?.name,
+          },
+          "ORPHANED CREDENTIAL: an auth_user was created but neither completed nor removed — this address cannot be invited again anywhere until the row is deleted by hand",
+        );
+      }
+      await db.delete(users, eq(users.id, created!.id));
+      throw err;
+    }
+
+    // Delivery is deliberately OUTSIDE the rollback: the account and its token
+    // are already valid, and a bounced invite mail is recoverable through
+    // POST /auth/forgot or POST /admin/users/{id}/reset-password. Failing the
+    // 201 here would instead destroy a perfectly good account. The token is
+    // handed to the seam and never touches the response or the log.
+    try {
+      await options.deliverReset({ to: email, token, kind: "invite", expiresAt });
+    } catch (err) {
+      request.log.error(
+        { kind: "invite", error: (err as { name?: string })?.name },
+        "invite delivery failed",
+      );
+    }
 
     return reply.code(201).send(toWire(created!));
   });
