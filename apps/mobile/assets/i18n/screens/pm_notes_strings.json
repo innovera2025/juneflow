@@ -1,0 +1,17 @@
+{
+  "_source": "Static UI keys for the mobile PM maintenance-log screen (route pm-notes, pototype/mobile-pm.jsx MPMNotes L148-181). KEYS ONLY — never a translation. MIXED LAYERS (the approvals_inbox / pm_checklist precedent): fields marked dict below are stable ids read with t(); the rest are the Thai phrase that IS the phrases-layer key, read with tp(). NEAR-TOTAL ZERO-MINT: the prototype's title and its three field labels are byte-identical to dict keys that ALREADY exist in docs/extract/i18n-full.json, because the merged web PM screen renders the same maintenance log — title=pm.maintLogTitle 'บันทึกการบำรุงรักษา' (L150), fieldCause=pm.fieldCause 'สาเหตุการเสีย / ความผิดปกติ' (L152), fieldFix=pm.fieldFix 'การแก้ไข / งานที่ทำ' (L155), fieldAdvice=pm.fieldAdvice 'ข้อเสนอแนะ / งานที่ควรทำเพิ่ม' (L158) — each verified byte-exact against the raw .jsx this round. The three input placeholders are that same web screen's own placeholder keys (pm.phCause / pm.phFix / pm.phAdvice); the prototype's static divs carry no placeholder of their own (they hold mock sentences), so these are the honest empty-field prompts, zero-mint. ONLY TWO values are net-new and are collected into agents/orch-d-recon/pm-notes-i18n.apply.json for a Wei sacred round (docs/extract/i18n-full.json is untouched by this slice): fieldParts 'อะไหล่ที่ใช้' (L161) and closeNext 'ไปสรุป + ปิดงาน' (L175). Both already resolve in Thai today (tp returns the key for lang th — the pm_jobs / st_grlist / notif / approve / pm_checklist precedent) and light up en/zh/ar once applied. The three HONEST offline-write states are copy the MOCK prototype never had (its CTA just navigates), so they borrow the SAME generic dict strings pm_checkin and pm_checklist already borrowed rather than inventing wording — BLOCKERS.md B-268 (ก): saved=labor.att.savedBadge 'บันทึกแล้ว', queued=tax.etax.statusPending 'รอส่ง', failed=admin.common.actionFailedToast. next=pm.btnNext 'ถัดไป' labels the onward affordance, honest-DISABLED (pm-close is a future screen, out of this slice). NOT REPRESENTED HERE: the prototype's amber banner (L169-171, 'มีการเปลี่ยนอะไหล่ — ระบบจะสร้างใบเสนอราคาส่งลูกค้าผ่าน LINE OA อัตโนมัติ') is DROPPED, not minted — it promises an automation that does not exist (nothing auto-raises a pmQuote; LINE is a verified no-op stub, apps/api/src/routes/pm.ts lineNotifyStub / B-108b) and a promise cannot be em-dashed the way a missing value can. The parts VALUE is likewise not a key: pm_workorder has no parts column (parts live on pmQuotes.parts via POST /pm/quotes and carry money), so the screen renders an em-dash under the kept label.",
+  "_layers": "dict (t): title · fieldCause · phCause · fieldFix · phFix · fieldAdvice · phAdvice · saved · queued · failed · next. phrases (tp): fieldParts · closeNext.",
+  "title": "pm.maintLogTitle",
+  "fieldCause": "pm.fieldCause",
+  "phCause": "pm.phCause",
+  "fieldFix": "pm.fieldFix",
+  "phFix": "pm.phFix",
+  "fieldAdvice": "pm.fieldAdvice",
+  "phAdvice": "pm.phAdvice",
+  "fieldParts": "อะไหล่ที่ใช้",
+  "closeNext": "ไปสรุป + ปิดงาน",
+  "saved": "labor.att.savedBadge",
+  "queued": "tax.etax.statusPending",
+  "failed": "admin.common.actionFailedToast",
+  "next": "pm.btnNext"
+}

@@ -15,6 +15,19 @@ import 'package:juneflow_mobile/offline/sync_processor.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_agg.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_repository.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_screen.dart';
+import 'package:juneflow_mobile/screens/pm_notes/pm_notes_screen.dart';
+
+/// Records every pushed route so the onward-navigation seam can be asserted without
+/// mounting the destination (the pm_checkin precedent: [PmNotesScreenHost] resolves
+/// its services through an AppScope this hermetic test deliberately does not build).
+class _RecordingObserver extends NavigatorObserver {
+  final List<Route<dynamic>> pushes = <Route<dynamic>>[];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushes.add(route);
+  }
+}
 
 /// A fake repo returning canned work orders and a scripted drain outcome. When
 /// [outcome] is null the drain "touched nothing" (an offline no-response).
@@ -117,9 +130,11 @@ Future<void> _pump(
   WidgetTester tester,
   _FakeRepo repo, {
   String? workOrderId = 'wo-1',
+  NavigatorObserver? observer,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      navigatorObservers: <NavigatorObserver>[if (observer != null) observer],
       home: Scaffold(
         body: PmChecklistScreen(
           repo: repo,
@@ -281,7 +296,7 @@ void main() {
       ]);
     });
 
-    testWidgets('a 2xx shows saved and the onward step (honest-disabled)', (
+    testWidgets('a 2xx shows saved and the onward step', (
       WidgetTester tester,
     ) async {
       final _FakeRepo repo = _FakeRepo(
@@ -297,9 +312,52 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('บันทึกแล้ว'), findsOneWidget);
-      // pm-notes is not built, so the CTA becomes the disabled onward affordance.
+      // The CTA becomes the onward affordance to pm-notes.
       expect(find.text('ถัดไป'), findsOneWidget);
       expect(find.text('บันทึกผล + ต่อไป'), findsNothing);
+    });
+
+    testWidgets('saved -> the onward CTA pushes pm-notes carrying the REAL work-order id', (
+      WidgetTester tester,
+    ) async {
+      // The behaviour change feature/mobile-pm-notes makes to this MERGED screen:
+      // the once honest-disabled onward affordance now navigates. Same assertion
+      // shape as pm_checkin's push test — the destination is BUILT but not mounted
+      // (PmNotesScreenHost resolves its services through an AppScope this hermetic
+      // test deliberately does not build).
+      final _RecordingObserver observer = _RecordingObserver();
+      final _FakeRepo repo = _FakeRepo(
+        outcome: SyncOutcome.synced,
+        // A distinctive id, so a hardcoded/stale value cannot pass by coincidence.
+        rows: <PmChecklistEnt>[
+          _wo('wo-42-real', <Object?>[
+            <String, Object?>{'label': 'a'},
+          ]),
+        ],
+      );
+      await _pump(tester, repo, workOrderId: 'wo-42-real', observer: observer);
+      await tester.tap(find.text('บันทึกผล + ต่อไป'));
+      await tester.pumpAndSettle();
+
+      // Precondition: saved, so the onward affordance is the button on screen.
+      expect(find.text('ถัดไป'), findsOneWidget);
+      observer.pushes.clear(); // drop the initial home route
+
+      await tester.tap(find.text('ถัดไป'));
+
+      // It really navigates now (it used to be honest-disabled: onTap null).
+      expect(observer.pushes, hasLength(1));
+      final Route<dynamic> route = observer.pushes.single;
+      expect(route, isA<MaterialPageRoute<void>>());
+
+      // The seam a later refactor must not drop: pushing without the id would
+      // mount pm-notes honest-EMPTY (an em-dash instead of the log) while every
+      // other assertion still passed.
+      final Widget dest = (route as MaterialPageRoute<void>).builder(
+        tester.element(find.byType(PmChecklistScreen)),
+      );
+      expect(dest, isA<PmNotesScreenHost>());
+      expect((dest as PmNotesScreenHost).workOrderId, 'wo-42-real');
     });
 
     testWidgets('a deferred outcome is QUEUED — never a fake success', (
