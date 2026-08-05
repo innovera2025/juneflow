@@ -25,6 +25,7 @@ import {
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
+import { isUniqueViolation, violatedConstraint } from "./gl-post.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -960,11 +961,32 @@ describe("GR return/cancel state machine", () => {
 // ---------------------------------------------------------------------------
 
 const IDEMP_KEY = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
-/** A Postgres unique-violation (23505) — what the gr_idempotency_uq index throws. */
-const uniqueViolation = (): Error =>
-  Object.assign(new Error("duplicate key value violates unique constraint \"gr_idempotency_uq\""), {
-    code: "23505",
-  });
+const GR_IDEMP_UQ = "gr_idempotency_uq";
+
+/**
+ * A raw pg unique-violation (SQLSTATE 23505) — the DatabaseError node-postgres
+ * throws. It names the violated index on `.constraint` (verified against a live
+ * PG 16 + pg 8: `{ code: "23505", constraint: "<index name>" }`), which is what
+ * B-263's catch gates on. `null` models the defensive case of a 23505 that names
+ * nothing.
+ */
+const pgUniqueViolation = (constraint: string | null = GR_IDEMP_UQ): Error =>
+  Object.assign(
+    new Error(`duplicate key value violates unique constraint "${constraint ?? "?"}"`),
+    constraint === null ? { code: "23505" } : { code: "23505", constraint },
+  );
+
+/**
+ * The shape the HANDLER actually sees: every insert goes through drizzle, which
+ * wraps the driver error in a DrizzleQueryError and nests the DatabaseError under
+ * `.cause` (verified live: drizzle-orm 0.45 → `DrizzleQueryError { cause:
+ * DatabaseError { code, constraint } }`). isUniqueViolation() and
+ * violatedConstraint() must therefore both look one level down — a suite that only
+ * ever threw the FLAT shape would stay green against a gate reading
+ * `err.constraint` directly while production silently lost its replay path.
+ */
+const uniqueViolation = (constraint: string | null = GR_IDEMP_UQ): Error =>
+  Object.assign(new Error("Failed query"), { cause: pgUniqueViolation(constraint) });
 
 describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
   it("same idempotency_key twice → ONE receipt: the replay returns the ORIGINAL byte-for-byte, no 2nd insert", async () => {
@@ -1118,5 +1140,113 @@ describe("POST /api/v1/gr — B-261 idempotency (client key + replay)", () => {
     const grInserts = inserted.filter((w) => w.table === grs);
     expect(grInserts).toHaveLength(1);
     expect((grInserts[0]!.rows[0] as { idempotencyKey: string | null }).idempotencyKey).toBe(null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-263 — the B-261 replay catch gates on the CONSTRAINT NAME, not on SQLSTATE
+// alone. 23505 says "some unique constraint was violated"; it does not say which.
+// Today gr carries only its PK + gr_idempotency_uq, so the old SQLSTATE-only gate
+// was safe — but this handler is the template being copied to the other
+// money-write endpoints, and the first future unique index on such a table (a
+// unique doc `no`, say) would otherwise inherit the replay path and answer a
+// wrong-ish 201/409 for an unrelated collision. Both branches are pinned below.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/gr — B-263 (the 23505 replay gate is constraint-name-specific)", () => {
+  /** The ORIGINAL receipt a replay must resolve (createdAt mirrors a fresh RETURNING). */
+  const baseRows = (): StubOpts["rows"] => [
+    [pos, [poRow("approved")]],
+    [prs, [prRow]],
+    [projects, [project]],
+    [prItems, [prLine("l0", "1000")]], // ordered 1000 → partial receipt
+    [grs, [{ ...gr("new-0", { poId: PO, received: 300 }), createdAt: undefined }]],
+    [vendors, [vendorRow]],
+  ];
+  const postKeyed = async (db: Db) =>
+    (await buildTestApp({ resolveTenant: async () => SESSION, db })).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: IDEMP_KEY, lines: [{ qty_ok: 300 }] },
+    });
+
+  it("(a) 23505 naming gr_idempotency_uq → the REPLAY still runs: the ORIGINAL receipt, no 2nd write", async () => {
+    const inserted: Inserted[] = [];
+    const db = stubDb({
+      rows: baseRows(),
+      inserted,
+      // drizzle-wrapped (the production shape): DrizzleQueryError → cause → DatabaseError.
+      insertThrows: (table) => (table === grs ? uniqueViolation(GR_IDEMP_UQ) : null),
+    });
+    const res = await postKeyed(db);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().id).toBe("new-0"); // the client's OWN receipt, re-read not recreated
+    expect(res.json().received).toBe(300);
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(0); // the insert threw → no duplicate
+  });
+
+  it("(a) the same violation UNWRAPPED (raw pg DatabaseError, constraint at the top level) replays too", async () => {
+    const db = stubDb({
+      rows: baseRows(),
+      insertThrows: (table) => (table === grs ? pgUniqueViolation(GR_IDEMP_UQ) : null),
+    });
+    const res = await postKeyed(db);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().id).toBe("new-0");
+  });
+
+  it("(b) 23505 naming a DIFFERENT unique constraint is NOT mis-routed into the replay — it rethrows (500)", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const db = stubDb({
+      rows: baseRows(),
+      captured,
+      inserted,
+      // a hypothetical future `unique(no)` on gr — a real collision, but NOT a replay.
+      insertThrows: (table) => (table === grs ? uniqueViolation("gr_no_uq") : null),
+    });
+    const res = await postKeyed(db);
+    // fails safe: the caller gets an honest error, never someone else's receipt as
+    // a 201 nor a fabricated "idempotency_key already used" 409.
+    expect(res.statusCode).toBe(500);
+    expect(res.json().code).toBe("INTERNAL_ERROR");
+    // and the replay path never even started: no dedup SELECT bound the client key…
+    expect(
+      captured.filter((c) => c.table === grs && paramsOf(c.where).includes(IDEMP_KEY)),
+    ).toHaveLength(0);
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(0); // …and no receipt was written
+  });
+
+  it("(b) a 23505 that names NO constraint is not assumed to be ours either (strict gate)", async () => {
+    const captured: Captured[] = [];
+    const db = stubDb({
+      rows: baseRows(),
+      captured,
+      insertThrows: (table) => (table === grs ? uniqueViolation(null) : null),
+    });
+    const res = await postKeyed(db);
+    expect(res.statusCode).toBe(500);
+    expect(res.json().code).toBe("INTERNAL_ERROR");
+    expect(
+      captured.filter((c) => c.table === grs && paramsOf(c.where).includes(IDEMP_KEY)),
+    ).toHaveLength(0);
+  });
+});
+
+describe("violatedConstraint() — the shared B-263 gate helper (money-write template)", () => {
+  it("reads the violated index name from BOTH real runtime shapes, undefined otherwise", () => {
+    expect(violatedConstraint(pgUniqueViolation(GR_IDEMP_UQ))).toBe(GR_IDEMP_UQ); // raw pg
+    expect(violatedConstraint(uniqueViolation(GR_IDEMP_UQ))).toBe(GR_IDEMP_UQ); // drizzle-wrapped
+    expect(violatedConstraint(uniqueViolation("gr_no_uq"))).toBe("gr_no_uq");
+    expect(violatedConstraint(uniqueViolation(null))).toBeUndefined(); // 23505, unnamed
+    expect(violatedConstraint(new Error("boom"))).toBeUndefined();
+    expect(violatedConstraint(null)).toBeUndefined();
+    expect(violatedConstraint("23505")).toBeUndefined();
+  });
+
+  it("pairs with isUniqueViolation(): the SQLSTATE precondition holds on both shapes", () => {
+    expect(isUniqueViolation(pgUniqueViolation())).toBe(true);
+    expect(isUniqueViolation(uniqueViolation())).toBe(true);
+    expect(isUniqueViolation(new Error("boom"))).toBe(false);
   });
 });
