@@ -31,10 +31,14 @@
 //     lineNotifyStub, B-108b). A promise cannot be em-dashed the way a missing value
 //     can, so rendering it at all would be a fabrication. Its trigger ("parts were
 //     replaced") has no wire either — see the parts slot above;
-//   - the CTA's LABEL (L175) is DROPPED for exactly the same reason, and this is the
-//     ONE place the port deviates from the reference image
-//     (tests/visual/reference/mobile/pm-notes.png) — BLOCKERS.md B-285 files the
-//     deviation for a ruling. There that button is a pure NAVIGATION
+//   - the CTA's LABEL (L175) is DROPPED for exactly the same reason. It is NOT the
+//     only place this port differs from the reference image
+//     (tests/visual/reference/mobile/pm-notes.png) — that image also renders the
+//     amber banner above as a full orange-bordered section, the parts row as a named
+//     part with a priced quantity where this port prints an em-dash, and the three
+//     note boxes as static mock sentences where this port renders editable inputs
+//     over the real columns. BLOCKERS.md B-285 enumerates that whole deviation set
+//     and files the CTA label for a ruling. There that button is a pure NAVIGATION
 //     (`setScreen("pm-close")`) reading "go to the summary + close the job": it
 //     performs no save, and the screen it names is not built here. This port's
 //     primary action is the SAVE the prototype never had, and it stays on the screen.

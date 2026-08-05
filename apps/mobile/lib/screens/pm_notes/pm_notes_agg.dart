@@ -3,8 +3,8 @@
 // text columns; no amount is read, derived, or sent by this screen.
 //
 // The prototype is a MOCK (§0 rule 3 — none of this is reproduced):
-//   - all four field boxes are STATIC divs holding hardcoded sentences (L156/159/
-//     159) — there is no state, no input, and nothing is ever read back;
+//   - the three note boxes are STATIC divs holding hardcoded sentences (L156 / L159
+//     / L162) — there is no state, no input, and nothing is ever read back;
 //   - the parts row (L164-167) shows a hardcoded part name + a hardcoded quantity
 //     and price, i.e. MONEY with no source;
 //   - the amber banner (L170-172) PROMISES an automation — that the system will
