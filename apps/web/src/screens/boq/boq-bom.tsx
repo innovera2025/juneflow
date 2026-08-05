@@ -1,8 +1,12 @@
 /*
  * BOMTemplates — the BOM Templates screen (per-house material/labour formula), ported 1:1 from
  * pototype/bom.jsx BOMTemplates (L59-216). Route boq.bom (docs/extract/NAV-ROUTES.md L24,
- * component BOMTemplates in bom.jsx — NOT boq.jsx), visual-gate reference
- * tests/visual/reference/gallery/g1/10-s.jpg.
+ * component BOMTemplates in bom.jsx — NOT boq.jsx). Design ground-truth used at PORT time =
+ * tests/visual/reference/gallery/g1/10-s.jpg (the prototype pack). The ACTIVE G5 gate
+ * reference is NOT that jpg: per tests/visual/screens.manifest.json (row "boq-bom") it is
+ * tests/visual/reference/app-baseline/boq-bom.png — a capture of the Wei-APPROVED app
+ * (ruling B-120), so G5 is a strict-0 REGRESSION gate. That path is under tests/visual/** =
+ * SACRED, so any re-baseline is a Wei-approved sacred round, never a routine NEW-REF.
  *
  * Design fidelity (PLAN.md §0 rule 1): the layout is the prototype's, verbatim — the
  * two-crumb breadcrumb + title/subtitle, the two header actions (import / generate-BOQ),
@@ -22,7 +26,7 @@
  * (cat/code/name/detail/unit/qty/price) come from GET /models/{id}/bom — contract operationId
  * getModelBom (packages/contracts/openapi.yaml `/models/{id}/bom`), handler
  * apps/api/src/routes/models.ts, generated client — fetched by useModelBom (use-model-bom.ts)
- * and narrowed by parseBomLines (boq-bom-agg.ts). The handler resolves the model in tenant
+ * and narrowed by parseBomPayload (boq-bom-agg.ts). The handler resolves the model in tenant
  * scope, then returns the boms.items of the `bom` row whose unit_type equals the model's code,
  * in the B-014 envelope; a model with no BOM returns an empty list. So the table rows, each
  * row amount, the category bands + band subtotals, the cost-per-house KPI, the three category
@@ -34,12 +38,24 @@
  * unit-tested boq-bom-agg module (the prototype's own arithmetic, bom.jsx L52-57) — nothing is
  * originated, written back or posted. Same precedent as boq-editor-agg.sumLineTotals.
  *
+ * MONEY HONESTY (B-272) — `boms.items` is unconstrained jsonb: nothing forces a row's `cat` to
+ * be one of M/S/L, so an import can serve a line the parser cannot categorise. Such a row is
+ * dropped from the table, which would leave every cross-line sum SHORT by its qty x price while
+ * the item-count KPI (the server's unfiltered bom_item_count) still counts it — an understated
+ * cost printed next to a contradicting count. So the money gate `totalsOk`
+ * (totalsPublishable(bom)) publishes a cross-line figure only when EVERY served row is inside
+ * it; otherwise the cost-per-house KPI, the three category %/amount KPIs, each band subtotal,
+ * the footer total, the info-formula and the generate-BOQ block value all em-dash. No category
+ * is ever invented for the unreadable row, and no short total is ever printed. Per-row figures
+ * (qty, price, qty x price) are per-line, unaffected, and keep rendering.
+ *
  * STILL EM-DASHED (honest, never fabricated — boq-overview GR precedent):
  *   • model version ("v4") + updated-date — mock decoration with no column on `model`, and
  *     getModelBom returns only the items array (not the bom row's updated_at); the KPI version
  *     tail and the "updated {date}" line render an em-dash (never the mock string).
- *   • every cost figure falls back to an em-dash whenever the BOM resolves to zero parseable
- *     lines (empty payload / failed read) — never a fabricated 0.
+ *   • every cross-line cost figure falls back to an em-dash whenever the BOM resolves to zero
+ *     parseable lines (empty payload / failed read) or the payload carried a row the parser had
+ *     to drop (above) — never a fabricated 0 and never a short total.
  *
  * i18n (rule 2): every string is a boq.bom* DICT key (t), nav.sec.boq / block.fieldModel /
  * vendor.btnExport / common.edit / boq.edCardMaterial / boq.bomCatSubcon / boq.edCardLabor
@@ -69,7 +85,8 @@ import { formatMoney } from "./boq-overview-agg";
 import {
   BOM_CAT_ORDER,
   groupByCat,
-  parseBomLines,
+  parseBomPayload,
+  totalsPublishable,
   bomTotal,
   bomBlockValue,
   bomCatTotal,
@@ -216,11 +233,19 @@ export function BOMTemplates() {
   // says HAS a BOM (bom_item_count > 0); the no-BOM model renders its empty state without
   // firing a read. The opaque rows are narrowed by the unit-tested agg.
   const bomQ = useModelBom(selected && modelHasBom ? selected.id : undefined);
-  const lines: BomLine[] = parseBomLines(bomQ.data);
-  const linesAvailable = lines.length > 0;
+  const bom = parseBomPayload(bomQ.data);
+  const lines: BomLine[] = bom.lines;
   const groups = groupByCat(lines);
   // Lines still in flight — render the skeleton rather than a flash of em-dashes.
   const linesLoading = !!selected && modelHasBom && bomQ.isLoading;
+  // MONEY GATE (B-272) — `boms.items` is unconstrained jsonb, so a served row whose `cat` is
+  // not M/S/L is dropped by the parser. Every figure that SUMS ACROSS LINES would then be
+  // short by that row's qty x price while the item-count KPI (the server's unfiltered
+  // bom_item_count) still counts it. So the cross-line figures are published only when every
+  // served row is inside them; otherwise each em-dashes (this screen's honest-unknown marker).
+  // No category is invented for the unreadable row, and no short total is ever printed.
+  // Per-row qty / price / amount are unaffected and keep rendering.
+  const totalsOk = totalsPublishable(bom);
 
   const genBOQ = () => {
     if (!selected) return;
@@ -235,8 +260,8 @@ export function BOMTemplates() {
           {fill(t("boq.bomGenMsgLine2"), {
             n: String(selected.bom_item_count),
             units: String(selected.unit_count),
-            // total × units — both server-sourced; em-dashes only if the BOM read yielded no lines.
-            value: linesAvailable ? formatMoney(bomBlockValue(lines, selected.unit_count)) : DASH,
+            // total x units — both server-sourced; em-dashes unless every served row is in it.
+            value: totalsOk ? formatMoney(bomBlockValue(lines, selected.unit_count)) : DASH,
           })}
         </span>
       ),
@@ -392,7 +417,7 @@ export function BOMTemplates() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
                 <KpiCard
                   label={t("boq.bomKpiCostPerHouse")}
-                  value={linesAvailable ? millions2(bomTotal(lines)) : DASH}
+                  value={totalsOk ? millions2(bomTotal(lines)) : DASH}
                   unit={tp(P("millionBaht"))}
                   sub={fill(t("boq.bomKpiItemsVer"), { n: String(selected.bom_item_count), ver: DASH })}
                   accent="var(--brand)"
@@ -401,8 +426,8 @@ export function BOMTemplates() {
                   <KpiCard
                     key={cat}
                     label={t(CAT_META[cat].kpi)}
-                    value={linesAvailable ? `${bomCatPct(lines, cat)}%` : DASH}
-                    sub={linesAvailable ? `${formatMoney(bomCatTotal(lines, cat))} ${BAHT}` : DASH}
+                    value={totalsOk ? `${bomCatPct(lines, cat)}%` : DASH}
+                    sub={totalsOk ? `${formatMoney(bomCatTotal(lines, cat))} ${BAHT}` : DASH}
                     accent={CAT_META[cat].color}
                   />
                 ))}
@@ -440,7 +465,11 @@ export function BOMTemplates() {
                     </tr>
                   </thead>
                   {/* Category bands render from the real BomLine[] parsed off
-                      GET /models/{id}/bom (header); markup is the prototype's, verbatim. */}
+                      GET /models/{id}/bom (header); markup is the prototype's, verbatim.
+                      The band's `n` counts the rows actually rendered in it (honest); its
+                      money subtotal is a cross-line sum, so it obeys the same totalsOk gate
+                      — a dropped row has no readable category, so ANY band could be the one
+                      it belongs to and every band subtotal is then unpublishable. */}
                   {groups.map((g) => (
                     <tbody key={g.cat}>
                       <tr style={{ background: "var(--surface)" }}>
@@ -449,7 +478,10 @@ export function BOMTemplates() {
                             <BomCatChip cat={g.cat} label={t(CAT_META[g.cat].short)} size="sm" />
                             <b style={{ fontSize: 11.5, color: "var(--text-2)" }}>{t(CAT_META[g.cat].full)}</b>
                             <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
-                              {fill(t("boq.bomCatGroupSummary"), { n: String(g.count), value: formatMoney(g.total) })}
+                              {fill(t("boq.bomCatGroupSummary"), {
+                                n: String(g.count),
+                                value: totalsOk ? formatMoney(g.total) : DASH,
+                              })}
                             </span>
                           </span>
                         </td>
@@ -487,7 +519,7 @@ export function BOMTemplates() {
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "right" }}>
                         <span className="num" style={{ fontWeight: 800, fontSize: 15, color: "var(--brand)" }}>
-                          {linesAvailable ? formatMoney(bomTotal(lines)) : DASH}
+                          {totalsOk ? formatMoney(bomTotal(lines)) : DASH}
                         </span>
                       </td>
                     </tr>
@@ -510,9 +542,9 @@ export function BOMTemplates() {
                   <span>
                     {renderInfoFormula(
                       t("boq.bomInfoFormula"),
-                      linesAvailable ? formatMoney(bomTotal(lines)) : DASH,
+                      totalsOk ? formatMoney(bomTotal(lines)) : DASH,
                       String(selected.unit_count),
-                      linesAvailable ? formatMoney(bomBlockValue(lines, selected.unit_count)) : DASH,
+                      totalsOk ? formatMoney(bomBlockValue(lines, selected.unit_count)) : DASH,
                     )}
                   </span>
                 </div>

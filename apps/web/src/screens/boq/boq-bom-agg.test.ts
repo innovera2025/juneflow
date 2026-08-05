@@ -2,17 +2,23 @@
  * Unit tests for boq-bom-agg.ts (P2-WEB-05, gate G3) — the pure BOM-line aggregation
  * that backs the BOM Templates screen. Covers line-amount, per-house total, per-category
  * total, whole-percent share (incl. the empty/zero guards), the M/S/L grouping order,
- * the opaque jsonb parse, the block value, and the millions formatter.
+ * the opaque jsonb parse, the block value, the drop-reporting payload parse + money gate
+ * (B-272), and the millions formatter.
  *
- * The last block exercises the REAL GET /models/{id}/bom payload shape (the served
- * boms.items rows) end-to-end through parse -> derive -> group, so a wire-shape change
- * breaks a test here rather than silently emptying the screen.
+ * SCOPE — these are PURE-MODULE tests: they prove the derivations are correct for a given
+ * BomLine[], and nothing about the screen. They stay green whether or not boq-bom.tsx
+ * actually calls the endpoint (a re-emptied screen leaves every one of them passing), so
+ * the component<->hook seam is covered separately in boq-bom.test.tsx. The wire-shape block
+ * below pins the served row shape, so a field rename breaks a test here instead of silently
+ * parsing to nothing.
  */
 import { describe, it, expect } from "vitest";
 import {
   BOM_CAT_ORDER,
   parseBomLine,
   parseBomLines,
+  parseBomPayload,
+  totalsPublishable,
   lineAmount,
   bomTotal,
   bomBlockValue,
@@ -137,6 +143,65 @@ describe("parseBomLines", () => {
   it("returns [] for non-array input", () => {
     expect(parseBomLines(undefined)).toEqual([]);
     expect(parseBomLines({})).toEqual([]);
+  });
+});
+
+/*
+ * B-272 — `boms.items` is unconstrained jsonb, so a served row can carry a `cat` outside
+ * M/S/L. parseBomLines DROPS it, which would leave every cross-line sum short by that row's
+ * qty x price while the server's bom_item_count still counts it. parseBomPayload reports the
+ * drop and totalsPublishable() is the gate the view uses before printing any such sum.
+ */
+describe("parseBomPayload", () => {
+  it("reports served == parsed when every row carries a valid category", () => {
+    const p = parseBomPayload([
+      { cat: "M", qty: 1, price: 10 },
+      { cat: "L", qty: 2, price: 5 },
+    ]);
+    expect(p.served).toBe(2);
+    expect(p.lines).toHaveLength(2);
+    expect(p.dropped).toBe(0);
+  });
+
+  it("counts a row it could not categorise as dropped (money the sums would miss)", () => {
+    const p = parseBomPayload([
+      { cat: "M", qty: 1, price: 10 },
+      { cat: "E", qty: 10, price: 5000 }, // real qty x price, no readable category
+      { cat: null, qty: 3, price: 7 },
+    ]);
+    expect(p.served).toBe(3);
+    expect(p.lines).toHaveLength(1);
+    expect(p.dropped).toBe(2);
+  });
+
+  it("counts a non-object element as a dropped row too", () => {
+    const p = parseBomPayload(["nope", { cat: "S", qty: 1, price: 1 }]);
+    expect(p).toMatchObject({ served: 2, dropped: 1 });
+  });
+
+  it("is an empty, drop-free payload for a non-array / empty response", () => {
+    expect(parseBomPayload([])).toEqual({ lines: [], served: 0, dropped: 0 });
+    expect(parseBomPayload(undefined)).toEqual({ lines: [], served: 0, dropped: 0 });
+  });
+});
+
+describe("totalsPublishable", () => {
+  it("is true only when at least one line parsed and nothing was dropped", () => {
+    expect(totalsPublishable(parseBomPayload([{ cat: "M", qty: 1, price: 10 }]))).toBe(true);
+  });
+
+  it("is false when a served row was dropped — the sum would be short", () => {
+    const p = parseBomPayload([
+      { cat: "M", qty: 1, price: 10 },
+      { cat: "E", qty: 10, price: 5000 },
+    ]);
+    // The derivable total (10) EXCLUDES the dropped 50,000 — it must not be published.
+    expect(bomTotal(p.lines)).toBe(10);
+    expect(totalsPublishable(p)).toBe(false);
+  });
+
+  it("is false for an empty payload (nothing to total)", () => {
+    expect(totalsPublishable(parseBomPayload([]))).toBe(false);
   });
 });
 

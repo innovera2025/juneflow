@@ -23,6 +23,16 @@
  * derivation of those server fields (the prototype's own arithmetic, bom.jsx L52-57), never an
  * originated amount: nothing here is written back, posted, or sent to the server. Same pattern
  * as the sibling boq-editor-agg.sumLineTotals. Prefer a server-computed total the day one lands.
+ *
+ * MONEY HONESTY (B-272): `boms.items` is unconstrained jsonb — nothing in the schema forces a
+ * row's `cat` to be one of M/S/L, so an import can write a line the parser cannot categorise.
+ * parseBomLines() drops such a row, which was inert while the screen had no wire but is now
+ * live on the money path: every sum below would then be SHORT by that row's qty x price while
+ * the server's bom_item_count (rendered as the item-count KPI) still counts it — an understated
+ * cost presented as complete, contradicted by the count printed beside it. So the parse result
+ * carries the drop (parseBomPayload -> BomPayload.dropped) and totalsPublishable() is the gate
+ * the view uses: no cross-line total is published unless every served row is inside it. The
+ * per-row figures (qty, price, qty x price) are unaffected and keep rendering.
  */
 
 /** BOM line category — Material / Subcontractor / Labor (bom.jsx BOM_CAT L4-8). */
@@ -101,6 +111,39 @@ export function parseBomLines(raw: unknown): BomLine[] {
     if (line) out.push(line);
   }
   return out;
+}
+
+/**
+ * One narrowed GET /models/{id}/bom payload: the typed lines PLUS how many rows the wire
+ * actually carried, so a caller can tell "these are all of them" from "some rows were
+ * dropped" (B-272 — see the MONEY HONESTY note in the header).
+ */
+export interface BomPayload {
+  /** Rows carrying a valid M/S/L category — renderable and summable. */
+  lines: BomLine[];
+  /** Rows the wire carried (array length; 0 for a non-array payload). */
+  served: number;
+  /** served - lines.length: rows dropped for want of a valid M/S/L category. */
+  dropped: number;
+}
+
+/** Narrow a served payload AND report what the narrowing dropped. */
+export function parseBomPayload(raw: unknown): BomPayload {
+  const lines = parseBomLines(raw);
+  const served = Array.isArray(raw) ? raw.length : 0;
+  return { lines, served, dropped: served - lines.length };
+}
+
+/**
+ * The money gate: may the view publish a figure that SUMS ACROSS LINES (per-house total,
+ * category subtotal/percentage, band subtotal, block value)? Only when at least one line
+ * parsed AND nothing was dropped — a dropped row still has a real qty x price behind it, so
+ * any sum that excludes it would be short. When this is false the view em-dashes those
+ * figures (its existing honest-unknown marker) rather than publishing an understated total,
+ * and never invents a category for the row it could not read.
+ */
+export function totalsPublishable(payload: BomPayload): boolean {
+  return payload.lines.length > 0 && payload.dropped === 0;
 }
 
 /** One line's amount = qty x price (bom.jsx `l.qty * l.price`). */
