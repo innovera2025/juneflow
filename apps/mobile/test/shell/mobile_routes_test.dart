@@ -80,18 +80,18 @@ void main() {
   testWidgets('the router renders an honest placeholder for an unbuilt route', (
     WidgetTester tester,
   ) async {
-    // `pm-checklist` is a known route whose screen is not built yet (pm-checkin,
-    // the sibling that used to stand in here, is now a real ported screen).
+    // `pm-notes` is a known route whose screen is not built yet (pm-checklist, the
+    // sibling that used to stand in here, is now a real ported screen).
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
           builder: (BuildContext context) =>
-              resolveMobileScreen(context, 'pm-checklist'),
+              resolveMobileScreen(context, 'pm-notes'),
         ),
       ),
     );
     expect(find.byType(ScreenPlaceholder), findsOneWidget);
-    expect(find.text('pm-checklist'), findsOneWidget);
+    expect(find.text('pm-notes'), findsOneWidget);
   });
 
   test(
@@ -103,6 +103,21 @@ void main() {
       expect(kBuiltRouteIds, contains('pm-checkin'));
       expect(mobileScreenBuilders.containsKey('pm-checkin'), isTrue);
       expect(kMobileRouteIds, contains('pm-checkin'));
+    },
+  );
+
+  test(
+    'pm-checklist is a built route in lockstep (feature/mobile-pm-checklist)',
+    () {
+      // The PM flow's second write screen: a built tab route (honest-empty with no
+      // selection) that pm-checkin also pushes with a real work-order id. Its
+      // builder + built id must stay in lockstep (keys==kBuiltRouteIds, above).
+      expect(kBuiltRouteIds, contains('pm-checklist'));
+      expect(mobileScreenBuilders.containsKey('pm-checklist'), isTrue);
+      expect(kMobileRouteIds, contains('pm-checklist'));
+      // `pm-notes`, the next step in the flow, is still unbuilt.
+      expect(kBuiltRouteIds, isNot(contains('pm-notes')));
+      expect(kMobileRouteIds, contains('pm-notes')); // still a known route
     },
   );
 }

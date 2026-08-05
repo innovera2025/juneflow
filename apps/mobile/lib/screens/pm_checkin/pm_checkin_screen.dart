@@ -38,6 +38,7 @@ import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
 import '../../widgets/mobile_header.dart';
+import '../pm_checklist/pm_checklist_screen.dart';
 import 'pm_checkin_agg.dart';
 import 'pm_checkin_repository.dart';
 
@@ -471,11 +472,24 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
     );
   }
 
+  /// Push the checklist screen for this work order (mobile-pm.jsx L86:
+  /// `setScreen("pm-checklist")`), carrying the REAL work-order id — the same
+  /// Navigator.push seam pm-jobs uses to reach this screen.
+  void _openChecklist() {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext _) => PmChecklistScreenHost(workOrderId: woId),
+      ),
+    );
+  }
+
   /// The sticky bottom bar (mobile-pm.jsx L80-86). Idle/queued/failed/gpsUnavailable
   /// → the check-in action (acquire a fix then enqueue, or re-drain a manual retry).
   /// While acquiring / submitting it is disabled (a spinner). Confirmed → the onward
-  /// checklist affordance, honest-DISABLED (pm-checklist is a future screen, out of
-  /// this slice — never a fake navigation).
+  /// checklist affordance, which now NAVIGATES: pm-checklist is built
+  /// (feature/mobile-pm-checklist), so this no longer has to sit honest-disabled.
   Widget _actionBar() {
     final bool confirmed = _state == PmCheckinState.confirmed;
     final bool busy =
@@ -491,8 +505,7 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
           ? _stickyButton(
               label: _t('checklistNext'),
               icon: Icons.chevron_right,
-              // Honest-disabled: the checklist screen is out of this slice.
-              onTap: null,
+              onTap: _openChecklist,
             )
           : _stickyButton(
               label: _t('checkinBtn'),

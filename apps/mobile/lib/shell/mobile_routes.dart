@@ -69,8 +69,11 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// its PR rows push the PR detail (a PUSHED route, so `detail` has no builder here).
 /// `pm-checkin` is the first offline-WRITE screen (feature/mobile-write-checkin): it
 /// is a built tab route (honest-empty with no selection) that pm-jobs also pushes
-/// with a real work-order id. Every further screen port adds its id here and its
-/// widget in [mobileScreenBuilders] (mobile_screen_router.dart).
+/// with a real work-order id. `pm-checklist` continues that PM flow
+/// (feature/mobile-pm-checklist): pm-checkin pushes it with the same work-order id
+/// once the check-in is confirmed, and it too is honest-empty as a bare tab route.
+/// Every further screen port adds its id here and its widget in
+/// [mobileScreenBuilders] (mobile_screen_router.dart).
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -80,6 +83,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'st-grlist',
   'pm-jobs',
   'pm-checkin',
+  'pm-checklist',
 };
 
 /// The set of all known route ids.
