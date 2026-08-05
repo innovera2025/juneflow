@@ -1,0 +1,20 @@
+{
+  "_source": "Static UI keys for the mobile executive dashboard (route exec, pototype/mobile-screens.jsx MExecDashboard L647-716). KEYS ONLY — never a translation. MIXED LAYERS (the approvals_inbox / pm_checklist / pm_notes precedent): the fields listed as dict in _layers are stable ids read with t(); the rest are the Thai phrase that IS the phrases-layer key, read with tp(). Every line number here was grepped out of the raw .jsx THIS round and the glyphs dumped codepoint-by-codepoint (the separator on L694 is U+00B7 with ASCII spaces; the axis arrow on L687 is U+2191; no curly quotes anywhere in this set). EIGHT of the fifteen slots are ZERO-MINT and resolve today: title='Dashboard' is both a phrases key and a nav key (L650); kpiPending='เอกสารรออนุมัติ' (L667), unitMBaht='M ฿' (L666/L669), unitDocs='ฉบับ' (L667) and legendPlan='แผน' (L690) are existing phrases keys byte-identical to the prototype; unitJobs=pm.unitJobs 'งาน' (L668), today=sales.common.today 'วันนี้' (L687) and heroLabel=sales.dashboard.kpiSalesCumulative 'ยอดขายสะสม' (L657) are existing dict ids. SEVEN values are net-new and are staged in agents/orch-d-recon/exec-i18n.apply.json for a Wei sacred round (docs/extract/i18n-full.json is UNTOUCHED by this slice): heroUnits · kpiCash · kpiDue · kpiSalesMonth · scurveTitle · legendActual · approvalsTitle. They already resolve in Thai today (tp returns the key for lang th — the pm_jobs / st_grlist / notif / approve / pm_checklist / pm_notes precedent) and light up en/zh/ar once applied. ONE deliberate text deviation, filed in BLOCKERS.md B-298 for a ruling: heroLabel drops the prototype's hardcoded year — L657 reads 'ยอดขายสะสมปี 2569' but 2569 is a MOCK CONSTANT typed into the source, and no feed supplies either the figure or the year it would cover, so the existing dict id 'ยอดขายสะสม' labels the em-dashed hero without asserting a period nothing computes (PLAN.md §0 rule 3 — strip mock mechanics). NOT REPRESENTED HERE — three prototype strings are DROPPED rather than keyed, each because it is a CLAIM and a claim cannot be em-dashed the way a missing value can: (1) the YoY delta (L661, '+12% YoY ↑') is a growth assertion with no feed — the dict does hold a TEMPLATE for it (dashboard.tplDeltaYoY '+{p}% YoY') and it is deliberately not used, because rendering it needs a p that does not exist; (2) the header eyebrow (L650, 'ผอ.สมพร เพชรชัย') is a person's name — AppServices exposes a bearer token, not a user profile, so the eyebrow is omitted (the merged sales-crm precedent); (3) the row action label (L708, 'อนุมัติ') labels a one-tap approval this READ screen does not perform — see BLOCKERS.md B-299. The KPI VALUES are likewise not keys: three of the four tiles have no endpoint at all and the fourth would need a tenant-wide pending count the tier-filtered inbox does not provide, so each kept label renders over an em-dash (see exec_agg.dart ExecKpis).",
+  "_layers": "dict (t): heroLabel · unitJobs · unitBaht · today. phrases (tp): title · heroUnits · kpiCash · kpiPending · kpiDue · kpiSalesMonth · unitMBaht · unitDocs · scurveTitle · legendPlan · legendActual · approvalsTitle.",
+  "title": "Dashboard",
+  "heroLabel": "sales.dashboard.kpiSalesCumulative",
+  "heroUnits": "ยูนิตขายแล้ว",
+  "kpiCash": "กระแสเงินสด 7 วัน",
+  "kpiPending": "เอกสารรออนุมัติ",
+  "kpiDue": "Project ใกล้กำหนด",
+  "kpiSalesMonth": "ขายเดือนนี้",
+  "unitMBaht": "M ฿",
+  "unitDocs": "ฉบับ",
+  "unitJobs": "pm.unitJobs",
+  "unitBaht": "subcon.unitBaht",
+  "scurveTitle": "S-Curve ความคืบหน้า",
+  "legendPlan": "แผน",
+  "legendActual": "จริง",
+  "today": "sales.common.today",
+  "approvalsTitle": "รออนุมัติของฉัน"
+}

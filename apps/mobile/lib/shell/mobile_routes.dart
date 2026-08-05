@@ -79,9 +79,12 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// READ-ONLY job summary + the stored signature state, which pm-notes pushes with the
 /// same work-order id once the log is saved, and which is honest-empty as a bare tab
 /// route. It performs NO write — the close itself is blocked on signature capture
-/// (BLOCKERS.md B-288), so its CTA ships as an honest-disabled affordance. Every
-/// further screen port adds its id here and its widget in [mobileScreenBuilders]
-/// (mobile_screen_router.dart).
+/// (BLOCKERS.md B-288), so its CTA ships as an honest-disabled affordance. `exec` is
+/// the executive dashboard (feature/mobile-exec): a read-only screen over
+/// GET /dashboard/summary (for the project scope only), GET /boq/reports/evm (the
+/// S-curve) and GET /dashboard/approvals-inbox (the same payload the `inbox` screen
+/// reads, through the same repository). Every further screen port adds its id here
+/// and its widget in [mobileScreenBuilders] (mobile_screen_router.dart).
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -94,6 +97,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'pm-checklist',
   'pm-notes',
   'pm-close',
+  'exec',
 };
 
 /// The set of all known route ids.

@@ -8,6 +8,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../screens/approvals_inbox/approvals_inbox_screen.dart';
+import '../screens/exec/exec_screen.dart';
 import '../screens/notif/notif_screen.dart';
 import '../screens/pm_checkin/pm_checkin_screen.dart';
 import '../screens/pm_close/pm_close_screen.dart';
@@ -75,6 +76,12 @@ Widget _buildSalesCrm(BuildContext context) => const SalesCrmScreenHost();
 /// services + the i18n sidecar from [AppScope]).
 Widget _buildStGrList(BuildContext context) => const StGrListScreenHost();
 
+/// Builds the `exec` executive dashboard (its host resolves services + the i18n
+/// sidecar from [AppScope]). Read-only: the S-curve comes from
+/// GET /boq/reports/evm and the approvals card from GET /dashboard/approvals-inbox
+/// — the same payload the `inbox` screen reads, through the same repository.
+Widget _buildExec(BuildContext context) => const ExecScreenHost();
+
 /// Builders for the routes that have a real ported screen. A screen port adds
 /// `'<id>': _buildX` here (a const-tearoff) and its id to [kBuiltRouteIds].
 const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
@@ -89,6 +96,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'reject': _buildReject,
   'sales-crm': _buildSalesCrm,
   'st-grlist': _buildStGrList,
+  'exec': _buildExec,
 };
 
 /// Resolves [routeId] to its widget: the built screen if registered, otherwise an
