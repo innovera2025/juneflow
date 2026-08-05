@@ -374,3 +374,9 @@
 - Reachability weighted honestly: not seed-reachable, not producible by the web writer (`buildLines` posts one bare unnamed line); reachable through the documented contract and by any mobile client — the same tier at which the round-2 finding was rated blocking.
 - Bookkeeping fix applied to the branch: its row was still **B-269**, which dev has since merged as the email adapter. Renumbered to **B-275** across BLOCKERS.md and both source comments (4 references).
 - **LESSON: fixing the instance you were shown is not fixing the class.** R1 and R2 each patched exactly what the reviewer cited and the same reasoning error surfaced elsewhere. R3 only broke the pattern because the brief demanded an inventory of every site BEFORE editing, and required the reviewer to build its own inventory before reading the executor's — anything the executor missed being an automatic FAIL.
+
+## 2026-08-05 (cont.) · po.list + boq.archive merged → dev 97058b7
+- Two small re-wires in one slice, both the same shape as the rest of the wave: the API has been serving the field for months and the screen renders a dash over it. po.list gains doc_date (credit_term/vat confirmed on the wire); boq.archive gains approved_by_name + approved_at from migration 0021.
+- **The only batch-3 slice to pass review first time**, and the reason is worth recording: it was the first slice written against the standard the earlier failures produced — enumerate every same-shape site BEFORE editing, and prove every new test dies when the fix is reverted. The reviewer ran its own class sweep and revert probe before accepting rather than reading the report first.
+- vitest 1554 → 1600 (+46) across 106 files; two new component-seam test files. typecheck 0, check:routes 100%.
+- G5: both screens need a Wei-approved sacred re-baseline. Nothing under tests/visual/ was touched.
