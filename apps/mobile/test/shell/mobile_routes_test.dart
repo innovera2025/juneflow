@@ -80,23 +80,36 @@ void main() {
   testWidgets('the router renders an honest placeholder for an unbuilt route', (
     WidgetTester tester,
   ) async {
-    // `tech-close` is a known route whose screen is not built yet. It replaced
-    // `pm-close` as this test's subject when feature/mobile-pm-close landed — the
-    // whole pm-* flow is now ported, so the stand-in has to come from elsewhere
-    // (`pm-notes` played the same role here before pm-close, and pm-checkin before
-    // that). Assert the id is genuinely unbuilt so this cannot rot into a test of a
-    // built screen.
-    expect(kBuiltRouteIds, isNot(contains('tech-close')));
+    // The subject is DERIVED, not named. A hardcoded id rots the moment its screen
+    // is ported: this test has already been rewritten four times (pm-checkin →
+    // pm-notes → pm-close → tech-close), each time by the port that broke it, and
+    // each rewrite was a red build someone had to diagnose first. Taking the first
+    // route the app itself reports as unbuilt keeps the assertion about the
+    // PLACEHOLDER, which is what it is for, instead of about one screen's status.
+    final String unbuilt = kMobileRouteIds.firstWhere(
+      (String id) => !kBuiltRouteIds.contains(id),
+      orElse: () => '',
+    );
+    // When every route is built the placeholder path is genuinely unreachable and
+    // this test has nothing left to prove — fail loudly rather than pass vacuously,
+    // so whoever ports the last screen deletes it deliberately.
+    expect(
+      unbuilt,
+      isNotEmpty,
+      reason:
+          'every route is built — delete this test and the ScreenPlaceholder path '
+          'it guards, do not leave it passing on nothing',
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
           builder: (BuildContext context) =>
-              resolveMobileScreen(context, 'tech-close'),
+              resolveMobileScreen(context, unbuilt),
         ),
       ),
     );
     expect(find.byType(ScreenPlaceholder), findsOneWidget);
-    expect(find.text('tech-close'), findsOneWidget);
+    expect(find.text(unbuilt), findsOneWidget);
   });
 
   test(
