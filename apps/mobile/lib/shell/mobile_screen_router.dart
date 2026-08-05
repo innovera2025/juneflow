@@ -16,6 +16,10 @@ import '../screens/pm_notes/pm_notes_screen.dart';
 import '../screens/pr_action/approve_screen.dart';
 import '../screens/pr_action/reject_screen.dart';
 import '../screens/sales_crm/sales_crm_screen.dart';
+import '../screens/service/srv_new_screen.dart';
+import '../screens/service/srv_track_screen.dart';
+import '../screens/service/tech_close_screen.dart';
+import '../screens/service/tech_jobs_screen.dart';
 import '../screens/st_grlist/st_grlist_screen.dart';
 import 'mobile_routes.dart';
 import 'screen_placeholder.dart';
@@ -67,6 +71,17 @@ Widget _buildSalesCrm(BuildContext context) => const SalesCrmScreenHost();
 /// services + the i18n sidecar from [AppScope]).
 Widget _buildStGrList(BuildContext context) => const StGrListScreenHost();
 
+/// Builds the four after-sales SERVICE screens. Each host resolves services + its
+/// i18n sidecar from [AppScope]. `srv-track` follows the register's newest ticket
+/// when the shell mounts it without a selection; `tech-jobs` scopes the register to
+/// the signed-in technician (GET /me) and pushes `tech-close` with a REAL ticket id;
+/// `srv-new` raises a request; `tech-close` mounts honest-empty as a bare tab route
+/// (the approve / reject / pm-checkin nullable-id precedent).
+Widget _buildSrvTrack(BuildContext context) => const SrvTrackScreenHost();
+Widget _buildTechJobs(BuildContext context) => const TechJobsScreenHost();
+Widget _buildSrvNew(BuildContext context) => const SrvNewScreenHost();
+Widget _buildTechClose(BuildContext context) => const TechCloseScreenHost();
+
 /// Builders for the routes that have a real ported screen. A screen port adds
 /// `'<id>': _buildX` here (a const-tearoff) and its id to [kBuiltRouteIds].
 const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
@@ -80,6 +95,10 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'reject': _buildReject,
   'sales-crm': _buildSalesCrm,
   'st-grlist': _buildStGrList,
+  'srv-track': _buildSrvTrack,
+  'tech-jobs': _buildTechJobs,
+  'srv-new': _buildSrvNew,
+  'tech-close': _buildTechClose,
 };
 
 /// Resolves [routeId] to its widget: the built screen if registered, otherwise an

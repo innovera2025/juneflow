@@ -75,7 +75,13 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// `pm-notes` is the PM flow's third write screen (feature/mobile-pm-notes): the
 /// maintenance log (cause / fix / advice), which pm-checklist pushes with the same
 /// work-order id once the checklist save is confirmed, and which is honest-empty as a
-/// bare tab route. Every further screen port adds its id here and its widget in
+/// bare tab route. The four after-sales SERVICE screens land together
+/// (feature/mobile-service-group) over one endpoint family and one state machine:
+/// `srv-track` (a resident's request + its 5-step timeline), `tech-jobs` (the
+/// technician's own tickets + the schedule/start moves), `srv-new` (raise a request —
+/// also the service tab's landing route) and `tech-close` (the close-out, which
+/// tech-jobs pushes with a REAL ticket id and which is honest-empty as a bare tab
+/// route). Every further screen port adds its id here and its widget in
 /// [mobileScreenBuilders] (mobile_screen_router.dart).
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
@@ -88,6 +94,10 @@ const Set<String> kBuiltRouteIds = <String>{
   'pm-checkin',
   'pm-checklist',
   'pm-notes',
+  'srv-track',
+  'tech-jobs',
+  'srv-new',
+  'tech-close',
 };
 
 /// The set of all known route ids.
