@@ -14,24 +14,34 @@
  * prototype-verbatim (B-037(a)). Numeric cells carry class `num` (rule 7).
  *
  * Data (rule 3): the prototype's local PR_ROWS demo array becomes the real server
- * catalogue — GET /pr (use-pr.ts) via the generated client. The wire doc
- * { id, no, type, project_id, need_date, status, approval_step, currency_code, amount }
- * drives each row; `amount` is the server SUM of the doc's priced lines and
- * (approval_step + amount) drives the tiered stepper (total tiers derived with the same
- * B-070 thresholds the backend approve-gate enforces — pr-rows.requiredTierCount).
+ * catalogue — GET /pr (use-pr.ts) via the generated client. The LIST wire doc
+ * { id, no, type, project_id, need_date, status, approval_step, currency_code, amount,
+ *   title, phase, vendor_id, requester_id, submitted_at, approved_at, vendor, requester }
+ * drives each row (shape pinned by apps/api/src/routes/pr.test.ts L267-287); `amount` is
+ * the server SUM of the doc's priced lines and (approval_step + amount) drives the tiered
+ * stepper (total tiers derived with the same B-070 thresholds the backend approve-gate
+ * enforces — pr-rows.requiredTierCount).
  *
- * WIRE GAPs (reported honestly, never fabricated — surfaced to Wei): the pr table / prWire
- * exposes NONE of the mock's `title` (detail), `vendor`, `requester` (requester), `phase`
- * (work-position), `budget %`, or `urgent` fields, so those cells render an em-dash / omit the
- * decoration. `need_date` is on the wire but is the need-by date (not the mock's document
- * date) and no created/doc date is exposed, so the date column renders an em-dash. Three of
- * the four KPIs (approved-this-month, over-budget, avg-approval-time) require data not on
- * the wire (approval timestamps / budget %), so their VALUE renders an em-dash — only the
- * awaiting-approval KPI (count + Σ value) is computed from real data. The `mine` /
- * `referenced` tabs need a PR↔user relationship the wire lacks (pr has no requester and
- * GET /pr is not user-scoped), so their count renders an em-dash and selecting them yields
- * an empty list. The active-filter row is implemented as REAL project + type selects (the
- * axes with honest backing); the mock's decorative period/amount pills are omitted.
+ * STALE-COMMENT CORRECTION: this header previously declared title / vendor / requester /
+ * phase and the approval timestamps absent from the wire. That was true before migration
+ * 0022 (B-075) and is now false — they are real pr columns, prWire returns them, and the
+ * LIST handler additionally resolves the vendor + requester display NAMES. They are wired
+ * here; nothing is invented, and a null column still renders an honest em-dash.
+ *
+ * REMAINING WIRE GAPs (reported honestly, never fabricated): `budget %` (the work-position
+ * progress bar) and the `urgent` flag have no column anywhere, so the bar / badge stay
+ * omitted. The over-budget KPI (kpiOverBudget) needs that same budget %, so its value stays
+ * an em-dash; likewise the pr.list.kpiAvgImprove sub-line asserts a month-over-month
+ * IMPROVEMENT, a claim the list cannot make honestly (no business clock on the web —
+ * apps/api/src/business-clock.ts is server-side), so it keeps its em-dash. The referenced
+ * tab (tabRef) needs a PR↔user mention relation that does not exist, so its count is an
+ * em-dash and selecting it yields an empty list. The mine tab (tabMine) IS wired now
+ * (requester_id === /me user id) and falls back to an em-dash only when /me is unresolved.
+ * The date column shows `submitted_at` (the document's entry into the flow — the exact
+ * instant the seed stores per PR); a never-submitted draft has none → em-dash. There is
+ * still no created_at on the LIST payload, and no per-row detail fetch is made to fill any
+ * of this in. The active-filter row is implemented as REAL project + type selects (the axes
+ * with honest backing); the mock's decorative period/amount pills are omitted.
  *
  * i18n (rule 2): navPr is the PR nav key (tn); every other string is a pr.list.* /
  * common.* / vendor.* / nav.sec.proc dict key (t) or a phrase (tp) sourced from
@@ -43,10 +53,11 @@ import type { NavKey, PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
+import { Avatar } from "../../ui/avatar";
 import { Icon, type IconName } from "../../ui/icon";
 import { Page } from "../../shell/page";
 import { useShellCtx } from "../../shell/shell-context";
-import { useProjects } from "../../shell/use-shell-data";
+import { useMe, useProjects, entityStr } from "../../shell/use-shell-data";
 import { usePrList } from "./use-pr";
 import {
   toPrRow,
@@ -58,9 +69,15 @@ import {
   approvalBars,
   approvalStepLabel,
   formatMoney,
+  formatDate,
+  firstName,
   millionsValue,
+  monthKey,
+  approvedInMonth,
+  avgApprovalDays,
   filterPrRows,
   countByStatus,
+  countByRequester,
   sumAmount,
   activeFilterCount,
   type PrRow,
@@ -231,15 +248,28 @@ function ApprovalSteps({ step, total, status }: { step: number; total: number; s
 }
 
 /**
- * The 5 view tabs (pr-list.jsx L56-62). `strKey` null = the "all" tab (labelled via
- * common.all); `status` null = a user-scoped view the wire cannot express (mine / ref).
+ * How a tab narrows the catalogue:
+ *   status — by the doc `status` column ("" = every doc)
+ *   mine   — by requester_id === the /me user id (real column since migration 0022)
+ *   unwired — no wire predicate exists (tabRef needs a PR↔user mention relation)
  */
-const TABS: readonly { id: string; strKey: keyof typeof prStrings | null; status: string | null }[] = [
-  { id: "all", strKey: null, status: "" },
-  { id: "approve", strKey: "tabApprove", status: "pending" },
-  { id: "mine", strKey: "tabMine", status: null },
-  { id: "draft", strKey: "tabDraft", status: "draft" },
-  { id: "ref", strKey: "tabRef", status: null },
+type TabScope = "status" | "mine" | "unwired";
+
+/**
+ * The 5 view tabs (pr-list.jsx L56-62). `strKey` null = the "all" tab (labelled via
+ * common.all).
+ */
+const TABS: readonly {
+  id: string;
+  strKey: keyof typeof prStrings | null;
+  status: string;
+  scope: TabScope;
+}[] = [
+  { id: "all", strKey: null, status: "", scope: "status" },
+  { id: "approve", strKey: "tabApprove", status: "pending", scope: "status" },
+  { id: "mine", strKey: "tabMine", status: "", scope: "mine" },
+  { id: "draft", strKey: "tabDraft", status: "draft", scope: "status" },
+  { id: "ref", strKey: "tabRef", status: "", scope: "unwired" },
 ];
 
 export function PRList() {
@@ -248,6 +278,9 @@ export function PRList() {
 
   const prQ = usePrList();
   const projectsQ = useProjects();
+  const meQ = useMe();
+  /** The signed-in user id (GET /me user.id) — the "tabMine" predicate; "" when unresolved. */
+  const myUserId = entityStr(meQ.data?.user, "id");
 
   const [tabId, setTabId] = useState("approve"); // prototype default (pr-list.jsx L55)
   const [projectId, setProjectId] = useState("");
@@ -257,24 +290,47 @@ export function PRList() {
   const docs = useMemo<PrRow[]>(() => (prQ.data ?? []).map(toPrRow), [prQ.data]);
 
   const activeTab = TABS.find((tab) => tab.id === tabId) ?? TABS[0]!;
-  const wireGapTab = activeTab.status === null; // mine / referenced — no wire predicate
-  const statusFilter = activeTab.status ?? "";
+  // A tab with no wire predicate (referenced), or the mine tab before /me resolves, cannot be
+  // answered honestly — it shows an empty list rather than an unfiltered one.
+  const unanswerableTab =
+    activeTab.scope === "unwired" || (activeTab.scope === "mine" && !myUserId);
 
   const list = useMemo(
     () =>
-      wireGapTab ? [] : filterPrRows(docs, { status: statusFilter, projectId, type, q }),
-    [docs, wireGapTab, statusFilter, projectId, type, q],
+      unanswerableTab
+        ? []
+        : filterPrRows(docs, {
+            status: activeTab.status,
+            projectId,
+            type,
+            q,
+            requesterId: activeTab.scope === "mine" ? myUserId : "",
+          }),
+    [docs, unanswerableTab, activeTab.status, activeTab.scope, myUserId, projectId, type, q],
   );
 
-  // KPI 1 (awaiting approval) is the only wire-computable card — count + Σ value in M.
+  // KPI 1 (awaiting approval) — count + Σ value in M, from real status + amount.
   const pendingCount = countByStatus(docs, "pending");
   const pendingMillions = millionsValue(sumAmount(docs.filter((d) => d.status === "pending")));
+
+  // KPI 2 (kpiApprovedMonth) — the label names the current month, so the cohort is keyed on
+  // the real approved_at stamp falling in this UTC month. No frozen business clock exists
+  // on the web, so this is the wall-clock month by construction.
+  const approvedMonth = useMemo(
+    () => approvedInMonth(docs, monthKey(new Date().toISOString())),
+    [docs],
+  );
+
+  // KPI 4 (kpiAvgTime) — mean submitted_at → approved_at over every doc with both
+  // stamps; null (→ em-dash) when no doc has a complete approval cycle.
+  const avgDays = avgApprovalDays(docs);
 
   const tabLabel = (tab: (typeof TABS)[number]): string =>
     tab.strKey === null ? t("common.all") : tp(P(tab.strKey));
 
   const tabCount = (tab: (typeof TABS)[number]): string => {
-    if (tab.status === null) return DASH; // user-scoped view, no wire count
+    if (tab.scope === "unwired") return DASH; // no wire relation for this view
+    if (tab.scope === "mine") return myUserId ? String(countByRequester(docs, myUserId)) : DASH;
     if (tab.status === "") return String(docs.length);
     return String(countByStatus(docs, tab.status));
   };
@@ -312,8 +368,9 @@ export function PRList() {
         </div>
       }
     >
-      {/* KPI strip (pr-list.jsx L88-114). Only the awaiting-approval card is wire-computable;
-          the other three need approval timestamps / budget %, absent from the wire → em-dash. */}
+      {/* KPI strip (pr-list.jsx L88-114). Three of the four cards are wire-computable from
+          real columns (status/amount + the migration-0022 approval stamps); only the over-budget card
+          needs a budget % that exists nowhere → its value stays an honest em-dash. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
         <KpiCard
           label={tp(P("kpiPending"))}
@@ -324,11 +381,16 @@ export function PRList() {
         />
         <KpiCard
           label={tp(P("kpiApprovedMonth"))}
-          value={DASH}
-          sub={t("pr.list.kpiValueMillion").replace("{value}", DASH)}
+          value={String(approvedMonth.length)}
+          sub={t("pr.list.kpiValueMillion").replace(
+            "{value}",
+            millionsValue(sumAmount(approvedMonth)),
+          )}
           tone="var(--ok)"
           icon="check"
         />
+        {/* WIRE GAP: the over-budget card counts PRs over their budget line — no budget % / budget link
+            exists on the pr wire, so the value stays an honest em-dash. */}
         <KpiCard
           label={tp(P("kpiOverBudget"))}
           value={DASH}
@@ -336,9 +398,11 @@ export function PRList() {
           tone="var(--danger)"
           icon="warn"
         />
+        {/* The value is real (submitted_at → approved_at); the sub-line asserts an
+            IMPROVEMENT vs last month — a claim no wire field supports → em-dash. */}
         <KpiCard
           label={tp(P("kpiAvgTime"))}
-          value={DASH}
+          value={avgDays == null ? DASH : avgDays.toFixed(1)}
           unit={t("pr.list.unitDay")}
           sub={t("pr.list.kpiAvgImprove").replace("{days}", DASH)}
           tone="var(--accent)"
@@ -556,15 +620,42 @@ export function PRList() {
                       <td style={td}>
                         <TypeChip type={r.type} label={tp(P(prTypeStringName(r.type)))} />
                       </td>
-                      {/* WIRE GAP: no title/vendor column on the wire — honest em-dash. */}
-                      <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
-                      {/* WIRE GAP: no phase/budget column on the wire — honest em-dash. */}
-                      <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
+                      {/* Detail = the real title + (when the PR has one) the resolved vendor
+                          name, exactly like pr-list.jsx L201-208 (which also hides the
+                          vendor sub-line when there is none). */}
+                      <td style={td}>
+                        <div style={{ maxWidth: 320 }}>
+                          <div style={{ color: "var(--text)", fontWeight: 500 }}>
+                            {r.title ?? DASH}
+                          </div>
+                          {r.vendor && (
+                            <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>
+                              {r.vendor}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      {/* Work position = the real phase column. WIRE GAP: the mock's budget
+                          % bar has no column anywhere, so the bar is omitted (the prototype
+                          also omits it whenever budget is 0). */}
+                      <td style={td}>
+                        <div style={{ fontSize: 12 }}>{r.phase ?? DASH}</div>
+                      </td>
                       <td style={{ ...td, textAlign: "right", fontWeight: 600 }} className="num">
                         {formatMoney(r.amount)}
                       </td>
-                      {/* WIRE GAP: no requester column on the wire — honest em-dash. */}
-                      <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
+                      {/* Requester = the display name the LIST handler resolves from users;
+                          the prototype prints the avatar + the first name token only. */}
+                      <td style={td}>
+                        {r.requester ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <Avatar name={r.requester} size={22} color="#0F766E" />
+                            <span style={{ fontSize: 12 }}>{firstName(r.requester)}</span>
+                          </div>
+                        ) : (
+                          <span style={{ color: "var(--text-3)" }}>{DASH}</span>
+                        )}
+                      </td>
                       <td style={td}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           <StatusBadge
@@ -574,9 +665,13 @@ export function PRList() {
                           <ApprovalSteps step={r.approvalStep} total={total} status={r.status} />
                         </div>
                       </td>
-                      {/* WIRE GAP: only need_date (need-by, not doc date) is on the wire, and no
-                          created/doc date — honest em-dash for the mock's "date" column. */}
-                      <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
+                      {/* Document date = submitted_at (the instant the PR entered the flow —
+                          the exact date the seed carries per PR). A never-submitted draft
+                          has none → em-dash. need_date stays out of this column: it is the
+                          need-by date, not the document date. */}
+                      <td style={{ ...td, color: "var(--text-3)" }} className="num">
+                        {formatDate(r.submittedAt) || DASH}
+                      </td>
                       <td style={td} onClick={(e) => e.stopPropagation()}>
                         <Icon name="more" size={16} color="var(--text-3)" />
                       </td>

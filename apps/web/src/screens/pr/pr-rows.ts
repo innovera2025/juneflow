@@ -5,24 +5,39 @@
  * <StatusBadge> reads.
  *
  * §0 rule 3: the prototype's local PR_ROWS demo array (L11-22) is dropped — the list is
- * the real server catalogue (GET /pr, use-pr.ts). The wire doc shape (apps/api/src/
- * routes/pr.ts prWire) is exactly:
- *   { id, no, type, project_id, need_date, status, approval_step, currency_code, amount }
+ * the real server catalogue (GET /pr, use-pr.ts). The LIST wire doc shape (apps/api/src/
+ * routes/pr.ts prWire + the GET /pr handler's name resolution, pinned by the exact key
+ * assertion in apps/api/src/routes/pr.test.ts L267-287) is exactly:
+ *   { id, no, type, project_id, need_date, status, approval_step, currency_code, amount,
+ *     title, phase, vendor_id, requester_id, submitted_at, approved_at, vendor, requester }
  * where `amount` is the real SUM of the doc's priced lines (never the mock's hardcoded
- * 842,500 etc), and `approval_step` is the real approval-matrix position.
+ * 842,500 etc), `approval_step` is the real approval-matrix position, and `vendor` /
+ * `requester` are the display names the LIST handler resolves from the tenant's vendor /
+ * user tables (they are NOT on the state-machine echoes — list + detail only).
  *
- * WIRE GAPs (reported honestly, never fabricated — surfaced to Wei): the prototype row
- * also shows `title` (detail), `vendor`, `requester` (requester), `phase` (work-position),
- * `budget %` and an `urgent` flag — NONE of these are columns on the pr table / prWire, so
- * the view renders an em-dash (or omits the decoration) for each and this module never
- * invents them. `need_date` IS on the wire but is the need-by date, not the mock's
- * document date, and no created/doc date is exposed (flagged in the view).
+ * The `title` / `phase` / `vendor_id` / `requester_id` / `submitted_at` / `approved_at`
+ * columns became REAL columns in migration 0022 (B-075, packages/db schema/boq.ts prs).
+ * The previous header here claimed they were absent — that claim was stale and is
+ * corrected: they are consumed. NOTHING is invented; a null column still renders an
+ * honest em-dash in the view.
+ *
+ * REMAINING WIRE GAPs (honest, never fabricated): the prototype row also shows a
+ * `budget %` bar (work-position cell) and an `urgent` flag — neither exists on the pr
+ * table or the wire, so the bar/badge stay omitted. There is still no created/document
+ * date on the LIST payload; `submitted_at` (the instant the PR entered the approval flow,
+ * which is precisely the date the seed carries per PR — packages/db seed/index.ts
+ * "the mock carries one date per PR ... both use it") is the document date the view shows,
+ * and a draft (never submitted) renders an em-dash. `need_date` remains the need-by date
+ * and is NOT shown as the document date.
  *
  * What IS real and drives this module: type -> chip, status -> badge, amount -> money,
- * and (approval_step + amount) -> the tiered approval stepper. The total number of
- * approval tiers is derived from `amount` with the SAME B-070 thresholds the backend
- * approve-gate enforces (pr.ts requiredTierCount) so the stepper can never drift from the
- * server: > 2,000,000 THB -> 3 tiers, > 500,000 -> 2, otherwise 1.
+ * (approval_step + amount) -> the tiered approval stepper, title/vendor -> the detail
+ * cell, phase -> the work-position cell, requester -> the requester cell, submitted_at ->
+ * the date cell, requester_id -> the mine tab (tabMine), and (submitted_at, approved_at) -> the
+ * approved-this-month + average-approval-time KPIs. The total number of approval tiers is
+ * derived from `amount` with the SAME B-070 thresholds the backend approve-gate enforces
+ * (pr.ts requiredTierCount) so the stepper can never drift from the server: > 2,000,000
+ * THB -> 3 tiers, > 500,000 -> 2, otherwise 1.
  */
 
 /** A PR doc as the table consumes it (GET /pr row, narrowed from the opaque wire). */
@@ -42,6 +57,20 @@ export interface PrRow {
   currencyCode: string;
   /** Doc total in FULL currency units (server SUM of its priced lines). */
   amount: number;
+  /** Free-text doc title (real column, migration 0022) — null renders an em-dash. */
+  title: string | null;
+  /** Work position / phase label (real column, migration 0022) — null renders an em-dash. */
+  phase: string | null;
+  /** Vendor display name, resolved by the LIST handler (null when the PR has no vendor). */
+  vendor: string | null;
+  /** Requester display name, resolved by the LIST handler (null when unattributed). */
+  requester: string | null;
+  /** Requester user id (real FK column) — the mine-tab (tabMine) predicate. */
+  requesterId: string | null;
+  /** Instant the PR entered the approval flow; the row's document date. Null on a draft. */
+  submittedAt: string | null;
+  /** Instant the PR was approved. Null until approved. */
+  approvedAt: string | null;
 }
 
 /** Read a string field off an opaque row ({ [k]: unknown }); "" when absent. */
@@ -82,6 +111,13 @@ export function toPrRow(e: Record<string, unknown>): PrRow {
     approvalStep: num(e.approval_step ?? e.approvalStep),
     currencyCode: str(e.currency_code ?? e.currencyCode),
     amount: num(e.amount),
+    title: strOrNull(e.title),
+    phase: strOrNull(e.phase),
+    vendor: strOrNull(e.vendor),
+    requester: strOrNull(e.requester),
+    requesterId: strOrNull(e.requester_id ?? e.requesterId),
+    submittedAt: strOrNull(e.submitted_at ?? e.submittedAt),
+    approvedAt: strOrNull(e.approved_at ?? e.approvedAt),
   };
 }
 
@@ -222,19 +258,82 @@ export function millionsValue(totalUnits: number): string {
   return (totalUnits / 1e6).toFixed(2);
 }
 
+/**
+ * Format a wire timestamp (submitted_at / approved_at, ISO) as an ISO calendar date
+ * (YYYY-MM-DD, UTC — deterministic + ASCII, the same house rule as ap/pv-rows.formatDate
+ * and bank/recon-rows.formatDate). The prototype printed a Thai buddhist-era short date
+ * from a mock string field; the wire carries a real UTC instant, so the cell shows that.
+ * "" for a null/blank/invalid value (the view renders the em-dash).
+ */
+export function formatDate(value: string | null): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The requester cell prints only the first name token, exactly like the prototype
+ * (pr-list.jsx L228 `r.requester.split(" ")[0]`). "" in -> "" out.
+ */
+export function firstName(name: string): string {
+  return name.trim().split(" ")[0] ?? "";
+}
+
+/** UTC calendar-month key ("YYYY-MM") of a wire timestamp; "" when absent/invalid. */
+export function monthKey(value: string | null): string {
+  const iso = formatDate(value);
+  return iso ? iso.slice(0, 7) : "";
+}
+
+/**
+ * The docs approved within the given "YYYY-MM" month — the approved-this-month (kpiApprovedMonth) KPI cohort.
+ * A row qualifies only on its REAL approved_at stamp (status is not enough: a doc can be
+ * approved without a stamp on rows predating migration 0022). An empty month key selects
+ * nothing rather than everything (fail-closed).
+ */
+export function approvedInMonth(rows: readonly PrRow[], month: string): PrRow[] {
+  if (!month) return [];
+  return rows.filter((r) => monthKey(r.approvedAt) === month);
+}
+
+/**
+ * Mean submitted_at -> approved_at duration in days over every doc carrying BOTH stamps
+ * (the kpiAvgTime KPI). null when no doc has a complete approval cycle, so the
+ * view renders an honest em-dash instead of a computed-from-nothing 0.
+ *
+ * Scope note: the KPI label carries no period, so this is the catalogue-wide mean — it
+ * needs no notion of "now" and therefore cannot drift with the wall clock (the web has no
+ * SEED_FROZEN_NOW business clock; apps/api/src/business-clock.ts is server-side only).
+ */
+export function avgApprovalDays(rows: readonly PrRow[]): number | null {
+  const spans: number[] = [];
+  for (const r of rows) {
+    if (!r.submittedAt || !r.approvedAt) continue;
+    const from = new Date(r.submittedAt).getTime();
+    const to = new Date(r.approvedAt).getTime();
+    if (Number.isNaN(from) || Number.isNaN(to) || to < from) continue;
+    spans.push((to - from) / 86_400_000);
+  }
+  if (spans.length === 0) return null;
+  return spans.reduce((s, v) => s + v, 0) / spans.length;
+}
+
 /** Filter inputs for the toolbar — status (tab), project id, PR type, free-text query. */
 export interface PrFilter {
   status: string;
   projectId: string;
   type: string;
   q: string;
+  /** Mine tab (tabMine) — keep only the docs this user requested (requester_id). */
+  requesterId?: string;
 }
 
 /**
  * Filter the docs by the active tab's status + the project / type selects + the free-text
- * query. Search runs over `no` only — the mock also searched title/vendor, which have no
- * wire column (WIRE GAP), so those are not searchable here. An empty field = no filter on
- * that field.
+ * query (+ the requester predicate the mine tab supplies). Search runs over the doc
+ * `no` and the real title / requester / vendor text the LIST payload carries. An empty
+ * field = no filter on that field.
  */
 export function filterPrRows(rows: readonly PrRow[], f: PrFilter): PrRow[] {
   const q = f.q.trim().toLowerCase();
@@ -242,9 +341,21 @@ export function filterPrRows(rows: readonly PrRow[], f: PrFilter): PrRow[] {
     if (f.status && r.status !== f.status) return false;
     if (f.projectId && r.projectId !== f.projectId) return false;
     if (f.type && r.type !== f.type) return false;
-    if (q && !r.no.toLowerCase().includes(q)) return false;
+    if (f.requesterId && r.requesterId !== f.requesterId) return false;
+    if (q) {
+      const hay = [r.no, r.title ?? "", r.requester ?? "", r.vendor ?? ""]
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   });
+}
+
+/** Count the docs this user requested — the mine-tab (tabMine) badge. */
+export function countByRequester(rows: readonly PrRow[], requesterId: string): number {
+  if (!requesterId) return 0;
+  return rows.filter((r) => r.requesterId === requesterId).length;
 }
 
 /** Count docs of a given status (KPI + tab-count aggregates). */
