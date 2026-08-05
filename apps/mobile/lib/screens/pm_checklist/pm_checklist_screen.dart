@@ -34,9 +34,10 @@
 // the pm-checkin precedent and BLOCKERS.md B-268 option (a): a `deferred` outcome
 // is shown as QUEUED (saved, not confirmed) and a 4xx as FAILED — never a fake
 // success. The
-// prototype's CTA simply navigates; pm-notes is a future screen, so the onward
-// affordance is honest-DISABLED after a confirmed save (exactly the treatment
-// pm-checkin gave this screen).
+// prototype's CTA simply navigates; the onward affordance now NAVIGATES too —
+// pm-notes is built (feature/mobile-pm-notes), so it no longer has to sit
+// honest-disabled (exactly the treatment pm-checkin gave this screen once it
+// landed).
 import 'dart:async';
 import 'dart:math';
 import 'dart:ui' show PathMetric;
@@ -50,6 +51,7 @@ import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
 import '../../widgets/mobile_header.dart';
+import '../pm_notes/pm_notes_screen.dart';
 import 'pm_checklist_agg.dart';
 import 'pm_checklist_repository.dart';
 
@@ -585,10 +587,24 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
     );
   }
 
-  /// The sticky bottom bar (mobile-pm.jsx L142-144). Idle/queued/failed → the save
+  /// Push the maintenance-log screen for this work order (mobile-pm.jsx L141:
+  /// `setScreen("pm-notes")`), carrying the REAL work-order id — the same
+  /// Navigator.push seam pm-checkin uses to reach this screen.
+  void _openNotes() {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext _) => PmNotesScreenHost(workOrderId: woId),
+      ),
+    );
+  }
+
+  /// The sticky bottom bar (mobile-pm.jsx L140-142). Idle/queued/failed → the save
   /// action (enqueue + drain, or re-drain the same op on a retry). While saving it
-  /// is disabled (a spinner). Saved → the onward affordance, honest-DISABLED
-  /// (pm-notes is a future screen, out of this slice — never a fake navigation).
+  /// is disabled (a spinner). Saved → the onward affordance, which now NAVIGATES:
+  /// pm-notes is built (feature/mobile-pm-notes), so this no longer has to sit
+  /// honest-disabled.
   Widget _actionBar() {
     final bool saved = _state == PmChecklistSaveState.saved;
     final bool busy = _state == PmChecklistSaveState.saving;
@@ -602,7 +618,7 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
           ? _stickyButton(
               label: _t('next'),
               icon: Icons.chevron_right,
-              onTap: null,
+              onTap: _openNotes,
             )
           : _stickyButton(
               label: _tp('saveNext'),

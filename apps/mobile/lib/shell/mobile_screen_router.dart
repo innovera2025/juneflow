@@ -12,6 +12,7 @@ import '../screens/notif/notif_screen.dart';
 import '../screens/pm_checkin/pm_checkin_screen.dart';
 import '../screens/pm_checklist/pm_checklist_screen.dart';
 import '../screens/pm_jobs/pm_jobs_screen.dart';
+import '../screens/pm_notes/pm_notes_screen.dart';
 import '../screens/pr_action/approve_screen.dart';
 import '../screens/pr_action/reject_screen.dart';
 import '../screens/sales_crm/sales_crm_screen.dart';
@@ -46,6 +47,12 @@ Widget _buildPmCheckin(BuildContext context) => const PmCheckinScreenHost();
 /// pushes it with the REAL work-order id once the check-in is confirmed.
 Widget _buildPmChecklist(BuildContext context) => const PmChecklistScreenHost();
 
+/// Builds the `pm-notes` screen (the maintenance log — cause / fix / advice). Same
+/// nullable-id contract as pm-checkin / pm-checklist: a bare tab route mounts it with
+/// workOrderId=null → an honest "no work order selected" state, while pm-checklist
+/// pushes it with the REAL work-order id once the checklist save is confirmed.
+Widget _buildPmNotes(BuildContext context) => const PmNotesScreenHost();
+
 /// Builds the `approve` / `reject` PR action sheets. Each host resolves services +
 /// its i18n sidecar from [AppScope]; the shell has no route-param mechanism yet, so
 /// prId is null → an honest "no PR selected" state (never a fabricated PR).
@@ -68,6 +75,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'pm-jobs': _buildPmJobs,
   'pm-checkin': _buildPmCheckin,
   'pm-checklist': _buildPmChecklist,
+  'pm-notes': _buildPmNotes,
   'approve': _buildApprove,
   'reject': _buildReject,
   'sales-crm': _buildSalesCrm,
