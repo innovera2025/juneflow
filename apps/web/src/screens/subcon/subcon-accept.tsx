@@ -74,6 +74,7 @@ import {
   pendingReviewCount,
   retentionHeld,
   cumMap,
+  hasOrdinalSeq,
   formatMoney,
   millionsValue,
   type PeriodRow,
@@ -254,8 +255,22 @@ export function SubconAccept() {
   const periodsQ = useContractPeriods(contractId);
   const periods = useMemo<PeriodRow[]>(() => (periodsQ.data ?? []).map(toPeriodRow), [periodsQ.data]);
 
+  // The contract method is only named when EVERY period agrees on a basis (deriveMethod);
+  // a mixed plan yields "" -> no chip, no tracker, an em-dashed measure column.
   const method = deriveMethod(periods);
   const meta = methodMeta(method);
+
+  /**
+   * Is this plan's `seq` the distinct ordinal every "งวด {seq}" render below reads it as?
+   * work_period.seq is `integer NOT NULL DEFAULT 0` with no unique(contract_id, seq) and
+   * POST /subcon/contracts does not validate it (see hasOrdinalSeq), so a plan of
+   * all-zeroes or duplicates is contract-legal. The period column, the acceptance modal
+   * title and the accept/reject toasts all withhold the ordinal rather than guess when it
+   * is not. Array position is deliberately NOT a fallback — that fabricates an ordinal.
+   */
+  const seqOk = useMemo(() => hasOrdinalSeq(periods), [periods]);
+  /** The period's ordinal as any of those three renders may print it (em-dash when unknown). */
+  const periodOrdinal = (p: PeriodRow): string => (seqOk ? String(p.seq) : DASH);
 
   // The non-blocking %-gate advisory (B-107c) — raised strictly from the server
   // `warning` flag returned by the accept flow; never blocks, never fabricates a %.
@@ -264,7 +279,7 @@ export function SubconAccept() {
   const openAccept = (period: PeriodRow) => {
     if (!contract) return;
     ctx.openModal({
-      title: t("subcon.acceptModalTitle").replace("{no}", String(period.seq)),
+      title: t("subcon.acceptModalTitle").replace("{no}", periodOrdinal(period)),
       subtitle: `${contract.no} · ${subconName(contract.vendorId) || DASH}`,
       iconTone: "var(--ok)",
       size: "lg",
@@ -273,7 +288,7 @@ export function SubconAccept() {
           onClose={close}
           contractId={contract.id}
           periodId={period.id}
-          periodSeq={period.seq}
+          periodLabel={periodOrdinal(period)}
           periodBasis={period.basis}
           periodAmount={period.amount}
           retentionPct={contract.retentionPct}
@@ -431,7 +446,7 @@ export function SubconAccept() {
               marginBottom: 8,
             }}
           >
-            {cumPoints.map((pt) => (
+            {(cumPoints ?? []).map((pt) => (
               <div
                 key={pt.seq}
                 style={{
@@ -449,7 +464,12 @@ export function SubconAccept() {
             <span className="num" style={{ color: "var(--brand)", fontWeight: 700 }}>
               {t("subcon.actualProgress").replace("{pct}", DASH)}
             </span>
-            <span className="num" style={{ color: "var(--text-3)" }}>{t("subcon.progressLegend")}</span>
+            {/* The legend reads "the division lines = each period's cumulative %" — it
+                describes the markers, so when the markers are withheld (cumMap null) it
+                has nothing to describe and is withheld with them. */}
+            <span className="num" style={{ color: "var(--text-3)" }}>
+              {cumPoints ? t("subcon.progressLegend") : DASH}
+            </span>
           </div>
         </Card>
       )}
@@ -504,12 +524,19 @@ export function SubconAccept() {
               <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
                 <th scope="col" style={th(50)}>{t("subcon.colPeriod")}</th>
                 <th scope="col" style={th()}>{t("subcon.colDetail")}</th>
+                {/* The measure column's HEADER names the basis of every cell under it,
+                    while each cell picks its own from p.basis. Naming it off one period
+                    (the old `method` fallthrough labelled a mixed plan "Milestone") is the
+                    header-vs-row mismatch; `method` is now "" unless every period agrees,
+                    and an unknown basis em-dashes the header rather than mislabelling it. */}
                 <th scope="col" style={th(110, true)}>
                   {method === "distance" || method === "unit"
                     ? t("subcon.colQty")
                     : method === "percent"
                       ? PERCENT_SIGN
-                      : t("subcon.colMilestone")}
+                      : method === "milestone"
+                        ? t("subcon.colMilestone")
+                        : DASH}
                 </th>
                 <th scope="col" style={th(120, true)}>{t("subcon.colValueBaht")}</th>
                 <th scope="col" style={th(120)}>{t("subcon.colDoc")}</th>
@@ -536,8 +563,10 @@ export function SubconAccept() {
                         background: disp.rowWarn ? "var(--warn-soft)" : "transparent",
                       }}
                     >
+                      {/* period ordinal — withheld when the served plan's seq is not a
+                          usable ordinal (seqOk); array position is never substituted. */}
                       <td style={{ ...td, fontWeight: 700 }} className="num">
-                        {p.seq}
+                        {periodOrdinal(p)}
                       </td>
                       {/* detail: the period label is a wire gap (em-dash); the
                           rejected-period DEFECT text is REAL (row.defect, META-1) and

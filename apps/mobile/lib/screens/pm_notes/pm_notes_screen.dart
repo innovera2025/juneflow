@@ -46,10 +46,13 @@
 //     button does not perform is a PROMISE, not a value, so it cannot be em-dashed —
 //     it is dropped, like the banner. What ships instead names what each control
 //     actually does: before a durable save the button is `common.save` and it saves;
-//     after one it becomes the onward affordance `pm.btnNext`, honest-DISABLED
-//     because pm-close is unbuilt (the treatment pm-checkin gave pm-checklist, and
-//     pm-checklist gave this screen). NOTHING here closes a job, claims one is
-//     closed, or names a screen the app does not have.
+//     after one it becomes the onward affordance `pm.btnNext`, which NOW NAVIGATES —
+//     pm-close is built (feature/mobile-pm-close), so it no longer has to sit
+//     honest-disabled (the same unblocking pm-checklist got when this screen landed).
+//     It carries the REAL work-order id through the Navigator.push seam. NOTHING here
+//     closes a job or claims one is closed: pm-close is itself a read-only summary
+//     whose own close affordance is disabled (BLOCKERS.md B-288), and `pm.btnNext`
+//     ("next") names a step, not an outcome.
 //
 // The write is the REAL POST /pm/workorders/{id}/close { cause, fix, advice },
 // captured through the level-(a) offline queue (pm_notes_repository.dart — read its
@@ -86,6 +89,7 @@ import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
 import '../../widgets/mobile_header.dart';
+import '../pm_close/pm_close_screen.dart';
 import 'pm_notes_agg.dart';
 import 'pm_notes_repository.dart';
 
@@ -131,15 +135,13 @@ class _PmNotesScreenHostState extends State<PmNotesScreenHost> {
           if (strings == null) {
             return const ColoredBox(color: JuneflowTokens.surfaceBg);
           }
-          // The save replays through the shared offline queue (services.syncQueue)
-          // via the level-(a) processor over the shared Dio (auth + tenant scope);
-          // the read goes straight to that same Dio.
-          final QueueDrainProcessor processor = QueueDrainProcessor(
-            services.syncQueue,
-            DioSyncApiClient(services.dio),
-          );
+          // The save replays through the app's ONE offline queue + drain processor
+          // (AppServices.syncProcessor, B-262) over the shared Dio (auth + tenant
+          // scope); the read goes straight to that same Dio. Taking the shared
+          // instance rather than building a processor here is what lets a queued
+          // save drain on app resume, not only while this screen is mounted.
           return PmNotesScreen(
-            repo: DioPmNotesRepository(services.dio, processor),
+            repo: DioPmNotesRepository(services.dio, services.syncProcessor),
             strings: strings,
             i18n: services.i18n,
             workOrderId: widget.workOrderId,
@@ -543,15 +545,32 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     );
   }
 
+  /// Push the close-summary screen for this work order (mobile-pm.jsx L175:
+  /// `setScreen("pm-close")`), carrying the REAL work-order id — the same
+  /// Navigator.push seam pm-checkin → pm-checklist → this screen already use. The id
+  /// is load-bearing: pm-close reads that work order's checklist tally, its asset
+  /// join and its stored signature, so pushing without it would render an honest-empty
+  /// summary instead of this job's.
+  void _openClose() {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext _) => PmCloseScreenHost(workOrderId: woId),
+      ),
+    );
+  }
+
   /// The sticky bottom bar (mobile-pm.jsx L174-176). Idle/queued/failed → the SAVE
   /// action (enqueue + drain, or re-drain the same op on a retry), labelled `save`
   /// and carrying NO forward chevron, because saving is all it does: it writes the
   /// three columns and stays here. The prototype's own label and chevron name a
   /// navigation to pm-close, which this button does not perform and which the app
   /// does not have — dropped like the amber banner (see the file header, B-285).
-  /// While saving it is disabled (a spinner). Saved → the onward affordance,
-  /// honest-DISABLED (pm-close is a future screen, out of this slice — never a fake
-  /// navigation, and never a claim that the job is closed).
+  /// While saving it is disabled (a spinner). Saved → the onward affordance, which
+  /// now NAVIGATES: pm-close is built (feature/mobile-pm-close), so this no longer
+  /// has to sit honest-disabled. It is still not a claim that the job is closed —
+  /// pm-close is a read-only summary whose own close affordance is disabled (B-288).
   Widget _actionBar() {
     final bool saved = _state == PmNotesSaveState.saved;
     final bool busy = _state == PmNotesSaveState.saving;
@@ -565,7 +584,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
           ? _stickyButton(
               label: _t('next'),
               icon: Icons.chevron_right,
-              onTap: null,
+              onTap: _openClose,
             )
           : _stickyButton(
               label: _t('save'),

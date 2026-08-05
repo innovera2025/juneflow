@@ -501,8 +501,14 @@ export function dueInstallmentCount(rows: readonly WoRow[]): number {
  *     all-zero plan labels every installment DP.
  * Both are per-element claims, so the precondition is checked per element: every seq a
  * non-negative integer, and all of them distinct. False -> the callers withhold.
+ *
+ * The parameter is the structural minimum ({ seq }) rather than WoInstallment because the
+ * SubconAccept period wire narrows the very same `work_period` rows: subcon-accept-rows.ts
+ * re-exports this function so the subcon screens (accept / progress / handover) and WOList
+ * share ONE implementation of the predicate — a future correction lands in one place
+ * instead of drifting between two copies of the same guard.
  */
-export function hasOrdinalSeq(installments: readonly WoInstallment[]): boolean {
+export function hasOrdinalSeq(installments: readonly { seq: number }[]): boolean {
   if (installments.length === 0) return false;
   if (!installments.every((p) => Number.isInteger(p.seq) && p.seq >= 0)) return false;
   return new Set(installments.map((p) => p.seq)).size === installments.length;

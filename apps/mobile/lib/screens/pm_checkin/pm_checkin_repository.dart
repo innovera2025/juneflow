@@ -46,9 +46,12 @@ abstract class PmCheckinRepository {
 /// processor owns the queue; both the enqueue and the state read go through it so
 /// they operate on the one shared queue instance.
 class QueueBackedPmCheckinRepository implements PmCheckinRepository {
-  const QueueBackedPmCheckinRepository(this._processor);
+  const QueueBackedPmCheckinRepository(this.processor);
 
-  final QueueDrainProcessor _processor;
+  /// The app's shared drain processor (`AppServices.syncProcessor`, B-262). Public
+  /// so the host wiring is assertable: a repository handed a screen-local processor
+  /// instead of the shared one is the regression this slice removed.
+  final QueueDrainProcessor processor;
 
   @override
   Future<DrainReport> submitCheckin({
@@ -68,13 +71,13 @@ class QueueBackedPmCheckinRepository implements PmCheckinRepository {
       payload: <String, Object?>{'gps': gps},
       createdAt: now,
     );
-    await _processor.queue.enqueue(op);
-    return _processor.drain();
+    await processor.queue.enqueue(op);
+    return processor.drain();
   }
 
   @override
-  Future<DrainReport> drain() => _processor.drain();
+  Future<DrainReport> drain() => processor.drain();
 
   @override
-  Future<List<SyncOperation>> due() => _processor.queue.pending();
+  Future<List<SyncOperation>> due() => processor.queue.pending();
 }
