@@ -38,6 +38,35 @@
 //   - the DRAFT button (L112) is DROPPED: the machine's start state is `received`
 //     and there is no draft status anywhere in it (sales-service.ts L21-27), so the
 //     button would promise a state the server cannot store.
+//   - the CATEGORY grid (L75-87) keeps its chrome but is honest-DISABLED, and the
+//     create does NOT send `category`, PENDING THE B-292 RULING. This is NOT a schema
+//     gap: the column exists and takes any string (sales-service.ts L246 stores the
+//     client's value verbatim/trimmed, or null). The gap is that NOTHING in this
+//     system declares WHICH strings it may hold, and the three candidate vocabularies
+//     disagree. A programmatic 3-way set-diff, re-run this round, is quoted in full in
+//     BLOCKERS.md B-292 (all Thai strings live there — this file carries none):
+//       * dict `sales.service.cat*` (6) vs the seed's SERVICE_TICKETS (6 distinct):
+//         2 of 6 differ — the seed stores a SHORTER string for the window/door and
+//         the floor/tile buckets than the dict key of the same name;
+//       * the mobile prototype's own tiles (L63-64) are a THIRD set: 4 of 6 differ
+//         from the dict (and 5 of 6 from the seed), one with the words reversed;
+//       * exactly ONE value is common to all three.
+//     None of the three is authoritative. The dict values are the labels of the
+//     prototype's category-MIX CHART (sales-service.jsx L131-136) — a panel the
+//     merged web port deliberately OMITS as "pure mock analytics with NO wire"
+//     (sales-service.tsx L49-51) — and no merged code reads those six keys at all.
+//     The seed values are 7 mock rows copied from the same prototype, two of them
+//     reading as truncations of that chart's own labels. And the merged web CREATE
+//     form types the category into a free-text <input> (sales-service.tsx L830), so
+//     the register declares no vocabulary either. Picking one of the three would be
+//     deciding a §0 conflict this port does not own, and writing the wrong one forks
+//     a column that other screens display (sales-service.tsx L451 / L708 render it
+//     raw). So the tiles are DRAWN (chrome, §0 rule 1) in the house disabled
+//     foreground, take no tap, and nothing is written — the honest-disabled precedent
+//     (servicePrimaryButton with a null onTap; the merged web port's honest-disabled
+//     WO link, sales-service.tsx L740), never a live-looking control whose value is
+//     silently discarded. Wei's answer turns it back on in ONE place: hand the ruled
+//     value to newTicketBody(category:), which already carries the parameter.
 //   - the UNIT field keeps its label (chrome) over an honest em-dash. unit_id is a
 //     project_node uuid and NO endpoint turns it into a unit code — the merged web
 //     port em-dashes exactly this field for exactly this reason. The real unit_id
@@ -67,13 +96,15 @@ import 'service_shared.dart';
 
 /// The six category tiles (mobile-screens.jsx L62-65), in prototype order. Each
 /// carries the prototype's own emoji glyph and the SIDECAR FIELD holding its label
-/// key. Those keys are the merged web port's existing category dict
-/// (sales.service.cat*), which is also the vocabulary the seed stores
-/// (packages/db/src/seed/index.ts L727-735) — so a ticket raised here lands in the
-/// same category bucket the web register already groups by, instead of forking the
-/// stored vocabulary with a second wording. Four of the six dict labels read a
-/// little fuller than the mobile prototype's own tiles — a deliberate, filed
-/// deviation: BLOCKERS.md B-292.
+/// key.
+///
+/// The label keys are the existing `sales.service.cat*` dict — a zero-mint DISPLAY
+/// choice only. They are NOT asserted to be the stored vocabulary: the dict, the seed
+/// and the mobile prototype's own tiles are three different sets (the file header has
+/// the diff; BLOCKERS.md B-292 has it in full), so until Wei rules, these tiles are
+/// inert chrome and the create writes no `category` at all. Four of the six dict
+/// labels read fuller than the mobile prototype's tiles — a filed §0 deviation, also
+/// B-292 question (1).
 const List<(String, String)> kServiceCategories = <(String, String)>[
   ('💧', 'catPlumbing'),
   ('⚡️', 'catElectrical'),
@@ -153,10 +184,6 @@ class SrvNewScreen extends StatefulWidget {
 class _SrvNewScreenState extends State<SrvNewScreen> {
   final TextEditingController _problem = TextEditingController();
 
-  /// Index into [kServiceCategories], or null while nothing is picked. `category` is
-  /// a nullable column, so an unpicked category is simply not sent.
-  int? _category;
-
   ServiceWriteState _state = ServiceWriteState.idle;
 
   /// The SERVER-allocated document number of the ticket this form created — printed
@@ -193,15 +220,6 @@ class _SrvNewScreenState extends State<SrvNewScreen> {
   String _t(String field) => widget.i18n.t(widget.strings[field]);
   String _tp(String field) => widget.i18n.tp(widget.strings[field]);
 
-  /// The category as it will be STORED: the canonical Thai value of the chosen dict
-  /// key, independent of the phone's display language, so an English-locale phone
-  /// does not write an English category into a register the web port groups by Thai.
-  String get _categoryValue {
-    final int? i = _category;
-    if (i == null) return '';
-    return widget.i18n.t(widget.strings[kServiceCategories[i].$2], 'th');
-  }
-
   Future<void> _submit() async {
     if (_state == ServiceWriteState.sending ||
         _state == ServiceWriteState.done) {
@@ -210,12 +228,12 @@ class _SrvNewScreenState extends State<SrvNewScreen> {
     if (!canSubmitNewTicket(_problem.text)) return;
     setState(() => _state = ServiceWriteState.sending);
     try {
+      // `category` is deliberately NOT passed: no vocabulary is ruled yet, so the
+      // column is left NULL rather than forked (file header + BLOCKERS.md B-292).
+      // newTicketBody still takes the parameter — Wei's answer is a one-line change
+      // here, nowhere else.
       final ServiceEnt? created = await widget.repo.createTicket(
-        newTicketBody(
-          title: _problem.text,
-          unitId: widget.unitId ?? '',
-          category: _categoryValue,
-        ),
+        newTicketBody(title: _problem.text, unitId: widget.unitId ?? ''),
       );
       if (!mounted) return;
       setState(() {
@@ -253,11 +271,13 @@ class _SrvNewScreenState extends State<SrvNewScreen> {
                       // L72: the label is kept, the value em-dashes (no unit-label
                       // endpoint). No required asterisk — there is no control here.
                       MField(label: _tp('fieldUnit'), child: serviceDashBox()),
-                      // L75-87: the six category tiles.
+                      // L75-87: the six category tiles, drawn but honest-DISABLED
+                      // until B-292 rules which vocabulary the column holds (see the
+                      // file header). No required asterisk, for the same reason it is
+                      // not drawn on the unit field above: there is no live control.
                       MField(
                         label: _tp('fieldCategory'),
-                        required: true,
-                        child: _categoryGrid(enabled: !busy && !done),
+                        child: _categoryGrid(),
                       ),
                       // L89-93: the problem text -> service_ticket.title.
                       MField(
@@ -293,7 +313,10 @@ class _SrvNewScreenState extends State<SrvNewScreen> {
   }
 
   /// The 3-column category grid (mobile-screens.jsx L76-86) as two rows of three.
-  Widget _categoryGrid({required bool enabled}) {
+  /// The prototype's brand-tinted SELECTION (its tile 0) is not reproduced: nothing
+  /// can be selected while the write is withheld, and a highlighted tile would claim
+  /// a bucket the create does not send.
+  Widget _categoryGrid() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
@@ -303,7 +326,7 @@ class _SrvNewScreenState extends State<SrvNewScreen> {
             children: <Widget>[
               for (int col = 0; col < 3; col++) ...<Widget>[
                 if (col > 0) const SizedBox(width: 6),
-                Expanded(child: _categoryTile(row * 3 + col, enabled: enabled)),
+                Expanded(child: _categoryTile(row * 3 + col)),
               ],
             ],
           ),
@@ -312,46 +335,37 @@ class _SrvNewScreenState extends State<SrvNewScreen> {
     );
   }
 
-  Widget _categoryTile(int index, {required bool enabled}) {
+  /// One tile: the prototype's glyph + label over the house DISABLED foreground
+  /// (JuneflowTokens.textTertiary — the same tone servicePrimaryButton takes when its
+  /// onTap is null). No GestureDetector at all, so the tile cannot look live: a tap
+  /// that silently discarded the resident's pick is exactly what the photo strip was
+  /// dropped to avoid. Re-enabling is one ruling away (B-292).
+  Widget _categoryTile(int index) {
     final (String glyph, String field) = kServiceCategories[index];
-    final bool selected = _category == index;
-    return GestureDetector(
-      onTap: enabled ? () => setState(() => _category = index) : null,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected
-              ? JuneflowTokens.brandSoft
-              : JuneflowTokens.surfaceAlt,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? JuneflowTokens.brandPrimary
-                : JuneflowTokens.surfaceBorder,
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(glyph, style: const TextStyle(fontSize: 22)),
-            const SizedBox(height: 2),
-            Text(
-              _t(field),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: selected
-                    ? JuneflowTokens.brandPrimary
-                    : JuneflowTokens.textSecondary,
-              ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      decoration: BoxDecoration(
+        color: JuneflowTokens.surfaceAlt,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: JuneflowTokens.surfaceBorder, width: 1.5),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(glyph, style: const TextStyle(fontSize: 22)),
+          const SizedBox(height: 2),
+          Text(
+            _t(field),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: JuneflowTokens.textTertiary,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

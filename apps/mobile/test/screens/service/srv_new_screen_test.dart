@@ -3,10 +3,11 @@
 // Thai literals are legitimate here: *_test.dart is exempt from the i18n-guard. The
 // screen is driven directly with a FAKE repository + inline i18n/strings, so nothing
 // touches the network; the assertions prove the REAL behaviours — the exact create
-// body (and every key it refuses to send), the canonical Thai category value under a
-// non-Thai display language, the required-title gate, the SERVER-allocated number on
-// success, the honest failure state, and the three prototype controls that are
-// dropped because no column backs them.
+// body (and every key it refuses to send), the WITHHELD category write (no ruled
+// vocabulary yet — BLOCKERS.md B-292) proved in BOTH display languages, the
+// required-title gate, the SERVER-allocated number on success, the honest failure
+// state, and the three prototype controls that are dropped because no column backs
+// them.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/i18n/i18n.dart';
@@ -105,9 +106,11 @@ void main() {
     expect(find.text('แจ้งซ่อมใหม่'), findsOneWidget);
     expect(find.text('ลูกบ้าน · แจ้งซ่อม'), findsOneWidget);
     expect(find.text('ยูนิตของฉัน'), findsOneWidget);
-    // Both carry the prototype's required asterisk, so the rendered span is
-    // "<label> *" — match the label inside it.
-    expect(find.textContaining('เลือกหมวด'), findsOneWidget);
+    // The problem field carries the prototype's required asterisk, so its rendered
+    // span is "<label> *" — match the label inside it. The category label does NOT:
+    // an asterisk over a control nothing can operate is a promise (same reason the
+    // unit field above drops it).
+    expect(find.text('เลือกหมวด'), findsOneWidget);
     expect(find.textContaining('คำอธิบายปัญหา'), findsOneWidget);
     expect(find.text('ส่งแจ้งซ่อม'), findsOneWidget);
 
@@ -164,6 +167,8 @@ void main() {
 
     await tester.enterText(find.byType(TextField), '  ก๊อกน้ำรั่ว  ');
     await tester.pump();
+    // Tapping a tile changes nothing: the grid is inert until B-292 rules which
+    // vocabulary service_ticket.category holds.
     await tester.tap(find.text('ระบบประปา'));
     await tester.pump();
     await tester.tap(find.text('ส่งแจ้งซ่อม'));
@@ -173,33 +178,74 @@ void main() {
     expect(repo.creates.single, <String, Object?>{
       'title': 'ก๊อกน้ำรั่ว', // the problem text -> the only free-text column
       'unit_id': 'unit-uuid-1', // the REAL uuid the flow carried
-      'category': 'ระบบประปา',
     });
   });
 
   testWidgets(
-    'the stored category stays Thai under an English display language',
+    'the category grid is inert chrome — no tile can be picked, no value stored',
     (WidgetTester tester) async {
       final _FakeRepo repo = _FakeRepo();
-      await _pump(tester, repo, i18n: _en);
+      await _pump(tester, repo);
 
-      // The TILE renders in English...
-      expect(find.text('Plumbing'), findsOneWidget);
-      expect(find.text('ระบบประปา'), findsNothing);
+      // The tiles are DRAWN (prototype chrome) but carry no gesture at all: a tap
+      // that silently discarded the pick is the failure mode the photo strip was
+      // dropped to avoid.
+      for (final String cat in <String>['ระบบประปา', 'พื้น/กระเบื้อง']) {
+        expect(
+          find.ancestor(
+            of: find.text(cat),
+            matching: find.byType(GestureDetector),
+          ),
+          findsNothing,
+          reason: 'tile "$cat" must not be tappable',
+        );
+      }
 
       await tester.enterText(find.byType(TextField), 'leak');
       await tester.pump();
-      await tester.tap(find.text('Plumbing'));
-      await tester.pump();
+      for (final String cat in <String>[
+        'ระบบประปา',
+        'หน้าต่าง/ประตู',
+        'พื้น/กระเบื้อง',
+      ]) {
+        await tester.tap(find.text(cat), warnIfMissed: false);
+        await tester.pump();
+      }
       await tester.tap(find.text('ส่งแจ้งซ่อม'));
       await tester.pump();
       await tester.pump();
 
-      // ...but the STORED value is the canonical Thai the register groups by, so a
-      // phone's locale cannot fork the category vocabulary.
-      expect(repo.creates.single['category'], 'ระบบประปา');
+      // Nothing about a category reaches the server. The dict values, the seed
+      // values and the mobile prototype's own tiles are three different sets (only
+      // one value is common to all three), so writing any of them would fork a
+      // free-text column the web register renders raw. B-292 holds the ruling.
+      expect(repo.creates.single.containsKey('category'), isFalse);
+      expect(repo.creates.single, <String, Object?>{'title': 'leak'});
     },
   );
+
+  testWidgets('no category is written under a non-Thai display language either', (
+    WidgetTester tester,
+  ) async {
+    final _FakeRepo repo = _FakeRepo();
+    await _pump(tester, repo, i18n: _en);
+
+    // The TILE label follows the locale (display only)...
+    expect(find.text('Plumbing'), findsOneWidget);
+    expect(find.text('ระบบประปา'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), 'leak');
+    await tester.pump();
+    await tester.tap(find.text('Plumbing'), warnIfMissed: false);
+    await tester.pump();
+    await tester.tap(find.text('ส่งแจ้งซ่อม'));
+    await tester.pump();
+    await tester.pump();
+
+    // ...and NEITHER language writes a category: not the English label, and not
+    // the Thai one behind it.
+    expect(repo.creates.single.containsKey('category'), isFalse);
+  });
 
   testWidgets('no unit and no category => those keys are simply not sent', (
     WidgetTester tester,

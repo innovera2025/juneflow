@@ -98,9 +98,10 @@ int? svcIntOrNull(Object? v) {
 /// numeric philosophy the notif and pr-detail ports already ship, so a date in this
 /// group reads identically to one on pr-detail. Nothing is re-implemented here.
 ///
-/// The prototype prints `23 พ.ค. 14:20` (mobile-screens.jsx L141). That form needs a
-/// Thai month table and a TIME the wire does not carry (`opened_date` /
-/// `scheduled_date` are DATE columns), so it is not reproduced — §0 rule 3.
+/// The prototype prints a Thai abbreviated month plus a clock time
+/// (mobile-screens.jsx L141). That form needs a Thai month table this repo may not
+/// invent AND a time the wire does not carry (`opened_date` / `scheduled_date` are
+/// DATE columns), so it is not reproduced — §0 rule 3.
 ///
 /// Anything that is not a date at all — "", a null-shaped value, a free-text string —
 /// em-dashes rather than leaking the raw wire string to the screen.
