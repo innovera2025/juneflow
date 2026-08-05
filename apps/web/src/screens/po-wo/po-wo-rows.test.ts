@@ -4,11 +4,21 @@
  * vendor), the tab partitions + C10 counts, the status tone/label mapping
  * (draft/pending/approved/rejected), the id -> display joins (vendor name / pr no /
  * pr->project name), the approved-PR gate, the retention sum, and money formatting.
+ *
+ * B-277 adds the installment plan helpers (installment narrowing, the awaiting-acceptance
+ * predicates, the de-duplicated due count and the cumulative contract-% guard).
  */
 import { describe, it, expect } from "vitest";
 import {
   toPoRow,
   toWoRow,
+  toWoInstallment,
+  sortInstallments,
+  isAwaitingAcceptance,
+  hasAwaitingInstallment,
+  installmentDisplayKind,
+  dueInstallmentCount,
+  cumulativeContractPct,
   toPrRef,
   toVendorRef,
   statusTone,
@@ -29,6 +39,7 @@ import {
   millionsValue,
   type PoRow,
   type WoRow,
+  type WoInstallment,
 } from "./po-wo-rows";
 
 const po = (over: Partial<PoRow> = {}): PoRow => ({
@@ -49,11 +60,27 @@ const wo = (over: Partial<WoRow> = {}): WoRow => ({
   no: "WO-2026-0117",
   prId: "",
   vendorId: "",
+  contractId: "",
   status: "approved",
   approvalStep: 0,
   value: 0,
   retentionPct: 0,
   retentionAmount: 0,
+  scope: "",
+  progress: null,
+  installments: [],
+  ...over,
+});
+
+/** An installment of a WO's plan (wo.ts installmentWire) — percent basis unless overridden. */
+const period = (over: Partial<WoInstallment> = {}): WoInstallment => ({
+  id: "wp1",
+  seq: 1,
+  basis: "percent",
+  target: 0,
+  pct: 0,
+  amount: 0,
+  status: "pending",
   ...over,
 });
 
@@ -93,29 +120,210 @@ describe("toPoRow", () => {
 });
 
 describe("toWoRow", () => {
-  it("narrows the woWire shape (retention fields, value->amount fallback)", () => {
+  /*
+   * The served row is the api's own fixture for the exact-key assertion in
+   * apps/api/src/routes/wo.test.ts ("returns the envelope with retention_amount +
+   * scope/progress/installments (F3)"): plan 645k passed + 645k pending + 860k
+   * pending = 2,150k, so the SERVER's progress is 30.
+   */
+  it("narrows the full woWire shape (B-277: contract_id, scope, progress, installments)", () => {
     expect(
       toWoRow({
         id: "w9",
-        no: "WO-2026-0115",
+        no: "WO-2026-0117",
         pr_id: "pr-2",
         vendor_id: "v-2",
-        status: "approved",
-        value: 2840000,
+        contract_id: "c0",
+        status: "pending",
+        approval_step: 0,
+        currency_code: "THB",
+        value: 2_150_000,
         retention_pct: 10,
-        retention_amount: 284000,
+        retention_amount: 215000,
+        amount: 2_150_000,
+        scope: "exterior paint block A",
+        progress: 30,
+        installments: [
+          { id: "wp0", seq: 1, basis: "percent", target: 0, pct: 30, amount: 645000, status: "passed", currency_code: "THB" },
+          { id: "wp1", seq: 2, basis: "percent", target: 0, pct: 30, amount: 645000, status: "pending", currency_code: "THB" },
+        ],
       }),
     ).toEqual({
       id: "w9",
-      no: "WO-2026-0115",
+      no: "WO-2026-0117",
       prId: "pr-2",
       vendorId: "v-2",
-      status: "approved",
+      contractId: "c0",
+      status: "pending",
       approvalStep: 0,
-      value: 2840000,
+      value: 2_150_000,
       retentionPct: 10,
-      retentionAmount: 284000,
+      retentionAmount: 215000,
+      scope: "exterior paint block A",
+      progress: 30,
+      installments: [
+        { id: "wp0", seq: 1, basis: "percent", target: 0, pct: 30, amount: 645000, status: "passed" },
+        { id: "wp1", seq: 2, basis: "percent", target: 0, pct: 30, amount: 645000, status: "pending" },
+      ],
     });
+  });
+
+  it("keeps the retention fields + the value->amount fallback", () => {
+    const r = toWoRow({
+      id: "w8",
+      no: "WO-2026-0115",
+      amount: 2840000,
+      retention_pct: 10,
+      retention_amount: 284000,
+    });
+    expect(r.value).toBe(2840000);
+    expect(r.retentionAmount).toBe(284000);
+  });
+
+  it("keeps a null progress null (never a fabricated 0%) but preserves a real 0", () => {
+    // wo.ts sends null for "no plan, not computable" and 0 for "plan with nothing done".
+    expect(toWoRow({ id: "w0", contract_id: null, progress: null, installments: [] }).progress).toBe(null);
+    expect(toWoRow({ id: "w0", progress: 0 }).progress).toBe(0);
+    // A row that predates the field at all is also "unknown", not 0%.
+    expect(toWoRow({ id: "w0" }).progress).toBe(null);
+  });
+
+  it("sorts the plan by seq and survives a non-array installments field", () => {
+    const r = toWoRow({
+      id: "w0",
+      installments: [{ id: "b", seq: 3 }, { id: "a", seq: 1 }, { id: "c", seq: 2 }],
+    });
+    expect(r.installments.map((p) => p.id)).toEqual(["a", "c", "b"]);
+    expect(toWoRow({ id: "w0", installments: "nope" }).installments).toEqual([]);
+  });
+});
+
+describe("toWoInstallment", () => {
+  it("narrows one work_period row, coercing the numeric-as-string columns", () => {
+    expect(
+      toWoInstallment({
+        id: "wp0",
+        seq: 1,
+        basis: "percent",
+        target: "0",
+        pct: "10.000",
+        amount: "215000.00",
+        status: "passed",
+        currency_code: "THB",
+      }),
+    ).toEqual({ id: "wp0", seq: 1, basis: "percent", target: 0, pct: 10, amount: 215000, status: "passed" });
+  });
+});
+
+describe("sortInstallments", () => {
+  it("orders by seq without mutating the input", () => {
+    const input = [period({ id: "b", seq: 2 }), period({ id: "a", seq: 0 })];
+    expect(sortInstallments(input).map((p) => p.id)).toEqual(["a", "b"]);
+    expect(input.map((p) => p.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("isAwaitingAcceptance + installmentDisplayKind", () => {
+  it("treats delivered/inspecting as awaiting acceptance and nothing else", () => {
+    expect(["delivered", "inspecting"].map(isAwaitingAcceptance)).toEqual([true, true]);
+    expect(["pending", "passed", "paid", "rejected", ""].map(isAwaitingAcceptance)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("collapses the 6 work_period statuses onto the prototype's 3 visual states", () => {
+    expect(installmentDisplayKind("passed")).toBe("done");
+    expect(installmentDisplayKind("paid")).toBe("done"); // same pair wo.ts calls done
+    expect(installmentDisplayKind("delivered")).toBe("current");
+    expect(installmentDisplayKind("inspecting")).toBe("current");
+    expect(installmentDisplayKind("pending")).toBe("pending");
+    // B-277 flagged: rejected has no prototype state -> the neutral not-done one.
+    expect(installmentDisplayKind("rejected")).toBe("pending");
+    expect(installmentDisplayKind("something-new")).toBe("pending");
+  });
+});
+
+describe("hasAwaitingInstallment (WO/header population)", () => {
+  it("is true for a WO with any installment handed over, false for a plan-less WO", () => {
+    expect(
+      hasAwaitingInstallment(
+        wo({ installments: [period({ id: "a", status: "passed" }), period({ id: "b", status: "delivered" })] }),
+      ),
+    ).toBe(true);
+    expect(hasAwaitingInstallment(wo({ installments: [period({ status: "passed" })] }))).toBe(false);
+    expect(hasAwaitingInstallment(wo())).toBe(false);
+  });
+});
+
+describe("dueInstallmentCount (installment / line population)", () => {
+  it("counts only the installments awaiting acceptance, across every WO", () => {
+    const rows = [
+      wo({ id: "w1", installments: [period({ id: "a", status: "delivered" }), period({ id: "b", status: "passed" })] }),
+      wo({ id: "w2", installments: [period({ id: "c", status: "inspecting" })] }),
+      wo({ id: "w3" }),
+    ];
+    expect(dueInstallmentCount(rows)).toBe(2);
+  });
+
+  /*
+   * THE POPULATION TRAP this helper exists for: wo.contract_id has no unique
+   * constraint, so two WOs can point at one subcon_contract and GET /wo then hands
+   * BOTH the very same work_period rows (wo.ts periodsByContract). A naive
+   * SUM(per-WO count) reports 4 installments where the tenant has 2.
+   */
+  it("de-duplicates installments shared by two WOs on the same subcon contract", () => {
+    const shared = [period({ id: "wp1", status: "delivered" }), period({ id: "wp2", seq: 2, status: "inspecting" })];
+    const rows = [
+      wo({ id: "w1", contractId: "c0", installments: shared }),
+      wo({ id: "w2", contractId: "c0", installments: shared }),
+    ];
+    expect(dueInstallmentCount(rows)).toBe(2);
+    // ...while the TAB counts headers, so the same data legitimately gives 2 WOs.
+    expect(woTabCount(rows, "installment")).toBe(2);
+  });
+
+  it("is 0 — not em-dash-worthy — when no plan has an installment awaiting acceptance", () => {
+    expect(dueInstallmentCount([wo(), wo({ installments: [period({ status: "paid" })] })])).toBe(0);
+  });
+});
+
+describe("cumulativeContractPct", () => {
+  const percentPlan = [
+    period({ id: "a", seq: 1, pct: 10 }),
+    period({ id: "b", seq: 2, pct: 20 }),
+    period({ id: "c", seq: 3, pct: 70 }),
+  ];
+
+  it("accumulates every earlier installment's share, not just this one's", () => {
+    expect(cumulativeContractPct(percentPlan, 1)).toBe(10);
+    expect(cumulativeContractPct(percentPlan, 2)).toBe(30);
+    expect(cumulativeContractPct(percentPlan, 3)).toBe(100);
+  });
+
+  it("rounds the float sum back to the numeric(6,3) column precision", () => {
+    const plan = [period({ id: "a", seq: 1, pct: 0.1 }), period({ id: "b", seq: 2, pct: 0.2 })];
+    expect(cumulativeContractPct(plan, 2)).toBe(0.3); // not 0.30000000000000004
+  });
+
+  /*
+   * `pct` only carries a contract share on the "percent" basis (schema: milestone
+   * uses the fixed amount, distance/unit use perPeriodQty x ratePerUnit and leave pct
+   * 0). Accumulating across a mixed plan would add two different populations and
+   * silently omit the non-percent installments, so it em-dashes instead.
+   */
+  it("returns null for a plan that is not entirely percent-basis", () => {
+    const mixed = [period({ id: "a", seq: 1, pct: 40 }), period({ id: "b", seq: 2, basis: "milestone", amount: 500 })];
+    expect(cumulativeContractPct(mixed, 1)).toBe(null);
+    expect(cumulativeContractPct(mixed, 2)).toBe(null);
+  });
+
+  it("returns null for an empty plan and for a percent plan with no pct data", () => {
+    expect(cumulativeContractPct([], 1)).toBe(null);
+    expect(cumulativeContractPct([period({ pct: 0 }), period({ id: "b", seq: 2, pct: 0 })], 2)).toBe(null);
   });
 });
 
@@ -187,16 +395,26 @@ describe("filterWoByTab + woTabCount", () => {
     wo({ id: "b", status: "approved" }),
     wo({ id: "c", status: "draft" }),
   ];
-  it("partitions all / pending / active and leaves installment+closed empty", () => {
+  it("partitions all / pending / active and leaves closed empty (no closed status on the wire)", () => {
     expect(filterWoByTab(rows, "all").map((r) => r.id)).toEqual(["a", "b", "c"]);
     expect(filterWoByTab(rows, "pending").map((r) => r.id)).toEqual(["a"]);
     expect(filterWoByTab(rows, "active").map((r) => r.id)).toEqual(["b"]);
-    expect(filterWoByTab(rows, "installment")).toEqual([]);
     expect(filterWoByTab(rows, "closed")).toEqual([]);
   });
   it("woTabCount returns the filtered length", () => {
     expect(woTabCount(rows, "pending")).toBe(1);
-    expect(woTabCount(rows, "installment")).toBe(0);
+    expect(woTabCount(rows, "closed")).toBe(0);
+  });
+  it("B-277: the installment tab now selects the WOs with an installment awaiting acceptance", () => {
+    const planned: WoRow[] = [
+      ...rows,
+      wo({ id: "d", installments: [period({ id: "p1", status: "delivered" })] }),
+      wo({ id: "e", installments: [period({ id: "p2", status: "passed" })] }),
+    ];
+    expect(filterWoByTab(planned, "installment").map((r) => r.id)).toEqual(["d"]);
+    expect(woTabCount(planned, "installment")).toBe(1);
+    // The plan-less rows a/b/c contribute nothing rather than being counted as due.
+    expect(filterWoByTab(rows, "installment")).toEqual([]);
   });
 });
 

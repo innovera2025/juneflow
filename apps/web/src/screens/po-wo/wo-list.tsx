@@ -14,26 +14,61 @@
  * local WO_ROWS becomes the server catalogue. The subcon NAME resolves from
  * vendor_id via GET /vendors. Retention is a REAL derived column (value x
  * retention_pct / 100 = retention_amount). Pure logic (tab filter / status tone /
- * money format / retention sum) lives in po-wo-rows.ts (unit-tested, G3).
+ * money format / retention sum / plan aggregates) lives in po-wo-rows.ts
+ * (unit-tested, G3); the component<->wire seam is wo-list.test.tsx.
  *
- * WIRE GAPS (reported honestly, never fabricated) — the woWire is only
- * { id, no, pr_id, vendor_id, status, approval_step, currency_code, value,
- *   retention_pct, retention_amount, amount } (apps/api/src/routes/wo.ts):
- *   - NO scope column: the scope list cell + the detail scope line em-dash.
- *   - NO progress / gist column: the progress list cell renders an em-dash and its
- *     progress bar is omitted.
- *   - NO installment table (wo.ts GAP 1 — installments live on
- *     subcon_contract -> work_period with no FK from wo): the detail installment
- *     section keeps its header for fidelity but has no rows / em-dash summary.
+ * B-277 RE-WIRE — the woWire had GROWN (migration 0020 / B-080 F3) while this screen
+ * still declared four of its fields absent. GET /wo returns, per the api's own
+ * exact-key assertion (wo.test.ts "returns the envelope with retention_amount +
+ * scope/progress/installments (F3)"): { id, no, pr_id, vendor_id, contract_id,
+ * status, approval_step, currency_code, value, retention_pct, retention_amount,
+ * amount, scope, progress, installments[] }. Now consumed:
+ *   - `scope` (= the source PR's title, wo.ts: the only real description of lump-sum subcon work)
+ *     -> the scope list cell + the detail scope line.
+ *   - `progress` (SERVER-derived, see the honesty note below) -> the progress list
+ *     cell's bar + % and the detail installment summary's {pct}.
+ *   - `installments[]` (work_period rows) -> the detail installment rows, the summary's
+ *     {n}, the "approve-installment" tab and the "due installments" KPI.
+ *   - `contract_id` -> tells "no plan linked" (em-dash the installment count) apart from
+ *     "a linked plan that is empty" (an honest 0).
+ *
+ * MONEY / POPULATION HONESTY (the gr.list class of defect):
+ *   - `progress` is NEVER recomputed here. The server derives it as SUM(passed|paid
+ *     installment amount) / SUM(all installment amount) over ONE WO's own plan —
+ *     numerator and denominator are the same rows and the same column. null means the
+ *     server itself says "not computable": the cell renders an em-dash and DROPS the
+ *     bar rather than drawing a 0%-wide one.
+ *   - progress === 100 only means the plan's AMOUNTS balance; it does not mean every
+ *     installment individually passed. It drives nothing but the prototype's own bar colour
+ *     (po-wo.jsx L342) — never a closed/complete badge (the WO wire still has no
+ *     closed status, so the prototype's closed chip stays absent).
+ *   - The "due installments" KPI counts INSTALLMENTS (the LINE population, de-duplicated by
+ *     installment id because two WOs may share one subcon contract); the
+ *     "approve-installment" TAB counts WOs (the HEADER population). Different numbers by
+ *     design — see dueInstallmentCount in po-wo-rows.ts.
+ *   - Every installment amount shown is the server's `amount` column verbatim.
+ *
+ * WIRE GAPS THAT REMAIN (reported honestly, never fabricated):
+ *   - NO per-installment label column (wo.ts: "the FE composes the installment label from
+ *     seq/basis"): the row caption is the existing subcon.rowDp / subcon.colPeriod
+ *     key plus the real seq — the prototype's descriptive installment text is never invented.
+ *   - NO cumulative-% target for a non-percent-basis plan: `pct` only carries a
+ *     contract share on the "percent" basis, so the atContractPct template ("at {pct}% of the contract") em-dashes on any
+ *     plan that is not entirely percent-basis (cumulativeContractPct returns null).
  *   - NO variation-order endpoint on /wo (only /po has one): the Variation figure +
  *     the variation action are presentational (em-dash / no persist).
  *   - NO deposit (downPct), NO "closed" status, NO attachment count: the deposit detail,
- *     the closed/approve-installment KPI values + tabs, and the file count em-dash.
- *   - KPI values: pending + active (approved) are real C10 counts; Retention-outstanding is
- *     the real sum of retention_amount (the "outstanding" semantic is approximated —
- *     the wire has no retention-return tracking); due-installments + closed-this-month
- *     have no wire metric -> em-dash. Mock money sub-captions are omitted; the static
- *     descriptive sub-captions (kpiDueSub / kpiRetentionSub) are kept.
+ *     the closed-contract KPI value + tab, and the file count em-dash.
+ *   - work_period_status has 6 values but the prototype draws 3 installment states, so a
+ *     REJECTED installment takes the neutral not-done styling (truthful, but the "sent back"
+ *     nuance is lost — flagged in BLOCKERS.md B-277 for a Wei ruling; inventing a
+ *     fourth colour would be redesigning a screen the prototype fixes).
+ *   - KPI values: pending + active (approved) are real C10 counts; due-installments is
+ *     the real de-duplicated installment count; Retention-outstanding is the real sum of
+ *     retention_amount (the "outstanding" semantic is approximated — the wire has no
+ *     retention-return tracking); closed-this-month has no wire metric -> em-dash.
+ *     Mock money sub-captions are omitted; the static descriptive sub-captions
+ *     (kpiDueSub / kpiRetentionSub) are kept.
  *   - Detail actions: approve-installment runs the REAL WO-level approve (/wo/{id}/approve, tiered
  *     authority) via a confirm — the prototype's per-installment approval has no
  *     endpoint, so this is a flagged semantic approximation (the full submit/approve/
@@ -70,6 +105,10 @@ import {
   vendorNameById,
   formatMoney,
   millionsValue,
+  cumulativeContractPct,
+  dueInstallmentCount,
+  installmentDisplayKind,
+  type WoInstallment,
   type WoRow,
   type WoTab,
 } from "./po-wo-rows";
@@ -242,6 +281,99 @@ function StatusBadge({ status, label }: { status: string; label: string }) {
   );
 }
 
+/**
+ * The list's progress cell (po-wo.jsx L339-346) — bar + %. `pct` is the SERVER's
+ * `progress`, passed straight through; the bar turns --ok at 100 exactly as the
+ * prototype does (that colour rule is about this number, not a completeness claim).
+ * Rendered only when the server gave a number — a null progress em-dashes instead.
+ */
+function ProgressCell({ pct }: { pct: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div
+        style={{
+          flex: 1,
+          height: 5,
+          background: "var(--surface-3)",
+          borderRadius: 999,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: pct === 100 ? "var(--ok)" : "var(--accent)",
+          }}
+        />
+      </div>
+      <span className="num" style={{ fontSize: 11, fontWeight: 600, color: "var(--text-2)" }}>
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+/**
+ * One installment row of the detail plan (po-wo.jsx L380-394). The three visual states are
+ * the prototype's; which one a row takes comes from the real work_period status
+ * (installmentDisplayKind). `caption` is em-dashed by the caller when the cumulative
+ * contract-% is not honestly computable.
+ */
+function InstallmentRow({
+  label,
+  caption,
+  amount,
+  kind,
+}: {
+  label: string;
+  caption: string;
+  amount: number;
+  kind: "done" | "current" | "pending";
+}) {
+  const done = kind === "done";
+  const current = kind === "current";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 10px",
+        borderRadius: 7,
+        background: done ? "var(--ok-soft)" : current ? "var(--warn-soft)" : "var(--surface-2)",
+      }}
+    >
+      <div
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 999,
+          background: done ? "var(--ok)" : current ? "var(--warn)" : "var(--surface)",
+          border: done || current ? "none" : "2px solid var(--border-strong)",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Icon
+          name={done ? "check" : current ? "clock" : "user"}
+          size={11}
+          color={done || current ? "#fff" : "var(--text-3)"}
+        />
+      </div>
+      <div style={{ flex: 1, fontSize: 11.5 }}>
+        <div style={{ fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 10, color: "var(--text-3)" }}>{caption}</div>
+      </div>
+      <span className="num" style={{ fontSize: 12, fontWeight: 700 }}>
+        {formatMoney(amount)}
+      </span>
+    </div>
+  );
+}
+
 /** Detail stat block (label over value), used in the Variation/Retention grid. */
 function StatBlock({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: string; tone: string }) {
   return (
@@ -287,6 +419,29 @@ export function WOList() {
   };
 
   const subconName = (id: string): string => vendorNames.get(id) ?? "";
+
+  /** The selected WO's installment plan (already seq-sorted by toWoRow). */
+  const plan: WoInstallment[] = selectedRow?.installments ?? [];
+
+  /**
+   * The installment caption. work_period carries no label column (wo.ts: "the FE
+   * composes the label from seq/basis"), so this is the existing subcon.colPeriod /
+   * subcon.rowDp key plus the row's REAL seq — the prototype's descriptive text
+   * ("deposit + start" / "installment 1 - foundations") was mock and is not invented.
+   */
+  const installmentLabel = (p: WoInstallment): string =>
+    p.seq === 0 ? t("subcon.rowDp") : `${t("subcon.colPeriod")} ${p.seq}`;
+
+  /**
+   * The atContractPct caption ("at {pct}% of the contract") — the CUMULATIVE contract
+   * share this installment completes. Em-dashed whenever that cumulative would mix
+   * populations: see cumulativeContractPct (a non-percent-basis plan carries no pct
+   * target at all, so accumulating one would silently drop those rows).
+   */
+  const installmentCaption = (p: WoInstallment): string => {
+    const cum = cumulativeContractPct(plan, p.seq);
+    return cum == null ? DASH : t("wo.list.atContractPct").replace("{pct}", String(cum));
+  };
 
   const changeTab = (id: WoTab) => {
     setTab(id);
@@ -364,8 +519,15 @@ export function WOList() {
           tone="var(--brand)"
           icon="hardhat"
         />
-        {/* No due-installment metric on the wire — em-dash value, static caption kept. */}
-        <MiniKpi label={t("wo.list.kpiDueInstallments")} value={DASH} sub={t("wo.list.kpiDueSub")} tone="var(--accent)" icon="check" />
+        {/* Real installment count awaiting acceptance across the WOs' plans (LINE population,
+            de-duped by installment id — NOT the same number as the tab below). */}
+        <MiniKpi
+          label={t("wo.list.kpiDueInstallments")}
+          value={String(dueInstallmentCount(rows))}
+          sub={t("wo.list.kpiDueSub")}
+          tone="var(--accent)"
+          icon="check"
+        />
         <MiniKpi
           label={tp(P("kpiRetentionDue"))}
           value={millionsValue(sumRetention(rows))}
@@ -429,13 +591,24 @@ export function WOList() {
                       </td>
                       {/* subcon: resolved from vendor_id via GET /vendors */}
                       <td style={td}>{subconName(r.vendorId) || DASH}</td>
-                      {/* scope: no wire column — em-dash */}
-                      <td style={{ ...td, fontSize: 11.5, color: "var(--text-3)", maxWidth: 280 }}>{DASH}</td>
+                      {/* scope = the source PR's title (wo.ts); "" -> em-dash */}
+                      <td
+                        style={{
+                          ...td,
+                          fontSize: 11.5,
+                          color: r.scope ? "var(--text-2)" : "var(--text-3)",
+                          maxWidth: 280,
+                        }}
+                      >
+                        {r.scope || DASH}
+                      </td>
                       <td style={{ ...td, textAlign: "right", fontWeight: 600 }} className="num">
                         {formatMoney(r.value)}
                       </td>
-                      {/* progress: no wire — em-dash (bar omitted) */}
-                      <td style={{ ...td, color: "var(--text-3)" }} className="num">{DASH}</td>
+                      {/* progress: the SERVER's derived %; null (no plan) -> em-dash, no bar */}
+                      <td style={{ ...td, ...(r.progress == null ? { color: "var(--text-3)" } : {}) }} className="num">
+                        {r.progress == null ? DASH : <ProgressCell pct={r.progress} />}
+                      </td>
                       {/* retention: real derived (value x retention_pct / 100) */}
                       <td style={{ ...td, textAlign: "right" }} className="num">
                         {r.retentionAmount > 0 ? (
@@ -473,19 +646,38 @@ export function WOList() {
                   </div>
                   <StatusBadge status={selectedRow.status} label={statusLabel(selectedRow.status)} />
                 </div>
-                {/* scope: no wire — em-dash */}
-                <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 8, lineHeight: 1.5 }}>{DASH}</div>
+                {/* scope = the source PR's title (wo.ts) */}
+                <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 8, lineHeight: 1.5 }}>
+                  {selectedRow.scope || DASH}
+                </div>
               </div>
 
-              {/* installments — presentational (no installment table on the wire, wo.ts GAP 1):
-                  header kept for fidelity, em-dash summary, no rows. */}
+              {/* Installment plan — the REAL work_period rows carried on the /wo row (B-080 / F3).
+                  {n} is the plan length (em-dashed when no contract is linked at all, so
+                  "no plan known" never renders as an honest-looking 0 installments); {pct} is the
+                  SERVER's progress. */}
               <div style={{ padding: 18, borderBottom: "1px solid var(--border)" }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>
                   {tp(P("installments"))}{" "}
                   <span style={{ color: "var(--text-3)", fontWeight: 500 }}>
-                    {t("wo.list.installmentSummary").replace("{n}", DASH).replace("{pct}", DASH)}
+                    {t("wo.list.installmentSummary")
+                      .replace("{n}", selectedRow.contractId ? String(plan.length) : DASH)
+                      .replace("{pct}", selectedRow.progress == null ? DASH : String(selectedRow.progress))}
                   </span>
                 </div>
+                {plan.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {plan.map((p) => (
+                      <InstallmentRow
+                        key={p.id}
+                        label={installmentLabel(p)}
+                        caption={installmentCaption(p)}
+                        amount={p.amount}
+                        kind={installmentDisplayKind(p.status)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Variation (presentational) + Retention (real derived) */}
