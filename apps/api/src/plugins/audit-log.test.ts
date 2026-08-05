@@ -130,6 +130,71 @@ describe("every successful mutation writes exactly one record", () => {
   });
 });
 
+// B-282: audit_log is durable, append-only and readable through GET /audit-log,
+// and the hook records `after: request.body`. POST /auth/reset is the first
+// mutating route whose body carries credentials ({token, password}) AND names a
+// tenant, so the redaction and that attribution must never be separated.
+describe("secrets never reach audit_log", () => {
+  it("redacts credential-named fields out of the recorded body, at any depth", async () => {
+    const { app, records } = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: {
+        name: "Tower A",
+        password: "correct-horse",
+        token: "raw-reset-token",
+        photo_after: "after.jpg",
+        nested: { client_secret: "sh-1", api_key: "ak-1", label: "keep me" },
+        rows: [{ Password: "MiXeD", qty: 3 }],
+      },
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]!.after).toEqual({
+      name: "Tower A",
+      password: "[redacted]",
+      token: "[redacted]",
+      // Business fields keep their real value — matching is on the key NAME,
+      // exact and case-insensitive, never on the value.
+      photo_after: "after.jpg",
+      nested: { client_secret: "[redacted]", api_key: "[redacted]", label: "keep me" },
+      rows: [{ Password: "[redacted]", qty: 3 }],
+    });
+    const serialized = JSON.stringify(records);
+    expect(serialized).not.toContain("correct-horse");
+    expect(serialized).not.toContain("raw-reset-token");
+  });
+
+  it("leaves request.body itself intact for anything running after the hook", async () => {
+    // Redaction copies; it must not overwrite the parsed body in place, or a
+    // later hook would see a request that no longer says what the client sent.
+    const records: AuditRecord[] = [];
+    const bodySeenAfterAudit: unknown[] = [];
+    app = Fastify();
+    app.addHook("onRequest", async (request) => {
+      request.tenant = { companyId: COMPANY };
+    });
+    await registerAuditLog(app, { sink: (r) => records.push(r) });
+    // Registered AFTER the audit hook, so it runs after it (Fastify keeps hook
+    // registration order) and observes whatever the audit hook left behind.
+    app.addHook("onResponse", async (request) => {
+      bodySeenAfterAudit.push(request.body);
+    });
+    app.post("/projects", async () => ({ id: "p1" }));
+    await app.ready();
+
+    await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { password: "correct-horse" },
+    });
+
+    expect(records[0]!.after).toEqual({ password: "[redacted]" });
+    expect(bodySeenAfterAudit).toEqual([{ password: "correct-horse" }]);
+  });
+});
+
 describe("failed mutations are not audited", () => {
   it("writes no record when the mutation returns 4xx (no state changed)", async () => {
     const { app, records } = await buildApp();

@@ -23,6 +23,7 @@ import {
 import type { PlatformDb } from "../db/platform-db.js";
 import type { PlatformWriteDb } from "../db/platform-write-db.js";
 import {
+  canonicalEmail,
   newResetToken,
   RESET_TOKEN_TTL_MS,
   type CredentialStore,
@@ -352,7 +353,11 @@ export function registerAdminRoutes(
     if (!user) return notFound(reply, `user ${id} not found`);
     request.auditTargetCompanyId = user.companyId; // audit the affected tenant
 
-    const account = await credentials.findByEmail(user.email);
+    // Canonicalized like every other email-keyed lookup (canonicalEmail): the
+    // stored dictionary address is the key into a case-SENSITIVE auth_user
+    // lookup, so a legacy row saved with different case must not silently
+    // become "has no credential to reset".
+    const account = await credentials.findByEmail(canonicalEmail(user.email));
     // No credential row = nothing to reset (a pre-B-282 user invited before this
     // slice). Say so plainly — this surface is owner-only, so there is no
     // enumeration concern, and silently answering 200 would hide real breakage.

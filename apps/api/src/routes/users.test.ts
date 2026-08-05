@@ -12,10 +12,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { users, roles } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
-import {
-  CredentialEmailTakenError,
-  type ResetDeliveryMessage,
-} from "../auth-provisioning.js";
+import type { ResetDeliveryMessage } from "../auth-provisioning.js";
 import { FakeCredentialStore } from "../auth-provisioning-fake.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
@@ -317,19 +314,16 @@ describe("POST /api/v1/users — B-282 credential provisioning", () => {
     expect(await credentials.findByEmail("napha@juneflow.co.th")).not.toBeNull();
   });
 
-  it("409s an address already credentialed on the platform (B-283 global unique)", async () => {
+  it("still invites an address another TENANT holds — the B-283 block is NOT shipped", async () => {
+    // auth_user.email is unique platform-wide (migration 0008), so this invite
+    // cannot be credentialed. That is a schema fact, not a licence to refuse:
+    // before B-282 tenant B could invite an address tenant A held, a
+    // subcontractor's PM legitimately appears in two companies, and a 409 that
+    // echoes the address would make any tenant admin a cross-tenant existence
+    // oracle. Narrowing the index needs a SACRED migration → Wei's ruling
+    // (B-283). Until then POST /users keeps its PER-COMPANY behaviour.
     const store = new FakeCredentialStore();
-    // Held by ANOTHER tenant — auth_user.email is unique platform-wide (0008).
     store.seed({ authUserId: "au-other", companyId: "99999999-9999-9999-9999-999999999999", email: "napha@juneflow.co.th" });
-
-    const res = await invite({ name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" }, store);
-    expect(res.statusCode).toBe(409);
-    expect(res.json().code).toBe("DUPLICATE_EMAIL");
-  });
-
-  it("rolls the dictionary row back when provisioning loses the race", async () => {
-    const store = new FakeCredentialStore();
-    store.provisionError = new CredentialEmailTakenError("napha@juneflow.co.th");
     const deleted: Deleted[] = [];
     const res = await (
       await buildTestApp({
@@ -343,7 +337,34 @@ describe("POST /api/v1/users — B-282 credential provisioning", () => {
       payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
     });
 
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().status).toBe("invited");
+    // The dictionary row stands — exactly the pre-B-282 outcome.
+    expect(deleted.find((d) => d.table === users)).toBeUndefined();
+    // What is genuinely new is only that this one invite has no credential yet
+    // and so cannot be completed until B-283 is answered.
+    expect(store.accounts.size).toBe(1); // still just the OTHER tenant's account
+    expect(store.tokens.size).toBe(0);
+    expect(delivered).toHaveLength(0);
+  });
+
+  it("rolls the dictionary row back when provisioning fails outright", async () => {
+    const store = new FakeCredentialStore();
+    store.provisionError = new Error("connection reset");
+    const deleted: Deleted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY, [], [], deleted),
+        credentials: store,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(500);
     // The dictionary row it had already written is removed, tenant-scoped — no
     // orphan user with no way in.
     const del = deleted.find((d) => d.table === users);
@@ -351,9 +372,41 @@ describe("POST /api/v1/users — B-282 credential provisioning", () => {
     expect(paramsOf(del!.where)).toContain(COMPANY);
   });
 
-  it("rolls back when the token cannot be stored (an invite nobody could complete)", async () => {
+  it("rolls back BOTH halves when the token cannot be stored — no orphaned credential", async () => {
+    // The compensator used to delete only the dictionary row, leaving auth_user
+    // + auth_account behind. auth_user_email_unique is platform-wide, so that
+    // address could then never be invited again in ANY tenant, and no endpoint
+    // existed that could clear it — a permanent, unrecoverable brick from one
+    // dropped connection.
     const store = new FakeCredentialStore();
     store.issueError = new Error("verification insert failed");
+    const deleted: Deleted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[roles, [roleRow]], [users, [caller]]], COMPANY, [], [], deleted),
+        credentials: store,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(deleted.find((d) => d.table === users)).toBeDefined();
+    // The credential is gone too — the address can be invited again.
+    expect(store.deprovisioned).toHaveLength(1);
+    expect(await store.findByEmail("napha@juneflow.co.th")).toBeNull();
+    expect(store.accounts.size).toBe(0);
+  });
+
+  it("still removes the dictionary row when the credential cleanup ITSELF fails", async () => {
+    // A compensator that throws must not swallow the original failure or skip
+    // the rest of the rollback; the orphan it could not clear is logged, loudly.
+    const store = new FakeCredentialStore();
+    store.issueError = new Error("verification insert failed");
+    store.deprovisionError = new Error("connection reset");
     const deleted: Deleted[] = [];
     const res = await (
       await buildTestApp({

@@ -39,10 +39,14 @@ export class FakeCredentialStore implements CredentialStore {
   readonly tokens = new Map<string, FakeToken>();
   /** Every activateInvitedUser call, in order — the tenant-scope assertion. */
   readonly activations: CredentialAccount[] = [];
+  /** Every deprovision() call, in order — the invite-rollback assertion. */
+  readonly deprovisioned: string[] = [];
   /** Set to make the next provision() throw (rollback / 409 paths). */
   provisionError: Error | null = null;
   /** Set to make the next issueResetToken() throw. */
   issueError: Error | null = null;
+  /** Set to make the next deprovision() throw (compensator-failure path). */
+  deprovisionError: Error | null = null;
   /** When set, tokens are issued already expired. */
   issueExpiredAt: Date | null = null;
   /** When set, consumeResetToken reports this digest instead of the real one. */
@@ -79,6 +83,13 @@ export class FakeCredentialStore implements CredentialStore {
     const authUserId = `au-fake-${this.seq++}`;
     this.seed({ authUserId, companyId: input.companyId, email: input.email });
     return { authUserId, companyId: input.companyId, email: input.email };
+  }
+
+  async deprovision(authUserId: string): Promise<void> {
+    if (this.deprovisionError) throw this.deprovisionError;
+    this.accounts.delete(authUserId);
+    for (const [k, t] of this.tokens) if (t.authUserId === authUserId) this.tokens.delete(k);
+    this.deprovisioned.push(authUserId);
   }
 
   async findByEmail(email: string): Promise<CredentialAccount | null> {

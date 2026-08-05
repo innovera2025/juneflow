@@ -30,6 +30,7 @@ import {
   type ResetDeliveryMessage,
 } from "../auth-provisioning.js";
 import { FakeCredentialStore } from "../auth-provisioning-fake.js";
+import type { AuditRecord } from "../plugins/audit-log.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -53,6 +54,8 @@ interface Harness {
   app: FastifyInstance;
   credentials: FakeCredentialStore;
   delivered: ResetDeliveryMessage[];
+  /** Every audit row the middleware wrote for this app (B-282 finding 3). */
+  audited: AuditRecord[];
 }
 
 async function buildHarness(overrides: Partial<AppDeps> = {}): Promise<Harness> {
@@ -60,6 +63,7 @@ async function buildHarness(overrides: Partial<AppDeps> = {}): Promise<Harness> 
     (overrides.credentials as FakeCredentialStore | undefined) ??
     new FakeCredentialStore();
   const delivered: ResetDeliveryMessage[] = [];
+  const audited: AuditRecord[] = [];
   app = await buildApp({
     db: overrides.db ?? inertDb(),
     resolveTenant: overrides.resolveTenant ?? (async () => null),
@@ -69,12 +73,12 @@ async function buildHarness(overrides: Partial<AppDeps> = {}): Promise<Harness> 
       resolver: unlimitedQuotaResolver,
       upgradeUrl: "https://upgrade.test",
     }),
-    auditSink: async () => {},
+    auditSink: async (record) => void audited.push(record),
     credentials,
     deliverReset: overrides.deliverReset ?? ((m) => void delivered.push(m)),
     logger: false,
   });
-  return { app, credentials, delivered };
+  return { app, credentials, delivered, audited };
 }
 
 const forgot = (h: Harness, email: unknown) =>
@@ -242,6 +246,104 @@ describe("POST /api/v1/auth/forgot — no account enumeration", () => {
     expect(last!.json().code).toBe("RATE_LIMITED");
     // The victim's inbox got 5 messages, not 6 — the cap really bounds delivery.
     expect(h.delivered).toHaveLength(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The store is case-canonical (the invite writes trim().toLowerCase()), and
+// Postgres text `=` is case-SENSITIVE. Every email-keyed surface must agree, or
+// a user is told the link was sent and can never get in.
+describe("B-282 email canonicalization — the whole chain agrees on one form", () => {
+  it("finds the account when forgot is typed in a DIFFERENT case", async () => {
+    const credentials = new FakeCredentialStore();
+    credentials.seed({ authUserId: "au-1", companyId: COMPANY_A, email: EMAIL });
+    const h = await buildHarness({ credentials });
+
+    // An autocapitalising phone keyboard produces exactly this.
+    const res = await forgot(h, "  Napha@Juneflow.CO.TH  ");
+
+    expect(res.statusCode).toBe(200);
+    expect(credentials.tokens.size).toBe(1);
+    expect(h.delivered).toHaveLength(1);
+    expect(h.delivered[0]!.to).toBe(EMAIL);
+
+    // ...and the token it issued really works.
+    const done = await reset(h, h.delivered[0]!.token, "correct-horse");
+    expect(done.statusCode).toBe(200);
+    expect(credentials.signInWith(EMAIL, "correct-horse")).not.toBeNull();
+  });
+
+  it("hands LOGIN the canonical address, so the lookup does not depend on better-auth", async () => {
+    // "an invited user can log in" must be a property of this repo. The invite
+    // stores the canonical form; if login forwarded the raw input, correctness
+    // would rest entirely on better-auth normalizing case internally — which
+    // nobody here can read or verify, and which would 401 the user forever if
+    // it turned out to be false.
+    const seen: { email: string; password: string }[] = [];
+    const h = await buildHarness({
+      signIn: async (email: string, password: string) => {
+        seen.push({ email, password });
+        return null;
+      },
+    });
+
+    await h.app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "  Napha@Juneflow.CO.TH  ", password: "correct-horse" },
+    });
+
+    expect(seen).toEqual([{ email: EMAIL, password: "correct-horse" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Root CLAUDE.md: ทุก mutation → AuditLog (ผ่าน middleware). These routes are
+// public, so tenant-scope never resolves a tenant and the hook had nothing to
+// attribute their writes to — three mutations with no trail at all.
+describe("B-282 audit trail — the reset mutations are recorded, the secrets are not", () => {
+  async function completeReset() {
+    const credentials = new FakeCredentialStore();
+    credentials.seed({ authUserId: "au-1", companyId: COMPANY_A, email: EMAIL });
+    const h = await buildHarness({ credentials });
+    await forgot(h, EMAIL);
+    const token = h.delivered[0]!.token;
+    const done = await reset(h, token, "correct-horse");
+    return { h, token, done };
+  }
+
+  it("writes a row for the reset, attributed to the token's OWN tenant", async () => {
+    const { h, done } = await completeReset();
+    expect(done.statusCode).toBe(200);
+
+    const row = h.audited.find((r) => r.entity === "/api/v1/auth/reset");
+    expect(row).toBeDefined();
+    expect(row!.companyId).toBe(COMPANY_A);
+  });
+
+  it("records NEITHER the new password NOR the raw reset token", async () => {
+    // The hook records `after: request.body`, and this body is {token, password}.
+    // Enabling the row without redaction would have written a plaintext password
+    // and a live single-use token into a durable, readable table.
+    const { h, token } = await completeReset();
+
+    const row = h.audited.find((r) => r.entity === "/api/v1/auth/reset")!;
+    expect(row.after).toEqual({ token: "[redacted]", password: "[redacted]" });
+    const serialized = JSON.stringify(h.audited);
+    expect(serialized).not.toContain(token);
+    expect(serialized).not.toContain("correct-horse");
+  });
+
+  it("records the token issue on forgot for a known address, and nothing for an unknown one", async () => {
+    const { h } = await completeReset();
+    expect(
+      h.audited.filter((r) => r.entity === "/api/v1/auth/forgot"),
+    ).toHaveLength(1);
+
+    const unknown = await buildHarness();
+    await forgot(unknown, "nobody@example.test");
+    // Nothing was written, so there is nothing to audit.
+    expect(unknown.audited).toHaveLength(0);
   });
 });
 

@@ -79,6 +79,29 @@ export const MAX_PASSWORD_LENGTH = 128;
 /** The unique index auth_user.email trips on a cross-company collision (0008). */
 const AUTH_USER_EMAIL_UNIQUE = "auth_user_email_unique";
 
+/**
+ * THE canonical account form of an address: trimmed + lowercased. ONE function,
+ * used by EVERY email-keyed lookup and write in apps/api, because the whole
+ * chain is only correct if all of them agree.
+ *
+ * WHY THIS EXISTS AS A HELPER RATHER THAN AN INLINE `.trim().toLowerCase()`.
+ * The first cut of B-282 lowercased the address on the WRITE side (POST /users)
+ * and left POST /auth/forgot on `.trim()` alone. Postgres text `=` is
+ * case-sensitive, so an invite stored as `napha@juneflow.co.th` could not be
+ * found by a user who typed — or whose phone autocapitalised — `Napha@...`:
+ * forgot answered its uniform 200, issued no token, sent no mail, logged
+ * nothing, and the user was told the link was on its way. That is the very
+ * "can never log in" bug B-282 exists to fix, one endpoint over. A single
+ * shared function makes the invariant greppable and makes a new email-keyed
+ * site an obvious omission rather than an invisible one.
+ *
+ * Safe against the data that exists: every auth_user today comes from
+ * packages/db/src/seed/index.ts, whose addresses are all lowercase already.
+ */
+export function canonicalEmail(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 /** One credentialed account: the auth_user identity + its tenant binding. */
 export interface CredentialAccount {
   /** auth_user.id — the better-auth identity, NOT the dictionary user id. */
@@ -130,7 +153,25 @@ export interface CredentialStore {
     name: string;
   }): Promise<CredentialAccount>;
 
-  /** The credentialed account for `email`, or null when there is none. */
+  /**
+   * Undo a provision(): remove the auth_user, its credential auth_account, its
+   * sessions and any reset token issued against it.
+   *
+   * WHY THIS IS NOT OPTIONAL. POST /users cannot provision and write its
+   * dictionary row in one transaction (TenantDb cannot reach auth_account — no
+   * company_id column), so it compensates by hand. Without this method a
+   * failure AFTER provision() commits deleted only the dictionary row and left
+   * auth_user behind; because auth_user_email_unique is platform-wide (B-283),
+   * that address could then never be invited again ANYWHERE, and no endpoint
+   * could clear it. Only ever called on an id this request just created.
+   */
+  deprovision(authUserId: string): Promise<void>;
+
+  /**
+   * The credentialed account for `email`, or null when there is none.
+   * `email` must already be in canonicalEmail() form — the comparison is the
+   * database's own case-SENSITIVE text `=`.
+   */
   findByEmail(email: string): Promise<CredentialAccount | null>;
 
   /**
@@ -187,8 +228,14 @@ export function hashResetToken(token: string): string {
 /**
  * Constant-time digest comparison. The SHA-256 indirection is the primary
  * defence (a timing oracle over a digest leaks nothing about the preimage);
- * this is the second layer, and it is load-bearing at the one place a store
- * implementation could return a record it matched loosely.
+ * this is cheap defence-in-depth against a store implementation that matched a
+ * record loosely (prefix / LIKE / case-folded) and handed back a near-miss.
+ *
+ * Honest scope: with DbCredentialStore it can never fire — that store matches
+ * with `eq(auth_verification.value, hash)`, so the returned digest equals the
+ * one asked for by construction. Only a store that lies (the fake's
+ * corruptStoredHash) exercises it. Keep it as a guard on future stores, not as
+ * a property of today's production path.
  */
 export function resetHashesMatch(a: string, b: string): boolean {
   const left = Buffer.from(a, "utf8");
@@ -234,6 +281,14 @@ export interface ResetDeliveryMessage {
  *        to: m.to, title: <i18n subject key>, body: <link + m.token> }) })
  *
  * Step 3's copy must come from an existing i18n key — no invented strings.
+ *
+ * THE WIRING MUST ENQUEUE, NOT AWAIT (B-282). POST /auth/forgot answers one
+ * identical 200 for every address, but only the KNOWN branch calls this seam.
+ * Today that branch costs one extra transaction, so the timing delta is
+ * negligible. An adapter that awaits an SMTP round-trip would turn that delta
+ * into a full mail send — hundreds of milliseconds, trivially measurable, and a
+ * working account-enumeration oracle behind the uniform body. Hand the message
+ * to a queue/worker and return immediately; do not await the transport inline.
  */
 export type ResetDelivery = (message: ResetDeliveryMessage) => Promise<void> | void;
 
@@ -289,6 +344,22 @@ export class DbCredentialStore implements CredentialStore {
       throw err;
     }
     return { authUserId, companyId: input.companyId, email: input.email };
+  }
+
+  async deprovision(authUserId: string): Promise<void> {
+    // Children first (auth_account / auth_session / auth_verification all point
+    // at auth_user), then the identity itself, all in ONE transaction so a
+    // half-removed credential is never left behind by the compensator.
+    await this.#db.transaction(async (tx) => {
+      await tx
+        .delete(authVerifications)
+        .where(
+          eq(authVerifications.identifier, `${RESET_IDENTIFIER_PREFIX}${authUserId}`),
+        );
+      await tx.delete(authSessions).where(eq(authSessions.userId, authUserId));
+      await tx.delete(authAccounts).where(eq(authAccounts.userId, authUserId));
+      await tx.delete(authUsers).where(eq(authUsers.id, authUserId));
+    });
   }
 
   async findByEmail(email: string): Promise<CredentialAccount | null> {

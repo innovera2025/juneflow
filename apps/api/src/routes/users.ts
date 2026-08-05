@@ -38,6 +38,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { users, roles } from "@juneflow/db/schema";
 import {
+  canonicalEmail,
   CredentialEmailTakenError,
   newResetToken,
   RESET_TOKEN_TTL_MS,
@@ -141,16 +142,13 @@ export function registerUsersRoute(
       typeof body.name === "string" && body.name.trim()
         ? body.name.trim()
         : [first, last].filter(Boolean).join(" ");
-    // Canonical account form = trimmed + lowercased. This is NOT cosmetic: the
-    // same address must resolve to ONE identity across the dictionary `user`
-    // row, the globally-unique auth_user.email, and whatever better-auth
-    // normalizes to at sign-in — otherwise a mixed-case invite provisions a
-    // credential nobody can ever sign in with, which is the very failure B-282
-    // exists to fix. login already canonicalizes this way for its throttle key
-    // (routes/auth.ts, `accountKey`). It also makes the duplicate pre-check
-    // below correct: before this, "A@x.co" and "a@x.co" both inserted.
-    const email =
-      typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    // Canonical account form (auth-provisioning.ts canonicalEmail). NOT
+    // cosmetic: the same address must resolve to ONE identity across the
+    // dictionary `user` row, the globally-unique auth_user.email, login and
+    // forgot — every one of which now uses this same helper. It also makes the
+    // duplicate pre-check below correct: before this, "A@x.co" and "a@x.co"
+    // both inserted.
+    const email = canonicalEmail(body.email);
     const roleId =
       typeof body.role_id === "string"
         ? body.role_id
@@ -195,20 +193,19 @@ export function registerUsersRoute(
       });
     }
 
-    // B-282 pre-check: auth_user.email is unique across the WHOLE platform
-    // (migration 0008), not per company, so an address another tenant already
-    // holds cannot be credentialed. Checking BEFORE the dictionary insert keeps
-    // the common case free of a compensating delete. (That global uniqueness
-    // also means this 409 answers "exists somewhere on the platform" rather than
-    // "exists in your company" — a cross-tenant existence signal that cannot be
-    // removed without a SACRED migration. Filed as B-283.)
-    if (await options.credentials.findByEmail(email)) {
-      return reply.code(409).send({
-        code: "DUPLICATE_EMAIL",
-        message: `a user with email ${email} already exists`,
-      });
-    }
-
+    // NO platform-wide pre-check here, deliberately — see B-283. auth_user.email
+    // is unique across the WHOLE platform (migration 0008), so a first cut of
+    // B-282 asked `credentials.findByEmail(email)` before inserting and answered
+    // 409. That would have been a NEW behaviour this slice is not entitled to
+    // ship: an address tenant A holds could no longer be invited by tenant B at
+    // all — and a construction ERP genuinely has one subcontractor PM working
+    // for two companies — while the 409 echoing the address turned an
+    // authenticated tenant admin into a cross-tenant existence oracle that did
+    // not exist before. Narrowing the index to UNIQUE(company_id, email) needs a
+    // SACRED migration, so the decision is Wei's. Until then this endpoint keeps
+    // its PER-COMPANY behaviour: the check above (scoped to this tenant) is the
+    // only duplicate rule, and a cross-tenant address is invited exactly as it
+    // was before B-282 — see the CredentialEmailTakenError branch below.
     const [created] = await db
       .insert(users, {
         name,
@@ -233,14 +230,25 @@ export function registerUsersRoute(
         name,
       });
     } catch (err) {
-      await db.delete(users, eq(users.id, created!.id));
       if (err instanceof CredentialEmailTakenError) {
-        // Lost the race against a concurrent invite of the same address.
-        return reply.code(409).send({
-          code: "DUPLICATE_EMAIL",
-          message: `a user with email ${email} already exists`,
-        });
+        // The platform-wide index rejected the address, so it is credentialed in
+        // ANOTHER tenant — a same-company duplicate cannot reach here, having
+        // been answered 409 by the scoped pre-check above.
+        //
+        // KEEP the dictionary row. That is precisely what POST /users did BEFORE
+        // B-282: the invite succeeds and the user sits `invited` with no
+        // credential yet. Answering 409 would ship the cross-tenant block (and
+        // its existence oracle) without Wei's ruling; rolling back would ship the
+        // same refusal behind a 500. The only genuinely new fact is that this
+        // particular invite cannot be COMPLETED until B-283 is decided, and that
+        // is what this line records. No PII in the log — the row id identifies it.
+        request.log.warn(
+          { kind: "invite", userId: created!.id },
+          "invited user provisioned NO credential: the address is already credentialed in another tenant (auth_user_email_unique is platform-wide — BLOCKERS.md B-283)",
+        );
+        return reply.code(201).send(toWire(created!));
       }
+      await db.delete(users, eq(users.id, created!.id));
       throw err;
     }
 
@@ -251,6 +259,24 @@ export function registerUsersRoute(
     try {
       await options.credentials.issueResetToken(account.authUserId, hash, expiresAt);
     } catch (err) {
+      // Compensate BOTH halves, credential FIRST. Deleting only the dictionary
+      // row left auth_user + auth_account behind, and auth_user_email_unique is
+      // platform-wide (B-283): that address could then never be invited again in
+      // ANY tenant, and no endpoint exists that could clear the orphan. The
+      // unrecoverable half therefore goes first, and if it fails the orphan is
+      // real — say so loudly rather than let it disappear into the rethrow.
+      try {
+        await options.credentials.deprovision(account.authUserId);
+      } catch (cleanupErr) {
+        request.log.error(
+          {
+            kind: "invite",
+            authUserId: account.authUserId,
+            error: (cleanupErr as { name?: string })?.name,
+          },
+          "ORPHANED CREDENTIAL: an auth_user was created but neither completed nor removed — this address cannot be invited again anywhere until the row is deleted by hand",
+        );
+      }
       await db.delete(users, eq(users.id, created!.id));
       throw err;
     }

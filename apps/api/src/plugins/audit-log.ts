@@ -36,6 +36,65 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // (with or without the /api/v1 prefix), never a substring like /badmin/.
 const ADMIN_PATH = /(?:^|\/)admin(?:\/|$)/;
 
+// B-282 — SECRETS MUST NEVER REACH audit_log.
+//
+// The hook records `after: request.body` for every successful mutation, and
+// audit_log is durable, append-only and readable through GET /audit-log. Until
+// B-282 no mutating route carried a secret in its body, so the rule held by
+// accident: POST /auth/login has a password but is public and unattributed, so
+// no row was ever written for it. POST /auth/reset breaks that accident — its
+// body is {token, password} and it now names its tenant so the mutation IS
+// audited. Recording that body verbatim would persist the plaintext password
+// AND a live single-use reset token.
+//
+// The fix belongs HERE, at the single choke point, not in the reset handler:
+// every current and future mutating route is covered, and a new route that
+// happens to accept a credential cannot reintroduce the leak by forgetting.
+// Matching is on the KEY NAME (exact, case-insensitive) — never on the value —
+// so nothing is redacted by accident: `photo_after`, `token_count`-style names
+// and every business field keep their real value.
+const SECRET_KEYS = new Set([
+  "password",
+  "newpassword",
+  "new_password",
+  "currentpassword",
+  "current_password",
+  "confirmpassword",
+  "confirm_password",
+  "token",
+  "accesstoken",
+  "access_token",
+  "refreshtoken",
+  "refresh_token",
+  "idtoken",
+  "id_token",
+  "secret",
+  "clientsecret",
+  "client_secret",
+  "apikey",
+  "api_key",
+  "authorization",
+]);
+
+/** What replaces a secret. A fixed marker, so the row still proves the field was sent. */
+const REDACTED = "[redacted]";
+
+/**
+ * Deep-copy `value` with every secret-named property replaced by [redacted].
+ * Depth-bounded (a request body is JSON, but a hostile one can be deeply
+ * nested) and non-mutating — `request.body` must stay intact for anything that
+ * runs after this hook.
+ */
+function redactSecrets(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((v) => redactSecrets(v, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = SECRET_KEYS.has(key.toLowerCase()) ? REDACTED : redactSecrets(v, depth + 1);
+  }
+  return out;
+}
+
 /** Logical action derived from the HTTP method of a mutating request. */
 const METHOD_ACTION: Record<string, string> = {
   POST: "create",
@@ -123,8 +182,10 @@ export async function registerAuditLog(
         userId: await resolveUserId(request),
         action: isOwnerRead ? "read" : resolveAction(request.method, routePath),
         entity: path,
-        // A read has no mutation body; a mutation records its intent as `after`.
-        after: isMutation ? (request.body ?? undefined) : undefined,
+        // A read has no mutation body; a mutation records its intent as `after`
+        // — with every secret-named field replaced (see SECRET_KEYS above), so
+        // a password or a live reset token can never be persisted here.
+        after: isMutation ? (redactSecrets(request.body) ?? undefined) : undefined,
         ip: request.ip ?? null,
         at: new Date(),
       };

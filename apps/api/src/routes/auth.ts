@@ -24,6 +24,7 @@ import type { Db } from "@juneflow/db/client";
 import { TenantDb } from "../db/tenant-db.js";
 import type { SignIn } from "../auth.js";
 import {
+  canonicalEmail,
   hashResetToken,
   newResetToken,
   resetHashesMatch,
@@ -212,7 +213,15 @@ export async function registerAuthRoutes(
       | { email?: unknown; password?: unknown }
       | null
       | undefined;
-    const email = typeof body?.email === "string" ? body.email : "";
+    // Canonicalized BEFORE it reaches the credential seam, not just before the
+    // throttle key. The invite path stores auth_user.email in exactly this form,
+    // so matching it here is what makes "an invited user can log in" a property
+    // of THIS repo rather than an assumption about how better-auth normalizes
+    // its own lookup — an assumption nobody could verify (node_modules is not
+    // readable here) and which, if false, would 401 a correctly-invited user
+    // forever while burning their throttle window. Every auth_user that exists
+    // today is seeded lowercase, so no stored credential is put out of reach.
+    const email = canonicalEmail(body?.email);
     const password = typeof body?.password === "string" ? body.password : "";
 
     // Contract declares 200/401 only — missing/invalid input is a failed login.
@@ -223,7 +232,7 @@ export async function registerAuthRoutes(
 
     const ip = request.ip || "unknown";
     const now = Date.now();
-    const accountKey = email.trim().toLowerCase();
+    const accountKey = email;
     // B-100 (ค): the per-account failure window is keyed on account+IP. B-099
     // keyed it on the (attacker-supplied, unauthenticated) email alone and counted
     // EVERY attempt, so ~11 requests against a victim's email tripped the window
@@ -290,10 +299,15 @@ export async function registerAuthRoutes(
   // used to discover which addresses have accounts.
   app.post("/auth/forgot", async (request, reply) => {
     const body = request.body as { email?: unknown } | null | undefined;
-    const email = typeof body?.email === "string" ? body.email.trim() : "";
+    // Canonical form, same as the invite writes and login looks up (see
+    // canonicalEmail). `.trim()` alone left this endpoint case-SENSITIVE against
+    // a store the invite had just made case-canonical: a user whose client
+    // autocapitalises got the uniform 200 with no token, no mail and no log —
+    // told the link was sent, unable ever to get in.
+    const email = canonicalEmail(body?.email);
     const ip = request.ip || "unknown";
     const now = Date.now();
-    const pairKey = `${email.toLowerCase()}|${ip}`;
+    const pairKey = `${email}|${ip}`;
 
     // Throttle BEFORE any lookup. Both windows are keyed on values the
     // requester supplies about themselves, so the 429 is identical whether or
@@ -336,6 +350,13 @@ export async function registerAuthRoutes(
         );
         return reply.code(200).send(FORGOT_ACCEPTED);
       }
+      // Issuing a token IS a mutation (auth_verification), and this route is
+      // public, so tenant-scope never set request.tenant and the audit hook had
+      // nothing to attribute the write to. Naming the account's own tenant
+      // gives it one. Only the known branch reaches here, so the audit trail
+      // records exactly the requests that changed state — and it is not an
+      // oracle, because audit_log is not readable by the anonymous caller.
+      request.auditTargetCompanyId = account.companyId ?? undefined;
       // Delivered to the address ON THE ACCOUNT, never to the address supplied
       // in the body — those are equal here, but pinning it to the stored value
       // means no future change to the lookup can redirect someone's token.
@@ -404,6 +425,20 @@ export async function registerAuthRoutes(
     // Completes the invite state machine (invited → active), pinned to the
     // token's own auth_user.company_id — a reset can never cross tenants.
     await options.credentials.activateInvitedUser(record.account);
+
+    // THREE mutations just happened — a password write, the termination of every
+    // live session, and a dictionary status flip invited → active — and root
+    // CLAUDE.md's rule is "ทุก mutation → AuditLog (ผ่าน middleware)". The route
+    // is public, so request.tenant is never set and the hook had no company to
+    // attribute the row to; the token resolves to an auth_user that carries one.
+    //
+    // This line is only safe BECAUSE plugins/audit-log.ts redacts secrets out of
+    // the recorded body: this request's body is {token, password}, and the hook
+    // records `after: request.body`. Enabling the row without that redaction
+    // would have written the plaintext password and the raw reset token into
+    // audit_log — a durable, widely-readable copy of both. The two halves must
+    // never be separated.
+    request.auditTargetCompanyId = record.account.companyId ?? undefined;
 
     return reply.code(200).send({ ok: true });
   });
