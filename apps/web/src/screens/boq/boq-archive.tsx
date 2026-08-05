@@ -123,7 +123,8 @@ function FilterSelect({
 
 /**
  * Static display-only filter pill (ds.jsx Filter) — label + value + chevron. Used for the year
- * filter, which has no date source on the wire, so its value is an em-dash (WIRE GAP, header).
+ * filter, whose only candidate date (approved_at) is null for every unapproved doc, so its
+ * value stays an em-dash pending a filter-semantics ruling (WIRE GAP 3, header).
  */
 function DisplayFilterPill({ label, value }: { label: string; value: string }) {
   return (
@@ -249,7 +250,9 @@ export function BOQArchive() {
             <option value="approved">{tp(S("statusApproved"))}</option>
             <option value="revise">{tp(S("statusRevise"))}</option>
           </FilterSelect>
-          {/* Year filter: no date source on the /boq wire -> display-only, em-dash value. */}
+          {/* Year filter: approved_at is the payload's only date and it is null for every
+              unapproved doc, so filtering by it would silently hide drafts -> display-only,
+              em-dash value pending a filter-semantics ruling (WIRE GAP 3, B-279). */}
           <DisplayFilterPill label={tp(A("yearLabel"))} value="—" />
         </div>
 
@@ -300,8 +303,8 @@ export function BOQArchive() {
                   const st = statusTone(d.status);
                   return (
                     <tr key={d.id} style={{ borderTop: "1px solid var(--border)" }}>
-                      {/* Chevron: static structural marker — no expansion (revise-history has
-                          no backend source, WIRE GAP 3). */}
+                      {/* Chevron: static structural marker — no expansion (version_history is
+                          DETAIL-payload only, WIRE GAP 2). */}
                       <td style={td}>
                         <Icon name="chevR" size={14} color="var(--text-3)" />
                       </td>
@@ -369,7 +372,8 @@ export function BOQArchive() {
                           {tp(S(statusStringName(d.status)))}
                         </span>
                       </td>
-                      {/* WIRE GAP 2: no attachments table + no revise-history log — both counts em-dash. */}
+                      {/* WIRE GAP 1: no attachments table + version_history is DETAIL-payload
+                          only — both counts em-dash. */}
                       <td style={{ ...td, color: "var(--text-2)", fontSize: 11.5 }}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginInlineEnd: 8 }}>
                           <Icon name="paperclip" size={12} color="var(--text-3)" />—
