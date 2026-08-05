@@ -2,8 +2,10 @@
  * pr-rows unit tests (P2-WEB-09, gate G3) — the pure PRList display logic ported from
  * pototype/pr-list.jsx. Guards the opaque-row narrowing defaults, the PR_TYPES chip map,
  * the ds.jsx STATUS badge tone, the B-070 tier-count (mirrored from the backend approve
- * gate), the ApprovalSteps bar/label stepper, the money format, the KPI aggregates and
- * the status/project/type/search filter.
+ * gate), the ApprovalSteps bar/label stepper, the money format, the KPI aggregates
+ * (including the approved-this-month cohort + the mean approval duration read off the
+ * migration-0022 submitted_at/approved_at stamps) and the status/project/type/requester/
+ * search filter.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -16,15 +18,21 @@ import {
   approvalBars,
   approvalStepLabel,
   formatMoney,
+  formatDate,
+  firstName,
   millionsValue,
+  monthKey,
+  approvedInMonth,
+  avgApprovalDays,
   filterPrRows,
   countByStatus,
+  countByRequester,
   sumAmount,
   activeFilterCount,
   type PrRow,
 } from "./pr-rows";
 
-/** A pending material PR + an approved subcon PR fixture (real wire shape). */
+/** A pending material PR + an approved subcon PR fixture (real LIST wire shape). */
 const PENDING: PrRow = {
   id: "p1",
   no: "PR-2026-0418",
@@ -35,6 +43,13 @@ const PENDING: PrRow = {
   approvalStep: 2,
   currencyCode: "THB",
   amount: 842500,
+  title: "cement + rebar phase 2/B",
+  phase: "phase 2 B",
+  vendor: "SCG Concrete",
+  requester: "Wipha Chancharoen",
+  requesterId: "u-1",
+  submittedAt: "2026-05-25T00:00:00.000Z",
+  approvedAt: null,
 };
 const APPROVED: PrRow = {
   id: "p2",
@@ -46,6 +61,13 @@ const APPROVED: PrRow = {
   approvalStep: 3,
   currencyCode: "THB",
   amount: 425000,
+  title: "exterior painting Block A",
+  phase: "phase 1 A",
+  vendor: "Changthai Pattana",
+  requester: "Somsak Rungrueang",
+  requesterId: "u-4",
+  submittedAt: "2026-05-24T00:00:00.000Z",
+  approvedAt: "2026-05-27T00:00:00.000Z",
 };
 const DRAFT: PrRow = {
   id: "p3",
@@ -57,6 +79,13 @@ const DRAFT: PrRow = {
   approvalStep: 0,
   currencyCode: "THB",
   amount: 985000,
+  title: "plumbing install B-1 to B-12",
+  phase: null,
+  vendor: null,
+  requester: null,
+  requesterId: null,
+  submittedAt: null,
+  approvedAt: null,
 };
 
 describe("toPrRow", () => {
@@ -72,17 +101,35 @@ describe("toPrRow", () => {
         approval_step: 2,
         currency_code: "THB",
         amount: 842500,
+        title: "cement + rebar phase 2/B",
+        phase: "phase 2 B",
+        vendor: "SCG Concrete",
+        requester: "Wipha Chancharoen",
+        requester_id: "u-1",
+        submitted_at: "2026-05-25T00:00:00.000Z",
+        approved_at: null,
         extra: "ignored",
       }),
     ).toEqual(PENDING);
   });
 
   it("accepts camelCase aliases and parses a numeric-string amount", () => {
-    const r = toPrRow({ projectId: "prj-9", approvalStep: 1, currencyCode: "USD", amount: "1,268,000" });
+    const r = toPrRow({
+      projectId: "prj-9",
+      approvalStep: 1,
+      currencyCode: "USD",
+      amount: "1,268,000",
+      requesterId: "u-9",
+      submittedAt: "2026-05-24T00:00:00.000Z",
+      approvedAt: "2026-05-24T00:00:00.000Z",
+    });
     expect(r.projectId).toBe("prj-9");
     expect(r.approvalStep).toBe(1);
     expect(r.currencyCode).toBe("USD");
     expect(r.amount).toBe(1268000);
+    expect(r.requesterId).toBe("u-9");
+    expect(r.submittedAt).toBe("2026-05-24T00:00:00.000Z");
+    expect(r.approvedAt).toBe("2026-05-24T00:00:00.000Z");
   });
 
   it("defaults every field (needDate null, amount 0) when absent — never invented", () => {
@@ -96,7 +143,21 @@ describe("toPrRow", () => {
       approvalStep: 0,
       currencyCode: "",
       amount: 0,
+      title: null,
+      phase: null,
+      vendor: null,
+      requester: null,
+      requesterId: null,
+      submittedAt: null,
+      approvedAt: null,
     });
+  });
+
+  it("keeps an absent vendor/requester name null (the list resolves them, detail-only fields stay null)", () => {
+    const r = toPrRow({ id: "p9", vendor: null, requester: "", title: "  " });
+    expect(r.vendor).toBeNull();
+    expect(r.requester).toBeNull();
+    expect(r.title).toBeNull();
   });
 
   it("treats a blank need_date as null (honest em-dash source)", () => {
@@ -208,6 +269,80 @@ describe("formatMoney / millionsValue", () => {
   });
 });
 
+describe("formatDate / firstName / monthKey", () => {
+  it("renders a wire instant as a deterministic UTC ISO date", () => {
+    expect(formatDate("2026-05-25T00:00:00.000Z")).toBe("2026-05-25");
+    expect(formatDate("2026-05-25")).toBe("2026-05-25");
+  });
+
+  it("returns '' for a null/blank/invalid stamp so the view can em-dash it", () => {
+    expect(formatDate(null)).toBe("");
+    expect(formatDate("")).toBe("");
+    expect(formatDate("not-a-date")).toBe("");
+  });
+
+  it("prints only the first name token, like the prototype requester cell", () => {
+    expect(firstName("Wipha Chancharoen")).toBe("Wipha");
+    expect(firstName("Somsak")).toBe("Somsak");
+    expect(firstName("")).toBe("");
+  });
+
+  it("keys a stamp to its UTC calendar month", () => {
+    expect(monthKey("2026-05-25T23:59:59.000Z")).toBe("2026-05");
+    expect(monthKey(null)).toBe("");
+  });
+});
+
+describe("approvedInMonth (KPI 'approved this month')", () => {
+  const rows = [PENDING, APPROVED, DRAFT];
+
+  it("keeps only the docs whose real approved_at falls in the month", () => {
+    expect(approvedInMonth(rows, "2026-05").map((r) => r.id)).toEqual(["p2"]);
+    expect(approvedInMonth(rows, "2026-06")).toHaveLength(0);
+  });
+
+  it("selects nothing for an empty month key (fail-closed, never the whole catalogue)", () => {
+    expect(approvedInMonth(rows, "")).toHaveLength(0);
+  });
+
+  it("ignores an approved doc that carries no approved_at stamp (never inferred)", () => {
+    const unstamped: PrRow = { ...APPROVED, id: "p9", approvedAt: null };
+    expect(approvedInMonth([unstamped], "2026-05")).toHaveLength(0);
+  });
+});
+
+describe("avgApprovalDays (KPI 'average approval time')", () => {
+  it("means the submitted_at -> approved_at span over docs with both stamps", () => {
+    expect(avgApprovalDays([PENDING, APPROVED, DRAFT])).toBe(3);
+  });
+
+  it("means across several complete cycles", () => {
+    const oneDay: PrRow = {
+      ...APPROVED,
+      id: "p4",
+      submittedAt: "2026-05-20T00:00:00.000Z",
+      approvedAt: "2026-05-21T00:00:00.000Z",
+    };
+    expect(avgApprovalDays([APPROVED, oneDay])).toBe(2);
+  });
+
+  it("returns null (-> em-dash) when no doc has a complete approval cycle", () => {
+    expect(avgApprovalDays([PENDING, DRAFT])).toBeNull();
+    expect(avgApprovalDays([])).toBeNull();
+  });
+
+  it("skips an inverted (approved before submitted) span rather than averaging a negative", () => {
+    const inverted: PrRow = {
+      ...APPROVED,
+      id: "p5",
+      submittedAt: "2026-05-27T00:00:00.000Z",
+      approvedAt: "2026-05-24T00:00:00.000Z",
+    };
+    expect(avgApprovalDays([inverted])).toBeNull();
+    expect(avgApprovalDays([APPROVED, inverted])).toBe(3);
+  });
+});
+
 describe("filterPrRows / countByStatus / sumAmount", () => {
   const rows = [PENDING, APPROVED, DRAFT];
 
@@ -233,11 +368,32 @@ describe("filterPrRows / countByStatus / sumAmount", () => {
     ).toEqual(["p2", "p3"]);
   });
 
-  it("searches over the PR no only (title/vendor are not on the wire)", () => {
+  it("searches over the PR no and the real title / requester / vendor text", () => {
     expect(
       filterPrRows(rows, { status: "", projectId: "", type: "", q: "0415" }).map((r) => r.id),
     ).toEqual(["p2"]);
+    expect(
+      filterPrRows(rows, { status: "", projectId: "", type: "", q: "rebar" }).map((r) => r.id),
+    ).toEqual(["p1"]);
+    expect(
+      filterPrRows(rows, { status: "", projectId: "", type: "", q: "somsak" }).map((r) => r.id),
+    ).toEqual(["p2"]);
+    expect(
+      filterPrRows(rows, { status: "", projectId: "", type: "", q: "scg" }).map((r) => r.id),
+    ).toEqual(["p1"]);
     expect(filterPrRows(rows, { status: "", projectId: "", type: "", q: "zzz" })).toHaveLength(0);
+  });
+
+  it("filters by requester id for the 'mine' tab", () => {
+    expect(
+      filterPrRows(rows, { status: "", projectId: "", type: "", q: "", requesterId: "u-4" }).map(
+        (r) => r.id,
+      ),
+    ).toEqual(["p2"]);
+    // an unattributed doc (requester_id null) is never claimed by anyone
+    expect(
+      filterPrRows(rows, { status: "", projectId: "", type: "", q: "", requesterId: "u-nobody" }),
+    ).toHaveLength(0);
   });
 
   it("counts by status and sums amounts for the KPI strip", () => {
@@ -245,6 +401,13 @@ describe("filterPrRows / countByStatus / sumAmount", () => {
     expect(countByStatus(rows, "approved")).toBe(1);
     expect(countByStatus(rows, "rejected")).toBe(0);
     expect(sumAmount(rows)).toBe(842500 + 425000 + 985000);
+  });
+
+  it("counts the docs a given user requested (the 'mine' tab badge)", () => {
+    expect(countByRequester(rows, "u-1")).toBe(1);
+    expect(countByRequester(rows, "u-nobody")).toBe(0);
+    // no signed-in user id resolved -> 0, never the whole catalogue
+    expect(countByRequester(rows, "")).toBe(0);
   });
 });
 
