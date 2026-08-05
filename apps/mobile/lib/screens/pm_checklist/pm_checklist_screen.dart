@@ -587,7 +587,7 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
     );
   }
 
-  /// Push the maintenance-log screen for this work order (mobile-pm.jsx L143:
+  /// Push the maintenance-log screen for this work order (mobile-pm.jsx L141:
   /// `setScreen("pm-notes")`), carrying the REAL work-order id — the same
   /// Navigator.push seam pm-checkin uses to reach this screen.
   void _openNotes() {
@@ -600,7 +600,7 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
     );
   }
 
-  /// The sticky bottom bar (mobile-pm.jsx L142-144). Idle/queued/failed → the save
+  /// The sticky bottom bar (mobile-pm.jsx L140-142). Idle/queued/failed → the save
   /// action (enqueue + drain, or re-drain the same op on a retry). While saving it
   /// is disabled (a spinner). Saved → the onward affordance, which now NAVIGATES:
   /// pm-notes is built (feature/mobile-pm-notes), so this no longer has to sit
