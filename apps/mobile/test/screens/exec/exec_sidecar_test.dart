@@ -9,9 +9,9 @@
 //     t() echoing the key back would mean the stable id does not exist, i.e. an
 //     un-approved mint. This is the ZERO-MINT guarantee for those slots.
 //   * PHRASE fields are the Thai phrase itself, so for Thai (the default) tp()
-//     returns them verbatim and the screen renders correctly TODAY; en/zh/ar light
-//     up once Wei runs the sacred round from
-//     agents/orch-d-recon/exec-i18n.apply.json (B-298).
+//     returns them verbatim. The sacred round from
+//     agents/orch-d-recon/exec-i18n.apply.json (B-298) was APPLIED on 2026-08-05,
+//     so en/zh/ar now resolve too — before that they rendered raw Thai.
 import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -53,17 +53,19 @@ const Map<String, String> _verbatimDict = <String, String>{
 
 /// Phrase slots that must already exist in the sacred file — these are the
 /// ZERO-MINT reuses, and if one ever stops resolving the mint list is wrong.
+///
+/// The seven slots below the original five were MINTED on 2026-08-05 under the
+/// standing pre-ratification (phrases 1065 -> 1099, all three copies of
+/// i18n-full.json byte-identical). They moved here from _mintedPhrases the moment
+/// they landed, which is exactly what the assertion below demanded: a slot that is
+/// present in the sacred file is no longer a mint. Until then tp() rendered them
+/// correctly in Thai only because it echoes the key — en/zh/ar saw raw Thai.
 const List<String> _zeroMintPhrases = <String>[
   'title',
   'kpiPending',
   'unitMBaht',
   'unitDocs',
   'legendPlan',
-];
-
-/// Phrase slots this slice knowingly MINTS (staged in exec-i18n.apply.json).
-/// They render correctly in Thai today because tp() echoes the key.
-const List<String> _mintedPhrases = <String>[
   'heroUnits',
   'kpiCash',
   'kpiDue',
@@ -72,6 +74,11 @@ const List<String> _mintedPhrases = <String>[
   'legendActual',
   'approvalsTitle',
 ];
+
+/// Phrase slots still awaiting a mint (staged in exec-i18n.apply.json).
+/// Empty: this screen's mint round is applied. Anything added here must be absent
+/// from the sacred file, or the assertion below fails — that is the point.
+const List<String> _mintedPhrases = <String>[];
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
