@@ -11,25 +11,32 @@
  *
  * Data (rule 8, C10): the archive is the SAME server catalogue as BOQList — GET /boq
  * (use-boq.ts) through the generated client — so the prototype's local ARCHIVE mock array is
- * dropped (§0 rule 3). Each doc's REAL fields { id, no, name, scope, project_id, version,
- * status, total } drive the row; the project NAME resolves from project_id via GET /projects.
- * Row logic (search / status tone / version label / money format) reuses the unit-tested
- * boq-rows.ts + boq-archive-rows.ts (gate G3).
+ * dropped (§0 rule 3). The LIST payload is { id, no, name, scope, project_id, version, status,
+ * currency_code, total, approved_by, approved_by_name, approved_at } (boq.ts docWire, pinned
+ * by boq.test.ts's exact-key assertion). Those REAL fields drive the row; the project NAME
+ * resolves from project_id via GET /projects. Row logic (search / status tone / version label /
+ * money format / approval narrowing) reuses the unit-tested boq-rows.ts + boq-archive-rows.ts
+ * (gate G3).
+ *   - REAL (B-278 re-wire): the latest-approver cell = approved_by_name (resolved server-side
+ *     from `users`, B-081/F4 + migration 0021); the approve-date cell = approved_at, rendered
+ *     ISO/UTC per the house formatApprovedAt. A doc with no approval carries null for both and
+ *     keeps its em-dash — the unapproved state is shown, never filled in.
  *
  * WIRE GAPS (reported honestly, never fabricated — B-066 / boq-list precedent):
- *   1. latest approver / approve date — boq_doc exposes neither on the /boq wire (no
- *      approver column, no approved-at timestamp), so both cells render an em-dash.
- *   2. file + revise counts (the "paperclip N · history N" cell) — there is no attachments
- *      table and no revise-history/version-log source, so both counts render an em-dash. The
- *      version chip column is the real doc.version.
- *   3. revise-history timeline (the prototype's expandable per-doc "Revise history" panel) has
- *      NO backend source (no version snapshots) AND its row labels/reasons carry no i18n key,
- *      so the row is NOT expandable here — the chevron is a static structural marker. Flagged.
- *   4. the year filter has no date source on the wire, so it is a display-only pill (em-dash
- *      value); the header filter button + the row "copy to new BOQ" action have no backend
- *      endpoint (no server filter-persist, no BOQ copy/duplicate route), so they are deferred
- *      no-op stubs (boq-overview export / boq-list duplicate precedent). The row "view" action
- *      navigates to the BOQ editor route (real).
+ *   1. file + revise counts (the "paperclip N · history N" cell) — there is no attachments
+ *      table, and the revise/version log (`version_history`) exists only on the DETAIL payload
+ *      (GET /boq/{id}), not on the list rows this screen reads, so both counts render an
+ *      em-dash. The version chip column is the real doc.version.
+ *   2. revise-history timeline (the prototype's expandable per-doc "Revise history" panel) is
+ *      likewise detail-only AND its row labels/reasons carry no i18n key, so the row is NOT
+ *      expandable here — the chevron is a static structural marker. Flagged.
+ *   3. the year filter stays a display-only pill (em-dash value): approved_at is the only date
+ *      on the payload and it is null for every unapproved doc, so filtering by it would
+ *      silently hide drafts — that needs a filter-semantics ruling, not a guess (B-279). The
+ *      header filter button + the row "copy to new BOQ" action have no backend endpoint (no
+ *      server filter-persist, no BOQ copy/duplicate route), so they are deferred no-op stubs
+ *      (boq-overview export / boq-list duplicate precedent). The row "view" action navigates
+ *      to the BOQ editor route (real).
  *
  * i18n (rule 2): every string is a boq.arc* / common. dict key (t), the boq-archive-strings.json
  * (details / value / year) or boq-strings.json (status labels) phrase (tp), or the boq.archive
@@ -58,7 +65,7 @@ import {
   projectNameById,
   type BoqRow,
 } from "./boq-rows";
-import { filterArchiveRows } from "./boq-archive-rows";
+import { filterArchiveRows, archiveApprovalById, formatApprovedAt } from "./boq-archive-rows";
 import boqStrings from "./boq-strings.json" with { type: "json" };
 import arcStrings from "./boq-archive-strings.json" with { type: "json" };
 
@@ -151,6 +158,8 @@ export function BOQArchive() {
   const [q, setQ] = useState("");
 
   const docs = useMemo<BoqRow[]>(() => (boqQ.data ?? []).map(toBoqRow), [boqQ.data]);
+  // The archive-only approval cells (approved_by_name / approved_at), keyed by doc id.
+  const approvals = useMemo(() => archiveApprovalById(boqQ.data), [boqQ.data]);
   const projectNames = useMemo(() => projectNameById(projectsQ.data), [projectsQ.data]);
   const rows = useMemo(
     () => filterArchiveRows(docs, projectNames, { projectId: project, status, q }),
@@ -328,10 +337,16 @@ export function BOQArchive() {
                           {formatMoney(d.total)}
                         </span>
                       </td>
-                      {/* WIRE GAP 1: no approver column on the /boq wire — em-dash. */}
-                      <td style={{ ...td, color: "var(--text-2)", fontSize: 11.5 }}>—</td>
-                      {/* WIRE GAP 1: no approved-at timestamp on the /boq wire — em-dash. */}
-                      <td style={{ ...td, color: "var(--text-3)", fontSize: 11.5 }}>—</td>
+                      {/* Real approver: GET /boq approved_by_name (server-resolved from
+                          users, B-081/F4). Unapproved docs carry null -> em-dash. */}
+                      <td style={{ ...td, color: "var(--text-2)", fontSize: 11.5 }}>
+                        {approvals.get(d.id)?.approverName || "—"}
+                      </td>
+                      {/* Real approval timestamp: GET /boq approved_at, ISO/UTC per the
+                          house formatApprovedAt. Unapproved docs carry null -> em-dash. */}
+                      <td style={{ ...td, color: "var(--text-3)", fontSize: 11.5 }}>
+                        {formatApprovedAt(approvals.get(d.id)?.approvedAt ?? "") || "—"}
+                      </td>
                       <td style={td}>
                         {/* Inline StatusBadge (ds.jsx, size="sm"): tokened bg/fg + verbatim dot. */}
                         <span
