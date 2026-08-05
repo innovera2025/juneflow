@@ -6,9 +6,10 @@
 // cause/fix/advice seeding the form, the whole-form body, an untouched field written
 // back as its stored text, the parts slot em-dashed (no wire), the dropped LINE-OA
 // banner, the online-saved / offline-queued / permanently-failed states (never a fake
-// success), the retry reusing the SAME op id, the onward affordance being genuinely
-// tap-less, and the honest-empty variants — including a failed read withholding the
-// write, with the reason spelled out at that test.
+// success), the retry reusing the SAME op id, the onward affordance really pushing
+// pm-close with the REAL work-order id (it used to be honest-disabled — pm-close is
+// built as of feature/mobile-pm-close), and the honest-empty variants — including a
+// failed read withholding the write, with the reason spelled out at that test.
 //
 // Deliberately NOT asserted here: that no widget renders 'ปิดงาน' or 'ใบรับรอง'. No
 // state of this screen can produce either word, so such an expectation passes in
@@ -19,9 +20,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/i18n/i18n.dart';
 import 'package:juneflow_mobile/offline/sync_operation.dart';
 import 'package:juneflow_mobile/offline/sync_processor.dart';
+import 'package:juneflow_mobile/screens/pm_close/pm_close_screen.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_agg.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_repository.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_screen.dart';
+
+/// Records every pushed route so the onward-navigation seam can be asserted without
+/// mounting the destination (the pm_checkin / pm_checklist precedent:
+/// [PmCloseScreenHost] resolves its services through an AppScope this hermetic test
+/// deliberately does not build).
+class _RecordingObserver extends NavigatorObserver {
+  final List<Route<dynamic>> pushes = <Route<dynamic>>[];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushes.add(route);
+  }
+}
 
 /// A fake repo returning canned work orders and a scripted drain outcome. When
 /// [outcome] is null the drain "touched nothing" (an offline no-response).
@@ -135,9 +150,11 @@ Future<void> _pump(
   WidgetTester tester,
   _FakeRepo repo, {
   String? workOrderId = 'wo-1',
+  NavigatorObserver? observer,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      navigatorObservers: <NavigatorObserver>[if (observer != null) observer],
       home: Scaffold(
         body: PmNotesScreen(
           repo: repo,
@@ -283,8 +300,9 @@ void main() {
       expect(repo.lastBody!.containsKey('signature'), isFalse);
     });
 
-    testWidgets('a 2xx shows saved and an onward affordance that really is '
-        'DISABLED — it navigates nowhere', (WidgetTester tester) async {
+    testWidgets('a 2xx shows saved and swaps the CTA for the onward affordance', (
+      WidgetTester tester,
+    ) async {
       final _FakeRepo repo = _FakeRepo(
         outcome: SyncOutcome.synced,
         rows: <PmNotesEnt>[_wo('wo-1')],
@@ -294,28 +312,60 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('บันทึกแล้ว'), findsOneWidget);
-      // pm-close is not built, so the button becomes the onward affordance.
       expect(find.text('ถัดไป'), findsOneWidget);
       expect(find.text('บันทึก'), findsNothing);
-      // "Honest-disabled" has to mean disabled: no tap handler, so it cannot
-      // navigate and cannot be read as a close action. Asserting the ABSENCE of
-      // 'ปิดงาน' text here would be vacuous — no state of this screen can render
+      // Still not a close, and still not a second write. Asserting the ABSENCE of
+      // 'ปิดงาน' text here would be vacuous — no state of THIS screen can render
       // it — so the sidecar test forbids it at the source instead.
-      final GestureDetector onward = tester.widget<GestureDetector>(
-        find
-            .ancestor(
-              of: find.text('ถัดไป'),
-              matching: find.byType(GestureDetector),
-            )
-            .first,
-      );
-      expect(onward.onTap, isNull);
-      // Tapping it changes nothing: no second write, no navigation.
-      await tester.tap(find.text('ถัดไป'));
-      await tester.pumpAndSettle();
       expect(repo.saves, 1);
-      expect(find.text('ถัดไป'), findsOneWidget);
     });
+
+    testWidgets(
+      'saved -> the onward CTA pushes pm-close carrying the REAL work-order id',
+      (WidgetTester tester) async {
+        // The behaviour change feature/mobile-pm-close makes to this MERGED screen:
+        // the once honest-disabled onward affordance (onTap: null, because pm-close
+        // was unbuilt) now navigates. Same assertion shape as the pm-checkin →
+        // pm-checklist → pm-notes push tests: the destination is BUILT but not
+        // mounted (PmCloseScreenHost resolves its services through an AppScope this
+        // hermetic test deliberately does not build).
+        final _RecordingObserver observer = _RecordingObserver();
+        final _FakeRepo repo = _FakeRepo(
+          outcome: SyncOutcome.synced,
+          // A distinctive id, so a hardcoded/stale value cannot pass by coincidence.
+          rows: <PmNotesEnt>[_wo('wo-42-real')],
+        );
+        await _pump(
+          tester,
+          repo,
+          workOrderId: 'wo-42-real',
+          observer: observer,
+        );
+        await tester.tap(find.text('บันทึก'));
+        await tester.pumpAndSettle();
+
+        // Precondition: saved, so the onward affordance is the button on screen.
+        expect(find.text('ถัดไป'), findsOneWidget);
+        observer.pushes.clear(); // drop the initial home route
+
+        await tester.tap(find.text('ถัดไป'));
+
+        // It really navigates now.
+        expect(observer.pushes, hasLength(1));
+        final Route<dynamic> route = observer.pushes.single;
+        expect(route, isA<MaterialPageRoute<void>>());
+
+        // The seam a later refactor must not drop: pushing without the id would
+        // mount pm-close honest-EMPTY (a bare em-dash instead of THIS job's asset,
+        // checklist tally and signature state) while every other assertion here
+        // still passed.
+        final Widget dest = (route as MaterialPageRoute<void>).builder(
+          tester.element(find.byType(PmNotesScreen)),
+        );
+        expect(dest, isA<PmCloseScreenHost>());
+        expect((dest as PmCloseScreenHost).workOrderId, 'wo-42-real');
+      },
+    );
 
     testWidgets('a deferred outcome is QUEUED — never a fake success', (
       WidgetTester tester,

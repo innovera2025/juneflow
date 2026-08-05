@@ -80,18 +80,23 @@ void main() {
   testWidgets('the router renders an honest placeholder for an unbuilt route', (
     WidgetTester tester,
   ) async {
-    // `pm-close` is a known route whose screen is not built yet (pm-notes, the
-    // sibling that used to stand in here, is now a real ported screen).
+    // `tech-close` is a known route whose screen is not built yet. It replaced
+    // `pm-close` as this test's subject when feature/mobile-pm-close landed — the
+    // whole pm-* flow is now ported, so the stand-in has to come from elsewhere
+    // (`pm-notes` played the same role here before pm-close, and pm-checkin before
+    // that). Assert the id is genuinely unbuilt so this cannot rot into a test of a
+    // built screen.
+    expect(kBuiltRouteIds, isNot(contains('tech-close')));
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
           builder: (BuildContext context) =>
-              resolveMobileScreen(context, 'pm-close'),
+              resolveMobileScreen(context, 'tech-close'),
         ),
       ),
     );
     expect(find.byType(ScreenPlaceholder), findsOneWidget);
-    expect(find.text('pm-close'), findsOneWidget);
+    expect(find.text('tech-close'), findsOneWidget);
   });
 
   test(
@@ -126,8 +131,31 @@ void main() {
     expect(kBuiltRouteIds, contains('pm-notes'));
     expect(mobileScreenBuilders.containsKey('pm-notes'), isTrue);
     expect(kMobileRouteIds, contains('pm-notes'));
-    // `pm-close`, the next step in the flow, is still unbuilt.
-    expect(kBuiltRouteIds, isNot(contains('pm-close')));
-    expect(kMobileRouteIds, contains('pm-close')); // still a known route
+  });
+
+  test('pm-close is a built route in lockstep (feature/mobile-pm-close)', () {
+    // The PM flow's last step (the READ-ONLY close summary): a built tab route
+    // (honest-empty with no selection) that pm-notes also pushes with a real
+    // work-order id. Its builder + built id must stay in lockstep
+    // (keys==kBuiltRouteIds, asserted above).
+    expect(kBuiltRouteIds, contains('pm-close'));
+    expect(mobileScreenBuilders.containsKey('pm-close'), isTrue);
+    expect(kMobileRouteIds, contains('pm-close'));
+  });
+
+  test('the whole pm-* flow is now built end to end', () {
+    // pm-jobs -> pm-checkin -> pm-checklist -> pm-notes -> pm-close. A regression
+    // that dropped any one of them from the router would strand the chain at that
+    // step (the pushing screen would navigate to a placeholder).
+    for (final String id in <String>[
+      'pm-jobs',
+      'pm-checkin',
+      'pm-checklist',
+      'pm-notes',
+      'pm-close',
+    ]) {
+      expect(kBuiltRouteIds, contains(id), reason: '$id must be built');
+      expect(mobileScreenBuilders.containsKey(id), isTrue, reason: id);
+    }
   });
 }

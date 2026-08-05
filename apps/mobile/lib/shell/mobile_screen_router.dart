@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 import '../screens/approvals_inbox/approvals_inbox_screen.dart';
 import '../screens/notif/notif_screen.dart';
 import '../screens/pm_checkin/pm_checkin_screen.dart';
+import '../screens/pm_close/pm_close_screen.dart';
 import '../screens/pm_checklist/pm_checklist_screen.dart';
 import '../screens/pm_jobs/pm_jobs_screen.dart';
 import '../screens/pm_notes/pm_notes_screen.dart';
@@ -53,6 +54,13 @@ Widget _buildPmChecklist(BuildContext context) => const PmChecklistScreenHost();
 /// pushes it with the REAL work-order id once the checklist save is confirmed.
 Widget _buildPmNotes(BuildContext context) => const PmNotesScreenHost();
 
+/// Builds the `pm-close` screen (the PM flow's last step — the READ-ONLY job summary
+/// plus the stored signature state). Same nullable-id contract as the rest of the
+/// flow: a bare tab route mounts it with workOrderId=null → an honest "no work order
+/// selected" state, while pm-notes pushes it with the REAL work-order id once the
+/// maintenance log is durably saved. It performs no write (BLOCKERS.md B-288).
+Widget _buildPmClose(BuildContext context) => const PmCloseScreenHost();
+
 /// Builds the `approve` / `reject` PR action sheets. Each host resolves services +
 /// its i18n sidecar from [AppScope]; the shell has no route-param mechanism yet, so
 /// prId is null → an honest "no PR selected" state (never a fabricated PR).
@@ -76,6 +84,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'pm-checkin': _buildPmCheckin,
   'pm-checklist': _buildPmChecklist,
   'pm-notes': _buildPmNotes,
+  'pm-close': _buildPmClose,
   'approve': _buildApprove,
   'reject': _buildReject,
   'sales-crm': _buildSalesCrm,
