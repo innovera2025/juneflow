@@ -320,7 +320,22 @@ export async function registerAuthRoutes(
 
     const account = await options.credentials.findByEmail(email);
     if (account) {
-      await options.credentials.issueResetToken(account.authUserId, hash, expiresAt);
+      try {
+        await options.credentials.issueResetToken(account.authUserId, hash, expiresAt);
+      } catch (err) {
+        // Swallowed for the SAME reason a delivery failure is: ONLY the
+        // known-address branch reaches this write, so letting it 500 would make
+        // "500 vs 200" mean "this address exists". The user gets no mail and
+        // retries — exactly what a lost mail already produces. Contrast
+        // POST /users, which deliberately does NOT swallow the same failure:
+        // there the caller is an authenticated admin, and staying quiet would
+        // leave a brand-new account nobody could ever complete, so it rolls back.
+        request.log.error(
+          { kind: "forgot", error: (err as { name?: string })?.name },
+          "password-reset token could not be stored",
+        );
+        return reply.code(200).send(FORGOT_ACCEPTED);
+      }
       // Delivered to the address ON THE ACCOUNT, never to the address supplied
       // in the body — those are equal here, but pinning it to the stored value
       // means no future change to the lookup can redirect someone's token.

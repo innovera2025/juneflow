@@ -199,6 +199,23 @@ describe("POST /api/v1/auth/forgot — no account enumeration", () => {
     expect(h.credentials.tokens.size).toBe(0);
   });
 
+  it("keeps the uniform 200 when the TOKEN WRITE throws (a 500 would be an oracle)", async () => {
+    // Only the known-address branch reaches the write, so a 500 here would mean
+    // "this address exists" — the exact signal the uniform 200 exists to hide.
+    const credentials = new FakeCredentialStore();
+    credentials.seed({ authUserId: "au-1", companyId: COMPANY_A, email: EMAIL });
+    credentials.issueError = new Error("verification insert failed");
+    const known = await buildHarness({ credentials });
+    const knownRes = await forgot(known, EMAIL);
+    await known.app.close();
+
+    const unknown = await buildHarness();
+    const unknownRes = await forgot(unknown, "nobody@example.test");
+
+    expect(knownRes.statusCode).toBe(200);
+    expect(knownRes.body).toBe(unknownRes.body);
+  });
+
   it("keeps the uniform 200 when delivery THROWS (a 500 would be an oracle)", async () => {
     const credentials = new FakeCredentialStore();
     credentials.seed({ authUserId: "au-1", companyId: COMPANY_A, email: EMAIL });
