@@ -135,9 +135,33 @@ void main() {
     expect(find.text('ซ่อมเสร็จ'), findsOneWidget);
     expect(find.text('ปิดงาน'), findsOneWidget);
 
-    // The two steps that HAVE a column show their real date.
-    expect(find.text('2026-05-23'), findsOneWidget);
-    expect(find.text('2026-05-27'), findsOneWidget);
+    // The two steps that HAVE a column show their real date, rendered in the house
+    // numeric form (pr_detail_agg.formatWireDate) — never the raw wire string.
+    expect(find.text('23/5/2026'), findsOneWidget);
+    expect(find.text('27/5/2026'), findsOneWidget);
+    expect(find.text('2026-05-23'), findsNothing);
+    expect(find.text('2026-05-27'), findsNothing);
+  });
+
+  testWidgets('no date slot leaks the raw wire string — timeline AND history', (
+    WidgetTester tester,
+  ) async {
+    await _pump(tester, <ServiceEnt>[
+      _row(id: 'a', no: 'SR-2026-0048', unitId: 'u1'),
+      _row(
+        id: 'b',
+        no: 'SR-2026-0045',
+        unitId: 'u1',
+        title: 'พื้นกระเบื้องแตก',
+        opened: '2026-04-02',
+      ),
+    ]);
+
+    // The history row's intake date is formatted too (single-digit day AND month
+    // are NOT zero-padded — the merged pr-detail contract).
+    expect(find.text('2/4/2026'), findsOneWidget);
+    // Nothing anywhere on the screen renders a YYYY-MM-DD.
+    expect(find.textContaining(RegExp(r'\d{4}-\d{2}-\d{2}')), findsNothing);
   });
 
   testWidgets('the warranty card prints the SERVER months and em-dashes the '

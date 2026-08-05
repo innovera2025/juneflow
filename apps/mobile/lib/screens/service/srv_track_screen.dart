@@ -27,7 +27,10 @@
 //     (scheduled_date) have a column. There is no fixing/fixed/closed timestamp
 //     anywhere on service_ticket, so those three always em-dash — the prototype's
 //     "today HH:MM" fixing time (L143) and its technician name on the schedule step
-//     (L142) have no wire at all.
+//     (L142) have no wire at all. The two dates that DO exist are rendered through
+//     [serviceDateText], the merged house formatter (pr_detail_agg.formatWireDate):
+//     locale-neutral numeric `d/m/yyyy`, never the raw `2026-05-23` wire string and
+//     never a fabricated Thai month/era.
 //   - the HISTORY rows (L163-165) keep `no` / problem / date from real columns and
 //     DROP the star rating: there is no rating column, and the close handler's own
 //     comment says that round did not invent one (sales-service.ts L354-356).
@@ -350,7 +353,7 @@ class _SrvTrackScreenState extends State<SrvTrackScreen> {
                         ),
                       ),
                       Text(
-                        s.date.isEmpty ? kServiceDash : s.date,
+                        serviceDateText(s.date),
                         style: const TextStyle(
                           fontSize: 10.5,
                           color: JuneflowTokens.textTertiary,
@@ -422,7 +425,7 @@ class _SrvTrackScreenState extends State<SrvTrackScreen> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  t.openedDate.isEmpty ? kServiceDash : t.openedDate,
+                  serviceDateText(t.openedDate),
                   style: const TextStyle(
                     fontSize: 10,
                     color: JuneflowTokens.textTertiary,

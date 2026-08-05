@@ -176,6 +176,25 @@ void main() {
     );
   });
 
+  group('serviceDateText renders the house numeric date, never the wire', () {
+    test('a wire date becomes d/m/yyyy (the merged pr-detail contract)', () {
+      expect(serviceDateText('2026-05-23'), '23/5/2026');
+      expect(serviceDateText('2026-12-25'), '25/12/2026');
+      // The raw wire string never reaches a screen.
+      expect(serviceDateText('2026-05-23'), isNot(contains('-')));
+    });
+
+    test('an ISO datetime keeps its DATE part (no timezone shift)', () {
+      expect(serviceDateText('2026-05-23T00:00:00.000Z'), '23/5/2026');
+    });
+
+    test('anything that is not a date em-dashes, never leaks through', () {
+      expect(serviceDateText(''), kServiceDash);
+      expect(serviceDateText('not-a-date'), kServiceDash);
+      expect(serviceDateText('2026-05'), kServiceDash);
+    });
+  });
+
   group('the tracked ticket and its unit history', () {
     final List<ServiceTicket> rows = parseTickets(<ServiceEnt>[
       _row(id: 'a', no: 'SR-1', unitId: 'u1'),

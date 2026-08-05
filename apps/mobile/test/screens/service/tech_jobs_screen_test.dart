@@ -173,6 +173,59 @@ void main() {
     expect(find.text('เรตติ้ง'), findsNothing);
   });
 
+  testWidgets('the stat tiles state no count until BOTH reads have landed', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TechJobsScreen(
+            repo: _FakeRepo(
+              rows: <ServiceEnt>[
+                _row(
+                  id: 'a',
+                  no: 'SR-1',
+                  priority: 'high',
+                  scheduled: serviceTodayIso(),
+                ),
+              ],
+            ),
+            strings: _strings,
+            i18n: _i18n,
+          ),
+        ),
+      ),
+    );
+
+    // FIRST frame: _load() is still awaiting GET /me and then GET /sales/service,
+    // so the row set is empty. A count taken over that set would assert "0 today,
+    // 0 urgent" — a fact nobody has answered — while the list below is blank.
+    expect(find.text('วันนี้'), findsNothing);
+    expect(find.text('ด่วน'), findsNothing);
+    expect(find.text('0'), findsNothing);
+
+    // Once both reads land, the tiles carry the REAL counts.
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('วันนี้'), findsOneWidget);
+    expect(find.text('1'), findsNWidgets(2));
+  });
+
+  testWidgets('the card date is the house numeric form, never the raw wire', (
+    WidgetTester tester,
+  ) async {
+    await _pump(
+      tester,
+      _FakeRepo(
+        rows: <ServiceEnt>[_row(id: 'a', no: 'SR-1', scheduled: '2026-05-27')],
+      ),
+    );
+
+    expect(find.textContaining('27/5/2026'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'\d{4}-\d{2}-\d{2}')), findsNothing);
+  });
+
   testWidgets('per-status buttons are exactly the machine\'s legal moves', (
     WidgetTester tester,
   ) async {

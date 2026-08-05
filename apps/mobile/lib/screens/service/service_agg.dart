@@ -47,6 +47,7 @@
 //     [newTicketBody] therefore sends the real create keys only (BLOCKERS.md B-293).
 //
 // No Flutter, no i18n, no Dio here — every derivation stays unit-testable.
+import '../pr_detail/pr_detail_agg.dart' show formatWireDate;
 
 /// An opaque contract Entity — GET /sales/service rows are `{ [k]: unknown }` (the
 /// wire models an opaque Entity; the generated client declares no fields, so the
@@ -89,6 +90,21 @@ int? svcIntOrNull(Object? v) {
   final num? n = num.tryParse('$v');
   return n == null || !n.isFinite ? null : n.truncate();
 }
+
+/// A wire date column rendered for a human, or [kServiceDash].
+///
+/// Reuses the MERGED house formatter, [formatWireDate] (pr_detail_agg.dart L203):
+/// locale-neutral numeric `d/m/yyyy` — no fabricated Thai month/era text, the same
+/// numeric philosophy the notif and pr-detail ports already ship, so a date in this
+/// group reads identically to one on pr-detail. Nothing is re-implemented here.
+///
+/// The prototype prints `23 พ.ค. 14:20` (mobile-screens.jsx L141). That form needs a
+/// Thai month table and a TIME the wire does not carry (`opened_date` /
+/// `scheduled_date` are DATE columns), so it is not reproduced — §0 rule 3.
+///
+/// Anything that is not a date at all — "", a null-shaped value, a free-text string —
+/// em-dashes rather than leaking the raw wire string to the screen.
+String serviceDateText(String raw) => formatWireDate(raw) ?? kServiceDash;
 
 // ---------------------------------------------------------------------------
 // The SV-3 status machine (received → scheduled → fixing → fixed → closed)

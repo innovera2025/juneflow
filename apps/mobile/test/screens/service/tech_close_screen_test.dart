@@ -126,7 +126,10 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     expect(find.byIcon(Icons.add), findsNothing);
     expect(find.byIcon(Icons.edit), findsNothing);
-    expect(find.byType(CustomPaint).evaluate().isEmpty, isFalse); // chrome only
+    // (A `find.byType(CustomPaint)` assertion used to sit here. Every Flutter tree
+    // contains CustomPaint, so it proved nothing about the absent signature pad —
+    // the three lines above are the real absence proofs. Removed rather than kept
+    // as decorative coverage.)
     // The prototype's survey promise never reaches the button.
     expect(find.text('ปิดงาน + ส่งแบบประเมิน'), findsNothing);
     expect(find.text('เซ็นที่นี่'), findsNothing);

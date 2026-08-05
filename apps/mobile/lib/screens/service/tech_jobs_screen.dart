@@ -214,6 +214,12 @@ class _TechJobsScreenState extends State<TechJobsScreen> {
           final _MyJobs? data = snap.data;
           final List<ServiceTicket> rows =
               data?.rows ?? const <ServiceTicket>[];
+          // ONE guard for the whole body. _load() awaits GET /me and then
+          // GET /sales/service in sequence, so `rows` is empty until BOTH land —
+          // and a count taken over an empty set is a claim ("0 today, 0 urgent"),
+          // not a blank. The tiles therefore blank with the list rather than
+          // stating a fact nothing has answered yet.
+          final bool waiting = snap.connectionState == ConnectionState.waiting;
           return Column(
             children: <Widget>[
               MobileHeader(
@@ -224,10 +230,10 @@ class _TechJobsScreenState extends State<TechJobsScreen> {
                 title: _tp('title'),
                 trailing: _bell(),
               ),
-              _stats(rows),
+              if (!waiting) _stats(rows),
               if (_failed) _failureCard(),
               Expanded(
-                child: snap.connectionState == ConnectionState.waiting
+                child: waiting
                     ? const SizedBox.shrink()
                     : rows.isEmpty
                     ? serviceEmpty()
@@ -438,10 +444,12 @@ class _TechJobsScreenState extends State<TechJobsScreen> {
           ),
         ),
         const SizedBox(height: 4),
-        // L235 (unit + visit time): the unit em-dashes (no label source); the time
-        // is the REAL scheduled_date, or an em-dash before the visit is booked.
+        // L235 (unit + visit time): the unit em-dashes (no label source); the date
+        // is the REAL scheduled_date in the house numeric form (serviceDateText),
+        // or an em-dash before the visit is booked. The prototype's TIME half has
+        // no column (scheduled_date is a DATE), so it is not reproduced.
         Text(
-          '$kServiceDash · ${t.scheduledDate.isEmpty ? kServiceDash : t.scheduledDate}',
+          '$kServiceDash · ${serviceDateText(t.scheduledDate)}',
           style: const TextStyle(
             fontSize: 11,
             color: JuneflowTokens.textTertiary,
