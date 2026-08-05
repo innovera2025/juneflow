@@ -62,11 +62,18 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
 import { round2 } from "./money.js";
-import { isUniqueViolation } from "./gl-post.js";
+import { isUniqueViolation, violatedConstraint } from "./gl-post.js";
 import { has, pick, prOrderedQty, str, toNum } from "./procurement.js";
 
 type GrRow = typeof grs.$inferSelect;
 type GrItemRow = typeof grItems.$inferSelect;
+
+/**
+ * The partial unique index (migration 0056, packages/db/src/schema/boq.ts) that
+ * dedups a replayed POST /gr. B-263: the replay catch gates on THIS name, not on
+ * SQLSTATE 23505 alone — see the catch below.
+ */
+const GR_IDEMPOTENCY_CONSTRAINT = "gr_idempotency_uq";
 
 /** uuid matcher — a widened gr line's boq_item_id must be a real uuid, else null. */
 const UUID_RE =
@@ -524,10 +531,16 @@ export function registerGrRoute(app: FastifyInstance): void {
     // B-261: the receipt insert carries the client idempotency_key. A REPLAY (the
     // SyncProcessor retrying a create it never heard back on) trips the
     // gr_idempotency_uq partial unique index → 23505; we catch it and return the
-    // ORIGINAL receipt instead of creating a duplicate. A 23505 can ONLY come from
-    // that index (gr has no other unique constraint) and only when a key is present
-    // (the partial index exempts nulls), so a keyless insert never enters the replay
-    // branch; any other error rethrows.
+    // ORIGINAL receipt instead of creating a duplicate. Entering that branch needs
+    // ALL THREE of: a key present (the partial index exempts nulls, so a keyless
+    // insert can never dedup), SQLSTATE 23505, and — B-263 — the violated
+    // constraint being gr_idempotency_uq BY NAME. The name check is the
+    // load-bearing hardening: 23505 alone only says "some unique constraint", so a
+    // future unique index on gr (say a unique `no`) would otherwise inherit the
+    // replay path and answer a wrong-ish 409/receipt for an unrelated collision.
+    // Anything else — including a 23505 that names another constraint — rethrows to
+    // the 500 handler, which is the safe failure for a money write (no row written,
+    // client retries) rather than a confidently wrong answer.
     let created: GrRow | undefined;
     try {
       [created] = await db.insertThrough(grs, projects, projectId, [
@@ -543,7 +556,11 @@ export function registerGrRoute(app: FastifyInstance): void {
         },
       ]);
     } catch (err) {
-      if (idempotencyKey && isUniqueViolation(err)) {
+      if (
+        idempotencyKey &&
+        isUniqueViolation(err) &&
+        violatedConstraint(err) === GR_IDEMPOTENCY_CONSTRAINT
+      ) {
         return replayExistingGr(db, reply, { idempotencyKey, poId, woId, prId });
       }
       throw err;

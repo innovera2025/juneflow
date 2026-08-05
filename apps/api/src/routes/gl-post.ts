@@ -43,6 +43,34 @@ export function isUniqueViolation(err: unknown): boolean {
   return code(cause) === "23505";
 }
 
+/**
+ * The NAME of the unique constraint/index a Postgres error violated, or undefined
+ * when the error carries no such name. B-263: SQLSTATE 23505 says "SOME unique
+ * constraint was violated" — it does NOT say WHICH. A handler that maps 23505 to one
+ * specific business outcome (the B-261 POST /gr idempotency replay) must therefore
+ * gate on the constraint NAME as well, or a future unique index added to the same
+ * table silently inherits that outcome and answers the wrong thing. Pair this with
+ * isUniqueViolation() (the SQLSTATE precondition) on every money-write that copies
+ * the B-261 template.
+ *
+ * Error shape VERIFIED against the real runtime (pg 8 + drizzle-orm 0.45 against a
+ * live PG 16), not assumed:
+ *   raw pg      → DatabaseError    { code: "23505", constraint: "<index name>" }
+ *   via drizzle → DrizzleQueryError { cause: DatabaseError { code, constraint } }
+ * Every handler insert/update goes THROUGH drizzle, so the nested lookup is the
+ * load-bearing one — reading only `err.constraint` yields undefined in production.
+ * Mirrors isUniqueViolation()'s own two-level check.
+ */
+export function violatedConstraint(err: unknown): string | undefined {
+  const name = (e: unknown): string | undefined => {
+    if (!e || typeof e !== "object") return undefined;
+    const c = (e as { constraint?: unknown }).constraint;
+    return typeof c === "string" && c ? c : undefined;
+  };
+  const cause = err && typeof err === "object" ? (err as { cause?: unknown }).cause : undefined;
+  return name(err) ?? name(cause);
+}
+
 /** The posting-inbox source kinds that have a real backing table (gl-posting.ts). */
 export type GlPostableKind = "pv" | "rv" | "gr" | "payroll" | "petty";
 
