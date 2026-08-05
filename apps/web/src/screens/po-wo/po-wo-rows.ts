@@ -26,7 +26,13 @@
  * `progress`, `contract_id` and the `installments[]` (work_period rows) have been
  * on GET /wo since F3 while WOList still em-dashed all four. They are wired now.
  *
- * POPULATION DISCIPLINE for everything derived here (the gr.list class of defect):
+ * POPULATION DISCIPLINE for everything derived here (the gr.list class of defect).
+ * THE RULE, in one line: a SUM may only license a claim about the SUM. The moment a
+ * rendered string says something about ONE installment, every precondition that string
+ * depends on has to hold for THAT installment — checked with .every()/per-row, never
+ * with a total. Where it cannot be established per element, the helper returns null and
+ * the view prints an em-dash: a visible gap beats a plausible wrong number.
+ *
  *   - `progress` is SERVER-computed as SUM(done installment amount) /
  *     SUM(all installment amount) over ONE WO's own plan — numerator is a subset of
  *     the denominator's rows, same column. It is consumed verbatim, never recomputed
@@ -35,12 +41,36 @@
  *   - progress === 100 means the plan's AMOUNTS balance. It does NOT mean every
  *     installment individually passed, and it is NEVER used as a closed/complete signal
  *     (the "SUM a >= SUM b does not imply each a >= its own b" trap).
+ *   - cumulativeContractPct prints a threshold ABOUT ONE INSTALLMENT, so all three of its
+ *     preconditions are per-element (.every): every row percent-basis, every row's own
+ *     `pct` recorded (> 0), every row's `seq` a distinct non-negative ordinal. A Σ-shaped
+ *     guard here (the old "Σpct > 0") passes a plan whose middle row has an unrecorded
+ *     share and reprints the previous row's threshold as that row's — see the function's
+ *     own doc block. The one Σ check left is the > 100 ceiling, and it disqualifies the
+ *     WHOLE series uniformly rather than licensing any single row.
+ *   - hasOrdinalSeq is the same discipline for the row LABEL: work_period.seq is
+ *     `integer NOT NULL DEFAULT 0` with no unique(contract_id, seq), so "seq 0 = the
+ *     down-payment row / seq n = installment n" is only true when the SERVED plan
+ *     actually carries distinct ordinals. When it does not, the view withholds the label
+ *     instead of stamping every row DP.
  *   - dueInstallmentCount aggregates the INSTALLMENT population across WOs and so
  *     de-duplicates by installment id: wo.contract_id has no unique constraint, so
  *     two WOs may point at the SAME subcon contract and the list handler then hands
  *     both the very same work_period rows. woTabCount("installment") counts the
  *     WO/HEADER population instead — the two numbers are deliberately different and
  *     must never be substituted for one another.
+ *   - Both of those installment aggregates run over EVERY served WO regardless of the
+ *     WO's own `status`, unlike their status-partitioned neighbours (kpiPending /
+ *     kpiActive / the pending + active tabs). Deliberate: an installment belongs to the
+ *     subcon CONTRACT, not to the WO doc, so a delivered period is awaiting our
+ *     acceptance whether or not the WO that happens to reference it is still draft or was
+ *     rejected. Filtering by WO status would UNDER-count real due installments and —
+ *     because contract_id is not unique — would drop or keep the same installment
+ *     depending on which WO happened to reference it. Pinned by tests in both suites.
+ *   - sumRetention likewise sums retention_amount over every served WO. It is a Σ
+ *     rendered as a Σ, but the KPI's "outstanding" qualifier is an approximation on two
+ *     counts (no retention-RETURN tracking on the wire, and draft/rejected WOs are
+ *     included) — stated here rather than silently narrowed.
  *
  * WIRE GAPS THAT REMAIN (reported, never fabricated — see the POList/WOList headers
  * for the full list): wo carries NO deposit/down-payment column, NO closed status,
@@ -335,7 +365,11 @@ export type WoTab = "all" | "pending" | "active" | "installment" | "closed";
  *   active       -> active: an approved (running) WO (status "approved")
  *   installment  -> approve-installment: WOs with >= 1 installment awaiting acceptance
  *                   (B-277 — this counts the WO/HEADER population; the KPI counts
- *                   the INSTALLMENT/LINE population, see dueInstallmentCount)
+ *                   the INSTALLMENT/LINE population, see dueInstallmentCount). Unlike
+ *                   its two status-partitioned neighbours this tab is a PREDICATE, not a
+ *                   status slice: a draft or rejected WO whose contract has a delivered
+ *                   period does appear here, because that period is genuinely awaiting
+ *                   our acceptance (module header, population-discipline block).
  *   closed       -> closed-contract: no "closed" status on the wire -> empty
  */
 export function filterWoByTab(rows: readonly WoRow[], tab: WoTab): WoRow[] {
@@ -432,6 +466,13 @@ export function installmentDisplayKind(
  * same work_period rows (wo.ts periodsByContract) — summing per WO would count one
  * real installment twice. This is NOT interchangeable with woTabCount(rows, "installment"),
  * which counts WOs.
+ *
+ * The `p.id` test cannot silently shrink the figure: `id` is work_period's uuid PRIMARY
+ * KEY and wo.ts installmentWire emits it unconditionally, so it is a defensive narrowing
+ * guard on the opaque row, not a filter a served installment can fall through.
+ *
+ * Runs over every served WO regardless of that WO's own status — see the module header's
+ * population-discipline block for why that is the honest population for an installment.
  */
 export function dueInstallmentCount(rows: readonly WoRow[]): number {
   const seen = new Set<string>();
@@ -444,35 +485,75 @@ export function dueInstallmentCount(rows: readonly WoRow[]): number {
 }
 
 /**
+ * Is this plan's `seq` column usable as the ordinal both of its renders read it as?
+ *
+ * `work_period.seq` is `integer NOT NULL DEFAULT 0` (packages/db/src/schema/subcon.ts)
+ * with NO unique(contract_id, seq) — the index list is (contract_id, status) only — and
+ * POST /subcon/contracts writes `seq: toNum(pick(p, "seq")) ?? 0` with no validation
+ * (apps/api/src/routes/subcon.ts). So a client that omits `seq` persists a plan whose
+ * every row is seq 0, and duplicate seqs are contract-legal.
+ *
+ * Two renders read `seq` as an ordinal and are wrong the moment it is not one:
+ *   - cumulativeContractPct's `seq <= seq` prefix — on an all-zero plan every row selects
+ *     the WHOLE plan, so every installment claims 100% of the contract; duplicates
+ *     double-count.
+ *   - the row label — `seq === 0` means "the down-payment row" (subcon convention), so an
+ *     all-zero plan labels every installment DP.
+ * Both are per-element claims, so the precondition is checked per element: every seq a
+ * non-negative integer, and all of them distinct. False -> the callers withhold.
+ */
+export function hasOrdinalSeq(installments: readonly WoInstallment[]): boolean {
+  if (installments.length === 0) return false;
+  if (!installments.every((p) => Number.isInteger(p.seq) && p.seq >= 0)) return false;
+  return new Set(installments.map((p) => p.seq)).size === installments.length;
+}
+
+/**
  * The installment's the atContractPct template ("at {pct}% of the contract") threshold (wo.list.atContractPct) — the CUMULATIVE
  * share of the contract reached once this installment is delivered, i.e. SUM(pct) over every
  * installments with seq <= this one. That cumulative reading is the server's own (subcon.ts
  * progressWarning: "cumTarget = Sum pct of periods with seq <= this seq") and the
  * prototype's (subcon.progressLegend: "the cumulative % of each installment; claimable once the project % reaches the threshold").
  *
- * Returns null — the view then em-dashes the line rather than printing a plausible
- * wrong number — whenever the cumulative is not honestly computable:
- *   - an empty plan;
- *   - a plan that is not ENTIRELY percent-basis. `pct` only carries a contract share
+ * The rendered string is a claim about ONE installment, so EVERY precondition it rests on
+ * is checked PER ELEMENT (.every), never as a total. Returns null — the view then
+ * em-dashes the line rather than printing a plausible wrong number — when:
+ *   - the plan is empty;
+ *   - `seq` is not a usable ordinal (hasOrdinalSeq: defaulted / duplicated / negative seqs
+ *     make the `seq <= seq` prefix select the wrong rows);
+ *   - the plan is not ENTIRELY percent-basis. `pct` only carries a contract share
  *     for the percent basis (schema: milestone uses the fixed amount, distance/unit
  *     use perPeriodQty x ratePerUnit and leave pct 0), so a mixed plan's cumulative
  *     would silently omit the non-percent installments — two different populations added up;
- *   - a percent plan whose pct column is all zeroes (no target data recorded).
+ *   - ANY single percent installment has no share recorded (pct <= 0). This guard used to be
+ *     a SUM ("Σpct > 0") and that was the same Σ-then-assert trap one relocation over: pct
+ *     is `numeric(6,3) NOT NULL DEFAULT '0'` and POST /subcon/contracts writes
+ *     `pct: String(toNum(pick(p, "pct")) ?? 0)` with neither a per-period > 0 nor a Σ = 100
+ *     check, so a plan of pct 30 / 0 / 40 is contract-legal — the Σ gate passed it and
+ *     installment 2 printed installment 1's threshold (30) byte-identically while nothing
+ *     about installment 2's own share was known. Per-element, that plan em-dashes whole.
+ *     (It subsumes the old Σ > 0 check: an all-zero plan fails it too.)
+ *   - the plan's shares total MORE than the whole contract. That is deliberately the one
+ *     Σ-shaped test left, and it is legitimate because it gates a Σ-shaped fact and
+ *     disqualifies the entire series uniformly — it never licenses a single row. A plan
+ *     totalling LESS than 100 is NOT rejected: an incomplete plan's cumulative is still
+ *     that installment's true share of the contract.
  */
 export function cumulativeContractPct(
   installments: readonly WoInstallment[],
   seq: number,
 ): number | null {
   if (installments.length === 0) return null;
+  if (!hasOrdinalSeq(installments)) return null;
   if (!installments.every((p) => p.basis === "percent")) return null;
-  const total = installments.reduce((s, p) => s + p.pct, 0);
-  if (!(total > 0)) return null;
-  const cum = installments
-    .filter((p) => p.seq <= seq)
-    .reduce((s, p) => s + p.pct, 0);
+  if (!installments.every((p) => p.pct > 0)) return null;
   // pct is numeric(6,3); summing floats can leave 30.000000000000004 — the column's
-  // own precision is the honest ceiling for the displayed figure.
-  return Math.round(cum * 1000) / 1000;
+  // own precision is the honest ceiling for every figure derived from it.
+  const round3 = (n: number) => Math.round(n * 1000) / 1000;
+  if (round3(installments.reduce((s, p) => s + p.pct, 0)) > 100) return null;
+  return round3(
+    installments.filter((p) => p.seq <= seq).reduce((s, p) => s + p.pct, 0),
+  );
 }
 
 /* --------------------------------------------------------------------------- */

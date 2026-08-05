@@ -248,6 +248,80 @@ describe("WOList <-> GET /wo installments[] (B-277)", () => {
     expect(text(render())).toContain(`plan n=${DASH} pct=${DASH}`);
   });
 
+  /*
+   * The Sigma-then-assert the review caught, at the seam. The caption is a claim about ONE
+   * installment; the pct-availability guard used to be a SUM. work_period.pct is
+   * numeric(6,3) NOT NULL DEFAULT '0' and POST /subcon/contracts writes it unvalidated (no
+   * per-period > 0, no Sigma = 100), so this served plan is contract-legal — and under the Sigma
+   * guard the screen printed installment 2's caption byte-identically to installment 1's
+   * ("at=30") while nothing about installment 2's own share was known.
+   */
+  it("withholds EVERY caption when one percent installment's own share is unrecorded", () => {
+    h.wo = {
+      data: [
+        {
+          ...SERVED_WO,
+          installments: [
+            period({ id: "a", seq: 1, pct: 30 }),
+            period({ id: "b", seq: 2, pct: 0, amount: 500000 }), // share NOT recorded
+            period({ id: "c", seq: 3, pct: 40, amount: 860000 }),
+          ],
+        },
+      ],
+      isLoading: false,
+    };
+    const shown = text(render());
+    expect(shown).not.toContain("at="); // not 30 / 30 / 70, and not a lone survivor either
+    // Only the unknowable is withheld — the rows, their labels and their real amounts stay.
+    expect(shown).toContain("period 1");
+    expect(shown).toContain("period 3");
+    expect(shown).toContain("500,000");
+  });
+
+  /*
+   * seq is `integer NOT NULL DEFAULT 0` with no unique(contract_id, seq) and subcon.ts writes
+   * `seq: toNum(pick(p,"seq")) ?? 0`, so a client that omits seq persists this plan. Both
+   * naive renders read it as an ordinal: every row selected the whole plan ("at=100") and
+   * every row took the down-payment label ("DP").
+   */
+  it("withholds the row label and the caption when the served plan's seq is the unvalidated default", () => {
+    h.wo = {
+      data: [
+        {
+          ...SERVED_WO,
+          installments: [
+            period({ id: "a", seq: 0, pct: 30 }),
+            period({ id: "b", seq: 0, pct: 30, amount: 500000 }),
+            period({ id: "c", seq: 0, pct: 40, amount: 860000 }),
+          ],
+        },
+      ],
+      isLoading: false,
+    };
+    const shown = text(render());
+    expect(shown).not.toContain("DP"); //     not three down-payment rows
+    expect(shown).not.toContain("period"); // and no ordinal fabricated from array position
+    expect(shown).not.toContain("at="); //    no row claims the whole contract
+    expect(shown).toContain("500,000"); //    the real amounts still render
+    expect(shown).toContain("860,000");
+  });
+
+  it("never prints a contract share larger than the whole contract", () => {
+    h.wo = {
+      data: [
+        {
+          ...SERVED_WO,
+          installments: [
+            period({ id: "a", seq: 1, pct: 150 }),
+            period({ id: "b", seq: 2, pct: 100 }),
+          ],
+        },
+      ],
+      isLoading: false,
+    };
+    expect(text(render())).not.toContain("at="); // not "at=150" / "at=250"
+  });
+
   it("em-dashes the installment caption when the plan is not entirely percent-basis", () => {
     // pct carries no contract share for a milestone installment, so accumulating would mix populations.
     h.wo = {
@@ -285,6 +359,35 @@ describe("WOList installment KPI vs tab — two different populations (B-277)", 
     const shown = text(render());
     expect(shown).toContain("wo.list.kpiDueInstallments1"); // installment population: 1
     expect(shown).toContain("wo.list.tabApproveInstallment2"); // WO population: 2
+  });
+
+  /*
+   * PIN, not a fix — this behaviour is unchanged by the rework, so this test SURVIVES a
+   * revert of the screen (stated plainly rather than counted as a probe kill). It locks a
+   * deliberate choice the review asked to be made explicit: unlike their status-partitioned
+   * neighbours (kpiPending / kpiActive / the pending + active tabs), the installment KPI and
+   * the approve-installment tab run over EVERY served WO. An installment belongs to the
+   * subcon CONTRACT, not to the WO doc, so a delivered period is awaiting our acceptance
+   * whether or not the WO referencing it is still draft — and because contract_id is not
+   * unique, filtering by WO status would drop or keep the same real installment depending
+   * on which WO happened to point at it.
+   */
+  it("counts a draft WO's delivered installment — the installment belongs to the contract, not the doc", () => {
+    h.wo = {
+      data: [
+        {
+          ...SERVED_WO,
+          status: "draft",
+          installments: [period({ id: "a", seq: 1, pct: 100, status: "delivered" })],
+        },
+      ],
+      isLoading: false,
+    };
+    const shown = text(render());
+    expect(shown).toContain("wo.list.kpiDueInstallments1");
+    expect(shown).toContain("wo.list.tabApproveInstallment1");
+    // ...while the status-partitioned neighbours correctly exclude it.
+    expect(shown).toContain("wo.list.kpiActive0");
   });
 
   it("keeps the KPI at 0 when every served plan is already accepted", () => {

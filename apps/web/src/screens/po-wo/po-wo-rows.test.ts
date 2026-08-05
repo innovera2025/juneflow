@@ -19,6 +19,7 @@ import {
   installmentDisplayKind,
   dueInstallmentCount,
   cumulativeContractPct,
+  hasOrdinalSeq,
   toPrRef,
   toVendorRef,
   statusTone,
@@ -324,6 +325,95 @@ describe("cumulativeContractPct", () => {
   it("returns null for an empty plan and for a percent plan with no pct data", () => {
     expect(cumulativeContractPct([], 1)).toBe(null);
     expect(cumulativeContractPct([period({ pct: 0 }), period({ id: "b", seq: 2, pct: 0 })], 2)).toBe(null);
+  });
+
+  /*
+   * The Sigma-then-assert the review caught. The basis guard was per-element (.every) but the
+   * pct-availability guard directly under it was a SUM, and a sum that one unrecorded row
+   * hides inside licenses nothing about that row. work_period.pct is
+   * numeric(6,3) NOT NULL DEFAULT '0' (packages/db/src/schema/subcon.ts) and
+   * POST /subcon/contracts writes `pct: String(toNum(pick(p,"pct")) ?? 0)` with neither a
+   * per-period > 0 nor a Sigma = 100 check (apps/api/src/routes/subcon.ts), so this plan is
+   * contract-legal. Under the Sigma guard it printed 30 / 30 / 70: installment 2's caption was
+   * byte-identical to installment 1's while its own share was unknown.
+   */
+  it("returns null for the whole plan when ANY single percent installment has no share recorded", () => {
+    const gap = [
+      period({ id: "a", seq: 1, pct: 30 }),
+      period({ id: "b", seq: 2, pct: 0 }), // share NOT recorded
+      period({ id: "c", seq: 3, pct: 40 }),
+    ];
+    expect(cumulativeContractPct(gap, 1)).toBe(null);
+    expect(cumulativeContractPct(gap, 2)).toBe(null); // never installment 1's 30 again
+    expect(cumulativeContractPct(gap, 3)).toBe(null);
+  });
+
+  /*
+   * The one Sigma-shaped test that stays, because it gates a Sigma-shaped fact and
+   * disqualifies the whole series uniformly rather than licensing any single row: shares
+   * that total more than the contract are not shares, and "at 250% of the contract" is not
+   * a number to print. A plan totalling LESS than 100 is still honest per row.
+   */
+  it("returns null when the plan's shares total more than the whole contract", () => {
+    const over = [period({ id: "a", seq: 1, pct: 150 }), period({ id: "b", seq: 2, pct: 100 })];
+    expect(cumulativeContractPct(over, 1)).toBe(null);
+    expect(cumulativeContractPct(over, 2)).toBe(null);
+    // ...but an incomplete plan is NOT rejected: 30 + 20 of a contract is still 50 of it.
+    const partial = [period({ id: "a", seq: 1, pct: 30 }), period({ id: "b", seq: 2, pct: 20 })];
+    expect(cumulativeContractPct(partial, 2)).toBe(50);
+  });
+
+  /*
+   * `seq <= seq` is only a prefix selector while seq is a real ordinal. work_period.seq is
+   * integer NOT NULL DEFAULT 0 with no unique(contract_id, seq) (the index list is
+   * (contract_id, status) only) and subcon.ts writes `seq: toNum(pick(p,"seq")) ?? 0`, so a
+   * client that omits seq persists an all-zero plan on which every row selected the WHOLE
+   * plan and claimed 100% of the contract.
+   */
+  it("returns null when seq is not a usable ordinal (defaulted, duplicated or negative)", () => {
+    const allZero = [
+      period({ id: "a", seq: 0, pct: 30 }),
+      period({ id: "b", seq: 0, pct: 30 }),
+      period({ id: "c", seq: 0, pct: 40 }),
+    ];
+    expect(cumulativeContractPct(allZero, 0)).toBe(null); // was 100 for every row
+
+    const dup = [period({ id: "a", seq: 1, pct: 30 }), period({ id: "b", seq: 1, pct: 30 })];
+    expect(cumulativeContractPct(dup, 1)).toBe(null); // was 60, double-counted
+
+    const negative = [period({ id: "a", seq: -1, pct: 30 }), period({ id: "b", seq: 1, pct: 30 })];
+    expect(cumulativeContractPct(negative, 1)).toBe(null);
+  });
+
+  /* A DP-anchored plan (seq 0,1,2) IS a distinct ordinal — still computed, not withheld. */
+  it("still accumulates a down-payment-anchored plan whose seqs start at 0", () => {
+    const dpPlan = [
+      period({ id: "dp", seq: 0, pct: 10 }),
+      period({ id: "a", seq: 1, pct: 40 }),
+      period({ id: "b", seq: 2, pct: 50 }),
+    ];
+    expect(cumulativeContractPct(dpPlan, 0)).toBe(10);
+    expect(cumulativeContractPct(dpPlan, 2)).toBe(100);
+  });
+});
+
+/*
+ * hasOrdinalSeq — the per-element precondition BOTH seq renders share (the cumulative
+ * prefix above, and the DP / period row label in wo-list.tsx).
+ */
+describe("hasOrdinalSeq", () => {
+  it("accepts a distinct non-negative ordinal, including one anchored at the DP row", () => {
+    expect(hasOrdinalSeq([period({ id: "a", seq: 1 }), period({ id: "b", seq: 2 })])).toBe(true);
+    expect(hasOrdinalSeq([period({ id: "dp", seq: 0 }), period({ id: "a", seq: 1 })])).toBe(true);
+    expect(hasOrdinalSeq([period({ id: "a", seq: 7 })])).toBe(true); // gaps are fine
+  });
+
+  it("rejects the defaulted all-zero plan, duplicates, negatives and the empty plan", () => {
+    expect(hasOrdinalSeq([period({ id: "a", seq: 0 }), period({ id: "b", seq: 0 })])).toBe(false);
+    expect(hasOrdinalSeq([period({ id: "a", seq: 2 }), period({ id: "b", seq: 2 })])).toBe(false);
+    expect(hasOrdinalSeq([period({ id: "a", seq: -1 })])).toBe(false);
+    expect(hasOrdinalSeq([period({ id: "a", seq: 1.5 })])).toBe(false);
+    expect(hasOrdinalSeq([])).toBe(false);
   });
 });
 

@@ -32,7 +32,11 @@
  *   - `contract_id` -> tells "no plan linked" (em-dash the installment count) apart from
  *     "a linked plan that is empty" (an honest 0).
  *
- * MONEY / POPULATION HONESTY (the gr.list class of defect):
+ * MONEY / POPULATION HONESTY (the gr.list class of defect). THE RULE: a SUM licenses a
+ * claim about the SUM only. Every string this screen prints about ONE installment rests on
+ * preconditions checked for THAT installment (.every / per-row in po-wo-rows.ts) — never
+ * on a total that one bad row can hide inside. Where a per-element fact is not
+ * establishable the render is an em-dash: a visible gap beats a plausible wrong number.
  *   - `progress` is NEVER recomputed here. The server derives it as SUM(passed|paid
  *     installment amount) / SUM(all installment amount) over ONE WO's own plan —
  *     numerator and denominator are the same rows and the same column. null means the
@@ -50,11 +54,19 @@
  *
  * WIRE GAPS THAT REMAIN (reported honestly, never fabricated):
  *   - NO per-installment label column (wo.ts: "the FE composes the installment label from
- *     seq/basis"): the row caption is the existing subcon.rowDp / subcon.colPeriod
+ *     seq/basis"): the row label is the existing subcon.rowDp / subcon.colPeriod
  *     key plus the real seq — the prototype's descriptive installment text is never invented.
- *   - NO cumulative-% target for a non-percent-basis plan: `pct` only carries a
- *     contract share on the "percent" basis, so the atContractPct template ("at {pct}% of the contract") em-dashes on any
- *     plan that is not entirely percent-basis (cumulativeContractPct returns null).
+ *     And `seq` itself is only trusted when the SERVED plan carries a distinct non-negative
+ *     ordinal (hasOrdinalSeq): work_period.seq is `integer NOT NULL DEFAULT 0` with no
+ *     unique(contract_id, seq) and POST /subcon/contracts writes it unvalidated, so an
+ *     all-zero plan would otherwise label every row DP. Then the label em-dashes too —
+ *     array position is never substituted for the ordinal the server did not record.
+ *   - NO cumulative-% target unless EVERY installment of the plan supports one: the
+ *     atContractPct template ("at {pct}% of the contract") em-dashes when any row is
+ *     non-percent-basis (pct carries no contract share there), when any single row's own
+ *     pct is unrecorded (pct is NOT NULL DEFAULT '0' and unvalidated on POST — the old
+ *     Σ-shaped guard let such a row reprint its predecessor's threshold), when seq is not
+ *     an ordinal, or when the plan's shares total more than the whole contract.
  *   - NO variation-order endpoint on /wo (only /po has one): the Variation figure +
  *     the variation action are presentational (em-dash / no persist).
  *   - NO deposit (downPct), NO "closed" status, NO attachment count: the deposit detail,
@@ -65,8 +77,16 @@
  *     fourth colour would be redesigning a screen the prototype fixes).
  *   - KPI values: pending + active (approved) are real C10 counts; due-installments is
  *     the real de-duplicated installment count; Retention-outstanding is the real sum of
- *     retention_amount (the "outstanding" semantic is approximated — the wire has no
- *     retention-return tracking); closed-this-month has no wire metric -> em-dash.
+ *     retention_amount; closed-this-month has no wire metric -> em-dash. Two of these are
+ *     status-AGNOSTIC where their neighbours are status-partitioned, deliberately:
+ *     due-installments (and the approve-installment tab) run over every served WO because
+ *     an installment belongs to the subcon CONTRACT, not to the WO doc — a delivered
+ *     period awaits our acceptance whether the referencing WO is draft, approved or
+ *     rejected, and filtering by WO status would UNDER-count it (and, since contract_id is
+ *     not unique, drop or keep it depending on which WO happened to reference it).
+ *     Retention-outstanding likewise sums every WO; its "outstanding" qualifier is an
+ *     approximation on two counts — the wire has no retention-RETURN tracking, and
+ *     draft/rejected WOs are included. Stated, not silently narrowed.
  *     Mock money sub-captions are omitted; the static descriptive sub-captions
  *     (kpiDueSub / kpiRetentionSub) are kept.
  *   - Detail actions: approve-installment runs the REAL WO-level approve (/wo/{id}/approve, tiered
@@ -106,6 +126,7 @@ import {
   formatMoney,
   millionsValue,
   cumulativeContractPct,
+  hasOrdinalSeq,
   dueInstallmentCount,
   installmentDisplayKind,
   type WoInstallment,
@@ -424,19 +445,37 @@ export function WOList() {
   const plan: WoInstallment[] = selectedRow?.installments ?? [];
 
   /**
-   * The installment caption. work_period carries no label column (wo.ts: "the FE
+   * Is this plan's `seq` the distinct ordinal both renders below read it as? work_period.seq
+   * is `integer NOT NULL DEFAULT 0` with no unique(contract_id, seq) and POST
+   * /subcon/contracts does not validate it, so a client that omits seq persists a plan of
+   * all-zeroes — see hasOrdinalSeq. Both the label and the caption withhold rather than
+   * guess when it is not.
+   */
+  const planSeqOk = useMemo(() => hasOrdinalSeq(plan), [plan]);
+
+  /**
+   * The installment label. work_period carries no label column (wo.ts: "the FE
    * composes the label from seq/basis"), so this is the existing subcon.colPeriod /
    * subcon.rowDp key plus the row's REAL seq — the prototype's descriptive text
    * ("deposit + start" / "installment 1 - foundations") was mock and is not invented.
+   *
+   * "seq 0 = the down-payment row" is a per-element claim about THIS installment, so it is
+   * only made when the whole served plan's seq is a usable ordinal. On a defaulted all-zero
+   * plan the naive form stamps every row DP; the honest output is an em-dash — the row
+   * still shows its real amount and state, only the ordinal nobody recorded is withheld.
+   * Array position is deliberately NOT used as a fallback: that would fabricate an ordinal.
    */
-  const installmentLabel = (p: WoInstallment): string =>
-    p.seq === 0 ? t("subcon.rowDp") : `${t("subcon.colPeriod")} ${p.seq}`;
+  const installmentLabel = (p: WoInstallment): string => {
+    if (!planSeqOk) return DASH;
+    return p.seq === 0 ? t("subcon.rowDp") : `${t("subcon.colPeriod")} ${p.seq}`;
+  };
 
   /**
    * The atContractPct caption ("at {pct}% of the contract") — the CUMULATIVE contract
-   * share this installment completes. Em-dashed whenever that cumulative would mix
-   * populations: see cumulativeContractPct (a non-percent-basis plan carries no pct
-   * target at all, so accumulating one would silently drop those rows).
+   * share this installment completes. Em-dashed whenever that per-installment claim is not
+   * honestly establishable for THIS row: see cumulativeContractPct, whose guards are all
+   * per-element (every row percent-basis, every row's own pct recorded, every seq a
+   * distinct ordinal) rather than a total that one unrecorded row can hide behind.
    */
   const installmentCaption = (p: WoInstallment): string => {
     const cum = cumulativeContractPct(plan, p.seq);
