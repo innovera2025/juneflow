@@ -17,22 +17,53 @@
  * Pure logic (tab filter / status tone / ref resolve / money format) lives in
  * gr-rows.ts (unit-tested, gate G3).
  *
- * WIRE GAPS (reported honestly, never fabricated) — the grWire is only
- * { id, no, po_id, wo_id, status, received, rejected, photos } (apps/api/src/routes/gr.ts):
- *   - NO money column (GAP 2): the value column renders an em-dash.
- *   - NO vendor / date / received-by columns: those list + detail cells em-dash.
- *   - NO per-line item table (GAP 1): the detail received-items block shows the
- *     aggregate received/rejected totals (the only real quantities), not line items.
- *   - NO ordered qty on the list read (GAP 3): the received-vs-ordered progress bar
- *     + the partial/complete badges are omitted (no source), never invented.
+ * RE-WIRE (B-078 / F1 data-completeness): this screen was ported against the OLD
+ * 8-key grWire and em-dashed vendor / date / ordered / money / per-line items. The
+ * list wire now carries all of them —
+ * { id, no, po_id, wo_id, status, received, rejected, photos,
+ *   vendor, date, ordered_qty, money, currency_code, items[] }
+ * (apps/api/src/routes/gr.ts grWire; the 14-key set is pinned by the API's own list
+ * test) — so those cells render REAL server data and the prototype's
+ * items/vendor cell, received-vs-ordered bar, value column, date column and detail
+ * line table are restored. MONEY = SERVER: `money` is Σ(received_qty × price)
+ * computed and 2-dp rounded in grWire; the client only formats it, never sums.
+ *
+ * REMAINING WIRE GAPS (reported honestly, never fabricated):
+ *   - NO received-by / receiver column: the date cell's sub-line and the detail
+ *     received-by stat em-dash.
+ *   - A receipt with NO gr_item lines has no per-line detail; the server then
+ *     reports money 0 / ordered_qty 0, which means "not recorded", NOT "zero baht".
+ *     Those cells em-dash instead of printing a false 0, and the detail panel falls
+ *     back to the aggregate received/rejected totals (the only real quantities for
+ *     such a receipt).
+ *   - ONE POPULATION PER NUMBER (the rule this screen is built around). The wire
+ *     mixes two: `received` / `rejected` are the receipt HEADER totals (Σ over ALL
+ *     posted lines, named AND bare) while `items[]`, `ordered_qty` and `money` cover
+ *     the NAMED lines only. Any cell that divides, compares or merely sits beside a
+ *     figure from the other population reads as like-for-like and is not — a header
+ *     quantity next to the line-derived value column implies a unit price that does
+ *     not exist. So this view prints NO raw wire number anywhere: every figure in
+ *     every tab comes from grRowDisplay(row) / grItemDisplay(item) (gr-rows.ts,
+ *     unit-tested), which serve line figures when the receipt has line detail and
+ *     the header total ONLY where it stands alone with the value column withheld.
+ *     Both tabs read the same model, so they cannot contradict each other on the
+ *     same GR. A ratio is formed only when EVERY line states its own ordered qty;
+ *     otherwise the ordered half em-dashes, no bar is drawn, and no line is labelled
+ *     fully-received on the strength of an ordered quantity it never carried. A receipt
+ *     holding unmeasured quantity never gets the complete badge.
+ *   - The prototype's "partial" badge has no i18n key (only gr.list.badgeComplete
+ *     exists) -> only the complete badge renders; the partial badge is omitted
+ *     rather than translated (B-275).
  *   - The prototype's separate RT return documents (RT-number / reason) do not exist
- *     on the wire — the returns tab lists GRs whose status is "returned".
+ *     on the wire — the returns tab lists GRs whose status is "returned", so its
+ *     ref-GR + reason cells em-dash (vendor / value / date are real now).
  *   - The 3 filter chips (status/period/warehouse) are presentational: the wire has
  *     no warehouse column and status is already partitioned by the tabs, so they show
  *     their "all" value and do not filter (mirrors boq-list's degraded phase filter).
  *   - KPI cards 2 (awaiting-PO) + 3 (WO pending-approval) have no wire metric ->
- *     em-dash; card 1 (received) is month-unscoped (no date on wire); the mock value
- *     subs are unkeyed and omitted.
+ *     em-dash; card 1 (received) is month-unscoped (the list is not date-filtered);
+ *     the mock value subs are money aggregates the server does not expose and the
+ *     client must not sum (money = SERVER), so they stay omitted.
  *   - Return / cancel are wired (POST /gr/{id}/{return,cancel}); the shell
  *     ConfirmDialog is a minimal port (no reason textarea, fixed confirm/cancel
  *     labels) and the endpoints take no body, so the prototype's reason capture +
@@ -65,6 +96,10 @@ import {
   statusTone,
   statusLabelKind,
   filterByQuery,
+  grRowDisplay,
+  grItemDisplay,
+  itemsLabel,
+  formatDate,
   type GrRow,
   type GrTab,
 } from "./gr-rows";
@@ -287,6 +322,8 @@ export function GRList() {
     [rows, tab, q, poNos, woNos],
   );
   const selectedRow = tabRows[Math.min(sel, Math.max(tabRows.length - 1, 0))];
+  // The detail panel prints the SAME display model as the row it mirrors.
+  const selDisplay = selectedRow ? grRowDisplay(selectedRow) : null;
 
   const navTitle = tn(grStrings.navGrList as NavKey);
 
@@ -460,6 +497,14 @@ export function GRList() {
                   tabRows.map((r, i) => {
                     const kind = refKind(r);
                     const ref = resolveRefNo(r, poNos, woNos);
+                    // EVERY number in this row — quantity, ordered, bar, value,
+                    // badge — comes from the one display model, so they all describe
+                    // the same lines (gr-rows.ts grRowDisplay). No raw wire figure is
+                    // read here: that is what kept a header total out of a ratio and
+                    // out of the cell beside the line-derived value column.
+                    const d = grRowDisplay(r);
+                    const items = itemsLabel(r.items);
+                    const date = formatDate(r.date);
                     return (
                       <tr
                         key={r.id}
@@ -472,6 +517,29 @@ export function GRList() {
                       >
                         <td style={{ ...td, fontWeight: 600 }} className="num">
                           <span style={{ color: "var(--brand)" }}>{r.no}</span>
+                          {/* Complete badge (gr.list.badgeComplete). It may only
+                              appear when the receipt is FULLY MEASURED — every line
+                              carries its own ordered qty and no unmeasured (bare)
+                              quantity hides in the header total — and every line met
+                              it. Anything less cannot prove completeness, so the
+                              badge is withheld rather than guessed (isFullyMeasured).
+                              The prototype's sibling "partial" badge has no i18n key,
+                              so it is omitted, never translated (B-275). */}
+                          {d.complete && (
+                            <span
+                              style={{
+                                fontSize: 9.5,
+                                marginInlineStart: 5,
+                                padding: "1px 5px",
+                                borderRadius: 3,
+                                background: "var(--ok-soft)",
+                                color: "var(--ok)",
+                                fontWeight: 700,
+                              }}
+                            >
+                              {t("gr.list.badgeComplete")}
+                            </span>
+                          )}
                         </td>
                         <td style={{ ...td, fontSize: 11.5 }}>
                           {kind !== "" && (
@@ -493,19 +561,69 @@ export function GRList() {
                             {ref || DASH}
                           </span>
                         </td>
-                        {/* items + vendor: no list wire — em-dash (GAP 1 / no vendor) */}
-                        <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
+                        {/* items + vendor — both real (gr_item names · resolved vendor) */}
                         <td style={td}>
-                          <span className="num" style={{ fontSize: 11.5, fontWeight: 600 }}>
-                            {r.received} / {DASH}
-                          </span>
+                          <div style={{ fontSize: 12, color: items ? undefined : "var(--text-3)" }}>
+                            {items || DASH}
+                          </div>
+                          <div style={{ fontSize: 10.5, color: "var(--text-3)" }}>
+                            {r.vendor || DASH}
+                          </div>
                         </td>
-                        {/* money: no wire (GAP 2) — em-dash */}
-                        <td style={{ ...td, textAlign: "right", color: "var(--text-3)" }} className="num">
-                          {DASH}
+                        {/* received / ordered + progress bar — one population (see
+                            grRowDisplay): Σ line received / Σ line ordered. */}
+                        <td style={td}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span className="num" style={{ fontSize: 11.5, fontWeight: 600 }}>
+                              {d.received} / {d.ordered ?? DASH}
+                            </span>
+                          </div>
+                          {/* No ordered qty to measure against (lump-sum WO / no line
+                              detail / a line that states no ordered qty) -> NO bar,
+                              rather than a fabricated 0 or 100%. */}
+                          {d.pct !== null && (
+                            <div
+                              style={{
+                                height: 3,
+                                background: "var(--surface-3)",
+                                borderRadius: 999,
+                                marginTop: 3,
+                                overflow: "hidden",
+                                width: 80,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${d.pct}%`,
+                                  // The "full" tone follows the completeness the data
+                                  // can evidence, not the ROUNDED percent: 99.6% also
+                                  // rounds to 100, and a bar that turns green there
+                                  // asserts a full receipt the badge is withholding.
+                                  background: d.complete ? "var(--ok)" : "var(--accent)",
+                                }}
+                              />
+                            </div>
+                          )}
                         </td>
-                        {/* date: no wire — em-dash */}
-                        <td style={{ ...td, fontSize: 11, color: "var(--text-3)" }}>{DASH}</td>
+                        {/* value — SERVER-derived Σ(received_qty × price) over the NAMED
+                            lines. Printed only when the quantity beside it is a line
+                            figure too; a line-less receipt em-dashes both. */}
+                        <td
+                          style={{
+                            ...td,
+                            textAlign: "right",
+                            fontWeight: d.money !== null ? 600 : undefined,
+                            color: d.money !== null ? undefined : "var(--text-3)",
+                          }}
+                          className="num"
+                        >
+                          {d.money ?? DASH}
+                        </td>
+                        {/* date real (created_at); the receiver sub-line has no wire */}
+                        <td style={{ ...td, fontSize: 11, color: "var(--text-3)" }}>
+                          <span className="num">{date || DASH}</span>
+                          <div style={{ fontSize: 10 }}>{DASH}</div>
+                        </td>
                       </tr>
                     );
                   })
@@ -515,7 +633,7 @@ export function GRList() {
 
             {/* Detail panel */}
             <div style={{ padding: 18 }}>
-              {selectedRow ? (
+              {selectedRow && selDisplay ? (
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                     <div>
@@ -532,33 +650,87 @@ export function GRList() {
                     <StatusBadge status={selectedRow.status} label={statusLabel(selectedRow.status)} />
                   </div>
 
-                  {/* vendor / date / receiver: no wire — em-dash */}
+                  {/* vendor + date are real now; receiver still has no wire column */}
                   <div style={{ padding: 12, background: "var(--surface-2)", borderRadius: 8, marginBottom: 12 }}>
-                    <SmallStat label={tp(P("vendor"))} value={DASH} />
+                    <SmallStat label={tp(P("vendor"))} value={selectedRow.vendor || DASH} />
                     <div style={{ marginTop: 8 }}>
-                      <SmallStat label={tp(P("dateReceived"))} value={DASH} />
+                      <SmallStat
+                        label={tp(P("dateReceived"))}
+                        value={formatDate(selectedRow.date) || DASH}
+                      />
                     </div>
                     <div style={{ marginTop: 8 }}>
                       <SmallStat label={t("gr.list.receivedBy")} value={DASH} />
                     </div>
                   </div>
 
-                  {/* received items: no per-line wire (GAP 1) — show the real aggregates */}
+                  {/* received items — the real gr_item lines (B-078 / F1). A receipt
+                      with no line detail falls back to the aggregate received total,
+                      the only real quantity it has. */}
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{t("gr.list.receivedItems")}</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        padding: "8px 10px",
-                        background: "var(--surface-2)",
-                        borderRadius: 6,
-                      }}
-                    >
-                      <div style={{ fontSize: 11.5, fontWeight: 500 }}>{t("gr.create.colReceived")}</div>
-                      <div className="num" style={{ fontSize: 12, fontWeight: 600 }}>{selectedRow.received}</div>
-                    </div>
-                    {selectedRow.rejected > 0 && (
+                    {selDisplay.hasLines ? (
+                      selectedRow.items.map((it) => {
+                        const line = grItemDisplay(it);
+                        return (
+                          <div
+                            key={it.id}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              padding: "8px 10px",
+                              background: line.short ? "var(--warn-soft)" : "var(--surface-2)",
+                              borderRadius: 6,
+                            }}
+                          >
+                            <div style={{ fontSize: 11.5 }}>
+                              <div style={{ fontWeight: 500 }}>{it.name || DASH}</div>
+                              {/* gr.list.fullyReceived is a claim about an ordered quantity: a
+                                  line that states none (ordered_qty 0) cannot be short
+                                  and must NOT be read as fully received, so the label
+                                  is withheld — em-dash, never a guess (see itemMeasure). */}
+                              <div style={{ fontSize: 10, color: "var(--text-3)" }}>
+                                {line.measure === "short"
+                                  ? t("gr.list.shortReceived").replace("{n}", line.shortfall)
+                                  : line.measure === "full"
+                                    ? t("gr.list.fullyReceived")
+                                    : DASH}
+                              </div>
+                            </div>
+                            <div
+                              className="num"
+                              style={{ fontSize: 12, fontWeight: 600, textAlign: "right" }}
+                            >
+                              <div>
+                                {line.received} / {line.ordered ?? DASH}
+                              </div>
+                              <div style={{ fontSize: 10, color: "var(--text-3)" }}>
+                                {it.unit || DASH}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          padding: "8px 10px",
+                          background: "var(--surface-2)",
+                          borderRadius: 6,
+                        }}
+                      >
+                        <div style={{ fontSize: 11.5, fontWeight: 500 }}>{t("gr.create.colReceived")}</div>
+                        {/* No lines at all -> the header total IS the receipt's only
+                            quantity, so here (and only here) it stands alone. */}
+                        <div className="num" style={{ fontSize: 12, fontWeight: 600 }}>{selDisplay.received}</div>
+                      </div>
+                    )}
+                    {/* Rejected is a receipt-header total with NO line counterpart on
+                        the wire (gr_item carries qty_ok only) — a different measure,
+                        never a line and never comparable with one. */}
+                    {selDisplay.rejected !== null && (
                       <div
                         style={{
                           display: "flex",
@@ -570,7 +742,7 @@ export function GRList() {
                       >
                         <div style={{ fontSize: 11.5, fontWeight: 500, color: "var(--warn)" }}>{tp(P("statusRejected"))}</div>
                         <div className="num" style={{ fontSize: 12, fontWeight: 600, color: "var(--warn)" }}>
-                          {selectedRow.rejected}
+                          {selDisplay.rejected}
                         </div>
                       </div>
                     )}
@@ -623,21 +795,45 @@ export function GRList() {
                   </td>
                 </tr>
               ) : (
-                tabRows.map((r) => (
+                tabRows.map((r) => {
+                  // SAME display model as the receipts tab (POST /gr/{id}/return only
+                  // flips the status — the receipt's quantities are unchanged), so the
+                  // two tabs cannot report different numbers for one GR. The qty and
+                  // value columns sit side by side here, so they must be one population: a
+                  // header total beside the line-derived value would imply a unit
+                  // price no line carries.
+                  const d = grRowDisplay(r);
+                  return (
                   <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
                     <td style={{ ...td, fontWeight: 600, color: "var(--brand)" }} className="num">{r.no}</td>
                     {/* no separate RT doc -> gr link on the wire — em-dash */}
                     <td style={td} className="num">{DASH}</td>
+                    <td style={{ ...td, color: r.vendor ? undefined : "var(--text-3)" }}>
+                      {r.vendor || DASH}
+                    </td>
+                    {/* no return-reason column on the wire — em-dash */}
                     <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
-                    <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
-                    <td style={{ ...td, textAlign: "right" }} className="num">{r.received}</td>
-                    <td style={{ ...td, textAlign: "right", color: "var(--text-3)" }} className="num">{DASH}</td>
-                    <td style={{ ...td, fontSize: 11.5, color: "var(--text-3)" }}>{DASH}</td>
+                    <td style={{ ...td, textAlign: "right" }} className="num">{d.received}</td>
+                    <td
+                      style={{
+                        ...td,
+                        textAlign: "right",
+                        fontWeight: d.money !== null ? 600 : undefined,
+                        color: d.money !== null ? undefined : "var(--text-3)",
+                      }}
+                      className="num"
+                    >
+                      {d.money ?? DASH}
+                    </td>
+                    <td style={{ ...td, fontSize: 11.5, color: "var(--text-3)" }} className="num">
+                      {formatDate(r.date) || DASH}
+                    </td>
                     <td style={td}>
                       <StatusBadge status={r.status} label={statusLabel(r.status)} />
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
