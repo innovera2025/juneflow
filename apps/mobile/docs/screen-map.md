@@ -78,15 +78,15 @@
 | `st-grlist` | สโตร์ · รอรับของ (PO) | `MStGRList` @ mobile-field.jsx:6 | การ์ด PO รอรับ (เลขที่/ผู้ขาย/ของ/กำหนดส่ง/ทะเบียนรถ) · แตะ → `st-receive` + `MTabBar(field)` | Scaffold + ListView การ์ด (tap → จอตรวจนับ) | — |
 | `st-receive` | สโตร์ · ตรวจนับ + รับของ (GR) | `MStReceive` @ mobile-field.jsx:38 | ต่อรายการ: ปุ่ม ±10 ปรับ "รับจริง" (state) + เตือนขาด/เกิน + รูปของ/ใบส่งของ · ปุ่มยืนยัน (รับขาด → โทน warn) · state `done` = จอ success GR + กลับ `st-grlist` | หน้า stepper ต่อรายการ + เงื่อนไขสี/ข้อความตามผลนับ + conditional success view | — |
 | `fm-progress` | โฟร์แมน · กรอก % งาน | `MFmProgress` @ mobile-field.jsx:93 | header เฉลี่ยโซน + ต่องาน: ปุ่ม ±5 + progress bar + % (state) + รูป + "เดิม x% → y%" + ปุ่มส่ง (แจ้งผ่าน `__juneflowCtx.notify` — ดู §7) | หน้า stepper %/progress ต่องาน + ส่งค่าเข้า API จริง | — |
-| `fm-accept` | โฟร์แมน · รอตรวจรับ | `MFmAccept` @ mobile-field.jsx:146 | tab filter (ทั้งหมด/รอตรวจ/ตีกลับ) + รายการจาก `window.ACCEPT_ITEMS` filter subcon/gr (ดู §7) + ปุ่ม ตรวจรับผ่าน/ตีกลับ (state done ต่อแถว) + `MTabBar(field)` | Scaffold + tab filter + ListView + action คู่ต่อแถว (data จาก API) | — |
+| `fm-accept` | โฟร์แมน · รอตรวจรับ | `MFmAccept` @ mobile-field.jsx:146 | tab filter (ทั้งหมด/รอตรวจ/ตีกลับ) + รายการจาก `window.ACCEPT_ITEMS` filter subcon/gr (ดู §7) + ปุ่ม ตรวจรับผ่าน/ตีกลับ (state done ต่อแถว) + `MTabBar(field)` | Scaffold + tab filter + ListView + action คู่ต่อแถว (data จาก API) | `tests/visual/reference/mobile/fm-accept.png` |
 
 ### กลุ่ม "B · งานหน้างาน" (field) — mobile-screens.jsx · 4 จอ
 
 | id | label | component @ source | โครงจอ (จาก .jsx) | โครง Flutter (structural) | ภาพอ้างอิง |
 |---|---|---|---|---|---|
-| `field-progress` | บันทึก Progress งวดงาน | `MFieldProgress` @ mobile-screens.jsx:316 | ข้อมูลผู้รับเหมา/งาน + progress งวด (bar+%) + รูปหน้างาน grid + หมายเหตุ + CTA ขออนุมัติงวด | หน้า form + progress + photo grid + CTA ล่าง | — |
+| `field-progress` | บันทึก Progress งวดงาน | `MFieldProgress` @ mobile-screens.jsx:316 | ข้อมูลผู้รับเหมา/งาน + progress งวด (bar+%) + รูปหน้างาน grid + หมายเหตุ + CTA ขออนุมัติงวด | หน้า form + progress + photo grid + CTA ล่าง | `tests/visual/reference/mobile/field-progress.png` |
 | `field-gr` | ตรวจรับงาน / GR + QC | `MFieldGR` @ mobile-screens.jsx:364 | ผู้ขาย/ใบส่ง + รายการรับ (got/ordered · แถว partial โทน danger) + QC checklist 4 ข้อ + รูป + ปุ่มคู่ คืน-ปฏิเสธ/เซ็นรับ GR | หน้า list รับของ + checklist + ปุ่มคู่ล่าง | — |
-| `field-pr` | สร้าง PR ด่วน | `MFieldQuickPR` @ mobile-screens.jsx:429 | เลือกจาก BOQ + รายการขอซื้อ + ความเร่งด่วน (ด่วน/ปกติ) + รูป+เหตุผล + banner สาย approval + CTA ส่ง PR ด่วน | หน้า form + ตัวเลือกความเร่งด่วน + info banner + CTA ล่าง | — |
+| `field-pr` | สร้าง PR ด่วน | `MFieldQuickPR` @ mobile-screens.jsx:429 | เลือกจาก BOQ + รายการขอซื้อ + ความเร่งด่วน (ด่วน/ปกติ) + รูป+เหตุผล + banner สาย approval + CTA ส่ง PR ด่วน | หน้า form + ตัวเลือกความเร่งด่วน + info banner + CTA ล่าง | `tests/visual/reference/mobile/field-pr.png` |
 | `field-stock` | เบิก/คืนวัสดุ + scan | `MFieldStock` @ mobile-screens.jsx:484 | ปุ่มสแกน QR/Barcode + รายการเบิก (± stepper ต่อแถว) + "ใช้กับ" WO + ปุ่มคู่ คืนวัสดุ/ยืนยันเบิก | หน้า list + scanner entry (กล้องจริงแทน mock) + stepper + ปุ่มคู่ล่าง | — |
 
 ### กลุ่ม "C · ช่าง & ความปลอดภัย" (safety) — mobile-screens.jsx · 2 จอ

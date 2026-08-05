@@ -91,6 +91,12 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// also the service tab's landing route) and `tech-close` (the close-out, which
 /// tech-jobs pushes with a REAL ticket id and which is honest-empty as a bare tab
 /// route).
+/// `fm-accept`, `field-progress` and `field-pr` are the FOREMAN / FIELD group
+/// (feature/mobile-field-group); each resolves its own subject from a real read, so
+/// none needs a pushed id: fm-accept IS the queue (GET /acceptance-center),
+/// field-progress lists the tenant's subcon contracts when no contract id is pushed
+/// and loads the tapped one's periods, and field-pr picks a BOQ then one of its
+/// lines.
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -108,6 +114,9 @@ const Set<String> kBuiltRouteIds = <String>{
   'srv-new',
   'tech-close',
   'exec',
+  'fm-accept',
+  'field-progress',
+  'field-pr',
 };
 
 /// The set of all known route ids.

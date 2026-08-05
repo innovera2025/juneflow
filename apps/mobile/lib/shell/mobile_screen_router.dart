@@ -9,6 +9,9 @@ import 'package:flutter/widgets.dart';
 
 import '../screens/approvals_inbox/approvals_inbox_screen.dart';
 import '../screens/exec/exec_screen.dart';
+import '../screens/field_pr/field_pr_screen.dart';
+import '../screens/field_progress/field_progress_screen.dart';
+import '../screens/fm_accept/fm_accept_screen.dart';
 import '../screens/notif/notif_screen.dart';
 import '../screens/pm_checkin/pm_checkin_screen.dart';
 import '../screens/pm_close/pm_close_screen.dart';
@@ -95,6 +98,21 @@ Widget _buildTechClose(BuildContext context) => const TechCloseScreenHost();
 /// GET /boq/reports/evm and the approvals card from GET /dashboard/approvals-inbox
 /// — the same payload the `inbox` screen reads, through the same repository.
 Widget _buildExec(BuildContext context) => const ExecScreenHost();
+/// Builds the `fm-accept` foreman acceptance queue (GET /acceptance-center — the
+/// work-period feed plus the goods-receipt feed, the same two the prototype filters
+/// to). Self-contained: the screen IS the queue, so it needs no pushed id.
+Widget _buildFmAccept(BuildContext context) => const FmAcceptScreenHost();
+
+/// Builds the `field-progress` work-period delivery screen. The shell has no
+/// route-param mechanism, so a bare tab route mounts it with contractId=null → it
+/// lists the tenant's REAL subcon contracts and loads the tapped one's periods; the
+/// push seam still accepts a contract id directly. Nothing is pre-selected.
+Widget _buildFieldProgress(BuildContext context) =>
+    const FieldProgressScreenHost();
+
+/// Builds the `field-pr` quick-PR-from-site screen (pick a BOQ → pick one of its
+/// lines → POST /pr + /submit). ONLINE ONLY — see the screen header / B-295.
+Widget _buildFieldPr(BuildContext context) => const FieldPrScreenHost();
 
 /// Builders for the routes that have a real ported screen. A screen port adds
 /// `'<id>': _buildX` here (a const-tearoff) and its id to [kBuiltRouteIds].
@@ -115,6 +133,9 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'srv-new': _buildSrvNew,
   'tech-close': _buildTechClose,
   'exec': _buildExec,
+  'fm-accept': _buildFmAccept,
+  'field-progress': _buildFieldProgress,
+  'field-pr': _buildFieldPr,
 };
 
 /// Resolves [routeId] to its widget: the built screen if registered, otherwise an
