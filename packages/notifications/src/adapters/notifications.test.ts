@@ -4,7 +4,10 @@
  * mock-first (packages/integrations/CLAUDE.md): the fake adapters must let
  * flows / contract tests / E2E run end-to-end before the real LINE / SMTP /
  * Web Push channels land behind the same interface. These tests lock in the
- * fakes' deterministic output and the skeletons' not-yet-implemented contract.
+ * fakes' deterministic output and the still-pending skeletons' contract.
+ *
+ * The real email adapter is no longer a skeleton (P0-INT-03) — its own
+ * behaviour is covered in ./email.test.ts.
  */
 import { describe, expect, it } from 'vitest';
 import type {
@@ -12,7 +15,7 @@ import type {
   NotificationChannel,
   NotificationMessage,
 } from '../index.js';
-import { FakeEmailNotificationAdapter, EmailNotificationAdapter } from './email.js';
+import { FakeEmailNotificationAdapter } from './email.js';
 import { FakeLineNotificationAdapter, LineNotificationAdapter } from './line.js';
 import { FakeWebPushNotificationAdapter, WebPushNotificationAdapter } from './webpush.js';
 
@@ -26,31 +29,37 @@ const sampleMessage = (channel: NotificationChannel, to: string): NotificationMe
 });
 
 /**
- * The three adapter families, each paired with its channel id, real (skeleton)
- * constructor and fake constructor — one table drives every shared assertion.
+ * The three fake adapter families, each paired with its channel id and fake
+ * constructor — one table drives every shared assertion.
  */
 const families = [
   {
     channel: 'line' as const,
     to: 'Uabc123',
-    Real: LineNotificationAdapter,
     Fake: FakeLineNotificationAdapter,
     fakePrefix: 'fake-line-',
   },
   {
     channel: 'email' as const,
     to: 'user@example.com',
-    Real: EmailNotificationAdapter,
     Fake: FakeEmailNotificationAdapter,
     fakePrefix: 'fake-email-',
   },
   {
     channel: 'webpush' as const,
     to: 'sub-789',
-    Real: WebPushNotificationAdapter,
     Fake: FakeWebPushNotificationAdapter,
     fakePrefix: 'fake-webpush-',
   },
+];
+
+/**
+ * Channels whose real adapter is still a skeleton. Email left this table when
+ * its real implementation landed (P0-INT-03); line/webpush are out of scope.
+ */
+const pendingFamilies = [
+  { channel: 'line' as const, to: 'Uabc123', Real: LineNotificationAdapter },
+  { channel: 'webpush' as const, to: 'sub-789', Real: WebPushNotificationAdapter },
 ];
 
 describe.each(families)('$channel adapter — interface conformance', ({ channel, Fake }) => {
@@ -84,7 +93,7 @@ describe.each(families)('Fake$channel adapter.send', ({ channel, to, Fake, fakeP
   });
 });
 
-describe.each(families)(
+describe.each(pendingFamilies)(
   '$channel adapter — skeleton (real impl pending, P0-INT-03)',
   ({ channel, to, Real }) => {
     const adapter = new Real();
