@@ -1,48 +1,75 @@
 // PmNotesScreen — the mobile PM maintenance log, ported from pototype/mobile-pm.jsx
-// MPMNotes (L148-181). Route `pm-notes` (mobile_routes.dart; MobileSection.field) —
+// MPMNotes (L148-179). Route `pm-notes` (mobile_routes.dart; MobileSection.field) —
 // reached from `pm-checklist` once the checklist save is confirmed, carrying the real
 // work-order id via the Navigator.push seam (the pm-jobs → pm-checkin → pm-checklist
 // precedent). money = NONE.
 //
 // §0 fidelity (rule 1): the CHROME is the prototype's — the header (back chevron ·
-// eyebrow · title), ONE card holding the four labelled fields in order
-// (cause / fix / advice / parts) with the prototype's own box metrics (surface-2 fill,
-// radius 8, 10px padding, 12.5px text, 1.5 line-height, 54/54/40 min heights), and the
-// sticky bottom CTA. Every colour/space is a generated design token (JuneflowTokens);
-// every string is a key from the sidecar (no Thai byte in this file — i18n-guard,
-// §0 rule 2).
+// eyebrow · title, L151-152), ONE card holding the four labelled fields in order
+// (cause L155 / fix L158 / advice L161 / parts L164) with the prototype's own box
+// metrics (surface-2 fill, radius 8, 10px padding, 12.5px text, 1.5 line-height,
+// 54/54/40 min heights), and the sticky bottom bar (L174-176). Every colour/space is
+// a generated design token (JuneflowTokens); every string is a key from the sidecar
+// (no Thai byte in this file — i18n-guard, §0 rule 2).
 //
 // Data (§0 rule 3) — what the prototype fakes and this screen does NOT:
-//   - the three text boxes hold hardcoded sentences there (L153/156/159); here they
+//   - the three text boxes hold hardcoded sentences there (L156/159/162); here they
 //     are REAL editable fields seeded from the work order's own `cause` / `fix` /
 //     `advice` columns (GET /pm/workorders, pm.ts workOrderWire) and written back by
-//     the CTA. The prototype renders them as static divs because it is a mock of an
+//     the save. The prototype renders them as static divs because it is a mock of an
 //     ALREADY-FILLED log; the screen's whole purpose is entering them, so they are
 //     inputs — same box, same metrics, nothing redesigned;
 //   - the parts row shows a hardcoded part name + a hardcoded quantity and price
-//     there (L161-165). The work order has NO parts column: spare parts live on
+//     there (L164-167). The work order has NO parts column: spare parts live on
 //     pmQuotes.parts, raised via
 //     POST /pm/quotes (pm.ts L830), and they carry money. The label stays (chrome);
 //     the value is an honest em-dash — never an invented part, never a fabricated
 //     amount (the pm-checkin zone/SLA/contract precedent);
-//   - the amber banner (L169-171) is DROPPED. It PROMISES that the system will raise
+//   - the amber banner (L170-172) is DROPPED. It PROMISES that the system will raise
 //     a quote and push it to the customer over LINE OA automatically. Nothing does:
 //     no code auto-raises a pmQuote, and LINE is an explicit no-op stub (pm.ts
 //     lineNotifyStub, B-108b). A promise cannot be em-dashed the way a missing value
 //     can, so rendering it at all would be a fabrication. Its trigger ("parts were
-//     replaced") has no wire either — see the parts slot above.
+//     replaced") has no wire either — see the parts slot above;
+//   - the CTA's LABEL (L175) is DROPPED for exactly the same reason, and this is the
+//     ONE place the port deviates from the reference image
+//     (tests/visual/reference/mobile/pm-notes.png) — BLOCKERS.md B-285 files the
+//     deviation for a ruling. There that button is a pure NAVIGATION
+//     (`setScreen("pm-close")`) reading "go to the summary + close the job": it
+//     performs no save, and the screen it names is not built here. This port's
+//     primary action is the SAVE the prototype never had, and it stays on the screen.
+//     A label naming both a destination the app does not have and an action the
+//     button does not perform is a PROMISE, not a value, so it cannot be em-dashed —
+//     it is dropped, like the banner. What ships instead names what each control
+//     actually does: before a durable save the button is `common.save` and it saves;
+//     after one it becomes the onward affordance `pm.btnNext`, honest-DISABLED
+//     because pm-close is unbuilt (the treatment pm-checkin gave pm-checklist, and
+//     pm-checklist gave this screen). NOTHING here closes a job, claims one is
+//     closed, or names a screen the app does not have.
 //
 // The write is the REAL POST /pm/workorders/{id}/close { cause, fix, advice },
 // captured through the level-(a) offline queue (pm_notes_repository.dart — read its
 // header for why that endpoint, and BLOCKERS.md B-281 for the future risk its NAME
 // carries). The handler has no status/certificate column and never invents one
-// (pm.ts L754-758), so NOTHING in this screen claims a certificate, a report, or a
-// closed job — the honest states are exactly saved / queued / failed, following the
-// pm-checkin + pm-checklist precedent and BLOCKERS.md B-268 option (a): a `deferred`
-// outcome is shown as QUEUED (captured, not confirmed), a 4xx as FAILED, never a fake
-// success. The prototype's CTA simply navigates; pm-close is a future screen, so the
-// onward affordance is honest-DISABLED after a confirmed save (exactly the treatment
-// pm-checkin gave pm-checklist, and pm-checklist gave this screen).
+// (pm.ts L754-758), so this screen never learns of, or reports, a closed job — the
+// honest states are exactly saved / queued / failed, following the pm-checkin +
+// pm-checklist precedent and BLOCKERS.md B-268 option (a): a `deferred` outcome is
+// shown as QUEUED (captured, not confirmed), a 4xx as FAILED, never a fake success.
+//
+// WHY A FAILED READ ALSO WITHHOLDS THE WRITE (a real limitation, stated up front —
+// the offline write is the point of the screen, so gating it needs a reason):
+// the body is the WHOLE form, all three keys, ALWAYS (pm_notes_agg.notesPayload),
+// because the handler keys off key PRESENCE — an omitted key could never clear a
+// field the technician just emptied. That makes the save a last-write-wins overwrite
+// of exactly the three columns the read supplies. Without the stored values in hand a
+// blank field is indistinguishable from a cleared one, so saving from an unseeded
+// form would silently NULL out text a previous visit stored. The queue still covers
+// the realistic field case — the read succeeds on arrival, signal drops in the
+// machine room, the save is captured and replayed — it is the read failing AT MOUNT
+// that makes the overwrite unsafe. So the form and the button are withheld and the
+// log renders UNKNOWN (an em-dash), never a blank log. The notes-only write path
+// B-281 offers as its first option is also the seam that would make a read-free
+// write safe.
 import 'dart:async';
 import 'dart:math';
 
@@ -149,8 +176,10 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   bool _loaded = false;
 
   /// Set when the work order could not be read (request threw, or the id was not in
-  /// the page). The log is then UNKNOWN, not empty, so the form must not be shown —
-  /// editing fields seeded from nothing would look like an empty stored log.
+  /// the page). The log is then UNKNOWN, not empty, so neither the form nor the save
+  /// is offered: the write overwrites all three columns at once, so an unseeded form
+  /// would blank whatever a previous visit stored (see the file header — this is a
+  /// deliberate, disclosed limitation of the offline write, not an oversight).
   bool _loadFailed = false;
 
   PmNotesSaveState _state = PmNotesSaveState.idle;
@@ -218,22 +247,22 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     }
   }
 
-  /// Fill the controllers without letting the listener mark the form dirty (seeding
-  /// is not an edit).
+  /// Fill the controllers from the stored columns.
+  ///
+  /// Seeding is not an edit, and needs no flag to say so: `_seed` is called from one
+  /// place only — `_load`, started in initState and never re-run — so the screen is
+  /// still `idle` with no op outstanding when the controllers fire, which is the
+  /// first case `_onEdited` returns on. (A guarded-but-unreachable branch here would
+  /// be decoration: no revert of it can fail a test.)
   void _seed(PmNotes n) {
-    _suppressEdits = true;
     _cause.text = n.cause ?? '';
     _fix.text = n.fix ?? '';
     _advice.text = n.advice ?? '';
-    _suppressEdits = false;
   }
-
-  bool _suppressEdits = false;
 
   /// A typed character invalidates any resolved/unresolved save: the body changed, so
   /// the next save is a NEW write, not a retry of the old one.
   void _onEdited() {
-    if (_suppressEdits) return;
     if (_state == PmNotesSaveState.idle && _opId == null) return;
     if (_state == PmNotesSaveState.saving) return;
     setState(() {
@@ -310,7 +339,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
         children: <Widget>[
           MobileHeader(
             // The prototype's eyebrow is a human work-order number
-            // ("PMWO-2569-0312", L150). pm_workorder stores no document number and
+            // ("PMWO-2569-0312", L151). pm_workorder stores no document number and
             // workOrderWire exposes none, so there is nothing honest to print — the
             // pm-jobs agg omits the same field for the same reason. An em-dash, never
             // the raw uuid dressed up as a document number.
@@ -325,7 +354,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     );
   }
 
-  /// A 34px round back button (mobile-pm.jsx L151 — surface-3 circle + chevL; the
+  /// A 34px round back button (mobile-pm.jsx L152 — surface-3 circle + chevL; the
   /// prototype returns to pm-checklist, which is exactly what popping does).
   Widget _backButton() {
     return GestureDetector(
@@ -359,7 +388,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              // mobile-pm.jsx L152-160 — the three REAL columns, in source order.
+              // mobile-pm.jsx L155-162 — the three REAL columns, in source order.
               MField(
                 label: _t('fieldCause'),
                 child: _noteBox(_cause, _t('phCause'), 54),
@@ -372,7 +401,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
                 label: _t('fieldAdvice'),
                 child: _noteBox(_advice, _t('phAdvice'), 40),
               ),
-              // mobile-pm.jsx L161-165 — label kept (chrome), value em-dashed: the
+              // mobile-pm.jsx L164-167 — label kept (chrome), value em-dashed: the
               // work order has no parts column (see the file header).
               MField(label: _tp('fieldParts'), child: _partsSlot()),
             ],
@@ -384,7 +413,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   }
 
   /// One editable note box, matching the prototype's static div exactly
-  /// (mobile-pm.jsx L153: surface-2 fill, radius 8, 10px padding, 12.5px / 1.5, and
+  /// (mobile-pm.jsx L156: surface-2 fill, radius 8, 10px padding, 12.5px / 1.5, and
   /// the per-field min height). Multi-line and unbounded — the technician types the
   /// whole account of the job here.
   Widget _noteBox(
@@ -428,7 +457,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     );
   }
 
-  /// The parts row (mobile-pm.jsx L162-164). The box is the prototype's; the value is
+  /// The parts row (mobile-pm.jsx L164-167). The box is the prototype's; the value is
   /// an em-dash because no work-order column backs it — parts live on pmQuotes.parts
   /// (POST /pm/quotes) and carry money, so nothing is read, computed, or invented
   /// here.
@@ -510,11 +539,15 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     );
   }
 
-  /// The sticky bottom bar (mobile-pm.jsx L174-176). Idle/queued/failed → the save
-  /// action (enqueue + drain, or re-drain the same op on a retry). While saving it is
-  /// disabled (a spinner). Saved → the onward affordance, honest-DISABLED (pm-close
-  /// is a future screen, out of this slice — never a fake navigation, and never a
-  /// claim that the job is closed).
+  /// The sticky bottom bar (mobile-pm.jsx L174-176). Idle/queued/failed → the SAVE
+  /// action (enqueue + drain, or re-drain the same op on a retry), labelled `save`
+  /// and carrying NO forward chevron, because saving is all it does: it writes the
+  /// three columns and stays here. The prototype's own label and chevron name a
+  /// navigation to pm-close, which this button does not perform and which the app
+  /// does not have — dropped like the amber banner (see the file header, B-285).
+  /// While saving it is disabled (a spinner). Saved → the onward affordance,
+  /// honest-DISABLED (pm-close is a future screen, out of this slice — never a fake
+  /// navigation, and never a claim that the job is closed).
   Widget _actionBar() {
     final bool saved = _state == PmNotesSaveState.saved;
     final bool busy = _state == PmNotesSaveState.saving;
@@ -531,8 +564,7 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
               onTap: null,
             )
           : _stickyButton(
-              label: _tp('closeNext'),
-              icon: Icons.chevron_right,
+              label: _t('save'),
               onTap: busy ? null : _onSave,
               busy: busy,
             ),
@@ -541,8 +573,8 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
 
   Widget _stickyButton({
     required String label,
-    required IconData icon,
     required VoidCallback? onTap,
+    IconData? icon,
     bool busy = false,
   }) {
     final bool enabled = onTap != null;
@@ -584,14 +616,16 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Icon(
-                    icon,
-                    size: 18,
-                    color: enabled
-                        ? JuneflowTokens.shellTextStrong
-                        : JuneflowTokens.textTertiary,
-                  ),
+                  if (icon != null) ...<Widget>[
+                    const SizedBox(width: 6),
+                    Icon(
+                      icon,
+                      size: 18,
+                      color: enabled
+                          ? JuneflowTokens.shellTextStrong
+                          : JuneflowTokens.textTertiary,
+                    ),
+                  ],
                 ],
               ),
       ),

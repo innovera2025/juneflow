@@ -3,10 +3,17 @@
 // Thai literals are legitimate here: *_test.dart is exempt from the i18n-guard. The
 // screen is driven with a FAKE repository + inline i18n/strings, so nothing touches
 // the network. The assertions prove the honest behaviour: the chrome, the REAL stored
-// cause/fix/advice seeding the form, the whole-form body, the parts slot em-dashed
-// (no wire), the dropped LINE-OA banner, the online-saved / offline-queued /
-// permanently-failed states (never a fake success and never a certificate claim), the
-// retry reusing the SAME op id, and the honest-empty variants.
+// cause/fix/advice seeding the form, the whole-form body, an untouched field written
+// back as its stored text, the parts slot em-dashed (no wire), the dropped LINE-OA
+// banner, the online-saved / offline-queued / permanently-failed states (never a fake
+// success), the retry reusing the SAME op id, the onward affordance being genuinely
+// tap-less, and the honest-empty variants — including a failed read withholding the
+// write, with the reason spelled out at that test.
+//
+// Deliberately NOT asserted here: that no widget renders 'ปิดงาน' or 'ใบรับรอง'. No
+// state of this screen can produce either word, so such an expectation passes in
+// every version of the file and pins nothing. The claim is enforced where it can
+// actually break — over the sidecar's RESOLVED strings, in pm_notes_sidecar_test.dart.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/i18n/i18n.dart';
@@ -88,6 +95,7 @@ final JuneflowI18n _i18n = JuneflowI18n.fromJsonString('''
     "labor.att.savedBadge": {"th":"บันทึกแล้ว"},
     "tax.etax.statusPending": {"th":"รอส่ง"},
     "admin.common.actionFailedToast": {"th":"ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง"},
+    "common.save": {"th":"บันทึก"},
     "pm.btnNext": {"th":"ถัดไป"}
   },
   "nav_i18n": {},
@@ -107,7 +115,7 @@ final ScreenStrings _strings = ScreenStrings.fromJsonString('''
   "fieldAdvice": "pm.fieldAdvice",
   "phAdvice": "pm.phAdvice",
   "fieldParts": "อะไหล่ที่ใช้",
-  "closeNext": "ไปสรุป + ปิดงาน",
+  "save": "common.save",
   "saved": "labor.att.savedBadge",
   "queued": "tax.etax.statusPending",
   "failed": "admin.common.actionFailedToast",
@@ -158,7 +166,12 @@ void main() {
       expect(find.text('การแก้ไข / งานที่ทำ'), findsOneWidget);
       expect(find.text('ข้อเสนอแนะ / งานที่ควรทำเพิ่ม'), findsOneWidget);
       expect(find.text('อะไหล่ที่ใช้'), findsOneWidget);
-      expect(find.text('ไปสรุป + ปิดงาน'), findsOneWidget);
+      // The primary button is labelled for what it DOES — it saves and stays here.
+      // The prototype's own label ('ไปสรุป + ปิดงาน', L175) names a navigation to
+      // pm-close, which this app does not have, so it is dropped along with its
+      // forward chevron (B-285); nothing on the screen points at a next step yet.
+      expect(find.text('บันทึก'), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
       expect(_fields, findsNWidgets(3));
     });
 
@@ -235,7 +248,7 @@ void main() {
         tester,
         _FakeRepo(rows: <PmNotesEnt>[_wo('wo-1', cause: 'c')]),
       );
-      // mobile-pm.jsx L169-171 promises an automation that does not exist.
+      // mobile-pm.jsx L171 promises an automation that does not exist.
       expect(find.textContaining('LINE OA'), findsNothing);
       expect(find.textContaining('ใบเสนอราคา'), findsNothing);
       expect(find.textContaining('อัตโนมัติ'), findsNothing);
@@ -254,7 +267,7 @@ void main() {
       await tester.enterText(_fields.at(0), 'ประตูค้าง');
       await tester.enterText(_fields.at(1), 'เปลี่ยนเซนเซอร์');
       await tester.pump();
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
 
       expect(repo.saves, 1);
@@ -270,23 +283,38 @@ void main() {
       expect(repo.lastBody!.containsKey('signature'), isFalse);
     });
 
-    testWidgets('a 2xx shows saved and the onward step (honest-disabled), '
-        'and claims NO certificate', (WidgetTester tester) async {
+    testWidgets('a 2xx shows saved and an onward affordance that really is '
+        'DISABLED — it navigates nowhere', (WidgetTester tester) async {
       final _FakeRepo repo = _FakeRepo(
         outcome: SyncOutcome.synced,
         rows: <PmNotesEnt>[_wo('wo-1')],
       );
       await _pump(tester, repo);
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
 
       expect(find.text('บันทึกแล้ว'), findsOneWidget);
-      // pm-close is not built, so the CTA becomes the disabled onward affordance.
+      // pm-close is not built, so the button becomes the onward affordance.
       expect(find.text('ถัดไป'), findsOneWidget);
-      expect(find.text('ไปสรุป + ปิดงาน'), findsNothing);
-      // pm.ts L754-758: there is no cert/status column and close never invents one.
-      expect(find.textContaining('ใบรับรอง'), findsNothing);
-      expect(find.textContaining('ปิดงาน'), findsNothing);
+      expect(find.text('บันทึก'), findsNothing);
+      // "Honest-disabled" has to mean disabled: no tap handler, so it cannot
+      // navigate and cannot be read as a close action. Asserting the ABSENCE of
+      // 'ปิดงาน' text here would be vacuous — no state of this screen can render
+      // it — so the sidecar test forbids it at the source instead.
+      final GestureDetector onward = tester.widget<GestureDetector>(
+        find
+            .ancestor(
+              of: find.text('ถัดไป'),
+              matching: find.byType(GestureDetector),
+            )
+            .first,
+      );
+      expect(onward.onTap, isNull);
+      // Tapping it changes nothing: no second write, no navigation.
+      await tester.tap(find.text('ถัดไป'));
+      await tester.pumpAndSettle();
+      expect(repo.saves, 1);
+      expect(find.text('ถัดไป'), findsOneWidget);
     });
 
     testWidgets('a deferred outcome is QUEUED — never a fake success', (
@@ -297,13 +325,13 @@ void main() {
         rows: <PmNotesEnt>[_wo('wo-1')],
       );
       await _pump(tester, repo);
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
 
       expect(find.text('รอส่ง'), findsOneWidget);
       expect(find.text('บันทึกแล้ว'), findsNothing);
       // The CTA stays the save action so the write can be retried.
-      expect(find.text('ไปสรุป + ปิดงาน'), findsOneWidget);
+      expect(find.text('บันทึก'), findsOneWidget);
     });
 
     testWidgets('a 4xx dead-letter is surfaced as failed', (
@@ -314,7 +342,7 @@ void main() {
         rows: <PmNotesEnt>[_wo('wo-1')],
       );
       await _pump(tester, repo);
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
 
       expect(find.text('ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง'), findsOneWidget);
@@ -329,11 +357,11 @@ void main() {
         rows: <PmNotesEnt>[_wo('wo-1')],
       );
       await _pump(tester, repo);
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
       final String? first = repo.lastOpId;
 
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
 
       expect(repo.saves, 1, reason: 'a retry must not enqueue a second op');
@@ -348,7 +376,7 @@ void main() {
         rows: <PmNotesEnt>[_wo('wo-1')],
       );
       await _pump(tester, repo);
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
       final String? first = repo.lastOpId;
       expect(find.text('รอส่ง'), findsOneWidget);
@@ -359,28 +387,33 @@ void main() {
       await tester.pump();
       expect(find.text('รอส่ง'), findsNothing);
 
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
       expect(repo.saves, 2);
       expect(repo.lastOpId, isNot(first));
       expect(repo.lastBody!['advice'], 'ตรวจสลิงรอบหน้า');
     });
 
-    testWidgets('seeding the form from the wire is NOT an edit', (
-      WidgetTester tester,
-    ) async {
-      // A load that arrives after mount must not look like the technician typing —
-      // otherwise a queued status would clear itself on a rebuild.
+    testWidgets('a field the technician never touched is written back as its '
+        'STORED text — never blanked', (WidgetTester tester) async {
+      // The body carries all three columns every time, so anything the form did not
+      // seed would be sent as "" and stored as NULL. A save that only touches `fix`
+      // must still return `cause` intact — this is the property that makes the
+      // whole-form write safe, and the reason an unreadable work order withholds
+      // the form entirely (see the failed-read test below).
       final _FakeRepo repo = _FakeRepo(
         outcome: SyncOutcome.deferred,
         rows: <PmNotesEnt>[_wo('wo-1', cause: 'จากเซิร์ฟเวอร์')],
       );
       await _pump(tester, repo);
-      await tester.tap(find.text('ไปสรุป + ปิดงาน'));
+      // The technician fills in only the repair; `cause` is left exactly as loaded.
+      await tester.enterText(_fields.at(1), 'เปลี่ยนเซนเซอร์');
+      await tester.pump();
+      await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
       expect(find.text('รอส่ง'), findsOneWidget);
-      // The seeded text is still the body that was sent.
       expect(repo.lastBody!['cause'], 'จากเซิร์ฟเวอร์');
+      expect(repo.lastBody!['fix'], 'เปลี่ยนเซนเซอร์');
     });
   });
 
@@ -392,7 +425,7 @@ void main() {
       // TWO em-dashes, both honest: the header eyebrow (no stored WO number to print)
       // and the body.
       expect(find.text('—'), findsNWidgets(2));
-      expect(find.text('ไปสรุป + ปิดงาน'), findsNothing);
+      expect(find.text('บันทึก'), findsNothing);
       expect(_fields, findsNothing);
     });
 
@@ -404,15 +437,28 @@ void main() {
       await _pump(tester, _FakeRepo(rows: <PmNotesEnt>[_wo('other')]));
       expect(find.text('—'), findsNWidgets(2)); // header eyebrow + body
       expect(_fields, findsNothing);
-      expect(find.text('ไปสรุป + ปิดงาน'), findsNothing);
+      expect(find.text('บันทึก'), findsNothing);
     });
 
-    testWidgets('a failed read em-dashes instead of crashing', (
+    testWidgets('a failed read withholds the form AND the save — the '
+        'whole-form write would blank the stored log', (
       WidgetTester tester,
     ) async {
-      await _pump(tester, _FakeRepo(readThrows: true));
+      // A DISCLOSED limitation, not an oversight: the body always carries all three
+      // columns (the server keys off presence), so a save from a form that was never
+      // seeded would overwrite whatever the previous visit stored with NULLs. With
+      // the prior state unknown the log is UNKNOWN — an em-dash — and neither the
+      // fields nor the button are offered. The offline queue still covers the field
+      // case it was built for: the read succeeds on arrival, signal drops, the save
+      // is captured and replayed. See BLOCKERS.md B-281 (ก) for the notes-only write
+      // path that would make a read-free write safe.
+      final _FakeRepo repo = _FakeRepo(readThrows: true);
+      await _pump(tester, repo);
       expect(find.text('—'), findsNWidgets(2)); // header eyebrow + body
-      expect(find.text('ไปสรุป + ปิดงาน'), findsNothing);
+      expect(_fields, findsNothing);
+      expect(find.text('บันทึก'), findsNothing);
+      expect(find.text('ถัดไป'), findsNothing);
+      expect(repo.saves, 0);
     });
   });
 }

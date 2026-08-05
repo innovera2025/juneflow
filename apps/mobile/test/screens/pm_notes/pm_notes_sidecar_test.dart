@@ -28,18 +28,18 @@ const List<String> _dictFields = <String>[
   'saved',
   'queued',
   'failed',
+  'save',
   'next',
 ];
 
 /// Fields read with tp() — the Thai phrase IS the key, byte-exact with
-/// pototype/mobile-pm.jsx MPMNotes (L161 / L175).
+/// pototype/mobile-pm.jsx MPMNotes (L164).
 const Map<String, String> _phraseFields = <String, String>{
   'fieldParts': 'อะไหล่ที่ใช้',
-  'closeNext': 'ไปสรุป + ปิดงาน',
 };
 
 /// Dict slots whose resolved Thai must be BYTE-EXACT with the prototype line, because
-/// they are the prototype's own copy reused zero-mint (mobile-pm.jsx L150/152/155/158).
+/// they are the prototype's own copy reused zero-mint (mobile-pm.jsx L151/155/158/161).
 const Map<String, String> _verbatimDict = <String, String>{
   'title': 'บันทึกการบำรุงรักษา',
   'fieldCause': 'สาเหตุการเสีย / ความผิดปกติ',
@@ -132,18 +132,41 @@ void main() {
     },
   );
 
-  test('the dropped banner is not represented in the sidecar', () async {
-    // mobile-pm.jsx L169-171 promises an automation that does not exist (nothing
-    // auto-raises a pmQuote; LINE is a verified no-op stub — pm.ts lineNotifyStub,
-    // B-108b). It is DROPPED, not minted: a key here would mean the screen is one
-    // edit away from making the claim again.
+  test('neither dropped PROMISE can re-enter through the sidecar', () async {
+    // Two prototype strings are dropped rather than keyed, and for the same reason:
+    //   * the amber banner (mobile-pm.jsx L171) promises an automation that does not
+    //     exist — nothing auto-raises a pmQuote, and LINE is a verified no-op stub
+    //     (pm.ts lineNotifyStub, B-108b);
+    //   * the CTA label (L175, 'ไปสรุป + ปิดงาน') promises a NAVIGATION to pm-close,
+    //     a screen this app does not have, on a button that saves and stays (B-285).
+    // Assert on the RESOLVED text, not on the raw slot value: pointing a slot at an
+    // existing dict id (pm.closeWoBtn 'ปิดงาน', pm.closeWithSignBtn 'ปิดงาน + ลายเซ็น')
+    // would smuggle the same claim back in while the sidecar still read as key-only.
+    final JuneflowI18n i18n = await JuneflowI18n.load(
+      bundle: rootBundle,
+      lang: 'th',
+    );
     final ScreenStrings s = await ScreenStrings.load(
       'pm_notes',
       bundle: rootBundle,
     );
     for (final String name in s.names) {
-      expect(s[name], isNot(contains('LINE OA')));
-      expect(s[name], isNot(contains('ใบเสนอราคา')));
+      // Resolved exactly the way the screen resolves that slot.
+      final String rendered = _dictFields.contains(name)
+          ? i18n.t(s[name])
+          : i18n.tp(s[name]);
+      for (final String claim in <String>[
+        'LINE OA',
+        'ใบเสนอราคา',
+        'ปิดงาน',
+        'ไปสรุป',
+      ]) {
+        expect(
+          rendered,
+          isNot(contains(claim)),
+          reason: '"$name" (${s[name]}) renders "$claim" — nothing backs it',
+        );
+      }
     }
   });
 }

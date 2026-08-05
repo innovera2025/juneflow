@@ -1,13 +1,13 @@
 // Pure parse + honest derivations for the mobile PM maintenance log (route
-// `pm-notes`, pototype/mobile-pm.jsx MPMNotes L148-181). money = NONE — three free
+// `pm-notes`, pototype/mobile-pm.jsx MPMNotes L148-179). money = NONE — three free
 // text columns; no amount is read, derived, or sent by this screen.
 //
 // The prototype is a MOCK (§0 rule 3 — none of this is reproduced):
-//   - all four field boxes are STATIC divs holding hardcoded sentences (L153/156/
+//   - all four field boxes are STATIC divs holding hardcoded sentences (L156/159/
 //     159) — there is no state, no input, and nothing is ever read back;
-//   - the parts row (L161-165) shows a hardcoded part name + a hardcoded quantity
+//   - the parts row (L164-167) shows a hardcoded part name + a hardcoded quantity
 //     and price, i.e. MONEY with no source;
-//   - the amber banner (L169-171) PROMISES an automation — that the system will
+//   - the amber banner (L170-172) PROMISES an automation — that the system will
 //     raise a spare-parts quote and push it to the customer over LINE OA by itself
 //     — which does not exist: nothing auto-raises a quote, and LINE is an explicit
 //     no-op stub (apps/api/src/routes/pm.ts lineNotifyStub, B-108b). It is a claim,
@@ -69,13 +69,13 @@ PmNotesEnt? findWorkOrder(List<PmNotesEnt> rows, String id) {
 class PmNotes {
   const PmNotes({this.cause, this.fix, this.advice});
 
-  /// `pm_workorder.cause` — the fault / abnormality found (prototype L152).
+  /// `pm_workorder.cause` — the fault / abnormality found (prototype L155).
   final String? cause;
 
-  /// `pm_workorder.fix` — the repair / work performed (prototype L155).
+  /// `pm_workorder.fix` — the repair / work performed (prototype L158).
   final String? fix;
 
-  /// `pm_workorder.advice` — recommended follow-up work (prototype L158).
+  /// `pm_workorder.advice` — recommended follow-up work (prototype L161).
   final String? advice;
 
   /// True when the work order stores none of the three (a fresh log).
@@ -98,9 +98,16 @@ PmNotes parsePmNotes(PmNotesEnt e) => PmNotes(
 /// `str(...).trim() || null` then stores NULL) — the honest "the tech cleared this"
 /// write, never a fabricated value.
 ///
+/// The cost of that choice, and why the screen gates on the READ: sending all three
+/// keys makes the save a whole-form, last-write-wins overwrite of exactly the columns
+/// the read supplies. With the stored values unknown a blank field is
+/// indistinguishable from a cleared one, so a save from an unseeded form would blank
+/// text a previous visit stored. That is why an unreadable work order withholds the
+/// form AND the button instead of offering the offline write (screen header + B-281).
+///
 /// `signature` / `customer_sign` is deliberately NOT sent: the customer signature
-/// belongs to pm-close (prototype L204-210), and omitting the key leaves the stored
-/// column untouched.
+/// belongs to pm-close (prototype MPMClose, L205), and omitting the key leaves the
+/// stored column untouched.
 ///
 /// Replay safety: the write is a plain last-write-wins SET of three text columns —
 /// no counter, no sequence, no JV, money = NONE — so re-sending the SAME body

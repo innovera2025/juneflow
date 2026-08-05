@@ -17,7 +17,7 @@
 //   contract fields is forbidden (PLAN.md §0). So this reads the raw JSON maps off
 //   the shared Dio, as the web ports read `Record<string, unknown>`.
 //
-//   NOT read: `GET /pm/quotes`. Spare parts (the prototype's parts row, L161-165)
+//   NOT read: `GET /pm/quotes`. Spare parts (the prototype's parts row, L164-167)
 //   live on pmQuotes.parts and carry MONEY (label/qty/price + currency_code). No
 //   column on the work order, this screen has no quote-raising affordance in the
 //   prototype, and surfacing priced parts is a money-bearing read that belongs to its
@@ -29,6 +29,16 @@
 //   The technician stands on site, so the write is captured as a durable
 //   SyncOperation and replayed through the level-(a) QueueDrainProcessor rather than
 //   assuming connectivity.
+//
+//   ⚠️ SCOPE OF THAT OFFLINE COVER (disclosed, not silent). The queue covers a signal
+//   drop AFTER the screen loaded — the read succeeds on arrival, the technician walks
+//   into the machine room, the save is captured and replayed. It does NOT cover a read
+//   that FAILS at mount: the body carries all three columns every time (the handler
+//   keys off presence), so the save is a whole-form overwrite, and an unseeded form
+//   would blank whatever a previous visit stored. With the prior state unknown the
+//   screen therefore withholds the form and the button and renders the log as UNKNOWN.
+//   See pm_notes_agg.notesPayload, the screen header, and B-281 option (a) — the
+//   notes-only write path that would also make a read-free write safe.
 //
 //   ⚠️ ENDPOINT-NAME CAVEAT (BLOCKERS.md B-281). `…/close` is the ONLY route that
 //   writes cause/fix/advice — there is no notes-only endpoint. Today that handler is
