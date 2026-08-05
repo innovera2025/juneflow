@@ -1,0 +1,17 @@
+{
+  "_source": "Static UI keys for the mobile PM checklist screen (route pm-checklist, pototype/mobile-pm.jsx MPMChecklist L98-146 + MPM_RESULTS L92-97). KEYS ONLY — never a translation. MIXED LAYERS (the approvals_inbox precedent): fields marked dict below are stable ids read with t()/tf(); the rest are the Thai phrase that IS the phrases-layer key, read with tp(). Each phrase value is byte-exact with the prototype line it comes from (grepped this round, not retyped): title L105, photoAfter L124, saveNext L141 (the prototype's trailing space before the chevron icon is layout, reproduced as a SizedBox), resultNormal/Adjust/Repair = the MPM_RESULTS labels L94/95/96. ZERO-MINT WHERE POSSIBLE: photoBefore reuses dict subcon.photoBefore whose th is byte-identical to the prototype's 'รูปก่อน', and resultNormal 'ปกติ' ALREADY exists in the phrases layer. FIVE values are net-new and are collected into agents/orch-d-recon/pm-checklist-i18n.apply.json for a Wei sacred round (docs/extract/i18n-full.json is untouched by this slice); they already resolve in Thai today (tp returns the key for lang th, the pm_jobs / st_grlist / notif / approve precedent) and light up en/zh/ar once applied. 'progress' is a composite: its {n}/{count} token NAMES follow the repo convention and are borrowed from dict pm.confirmIncomplete ('ตรวจแล้ว {n}/{count} — …'), which counts the very same thing; the prototype writes them as JS ${done}/${items.length}. A translator MUST keep both tokens. The dict alternatives pm.resultNormal/Adjust/Repair were REJECTED for the toggle buttons: their th carries an English gloss ('ปรับตั้ง (Service & Adjust)') that does not fit the prototype's 30px 2-column grid and is not the prototype's copy. MPM_RESULTS' 'none' label ('ยังไม่ตรวจ', L93) is DEAD CODE in the prototype (the const r on L109 is never rendered and the toggles are MPM_RESULTS.slice(1)), so it is not represented here. The three HONEST offline-write states are copy the MOCK prototype never had (its CTA just navigates), so they borrow existing GENERIC dict strings rather than inventing wording — the pm_checkin precedent, and BLOCKERS.md B-268 (ก): saved=labor.att.savedBadge 'บันทึกแล้ว', queued=tax.etax.statusPending 'รอส่ง', failed=admin.common.actionFailedToast. emptyChecklist=pm.emptyChecklist covers a work order whose items[] snapshot is genuinely empty. next=pm.btnNext labels the onward affordance, honest-DISABLED (pm-notes is a future screen, out of this slice — the same treatment pm-checkin gave this screen).",
+  "_layers": "dict (t/tf): photoBefore · emptyChecklist · saved · queued · failed · next. phrases (tp): title · progress · photoAfter · resultNormal · resultAdjust · resultRepair · saveNext.",
+  "title": "Checklist PM",
+  "progress": "ตรวจแล้ว {n}/{count}",
+  "photoBefore": "subcon.photoBefore",
+  "photoAfter": "รูป/วิดีโอหลัง",
+  "resultNormal": "ปกติ",
+  "resultAdjust": "ปรับตั้ง",
+  "resultRepair": "เปลี่ยน/ซ่อม",
+  "saveNext": "บันทึกผล + ต่อไป",
+  "emptyChecklist": "pm.emptyChecklist",
+  "saved": "labor.att.savedBadge",
+  "queued": "tax.etax.statusPending",
+  "failed": "admin.common.actionFailedToast",
+  "next": "pm.btnNext"
+}
