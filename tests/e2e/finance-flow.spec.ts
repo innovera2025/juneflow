@@ -100,14 +100,25 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
 
   // Create an AP billing and return its wire body (helper for the PV/adversarial
   // tests that just need a tenant billing to draw a PV from).
+  //
+  // B-315: `vat` is OPTIONAL here and defaults to 0 — which is precisely why this
+  // gate never caught the client-supplied-gross defect. With vat 0 the browser's
+  // (wrong) amount + vat happened to equal the server's amount, so every
+  // assertion below held. Pass a real vat to exercise the divergence.
   async function makeBilling(
     client: APIRequestContext,
     vendorId: string,
     amount: number,
+    vat?: number,
   ): Promise<Record<string, unknown>> {
     return okJson(
       await client.post("/api/v1/ap/billing", {
-        data: { vendor_id: vendorId, amount, invoice_no: uniqueNo("INV") },
+        data: {
+          vendor_id: vendorId,
+          amount,
+          invoice_no: uniqueNo("INV"),
+          ...(vat == null ? {} : { vat }),
+        },
       }),
       "createBilling",
     );
@@ -190,21 +201,24 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
     const retention = 40_000;
     let pvId = "";
 
-    await test.step("create PV — server computes net, ignoring a tampered client net", async () => {
+    await test.step("create PV — server computes gross AND net, ignoring tampered client values", async () => {
       const pv = await okJson(
         await md.post("/api/v1/ap/pv", {
           data: {
             billing_ids: [billingId],
-            amount: gross,
             wht_pct: WHT_PCT_SERVICE,
             retention,
             method: "transfer",
+            // B-315: a tampered GROSS the server MUST ignore. 1 baht would fall in
+            // tier-1 (≤500K) and let the accountant sign off this 800K payment.
+            amount: 1,
             // A tampered net the server MUST ignore (net is server-authoritative).
             net: 1,
           },
         }),
         "createPv",
       );
+      expect(Number(pv.amount), "gross is server-derived, NOT the tampered 1").not.toBe(1);
       pvId = String(pv.id);
       expect(pv.status, "a new PV awaits approval (server-owned)").toBe(STATUS.pending);
       expect(Number(pv.amount)).toBe(gross);
@@ -265,8 +279,8 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
     const pv = await okJson(
       await accountant.post("/api/v1/ap/pv", {
         data: {
+          // B-315: no client `amount` — the server derives 2,500,000 from the billing.
           billing_ids: [String(billing.id)],
-          amount: gross,
           wht_pct: WHT_PCT_SERVICE,
           method: "transfer",
         },
@@ -274,6 +288,7 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
       "createPv (>2M)",
     );
     const pvId = String(pv.id);
+    expect(Number(pv.amount), "server-derived gross").toBe(gross);
     expect(gross, "amount is in the MD tier band").toBeGreaterThan(PV_TIER_MD);
 
     // Finance Manager (level 3) cannot sign off a > 2M PV — MD (level 4) is required.
@@ -285,6 +300,72 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
       "approvePv (md)",
     );
     expect(approved.status).toBe(STATUS.approved);
+  });
+
+  // -------------------------------------------------------------------------
+  // B-315 (Wei = ก) — the exploit this gate used to miss, end to end on the real
+  // stack: an understated client `amount` demoted the approval tier.
+  // -------------------------------------------------------------------------
+  test("B-315: an understated client amount cannot demote the PV approval tier", async () => {
+    const vendorId = await firstVendorId(accountant);
+    const trueGross = 3_000_000; // MD band (>2M)
+    const billing = await makeBilling(accountant, vendorId, trueGross);
+
+    const pv = await okJson(
+      await accountant.post("/api/v1/ap/pv", {
+        data: {
+          billing_ids: [String(billing.id)],
+          // The attack: 500,000 is NOT > PV_TIER_FINMGR (strict >), so pre-fix the
+          // stored gross yielded needed = 0 and the accountant could self-clear a
+          // 3,000,000 payment — MD and the Finance Manager never saw it.
+          amount: 500_000,
+          wht_pct: WHT_PCT_SERVICE,
+          method: "transfer",
+        },
+      }),
+      "createPv (understated amount)",
+    );
+    const pvId = String(pv.id);
+
+    // 1) the STORED gross is the server's figure
+    expect(Number(pv.amount), "server ignores the understated client amount").toBe(trueGross);
+    // 2) the ledger/bank basis follows it
+    expect(Number(pv.net), "net follows the server gross").toBe(
+      expectedNet(trueGross, expectedWht(trueGross, WHT_PCT_SERVICE), 0),
+    );
+    // 3) THE POINT — the tier computed from the stored gross demands MD
+    const byAccountant = await accountant.post(`/api/v1/pv/${pvId}/approve`, { data: {} });
+    expect(byAccountant.status(), "tier-1 approver on a 3M PV → 403").toBe(403);
+    const byFinMgr = await finMgr.post(`/api/v1/pv/${pvId}/approve`, { data: {} });
+    expect(byFinMgr.status(), "finmgr is still under the MD tier → 403").toBe(403);
+    const byMd = await okJson(
+      await md.post(`/api/v1/pv/${pvId}/approve`, { data: {} }),
+      "approvePv (md, B-315)",
+    );
+    expect(byMd.status).toBe(STATUS.approved);
+  });
+
+  test("B-315: the PV gross is the billing's VAT-INCLUSIVE amount — vat is never added", async () => {
+    // The seeded shape: vat = amount x 7/107 is the tax CONTAINED IN amount. The
+    // browser used to send amount + vat. With vat 0 (this suite's old default) the
+    // two agreed, which is why G4 stayed green over the defect.
+    const vendorId = await firstVendorId(md);
+    const amount = 645_000;
+    const vat = 42_196; // 645000 x 7/107, exactly the ap.jsx AP-2026-0180 figure
+    const billing = await makeBilling(md, vendorId, amount, vat);
+    expect(Number(billing.vat), "the billing really carries a non-zero vat").toBe(vat);
+
+    const pv = await okJson(
+      await md.post("/api/v1/ap/pv", {
+        data: { billing_ids: [String(billing.id)], wht_pct: WHT_PCT_SERVICE, method: "transfer" },
+      }),
+      "createPv (vat-bearing billing)",
+    );
+    expect(Number(pv.amount), "gross = amount, NOT amount + vat").toBe(amount);
+    expect(Number(pv.amount)).not.toBe(amount + vat);
+    // the prototype's own net box: 645,000 - 19,350 = 625,650 (no retention here)
+    expect(Number(pv.wht)).toBe(expectedWht(amount, WHT_PCT_SERVICE));
+    expect(Number(pv.net)).toBe(expectedNet(amount, expectedWht(amount, WHT_PCT_SERVICE), 0));
   });
 
   test("GL JV enforces the Σdebit === Σcredit double-entry guard", async () => {
@@ -357,12 +438,20 @@ liveDescribe("Wave-2 finance money-path (G4, live seeded stack)", () => {
     });
     expect(billingRes.status(), "negative AP billing amount → 400").toBe(400);
 
-    // A valid billing to draw a (negative-amount) PV from.
+    // B-315 (Wei = ก) changed WHERE this guard lives for a PV. The PV gross is no
+    // longer a client input, so a negative `amount` in the body is simply ignored
+    // rather than rejected — asserting a 400 here would contradict the ruling. The
+    // property that actually protects the ledger is that no negative gross can be
+    // REACHED: /ap/billing (above) is the only door money enters through, and the
+    // PV sums those stored, already-positive rows.
     const billing = await makeBilling(finMgr, vendorId, 100_000);
     const pvRes = await finMgr.post("/api/v1/ap/pv", {
       data: { billing_ids: [String(billing.id)], amount: -100, method: "transfer" },
     });
-    expect(pvRes.status(), "negative PV amount → 400").toBe(400);
+    expect(pvRes.status(), "a negative client amount is ignored, not honoured").toBe(201);
+    const pv = await pvRes.json();
+    expect(Number(pv.amount), "the stored gross is the billing's, never negative").toBe(100_000);
+    expect(Number(pv.net), "the GL/bank basis is positive").toBeGreaterThan(0);
   });
 
   test("bank reconciliation — statements, auto-match SUGGEST, manual CONFIRM, re-match guard", async () => {

@@ -10,9 +10,17 @@
  *
  * Data: this is a REAL POST /ap/pv (use-ap.ts). The AP picker is the REAL billing
  * catalogue (GET /ap/billing -> billing_ids); the payee + gross + WHT + retention are
- * DERIVED from the selected billing's real wire figures (vendor_name, amount + vat,
- * wht, retention) — pv-rows.impliedWhtPct / pvNet. The server re-computes the net via
- * @juneflow/tax-engine and owns status ("pending").
+ * DERIVED from the selected billing's real wire figures (vendor_name, amount, wht,
+ * retention) — pv-rows.pvGross / impliedWhtPct / pvNet. The server re-computes the net
+ * via @juneflow/tax-engine and owns status ("pending").
+ *
+ * B-315 (Wei = ก · money = SERVER): the gross shown here is a PREVIEW and is NOT sent.
+ * The server derives the stored gross from billing_ids and ignores any client amount —
+ * it is the stored figure that selects the approval tier, posts the JV and prints the
+ * bank payment instruction. The preview also FIXES a real arithmetic bug: it used to
+ * show amount + vat, but ap_billing.amount is already VAT-inclusive (`vat` is the tax
+ * INSIDE it), so the displayed payable was 6.54% too high and disagreed with ap.jsx's
+ * own net box. The picker + net box now match the prototype's printed figures.
  *
  * HONEST DIVERGENCES (flagged, never fabricated):
  *   - the prototype's PV-number + pay-date + accounting-period fields are DROPPED: pv
@@ -45,6 +53,7 @@ import { toBillingRow } from "./billing-rows";
 import {
   METHOD_OPTIONS,
   impliedWhtPct,
+  pvGross,
   pvNet,
   pvSubmittable,
   buildPvBody,
@@ -104,7 +113,9 @@ export function PVCreateForm({ onClose }: { onClose: () => void }) {
   const selected = billings.find((b) => b.id === billingId);
 
   // Derive the payable figures from the selected billing (all real wire data).
-  const gross = selected ? selected.amount + selected.vat : 0;
+  // B-315: pvGross — `amount` is already VAT-inclusive; the server derives and
+  // stores the same figure from billing_ids, so this is a preview, never the input.
+  const gross = selected ? pvGross(selected) : 0;
   const whtPct = selected ? impliedWhtPct(selected.wht, gross) : 0;
   const retention = selected?.retention ?? 0;
   const net = pvNet(gross, whtPct, retention);
@@ -144,7 +155,7 @@ export function PVCreateForm({ onClose }: { onClose: () => void }) {
             <option value="">{tp(P("selectPlaceholder"))}</option>
             {billings.map((b) => (
               <option key={b.id} value={b.id}>
-                {[b.vendorName, `${formatMoney(b.amount + b.vat)} ${baht}`].filter(Boolean).join(" · ")}
+                {[b.vendorName, `${formatMoney(pvGross(b))} ${baht}`].filter(Boolean).join(" · ")}
               </option>
             ))}
           </select>
