@@ -414,6 +414,13 @@
       "when": 1785988410420,
       "tag": "0058_payroll_worker_period_uq",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1785997284968,
+      "tag": "0059_material_issue_idempotency_key",
+      "breakpoints": true
     }
   ]
 }

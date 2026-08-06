@@ -192,13 +192,36 @@ export const materialIssues = pgTable("material_issue", {
     onDelete: "set null",
   }),
   status: text("status"),
+  // B-312 (migration 0059): the client-supplied idempotency key for the mobile
+  // offline SyncProcessor's at-least-once replay. POST /inventory/issues MINTS a
+  // fresh issue id per request and posts a Dr 1140 / Cr 5020 JV keyed
+  // `issue:<that fresh id>` — so jv_source_doc_uq can NEVER see a replay (two
+  // different source_docs, two clean balanced JVs) and the stock ledger is
+  // decremented twice. No natural key exists: (project_id, from_warehouse_id,
+  // issue_date, value) is legitimately repeatable (two issues of the same
+  // material to the same project on one day) AND four of those five columns are
+  // nullable, so a plain unique index would be NULL-escapable. Hence the B-307
+  // client-key shape, not B-308's natural key. NULLABLE: pre-existing rows and
+  // web clients that omit it carry none and never collide.
+  idempotencyKey: text("idempotency_key"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("material_issue_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("material_issue_company_idx").on(t.companyId),
+  // B-312 (migration 0059): PARTIAL unique index — a replayed POST
+  // /inventory/issues carrying a previously-seen idempotency_key trips 23505 →
+  // the handler returns the ORIGINAL issue (no duplicate row, no second JV, no
+  // second ledger decrement). Partial (WHERE idempotency_key IS NOT NULL) so the
+  // pre-existing / key-less issues are exempt and never collide (mirrors
+  // gr_idempotency_uq / attendance_idempotency_uq).
+  uniqueIndex("material_issue_idempotency_uq")
+    .on(t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
+]);
 
 /**
  * StockLedger — the per-(item, warehouse) append-only movement ledger (B-141 B2,

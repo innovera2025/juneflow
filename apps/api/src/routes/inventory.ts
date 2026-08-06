@@ -68,8 +68,22 @@
 // materials-cost = value, source_doc `issue:<id>`, carrying the issue's project_id
 // (and a single distinct cc_id, when present) on both legs. 1140 + 5020 are real
 // COA_SEED codes (resolved per-tenant at post time — never invented, C-177; a
-// missing code → honest 409). The JV posts EXACTLY ONCE at create (the issue id is
-// fresh), so there is no idempotency pre-check to make.
+// missing code → honest 409).
+//
+// ISSUE IDEMPOTENCY (B-312 · migration 0059) — this comment used to read "the JV
+// posts EXACTLY ONCE at create (the issue id is fresh), so there is no idempotency
+// pre-check to make". That reasoning was BACKWARDS and is now deleted: a fresh id
+// per request is precisely why a REPLAY is unprotected. apps/mobile's offline
+// SyncProcessor retries at-least-once, so a create it never heard back on is
+// re-sent → a NEW issue row → a NEW `issue:<new id>` source_doc → jv_source_doc_uq
+// (whose predicate does not even list `issue:`) cannot see it → TWO clean balanced
+// JVs for ONE physical issue, and the stock ledger decremented TWICE. Proven live:
+// two identical posts of 100 bags → MI-2026-0001 + MI-2026-0002, JV-2026-0419 +
+// JV-2026-0420, Σ Dr 1140 = 2 × value, on-hand 800 instead of 900. The fix is the
+// ratified B-261/B-307 template: a CLIENT idempotency_key + a PARTIAL unique index
+// + a 23505 catch that returns the ORIGINAL. It is a CLIENT key (not B-308's
+// natural key) because (project_id, from_warehouse_id, issue_date, value) is
+// legitimately repeatable AND four of those five columns are nullable.
 //   ⚠ ORCHESTRATOR-FLAG (Wei-ratify, do NOT block): the prototype draft's
 //     "Cr inventory asset" leg has NO dedicated COA account in COA_SEED. Cr 5020
 //     materials-cost (reclassify the GR-expensed material pool into project WIP) is
@@ -91,10 +105,16 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
-import { pick, str, toNum } from "./procurement.js";
+import { pick, readIdempotencyKey, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed, type CallerAuthz } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  isUniqueViolation,
+  resolveAccountIds,
+  violatedConstraint,
+} from "./gl-post.js";
 
 type InventoryItemRow = typeof inventoryItems.$inferSelect;
 type WarehouseRow = typeof warehouses.$inferSelect;
@@ -104,6 +124,7 @@ type StockLedgerRow = typeof stockLedgers.$inferSelect;
 type TransferLineRow = typeof transferLines.$inferSelect;
 type IssueLineRow = typeof issueLines.$inferSelect;
 type ProjectRow = typeof projects.$inferSelect;
+type JvRow = typeof jvs.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -119,6 +140,16 @@ const FINANCE_MODULE = "finance";
  * COA lacks it → honest 409 (C-177).
  */
 const WIP_MATERIAL = "1140";
+
+/** The partial unique index the B-312 replay branch gates on BY NAME (B-263). */
+const ISSUE_IDEMPOTENCY_CONSTRAINT = "material_issue_idempotency_uq";
+
+/**
+ * issue_line carries NO company_id — it is scoped THROUGH its material_issue parent
+ * (which does). One shared hop chain so the read path (getIssue) and the B-312
+ * replay sender cannot drift on how a line is tenant-scoped.
+ */
+const ISSUE_LINE_HOPS = [{ fk: issueLines.issueId, parent: materialIssues }];
 
 // ---------------------------------------------------------------------------
 // Reply helpers (flat contract Error shape {code,message})
@@ -583,7 +614,7 @@ async function getIssue(
     // issue_line carries no company_id — scoped THROUGH material_issue.
     db.selectThrough(
       issueLines,
-      [{ fk: issueLines.issueId, parent: materialIssues }],
+      ISSUE_LINE_HOPS,
       eq(materialIssues.id, issueId),
     ) as Promise<IssueLineRow[]>,
     db.select(projects) as Promise<ProjectRow[]>,
@@ -928,6 +959,134 @@ async function approveTransfer(
   return reply.code(200).send({ id: transferId, status: "approved" });
 }
 
+// ---------------------------------------------------------------------------
+// POST /inventory/issues — B-312 idempotency (client key + partial index + replay)
+// ---------------------------------------------------------------------------
+
+/** A create/replay line as the 201 body reports it (client shape, no row id). */
+interface IssueEnvelopeLine {
+  itemId: string;
+  qty: number;
+  ccId: string | null;
+}
+
+/**
+ * The 201 create/replay body: the issue header wire + the posted `jv_no` + the
+ * per-line detail. Shared by the FRESH create AND the B-312 replay so a replayed
+ * POST is byte-identical to the original BY CONSTRUCTION rather than by two
+ * hand-built shapes happening to agree today (the grCreateEnvelope precedent).
+ * `value` is re-derived from the PERSISTED column on both paths — never recomputed
+ * on a replay, so a later price change cannot make the replay disagree with the
+ * original. Key ORDER is the spread's: `value` keeps issueWire's slot.
+ */
+function issueCreateEnvelope(
+  issue: MaterialIssueRow,
+  projectName: string | null,
+  jvNo: string | null,
+  lines: readonly IssueEnvelopeLine[],
+): Record<string, unknown> {
+  return {
+    ...issueWire(issue, projectName),
+    jv_no: jvNo,
+    value: num(issue.value),
+    lines: lines.map((l) => ({ item_id: l.itemId, qty: l.qty, cc_id: l.ccId })),
+  };
+}
+
+/**
+ * Resolve the ORIGINAL material issue behind a client idempotency_key. THREE
+ * filters, ALL load-bearing:
+ *   - the TENANT scope — `material_issue` carries company_id directly, so it is a
+ *     plain TenantTable and db.select() AND-binds company_id by construction (ZERO
+ *     hops, the attendance shape — unlike gr, which has no company_id and must walk
+ *     po/wo → pr → project). Without it a key-only lookup could resolve ANOTHER
+ *     company's issue: material_issue_idempotency_uq is a GLOBAL partial index on
+ *     the key alone, so a cross-tenant key clash is physically possible;
+ *   - the ANCHOR project_id — the same key replayed against a DIFFERENT project must
+ *     never hand back the first project's issue (that would confirm a material
+ *     withdrawal the second project never received, and hide the one it did);
+ *   - the ANCHOR from_warehouse_id — likewise a key reused against another warehouse
+ *     must not confirm a decrement that warehouse never took.
+ * A non-matching anchor deliberately resolves to null: the caller falls through to
+ * the insert, trips the global index, and the catch answers the honest 409
+ * "idempotency_key already used". Handing back someone else's document is worse than
+ * a 409. Used by the PRE-CHECK, the 23505 catch AND the negative-stock catch — ONE
+ * resolver, so the three paths can never diverge on what counts as "the client's own
+ * issue".
+ */
+async function findIssueByIdempotencyKey(
+  db: TenantDb,
+  args: { idempotencyKey: string; projectId: string; fromWarehouseId: string },
+): Promise<MaterialIssueRow | null> {
+  const { idempotencyKey, projectId, fromWarehouseId } = args;
+  const [existing] = (await db.select(
+    materialIssues,
+    and(
+      eq(materialIssues.idempotencyKey, idempotencyKey),
+      eq(materialIssues.projectId, projectId),
+      eq(materialIssues.fromWarehouseId, fromWarehouseId),
+    ),
+  )) as MaterialIssueRow[];
+  return existing ?? null;
+}
+
+/**
+ * Rebuild and send the 201 create envelope for an ALREADY-PERSISTED issue — same id,
+ * same server `no`, money and lines RE-READ not recomputed, and critically NO second
+ * write of any kind: no stock_ledger row, no JV, no issue_line. The `jv_no` comes
+ * from the ORIGINAL JV (source_doc `issue:<id>`) — never re-allocated, so a replay
+ * cannot mint a voucher number for a posting that already exists. The ONLY place a
+ * replay 201 is produced (the pre-check, the 23505 catch and the negative-stock catch
+ * all call it).
+ */
+async function sendExistingIssue(
+  db: TenantDb,
+  reply: FastifyReply,
+  existing: MaterialIssueRow,
+  projectName: string | null,
+): Promise<FastifyReply> {
+  const [lines, jvRows] = await Promise.all([
+    db.selectThrough(
+      issueLines,
+      ISSUE_LINE_HOPS,
+      eq(materialIssues.id, existing.id),
+    ) as Promise<IssueLineRow[]>,
+    db.select(jvs, eq(jvs.sourceDoc, `issue:${existing.id}`)) as Promise<JvRow[]>,
+  ]);
+  return reply.code(201).send(
+    issueCreateEnvelope(
+      existing,
+      projectName,
+      jvRows[0]?.no ?? null,
+      lines.map((l) => ({ itemId: l.itemId, qty: num(l.qty), ccId: l.ccId })),
+    ),
+  );
+}
+
+/**
+ * B-312 idempotency REPLAY, reached from a CATCH (either the 23505 on
+ * material_issue_idempotency_uq, or the negative-stock guard tripping on stock the
+ * ORIGINAL already consumed). A key that collided at the DB layer but resolves to
+ * nothing in THIS tenant/anchor (a cross-tenant clash, or the same key against a
+ * different project/warehouse) is an honest 409 — never a leak, never a fabricated
+ * issue. Kept deliberately alongside the pre-check: a pre-check is NOT a substitute
+ * for the unique index + catch (money-post-idempotency lesson).
+ */
+async function replayExistingIssue(
+  db: TenantDb,
+  reply: FastifyReply,
+  args: {
+    idempotencyKey: string;
+    projectId: string;
+    fromWarehouseId: string;
+    projectName: string | null;
+  },
+): Promise<FastifyReply> {
+  const existing = await findIssueByIdempotencyKey(db, args);
+  if (!existing) return conflict(reply, "idempotency_key already used");
+  return sendExistingIssue(db, reply, existing, args.projectName);
+}
+
 /**
  * POST /inventory/issues — issue stock out to a project + post the cost to WIP
  * (inventory.jsx IssueAddForm). finance.approve (it MOVES stock and POSTS money).
@@ -948,6 +1107,18 @@ async function createIssue(
 ): Promise<FastifyReply> {
   const caller = await requireFinance(request, reply, "approve");
   if (!caller) return reply;
+
+  // B-312: the client's replay key, read FIRST — before any validation, any read and
+  // any write, so nothing can run ahead of it. Absent / explicit null / blank →
+  // null, so the web create form is unchanged and no dedup path fires without a key
+  // (the index is PARTIAL and SQL NULL is not equal to itself, so both layers refuse
+  // a null independently). B-309: a PRESENT but non-string key is a 400 rather than
+  // being swallowed by str() into that same null — a silent dedup-off double-posts
+  // this issue's JV. Shared parser (readIdempotencyKey) with POST /gr and POST
+  // /labor/attendance so the three money-writes cannot drift on what counts as a key.
+  const idem = readIdempotencyKey(body);
+  if (!idem.ok) return badRequest(reply, idem.message);
+  const idempotencyKey = idem.key;
 
   const projectId = str(pick(body, "project_id", "projectId")).trim();
   if (!projectId) return badRequest(reply, "project_id is required");
@@ -977,6 +1148,29 @@ async function createIssue(
     if (!priceById.has(line.itemId)) {
       return badRequest(reply, `item ${line.itemId} not found in this tenant`);
     }
+  }
+
+  // B-312 PRE-CHECK, deliberately HOISTED ABOVE db.transaction — this is the
+  // load-bearing deviation from the attendance template, and a catch-at-the-insert
+  // implementation is WRONG here. Inside the tx the NEGATIVE-STOCK GUARD runs BEFORE
+  // the header insert, so on a replay the original has ALREADY consumed the stock and
+  // the guard throws first: the insert (and therefore the 23505 that would trigger the
+  // replay) is never reached. Proven live: on-hand 800, issue 800, replay → "409
+  // insufficient stock … on-hand 0, issue 800" for material that really did leave the
+  // warehouse. That is B-264 exactly, and sync_processor.dart dead-letters every 4xx
+  // PERMANENTLY, so the storekeeper would see FAILED with no in-app recovery. The
+  // anchors are resolved above this on purpose: a foreign project/warehouse/item is a
+  // 400 REGARDLESS of any key — a replay against something that is not ours must never
+  // be answered from our data. Falling through is safe: a key that is new (or belongs
+  // to another anchor/tenant) still meets every gate below, and the 23505 catch remains
+  // the concurrency backstop.
+  if (idempotencyKey) {
+    const existing = await findIssueByIdempotencyKey(db, {
+      idempotencyKey,
+      projectId,
+      fromWarehouseId,
+    });
+    if (existing) return sendExistingIssue(db, reply, existing, project.name);
   }
 
   // SERVER money (standard-cost): value = Σ qty × item.price.
@@ -1048,6 +1242,13 @@ async function createIssue(
           issueDate,
           byUserId: caller.userId,
           status: "approved",
+          // B-312: the header carries the client key. A REPLAY that raced past the
+          // pre-check trips material_issue_idempotency_uq → 23505 → the catch below
+          // returns the ORIGINAL. The header is the FIRST write in this tx (the guard
+          // above only READS), so that 23505 rolls the whole block back BEFORE any
+          // stock_ledger row or JV leg exists — the replay-safety of the stock
+          // movement is structural, not a compensating action.
+          idempotencyKey,
         })
         .returning()) as MaterialIssueRow[];
       await tx.insertThrough(
@@ -1073,16 +1274,60 @@ async function createIssue(
       return header!;
     });
   } catch (err) {
-    if (err instanceof NegativeStockError) return conflict(reply, err.message);
+    // B-312 CONCURRENCY BACKSTOP. Two distinct races land here, and BOTH are the same
+    // logical event — "the original committed between our pre-check and our write":
+    //
+    //  (1) 23505 on material_issue_idempotency_uq — our guard read the ledger BEFORE
+    //      the original committed (so it saw the un-consumed stock and passed), then
+    //      our header insert hit the index. Entering this branch needs ALL THREE of: a
+    //      key present (the partial index exempts nulls, so a key-less insert can never
+    //      dedup), SQLSTATE 23505, and — B-263 — the violated constraint BY NAME.
+    //      `err.constraint` alone is undefined in production because drizzle nests the
+    //      DatabaseError under `.cause`; violatedConstraint() reads both levels. The
+    //      name check is load-bearing: 23505 alone only says "SOME unique constraint",
+    //      so a future unique index on material_issue (a unique `no`, say) would
+    //      otherwise silently inherit the replay path and answer the wrong document.
+    //
+    //  (2) NegativeStockError — the SAME race with the other interleaving: the original
+    //      committed BEFORE our in-tx guard read, so the guard sees the stock it already
+    //      consumed and throws for goods that really were issued. The pre-check above
+    //      cannot close this window (it ran earlier), and the 23505 never fires because
+    //      the guard pre-empts the insert. Re-resolving the client's OWN issue here is
+    //      what makes the hoist race-tight rather than merely race-narrowed. A fresh
+    //      (unkeyed, or non-resolving) write is unaffected: it still gets the honest 409.
+    //
+    // Both use the SAME resolver and the SAME sender, so they cannot diverge. Anything
+    // else rethrows to the 500 handler — the safe failure for a money write (nothing
+    // committed, client retries) rather than a confidently wrong answer.
+    if (
+      idempotencyKey &&
+      isUniqueViolation(err) &&
+      violatedConstraint(err) === ISSUE_IDEMPOTENCY_CONSTRAINT
+    ) {
+      return replayExistingIssue(db, reply, {
+        idempotencyKey,
+        projectId,
+        fromWarehouseId,
+        projectName: project.name,
+      });
+    }
+    if (err instanceof NegativeStockError) {
+      if (idempotencyKey) {
+        const existing = await findIssueByIdempotencyKey(db, {
+          idempotencyKey,
+          projectId,
+          fromWarehouseId,
+        });
+        if (existing) return sendExistingIssue(db, reply, existing, project.name);
+      }
+      return conflict(reply, err.message);
+    }
     throw err;
   }
 
-  return reply.code(201).send({
-    ...issueWire(created, project.name),
-    jv_no: jvNo,
-    value,
-    lines: lines.map((l) => ({ item_id: l.itemId, qty: l.qty, cc_id: l.ccId })),
-  });
+  return reply
+    .code(201)
+    .send(issueCreateEnvelope(created, project.name, jvNo, lines));
 }
 
 // ---------------------------------------------------------------------------
