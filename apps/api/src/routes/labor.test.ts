@@ -814,6 +814,100 @@ describe("POST /api/v1/labor/attendance — B-307 idempotency (client key + repl
     expect(captured.filter((c) => c.table === attendances)).toHaveLength(0);
   });
 
+  // -------------------------------------------------------------------------
+  // B-309 — a PRESENT but NON-STRING key
+  // -------------------------------------------------------------------------
+  // The three blank cases above are all STRINGS: they exercise `.trim()` and never
+  // the type coercion, which is exactly why str() swallowing a NUMBER survived two
+  // reviews. Proven live before the fix: POST {…, idempotency_key: 123} twice → 201,
+  // 201, two attendance rows, and payroll paid the day TWICE. The row-count assertion
+  // is load-bearing here — a 400 that still wrote would be the same double-pay.
+  it.each([
+    ["a JSON number (the live-proven case)", 123],
+    ["a float", 1.5],
+    ["a boolean", true],
+    ["an array", ["1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"]],
+    ["an object", { key: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d" }],
+  ])(
+    "B-309: %s idempotency_key → 400 VALIDATION and NOTHING is written (never a silent no-key create)",
+    async (_label, key) => {
+      const inserted: Inserted[] = [];
+      const captured: Captured[] = [];
+      const db = idempDb({ stored: () => [], captured, inserted });
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/labor/attendance",
+        payload: { worker_id: W1, day: DAY, idempotency_key: key },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe("VALIDATION");
+      expect(res.json().message).toMatch(/idempotency_key must be a string/);
+      // THE assertion: no attendance row exists to be summed by a payroll run.
+      expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+      // and it never even looked — the dedup read is unreachable for a rejected key.
+      expect(captured.filter((c) => c.table === attendances)).toHaveLength(0);
+    },
+  );
+
+  it("B-309: the camelCase alias is guarded too — {idempotencyKey: 123} → 400, nothing written", async () => {
+    const inserted: Inserted[] = [];
+    const db = idempDb({ stored: () => [], inserted });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotencyKey: 123 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+  });
+
+  it("B-309: an EXPLICIT null is ABSENT, not invalid — 201, persists null, issues no dedup read", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const db = idempDb({ stored: () => [], captured, inserted });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: null },
+    });
+    // A null is the wire form of a nullable client field holding no key — nothing was
+    // ever minted, so no client is misled and the legitimate no-key path must stand.
+    expect(res.statusCode).toBe(201);
+    const attInserts = inserted.filter((i) => i.table === attendances);
+    expect(attInserts).toHaveLength(1);
+    expect((attInserts[0]!.values as Record<string, unknown>).idempotencyKey).toBe(null);
+    expect(captured.filter((c) => c.table === attendances)).toHaveLength(0);
+  });
+
+  it("B-309: a NUMERIC-LOOKING STRING is a perfectly valid key — it still dedups (the fix gates on type, not on shape)", async () => {
+    const inserted: Inserted[] = [];
+    const stored: unknown[] = [];
+    const db = idempDb({
+      stored: () => stored,
+      byKey: { "123": () => stored },
+      inserted,
+      onInsert: (table, out) => {
+        if (table === attendances) stored.push(...out);
+      },
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const payload = { worker_id: W1, day: DAY, idempotency_key: "123" };
+    const res1 = await app.inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json().id).toBe(res1.json().id); // the replay, not a second day
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+    expect((inserted.find((i) => i.table === attendances)!.values as Record<string, unknown>)
+      .idempotencyKey).toBe("123");
+  });
+
   // Each case pairs the NEGATIVE (this error must NOT replay) with the POSITIVE
   // CONTROL (attendance_idempotency_uq on the very same stub MUST replay). Both
   // halves are needed: the negative alone is green against a handler with no catch at

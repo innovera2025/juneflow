@@ -98,6 +98,64 @@ export function toNum(value: unknown): number | null {
 }
 
 // ---------------------------------------------------------------------------
+// B-309 — the client idempotency key of the B-261 money-write template
+// ---------------------------------------------------------------------------
+
+/** The 400 message every handler emits for a present-but-non-string key (one string,
+ *  so the two money-writes cannot drift on what they tell the client). */
+export const IDEMPOTENCY_KEY_TYPE_MESSAGE = "idempotency_key must be a string";
+
+/** Either the resolved key (a non-blank string, or null = no key) or the 400 to send. */
+export type IdempotencyKeyResult =
+  | { ok: true; key: string | null }
+  | { ok: false; message: string };
+
+/**
+ * Read the client idempotency key out of an opaque JSON body — the SINGLE parser for
+ * every handler that implements the B-261 template (POST /gr, POST /labor/attendance).
+ *
+ * B-309: the old inline form was `str(pick(body, ...)).trim() || null`, and `str()`
+ * returns "" for anything that is not a string. A JSON **number** therefore collapsed
+ * to null and the request silently took the NO-KEY path — no dedup, no 400, no warning,
+ * **while the client believed it had sent a key**. Proven live: `POST {…,
+ * idempotency_key: 123}` twice → 201, 201, two rows, payroll paid 2×. The three
+ * pre-existing blank-key tests ("", "   ", "\t\n") could not catch it: all three are
+ * STRINGS, so they exercise `.trim()` and never the type coercion.
+ *
+ * Wei B-309 = (ก): a key that is PRESENT but not a string is a `400 VALIDATION`.
+ * Silence is the defect, not the rejection — a client that believes it sent a key must
+ * never be told its write succeeded idempotently when dedup was in fact switched off.
+ *
+ * CLASSIFICATION (every input shape, deliberately — none of these is left to accident):
+ *   ABSENT → { ok: true, key: null } (the legitimate no-key path; the web clients never
+ *   send a key and MUST stay unchanged):
+ *     - the property is missing entirely;
+ *     - `undefined` — JSON cannot transmit it, so it can only mean "not set";
+ *     - explicit `null` — the wire form of a nullable client field that holds no key.
+ *       A null is not a lost key: nothing was ever minted, so no client is misled. A
+ *       mobile map with a nullable `idempotency_key` serialises exactly this;
+ *     - `""` / whitespace-only — a string carrying no dedup identity. Pinned as ABSENT
+ *       by the ratified B-261/B-307 tests; still `.trim()`-collapsed, unchanged.
+ *   VALID KEY → { ok: true, key: <trimmed> }:
+ *     - ANY non-blank string, including a numeric-looking one like "123". It is a
+ *       string, the handler never enforced uuid-ness, and B-261/B-307/B-308 behaviour
+ *       for every string key is untouched by B-309.
+ *   INVALID → { ok: false } → 400 VALIDATION:
+ *     - number, boolean, array, object — every shape that `str()` used to swallow.
+ *
+ * Alias precedence is `pick()`'s and is NOT changed: the FIRST present of
+ * idempotency_key / idempotencyKey decides, so `{ idempotency_key: 123 }` is a 400 even
+ * if a valid camelCase twin is also present. Answering from the twin would hide exactly
+ * the client bug this guard exists to surface.
+ */
+export function readIdempotencyKey(body: Record<string, unknown>): IdempotencyKeyResult {
+  const raw = pick(body, "idempotency_key", "idempotencyKey");
+  if (raw === undefined || raw === null) return { ok: true, key: null };
+  if (typeof raw !== "string") return { ok: false, message: IDEMPOTENCY_KEY_TYPE_MESSAGE };
+  return { ok: true, key: raw.trim() || null };
+}
+
+// ---------------------------------------------------------------------------
 // Source-PR line pricing (PO create) — the same C10 computation pr.ts uses to
 // derive a PR's `amount`. A PO has NO line-item table of its own (unlike
 // pr_item), so a PO's stored `total` is seeded from this at create-time; the PO
