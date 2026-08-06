@@ -867,7 +867,28 @@ export const payrolls = pgTable("payroll", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("payroll_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("payroll_company_idx").on(t.companyId),
+  /**
+   * B-308 (money · Wei = ก): ONE payroll run per worker per period. Without this a
+   * double-click on "run payroll" mints TWO rows, and because the GL guard keys on
+   * `source_doc = payroll:<id>` (jv_source_doc_uq, 0037) BOTH post as clean balanced
+   * JVs — 2× the money for one day's work, uncorrelatable after the fact. Reproduced
+   * live: JV-2026-0419 + JV-2026-0420, 687.50 each, distinct payroll ids.
+   *
+   * NATURAL key, not a client idempotency key (unlike attendance_idempotency_uq /
+   * gr_idempotency_uq): a second run for the same worker+period is never legitimate
+   * work — `period` is a monthly YYYY-MM bucket by ruling (B-140 RG-4) and no
+   * UPDATE / PUT / re-run path for `payroll` exists anywhere in the API.
+   *
+   * NOT partial and NOT company-scoped, both deliberate: worker_id and period are
+   * both NOT NULL, so the key covers 100% of rows with no NULL-distinctness escape
+   * (the trap the partial B-307 index had to dodge); and worker_id FKs a
+   * tenant-owned worker, so two companies can never share one — the 2-column key is
+   * strictly TIGHTER than adding company_id, never looser.
+   */
+  uniqueIndex("payroll_worker_period_uq").on(t.workerId, t.period),
+]);
 
 /**
  * OpexBudget — a department's operating budget by month, compared across years
