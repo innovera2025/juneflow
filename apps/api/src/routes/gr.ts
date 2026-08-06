@@ -63,7 +63,14 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
 import { round2 } from "./money.js";
 import { isUniqueViolation, violatedConstraint } from "./gl-post.js";
-import { has, pick, prOrderedQty, str, toNum } from "./procurement.js";
+import {
+  has,
+  pick,
+  prOrderedQty,
+  readIdempotencyKey,
+  str,
+  toNum,
+} from "./procurement.js";
 
 type GrRow = typeof grs.$inferSelect;
 type GrItemRow = typeof grItems.$inferSelect;
@@ -444,10 +451,18 @@ export function registerGrRoute(app: FastifyInstance): void {
     const woId = str(pick(body, "wo_id", "woId")).trim();
     const no = has(body, "no") ? str(pick(body, "no")).trim() || null : null;
     // B-261: the client's idempotency key for the mobile offline SyncProcessor's
-    // at-least-once replay. Absent / blank → null (web clients are unchanged; the
-    // partial unique index exempts nulls, so no dedup path fires without a key).
-    const idempotencyKey =
-      str(pick(body, "idempotency_key", "idempotencyKey")).trim() || null;
+    // at-least-once replay. Absent / null / blank → null (web clients are unchanged;
+    // the partial unique index exempts nulls, so no dedup path fires without a key).
+    // B-309: a PRESENT but non-string key is a 400 — it used to be swallowed by str()
+    // and silently turn dedup OFF while the client believed it had sent a key. Shared
+    // parser (readIdempotencyKey) so this handler and POST /labor/attendance cannot
+    // drift on what counts as a key. The guard sits AT the read on purpose: no insert,
+    // no read, and no state gate can run ahead of it.
+    const idem = readIdempotencyKey(body);
+    if (!idem.ok) {
+      return reply.code(400).send({ code: "VALIDATION", message: idem.message });
+    }
+    const idempotencyKey = idem.key;
     const rawLines = pick(body, "lines");
 
     // Exactly one anchor.

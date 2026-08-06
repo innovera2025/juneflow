@@ -63,7 +63,7 @@ import { and, eq } from "drizzle-orm";
 import { attendances, jvLines, jvs, payrolls, workers } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
-import { has, pick, str, toNum } from "./procurement.js";
+import { has, pick, readIdempotencyKey, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
 import {
@@ -456,13 +456,17 @@ async function createLaborAttendance(
   const otRaw = toNum(pick(body, "ot"));
   const ot = otRaw != null && otRaw > 0 ? otRaw : 0;
   const ccId = str(pick(body, "cc_id", "ccId")).trim() || null;
-  // B-307: the client's replay key. Absent / blank / whitespace-only → null (the
-  // .trim() || null collapses all three), so the web bulk-save is unchanged and no
-  // dedup path fires without a key. A null NEVER enters the replay branch and never
-  // matches a stored null — the index is PARTIAL (WHERE idempotency_key IS NOT NULL)
-  // and SQL NULL is not equal to itself, so both layers refuse it independently.
-  const idempotencyKey =
-    str(pick(body, "idempotency_key", "idempotencyKey")).trim() || null;
+  // B-307: the client's replay key. Absent / explicit null / blank / whitespace-only →
+  // null, so the web bulk-save is unchanged and no dedup path fires without a key. A
+  // null NEVER enters the replay branch and never matches a stored null — the index is
+  // PARTIAL (WHERE idempotency_key IS NOT NULL) and SQL NULL is not equal to itself, so
+  // both layers refuse it independently.
+  // B-309: a PRESENT but non-string key is a 400 instead of being swallowed by str()
+  // into that same null — a silent dedup-off double-pays this worker on replay. Shared
+  // parser (readIdempotencyKey) with POST /gr so the two money-writes cannot drift.
+  const idem = readIdempotencyKey(body);
+  if (!idem.ok) return badRequest(reply, idem.message);
+  const idempotencyKey = idem.key;
 
   // worker must belong to THIS tenant (scoped select — no cross-tenant leak).
   const [worker] = (await db.select(

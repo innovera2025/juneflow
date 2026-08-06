@@ -26,6 +26,7 @@ import {
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { isUniqueViolation, violatedConstraint } from "./gl-post.js";
+import { IDEMPOTENCY_KEY_TYPE_MESSAGE, readIdempotencyKey } from "./procurement.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -1432,6 +1433,140 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     }
   });
 
+  // -------------------------------------------------------------------------
+  // B-309 — a PRESENT but NON-STRING key
+  // -------------------------------------------------------------------------
+  // The blank cases above are all STRINGS: they exercise `.trim()` and never the type
+  // coercion, which is why str() swallowing a NUMBER survived review here AND in the
+  // B-307 copy of this template. A number collapsed to null → dedup silently OFF while
+  // the client believed it had sent a key → the replay received the goods a second
+  // time. The insert-count assertion is the load-bearing one.
+  it.each([
+    ["a JSON number (the live-proven case)", 123],
+    ["a float", 1.5],
+    ["a boolean", true],
+    ["an array", [FRESH_KEY]],
+    ["an object", { key: FRESH_KEY }],
+  ])(
+    "B-309: %s idempotency_key → 400 VALIDATION and NO receipt is written (never a silent no-key create)",
+    async (_label, key) => {
+      const inserted: Inserted[] = [];
+      const captured: Captured[] = [];
+      const db = stubDb({
+        rows: [
+          [pos, [poRow("approved")]],
+          [prs, [prRow]],
+          [projects, [project]],
+          [prItems, [prLine("l0", "1000")]],
+          [grs, []],
+          [vendors, [vendorRow]],
+        ],
+        captured,
+        inserted,
+      });
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/gr",
+        payload: { po_id: PO, idempotency_key: key, lines: [{ qty_ok: 10 }] },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe("VALIDATION");
+      expect(res.json().message).toMatch(/idempotency_key must be a string/);
+      expect(inserted.filter((w) => w.table === grs)).toHaveLength(0); // nothing received
+      expect(captured.filter((c) => c.table === grs)).toHaveLength(0); // never even looked
+    },
+  );
+
+  it("B-309: the camelCase alias is guarded too — {idempotencyKey: 123} → 400, no receipt", async () => {
+    const inserted: Inserted[] = [];
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, []],
+        [vendors, [vendorRow]],
+      ],
+      inserted,
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotencyKey: 123, lines: [{ qty_ok: 10 }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(0);
+  });
+
+  it("B-309: an EXPLICIT null is ABSENT, not invalid — 201, persists null, binds no key in any read", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, [gr("g-null", { poId: PO, received: 100 })]],
+        [vendors, [vendorRow]],
+      ],
+      captured,
+      inserted,
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: null, lines: [{ qty_ok: 10 }] },
+    });
+    // A null is the wire form of a nullable client field holding no key — nothing was
+    // ever minted, so no client is misled and the legitimate no-key path must stand.
+    expect(res.statusCode).toBe(201);
+    expect(res.json().id).not.toBe("g-null"); // a real create, not the NULL-key row
+    const grInserts = inserted.filter((w) => w.table === grs);
+    expect(grInserts).toHaveLength(1);
+    expect((grInserts[0]!.rows[0] as { idempotencyKey: string | null }).idempotencyKey).toBe(
+      null,
+    );
+  });
+
+  it("B-309: a NUMERIC-LOOKING STRING is a perfectly valid key — it still dedups (the fix gates on TYPE, not on shape)", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    // The ORIGINAL receipt this key already resolves — the same pre-check replay the
+    // uuid key gets. "123" is a string, so nothing about B-309 may touch it.
+    const original = { ...gr("new-0", { poId: PO, received: 300 }), createdAt: undefined };
+    const db = stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", "1000")]],
+        [grs, keyedGrs({ "123": [original] }, [original])],
+        [vendors, [vendorRow]],
+      ],
+      captured,
+      inserted,
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, idempotency_key: "123", lines: [{ qty_ok: 300 }] },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().id).toBe("new-0"); // the client's OWN receipt, replayed
+    expect(inserted.filter((w) => w.table === grs)).toHaveLength(0); // no second receipt
+    expect(keyedReads(captured, "123").length).toBeGreaterThan(0); // the key was bound
+  });
+
   it("the 23505 backstop still fires when the pre-check MISSES (two simultaneous replays of the full receipt)", async () => {
     const inserted: Inserted[] = [];
     const captured: Captured[] = [];
@@ -1589,5 +1724,57 @@ describe("violatedConstraint() — the shared B-263 gate helper (money-write tem
     expect(isUniqueViolation(pgUniqueViolation())).toBe(true);
     expect(isUniqueViolation(uniqueViolation())).toBe(true);
     expect(isUniqueViolation(new Error("boom"))).toBe(false);
+  });
+});
+
+/**
+ * B-309. The classification table itself, at the unit level — the handler tests above
+ * prove each verdict end-to-end for /gr and labor.test.ts does the same for
+ * /labor/attendance, but only here can `undefined` be asserted: JSON cannot transmit
+ * it, so no HTTP-level test can reach that branch. Every row is a DECISION, not an
+ * accident — this is the artifact a future reviewer reads to see which shapes were
+ * deliberately treated as absent and which as invalid.
+ */
+describe("readIdempotencyKey() — the shared B-309 parser (money-write template)", () => {
+  it.each([
+    ["the property is missing entirely", {}],
+    ["an explicit undefined (unreachable over JSON — only a direct call)", { idempotency_key: undefined }],
+    ["an explicit null (a nullable client field holding no key)", { idempotency_key: null }],
+    ["an empty string", { idempotency_key: "" }],
+    ["whitespace only", { idempotency_key: "   " }],
+    ["a tab/newline", { idempotency_key: "\t\n" }],
+  ])("ABSENT — %s → key null, no error", (_label, body) => {
+    expect(readIdempotencyKey(body)).toEqual({ ok: true, key: null });
+  });
+
+  it.each([
+    ["a uuid", IDEMP_KEY, IDEMP_KEY],
+    ["a numeric-looking string", "123", "123"],
+    ["a padded string (trimmed, as before B-309)", "  k1  ", "k1"],
+    ["the string \"null\"", "null", "null"],
+  ])("VALID — %s stays a key", (_label, raw, expected) => {
+    expect(readIdempotencyKey({ idempotency_key: raw })).toEqual({ ok: true, key: expected });
+  });
+
+  it.each([
+    ["a number (the live-proven double-post)", 123],
+    ["zero — falsy, but still a present non-string", 0],
+    ["a float", 1.5],
+    ["a boolean", true],
+    ["an array", ["k"]],
+    ["an object", { k: "v" }],
+  ])("INVALID — %s → 400, never a silent no-key create", (_label, raw) => {
+    expect(readIdempotencyKey({ idempotency_key: raw })).toEqual({
+      ok: false,
+      message: IDEMPOTENCY_KEY_TYPE_MESSAGE,
+    });
+  });
+
+  it("alias precedence is pick()'s and is unchanged: the FIRST present key decides, even when it is the bad one", () => {
+    // Answering from the valid camelCase twin would hide exactly the client bug the
+    // guard exists to surface.
+    expect(readIdempotencyKey({ idempotency_key: 123, idempotencyKey: "ok" }).ok).toBe(false);
+    expect(readIdempotencyKey({ idempotencyKey: 123 }).ok).toBe(false);
+    expect(readIdempotencyKey({ idempotencyKey: "ok" })).toEqual({ ok: true, key: "ok" });
   });
 });
