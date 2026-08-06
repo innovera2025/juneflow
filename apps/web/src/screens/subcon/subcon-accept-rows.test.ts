@@ -247,19 +247,40 @@ describe("cumMap (percent-method markers)", () => {
 
   it("withholds when the plan is not ENTIRELY percent-basis (the mixed-plan escape)", () => {
     // The old render gate (deriveMethod = the FIRST period's basis) let exactly this
-    // through: period 1 percent -> tracker renders -> pct 0 rows add nothing but still
-    // emit markers, silently mixing two populations.
+    // through: period 1 percent -> tracker renders -> the non-percent rows still emit
+    // markers, silently mixing two populations.
+    //
+    // The non-percent rows carry a NONZERO pct deliberately. `pct` is
+    // numeric(6,3) NOT NULL DEFAULT '0' written unvalidated by POST /subcon/contracts, so
+    // basis "distance" + pct 40 is contract-legal — and a fixture that sets pct 0 on the
+    // mixed row is caught by the per-element `pct > 0` guard INSTEAD, which means the
+    // `basis === "percent"` line becomes deletable with the whole suite green while this
+    // test's name still claims to cover it. Every other precondition is satisfied here
+    // (seqs distinct, all pcts > 0, Sigma <= 100) so the basis guard is the ONLY line that
+    // can return null. This is the discipline po-wo-rows.test.ts already applies to the
+    // twin guard in cumulativeContractPct; the subcon port had lost it.
     const mixed = [
       period({ id: "a", seq: 1, basis: "percent", pct: 40 }),
-      period({ id: "b", seq: 2, basis: "distance", pct: 0, target: 100 }),
+      period({ id: "b", seq: 2, basis: "distance", pct: 40, target: 100 }),
     ];
     expect(cumMap(mixed)).toBe(null);
     const mixedTail = [
-      period({ id: "a", seq: 1, basis: "percent", pct: 40 }),
-      period({ id: "b", seq: 2, basis: "percent", pct: 40 }),
-      period({ id: "c", seq: 3, basis: "milestone", pct: 0 }),
+      period({ id: "a", seq: 1, basis: "percent", pct: 30 }),
+      period({ id: "b", seq: 2, basis: "percent", pct: 30 }),
+      period({ id: "c", seq: 3, basis: "milestone", pct: 30 }),
     ];
     expect(cumMap(mixedTail)).toBe(null);
+    // Positive control: the same plans minus the mixed basis ARE computed, proving the
+    // nulls above are the basis guard's doing and not another precondition tripping.
+    expect(
+      cumMap([
+        period({ id: "a", seq: 1, basis: "percent", pct: 40 }),
+        period({ id: "b", seq: 2, basis: "percent", pct: 40 }),
+      ]),
+    ).toEqual([
+      { seq: 1, cum: 40 },
+      { seq: 2, cum: 80 },
+    ]);
   });
 
   it("withholds when ANY single period has no share recorded (not a Sigma gate)", () => {
