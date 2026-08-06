@@ -54,14 +54,20 @@
 //     23505 → 409 (the pre-check + the DB constraint are both enforced).
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { attendances, jvLines, jvs, payrolls, workers } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  isUniqueViolation,
+  resolveAccountIds,
+  violatedConstraint,
+} from "./gl-post.js";
 
 type WorkerRow = typeof workers.$inferSelect;
 type AttendanceRow = typeof attendances.$inferSelect;
@@ -332,13 +338,97 @@ async function createLaborWorker(
 }
 
 // ---------------------------------------------------------------------------
+// POST /labor/attendance — B-307 idempotency (client key + partial index + replay)
+// ---------------------------------------------------------------------------
+
+/** The partial unique index the B-307 replay branch gates on BY NAME (B-263). */
+const ATTENDANCE_IDEMPOTENCY_CONSTRAINT = "attendance_idempotency_uq";
+
+/**
+ * Resolve the ORIGINAL attendance row behind a client idempotency_key. THREE filters,
+ * all load-bearing:
+ *   - the TENANT scope — `attendance` carries company_id directly, so it is a plain
+ *     TenantTable and db.select() AND-binds company_id by construction (NO
+ *     selectThrough / zero hops, unlike gr which has no company_id and must walk
+ *     po/wo → pr → project). Without it a key-only lookup could resolve ANOTHER
+ *     company's row: attendance_idempotency_uq is a GLOBAL partial index on the key
+ *     alone, so a cross-tenant key clash is physically possible;
+ *   - the ANCHOR worker_id — the same key replayed for a DIFFERENT worker must not
+ *     hand back the first worker's day (that would understate the second worker's pay
+ *     while looking like a success);
+ *   - the ANCHOR day — likewise a key reused across days must not confirm a day that
+ *     was never recorded.
+ * A non-matching anchor deliberately resolves to null: the caller falls through to the
+ * insert, trips the global index, and the catch answers the honest 409
+ * "idempotency_key already used". Handing back someone else's record is worse than a
+ * 409. Used by BOTH the pre-check and the 23505 catch — ONE resolver, so the two paths
+ * can never diverge on what counts as "the client's own row".
+ */
+async function findAttendanceByIdempotencyKey(
+  db: TenantDb,
+  args: { idempotencyKey: string; workerId: string; day: string },
+): Promise<AttendanceRow | null> {
+  const { idempotencyKey, workerId, day } = args;
+  const [existing] = (await db.select(
+    attendances,
+    and(
+      eq(attendances.idempotencyKey, idempotencyKey),
+      eq(attendances.workerId, workerId),
+      eq(attendances.day, day),
+    ),
+  )) as AttendanceRow[];
+  return existing ?? null;
+}
+
+/**
+ * Send the 201 create body for an ALREADY-PERSISTED attendance row — same id, same
+ * SERVER-DERIVED day_fraction, never a second write. The ONLY place a replay 201 is
+ * produced (both the pre-check and the 23505 catch call it), so a replayed POST is
+ * byte-identical to the original create BY CONSTRUCTION rather than by two hand-built
+ * shapes happening to agree today. attendanceWire is a pure function of the one row,
+ * so byte-identity needs no envelope re-derivation (unlike sendExistingGr).
+ */
+function sendExistingAttendance(
+  reply: FastifyReply,
+  existing: AttendanceRow,
+): FastifyReply {
+  return reply.code(201).send(attendanceWire(existing));
+}
+
+/**
+ * B-307 idempotency REPLAY, reached from the 23505 CATCH. The insert tripped
+ * attendance_idempotency_uq: a POST carrying a previously-seen idempotency_key is the
+ * mobile SyncProcessor's at-least-once retry, NOT a second day worked. This is the
+ * CONCURRENCY BACKSTOP for the pre-check — the pre-check read nothing, then a racing
+ * replay of the same key committed before our insert. Kept deliberately: an app-level
+ * pre-check is NOT a substitute for the unique index + catch (money-post-idempotency
+ * lesson). A key that collided at the DB layer but resolves to nothing in THIS
+ * tenant/worker/day is a 409 — never a leak, never a fabricated record.
+ */
+async function replayExistingAttendance(
+  db: TenantDb,
+  reply: FastifyReply,
+  args: { idempotencyKey: string; workerId: string; day: string },
+): Promise<FastifyReply> {
+  const existing = await findAttendanceByIdempotencyKey(db, args);
+  if (!existing) return conflict(reply, "idempotency_key already used");
+  return sendExistingAttendance(reply, existing);
+}
+
+// ---------------------------------------------------------------------------
 // POST /labor/attendance — record a worker's day (labor.jsx AttendanceForm)
 // ---------------------------------------------------------------------------
-// Body (opaque Entity): { worker_id, day, ot?, status?, cc_id? }. Gated
-// finance.create; worker_id + day required; worker_id must be THIS tenant's
+// Body (opaque Entity): { worker_id, day, ot?, status?, cc_id?, idempotency_key? }.
+// Gated finance.create; worker_id + day required; worker_id must be THIS tenant's
 // (scoped select → 400). status defaults 'full' and must be full/half/absent
 // (→ 400). day_fraction is SERVER-DERIVED from status ({full:1, half:0.5,
 // absent:0}) — never a client value. Returns 201.
+//
+// B-307 (money): POST /labor/payroll pays by SUMMING attendance ROWS in the period —
+// not DISTINCT days — so a duplicate row is a DOUBLE PAYMENT, and the downstream
+// jv_source_doc_uq guard cannot see it (the inflated amount posts as one clean
+// balanced JV). A client idempotency_key collapses the mobile SyncProcessor's
+// at-least-once replay onto the ORIGINAL row.
 async function createLaborAttendance(
   db: TenantDb,
   request: FastifyRequest,
@@ -361,6 +451,13 @@ async function createLaborAttendance(
   const otRaw = toNum(pick(body, "ot"));
   const ot = otRaw != null && otRaw > 0 ? otRaw : 0;
   const ccId = str(pick(body, "cc_id", "ccId")).trim() || null;
+  // B-307: the client's replay key. Absent / blank / whitespace-only → null (the
+  // .trim() || null collapses all three), so the web bulk-save is unchanged and no
+  // dedup path fires without a key. A null NEVER enters the replay branch and never
+  // matches a stored null — the index is PARTIAL (WHERE idempotency_key IS NOT NULL)
+  // and SQL NULL is not equal to itself, so both layers refuse it independently.
+  const idempotencyKey =
+    str(pick(body, "idempotency_key", "idempotencyKey")).trim() || null;
 
   // worker must belong to THIS tenant (scoped select — no cross-tenant leak).
   const [worker] = (await db.select(
@@ -369,17 +466,56 @@ async function createLaborAttendance(
   )) as WorkerRow[];
   if (!worker) return badRequest(reply, "worker not found in this tenant");
 
-  const [attendance] = (await db
-    .insert(attendances, {
+  // B-307 PRE-CHECK: resolve the client's OWN row before writing. It sits BELOW all
+  // validation on purpose — unlike POST /gr there is no state gate above the insert
+  // that a legitimate replay could trip, so nothing is gained by hoisting it, and
+  // keeping it here means a replay can never bypass the tenant / status-enum gates.
+  // Not a substitute for the index + catch below: it only saves the round-trip in the
+  // common (already-committed) case; a concurrent replay still races past it.
+  if (idempotencyKey) {
+    const existing = await findAttendanceByIdempotencyKey(db, {
+      idempotencyKey,
       workerId,
       day,
-      ot: ot.toFixed(2),
-      // SERVER-DERIVED from status — the client never supplies day_fraction.
-      status,
-      dayFraction: DAY_FRACTION[status]!,
-      ccId,
-    })
-    .returning()) as AttendanceRow[];
+    });
+    if (existing) return sendExistingAttendance(reply, existing);
+  }
+
+  // B-307: the row carries the client key. A REPLAY (the SyncProcessor retrying a
+  // create it never heard back on) trips attendance_idempotency_uq → 23505; we catch
+  // it and return the ORIGINAL row instead of a duplicate the payroll would pay again.
+  // Entering that branch needs ALL THREE of: a key present (the partial index exempts
+  // nulls, so a key-less insert can never dedup), SQLSTATE 23505, and — B-263 — the
+  // violated constraint being attendance_idempotency_uq BY NAME. The name check is the
+  // load-bearing hardening: 23505 alone only says "SOME unique constraint", so a future
+  // unique index on `attendance` (say the unique(worker_id, day) this deliberately did
+  // NOT add) would otherwise silently inherit the replay path and answer a wrong row.
+  // Anything else rethrows to the 500 handler — the safe failure for a money write (no
+  // row written, client retries) rather than a confidently wrong answer.
+  let attendance: AttendanceRow | undefined;
+  try {
+    [attendance] = (await db
+      .insert(attendances, {
+        workerId,
+        day,
+        ot: ot.toFixed(2),
+        // SERVER-DERIVED from status — the client never supplies day_fraction.
+        status,
+        dayFraction: DAY_FRACTION[status]!,
+        ccId,
+        idempotencyKey,
+      })
+      .returning()) as AttendanceRow[];
+  } catch (err) {
+    if (
+      idempotencyKey &&
+      isUniqueViolation(err) &&
+      violatedConstraint(err) === ATTENDANCE_IDEMPOTENCY_CONSTRAINT
+    ) {
+      return replayExistingAttendance(db, reply, { idempotencyKey, workerId, day });
+    }
+    throw err;
+  }
 
   return reply.code(201).send(attendanceWire(attendance!));
 }

@@ -815,13 +815,35 @@ export const attendances = pgTable("attendance", {
   status: text("status").notNull().default("full"),
   dayFraction: numeric("day_fraction", { precision: 3, scale: 2 }).notNull().default("1"),
   ccId: uuid("cc_id").references(() => costCenters.id, { onDelete: "set null" }),
+  // B-307 (migration 0057): the client-supplied idempotency key for the mobile
+  // offline SyncProcessor's at-least-once replay. POST /labor/payroll computes the
+  // payout by SUMMING attendance ROWS (not DISTINCT days), so a replayed check-in
+  // inserts a second row and the worker is PAID TWICE for that day — a money defect,
+  // not data hygiene. This key + the attendance_idempotency_uq partial unique index
+  // below is the dedup point (mirrors the B-261 gr contract). NULLABLE: pre-existing
+  // rows and the web bulk-save carry none and never collide.
+  idempotencyKey: text("idempotency_key"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("attendance_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("attendance_company_idx").on(t.companyId),
+  // B-307 (migration 0057): PARTIAL unique index — a replayed POST /labor/attendance
+  // carrying a previously-seen idempotency_key trips 23505 → the handler returns the
+  // ORIGINAL row (no duplicate, so payroll still sums that day ONCE). Partial (WHERE
+  // idempotency_key IS NOT NULL) so every pre-existing / key-less attendance row is
+  // exempt and never collides (mirrors gr_idempotency_uq / jv_source_doc_uq).
+  // Deliberately NOT unique(worker_id, day): a cost-centre-split day is legitimately
+  // two `half` rows with different cc_id (the column exists for exactly that), and the
+  // mobile check-in/check-out pair's mapping onto this single POST is undecided — a
+  // wrong uniqueness constraint on a money table rejects real work at the door.
+  uniqueIndex("attendance_idempotency_uq")
+    .on(t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
+]);
 
 /**
  * Payroll — a worker's payout for a period (erd.html labor "period, cc_id").

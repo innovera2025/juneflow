@@ -183,11 +183,26 @@ interface WriteStubOpts {
   rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
   inserted?: Inserted[];
+  /**
+   * B-307: make an insert into a table THROW (models a 23505 unique-violation on the
+   * attendance_idempotency_uq partial index). Receives the table and the running
+   * 0-based per-table insert count, so a test can let the 1st create through and trip
+   * only the replay. Return null to insert normally.
+   */
+  insertThrows?: (table: unknown, nth: number) => Error | null;
+  /**
+   * B-307: called with the rows an insert actually RETURNED (id + createdAt stamped).
+   * Lets a test derive its stored-row view from what the handler really wrote instead
+   * of hand-seeding it — so a handler that writes twice really is seen twice by the
+   * later payroll SUM (a hand-seeded array would hide exactly the defect under test).
+   */
+  onInsert?: (table: unknown, rows: Record<string, unknown>[]) => void;
 }
 
 /** Db stub with insert/transaction doors (the read-only stubDb above cannot write). */
 function writeStub(opts: WriteStubOpts): Db {
-  const { rows, captured = [], inserted = [] } = opts;
+  const { rows, captured = [], inserted = [], insertThrows, onInsert } = opts;
+  const insertCount = new Map<unknown, number>();
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -215,14 +230,20 @@ function writeStub(opts: WriteStubOpts): Db {
     insert: (table: unknown) => ({
       values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
         returning: () => {
+          const nth = insertCount.get(table) ?? 0;
+          insertCount.set(table, nth + 1);
+          const boom = insertThrows?.(table, nth);
+          // Thrown BEFORE the capture: a rejected insert wrote no row, so it must not
+          // be counted as one (the "exactly one row" assertions depend on that).
+          if (boom) return Promise.reject(boom);
           inserted.push({ table, values });
           const arr = Array.isArray(values) ? values : [values];
-          return Promise.resolve(
-            arr.map((v) => {
-              const row = v as Record<string, unknown>;
-              return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
-            }),
-          );
+          const out = arr.map((v) => {
+            const row = v as Record<string, unknown>;
+            return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
+          });
+          onInsert?.(table, out as Record<string, unknown>[]);
+          return Promise.resolve(out);
         },
       }),
     }),
@@ -472,6 +493,416 @@ describe("POST /api/v1/labor/attendance", () => {
     expect(v.status).toBe("full");
     expect(v.dayFraction).toBe("1");
     expect(v.ot).toBe("0.00");
+  });
+});
+
+// ===========================================================================
+// B-307 — POST /labor/attendance idempotency (client key + partial index + replay)
+// ---------------------------------------------------------------------------
+// WHY this is a MONEY contract, not data hygiene: createLaborPayroll computes the
+// payout by SUMMING attendance ROWS in the period — not DISTINCT days — so a
+// duplicate row is a DOUBLE PAYMENT, and jv_source_doc_uq cannot see it (the
+// inflated amount posts as one clean balanced JV). sync_processor.dart replays a
+// create it never heard back on with the SAME SyncOperation.id, so the mobile
+// check-in screen cannot ship until that replay collapses onto the original row.
+// The load-bearing assertion in the first test is the PAYROLL AMOUNT — a row count
+// alone would not encode the defect.
+// ===========================================================================
+
+const IDEMP_KEY = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+const ATT_IDEMP_UQ = "attendance_idempotency_uq";
+const OTHER_COMPANY = "99999999-9999-9999-9999-999999999999";
+const DAY = "2026-05-01";
+/** 450 day-rate × 1 full day + 2h OT × (450/8) × 1.5 = 450 + 168.75. ONE day's pay. */
+const ONE_DAY_PAY = 618.75;
+
+/**
+ * A raw pg unique-violation (SQLSTATE 23505) — the DatabaseError node-postgres
+ * throws, naming the violated index on `.constraint` (verified live against PG 16 +
+ * pg 8). `null` models the defensive case of a 23505 that names nothing.
+ */
+const pgUniqueViolation = (constraint: string | null = ATT_IDEMP_UQ): Error =>
+  Object.assign(
+    new Error(`duplicate key value violates unique constraint "${constraint ?? "?"}"`),
+    constraint === null ? { code: "23505" } : { code: "23505", constraint },
+  );
+
+/**
+ * The shape the HANDLER actually sees: every insert goes through drizzle, which wraps
+ * the driver error in a DrizzleQueryError and nests the DatabaseError under `.cause`.
+ * isUniqueViolation() / violatedConstraint() must both look one level down — a suite
+ * that only ever threw the FLAT shape would stay green against a gate reading
+ * `err.constraint` directly while production silently lost its replay path.
+ */
+const uniqueViolation = (constraint: string | null = ATT_IDEMP_UQ): Error =>
+  Object.assign(new Error("Failed query"), { cause: pgUniqueViolation(constraint) });
+
+/**
+ * A keyed create issues TWO kinds of attendance read — the keyed dedup resolve
+ * (pre-check, and again in the 23505 catch) and payroll's unkeyed period read. The
+ * row-blind stub answers both the same, so this splits them: a read whose WHERE binds
+ * one of `byKey`'s keys gets that key's rows ([] = not stored, or another
+ * tenant's/anchor's key we cannot see); every other read gets `unkeyed`.
+ */
+const keyedAtt =
+  (byKey: Record<string, () => unknown[]>, unkeyed: () => unknown[]) =>
+  (where: SQL | undefined): unknown[] => {
+    const params = paramsOf(where);
+    for (const [key, rows] of Object.entries(byKey)) {
+      if (params.includes(key)) return rows();
+    }
+    return unkeyed();
+  };
+
+/** Every attendance read this request made whose WHERE bound the client key. */
+const keyedAttReads = (captured: Captured[], key = IDEMP_KEY): Captured[] =>
+  captured.filter((c) => c.table === attendances && paramsOf(c.where).includes(key));
+
+/** The write-capable stub for the B-307 cases: caller authz + one 450/day worker. */
+const idempDb = (opts: {
+  stored: () => unknown[];
+  byKey?: Record<string, () => unknown[]>;
+  captured?: Captured[];
+  inserted?: Inserted[];
+  insertThrows?: (table: unknown, nth: number) => Error | null;
+  onInsert?: (table: unknown, rows: Record<string, unknown>[]) => void;
+}) =>
+  writeStub({
+    rows: [
+      [users, [userRow]],
+      [roles, [roleRow()]],
+      [workers, [worker(W1, "สมหมาย", "450")]],
+      [attendances, keyedAtt(opts.byKey ?? { [IDEMP_KEY]: opts.stored }, opts.stored)],
+    ],
+    captured: opts.captured,
+    inserted: opts.inserted,
+    insertThrows: opts.insertThrows,
+    onInsert: opts.onInsert,
+  });
+
+describe("POST /api/v1/labor/attendance — B-307 idempotency (client key + replay)", () => {
+  it("same idempotency_key twice → ONE row, the replay returns the ORIGINAL byte-for-byte, and PAYROLL still pays ONE day (618.75, not 1237.50)", async () => {
+    const inserted: Inserted[] = [];
+    // The stored view is DERIVED from what the handler actually wrote (onInsert), not
+    // hand-seeded — so if the replay inserted a second row, payroll below really would
+    // sum it and this test would go red. That is the whole point.
+    const stored: unknown[] = [];
+    const db = idempDb({
+      stored: () => stored,
+      inserted,
+      onInsert: (table, out) => {
+        if (table === attendances) stored.push(...out);
+      },
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const payload = { worker_id: W1, day: DAY, ot: 2, idempotency_key: IDEMP_KEY };
+
+    const res1 = await app.inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    // The replay is idempotent — the client sees its OWN row (same id), never a 409,
+    // never a duplicate. Byte-identical by construction (one sender, one wire fn).
+    expect(res2.json()).toEqual(res1.json());
+    expect(res2.json().id).toBe(res1.json().id);
+    expect(res2.json()).toMatchObject({ worker_id: W1, day: DAY, status: "full", day_fraction: 1, ot: 2 });
+    // exactly ONE row written across BOTH requests, carrying the client key.
+    const attInserts = inserted.filter((i) => i.table === attendances);
+    expect(attInserts).toHaveLength(1);
+    expect((attInserts[0]!.values as Record<string, unknown>).idempotencyKey).toBe(IDEMP_KEY);
+    expect(stored).toHaveLength(1);
+
+    // THE MONEY ASSERTION: run payroll over the same period and prove the worker is
+    // paid for ONE day. Without the dedup the period would hold two rows and the
+    // SERVER-computed amount would be 1237.50 — the actual defect, invisible to every
+    // downstream guard because the inflated amount posts as one balanced JV.
+    const pay = await app.inject({
+      method: "POST",
+      url: "/api/v1/labor/payroll",
+      payload: { worker_id: W1, period: "2026-05" },
+    });
+    expect(pay.statusCode).toBe(201);
+    expect(pay.json().amount).toBe(ONE_DAY_PAY);
+    expect(pay.json().amount).not.toBe(ONE_DAY_PAY * 2);
+  });
+
+  it("the 23505 backstop still fires when the PRE-CHECK misses (the real race) → 201 with the ORIGINAL, still one row", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const stored: unknown[] = [];
+    // The real race: reads 0 (create #1) and 1 (create #2's pre-check) happen BEFORE
+    // the original is visible to us; our insert then trips the index, and read 2 (the
+    // catch's resolve, after that commit) finds it. This is exactly the window an
+    // app-level pre-check cannot close — which is why the catch is kept.
+    let keyedReadNo = 0;
+    const raceKeyed = (): unknown[] => (keyedReadNo++ < 2 ? [] : stored);
+    const db = idempDb({
+      stored: () => stored,
+      byKey: { [IDEMP_KEY]: raceKeyed },
+      captured,
+      inserted,
+      onInsert: (table, out) => {
+        if (table === attendances) stored.push(...out);
+      },
+      // the 2nd insert (the replay) trips the partial unique index; the 1st is fine.
+      insertThrows: (table, nth) => (table === attendances && nth >= 1 ? uniqueViolation() : null),
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const payload = { worker_id: W1, day: DAY, ot: 2, idempotency_key: IDEMP_KEY };
+    const res1 = await app.inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json()); // the ORIGINAL, produced by the same sender
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+    expect(stored).toHaveLength(1);
+    // 3 keyed resolves: create#1's pre-check, create#2's pre-check (missed), the catch.
+    expect(keyedAttReads(captured)).toHaveLength(3);
+  });
+
+  it("409s when a key collision resolves to NO row in this tenant (a cross-tenant clash — never a leak, never a fabricated success)", async () => {
+    const inserted: Inserted[] = [];
+    const db = idempDb({
+      // the colliding row belongs to ANOTHER company → invisible through our scoped door
+      stored: () => [],
+      inserted,
+      insertThrows: (table) => (table === attendances ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: IDEMP_KEY },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/idempotency_key already used/);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+  });
+
+  it("the dedup resolve is TENANT-scoped and ANCHORED (binds company_id + worker_id + day, never another company)", async () => {
+    const captured: Captured[] = [];
+    const db = idempDb({ stored: () => [], captured });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: IDEMP_KEY },
+    });
+    expect(res.statusCode).toBe(201);
+    const keyed = keyedAttReads(captured);
+    expect(keyed.length).toBeGreaterThan(0);
+    for (const c of keyed) {
+      const params = paramsOf(c.where);
+      // attendance carries company_id directly → the plain scoped door binds it (zero
+      // hops, no selectThrough). The anchors keep a reused key from resolving a row
+      // that is not the client's own.
+      expect(params).toContain(COMPANY);
+      expect(params).toContain(W1);
+      expect(params).toContain(DAY);
+      expect(params).not.toContain(OTHER_COMPANY);
+    }
+  });
+
+  it("the same key replayed for a DIFFERENT worker-day never hands back the first row — it 409s (anchors are load-bearing)", async () => {
+    const inserted: Inserted[] = [];
+    const first = {
+      id: "at-1", companyId: COMPANY, workerId: W1, day: DAY, ot: "2.00",
+      status: "full", dayFraction: "1", ccId: null, idempotencyKey: IDEMP_KEY, createdAt: D,
+    };
+    const db = idempDb({
+      // The resolver's anchors (worker_id + day) are part of the WHERE, so a mismatched
+      // anchor resolves nothing even though the row exists under this key + tenant.
+      stored: () => [],
+      byKey: { [IDEMP_KEY]: () => [] },
+      inserted,
+      insertThrows: (table) => (table === attendances ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-05-09", idempotency_key: IDEMP_KEY },
+    });
+    // 409, NOT a 201 echoing `first` — handing back a day the client never recorded
+    // would understate that day's pay while looking like a success.
+    expect(res.statusCode).toBe(409);
+    expect(res.json().id).toBeUndefined();
+    expect(res.json()).not.toMatchObject({ day: first.day });
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+  });
+
+  it("different idempotency_keys → two distinct rows (no dedup path)", async () => {
+    const inserted: Inserted[] = [];
+    const db = idempDb({
+      stored: () => [],
+      // neither key is stored → both pre-checks miss → two real creates.
+      byKey: { "key-A": () => [], "key-B": () => [] },
+      inserted,
+      // distinct keys never collide on a real DB → the stub never throws.
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    for (const key of ["key-A", "key-B"]) {
+      const r = await app.inject({
+        method: "POST",
+        url: "/api/v1/labor/attendance",
+        payload: { worker_id: W1, day: DAY, idempotency_key: key },
+      });
+      expect(r.statusCode).toBe(201);
+    }
+    const attInserts = inserted.filter((i) => i.table === attendances);
+    expect(attInserts).toHaveLength(2);
+    expect(attInserts.map((i) => (i.values as Record<string, unknown>).idempotencyKey)).toEqual([
+      "key-A",
+      "key-B",
+    ]);
+  });
+
+  it("no idempotency_key → a normal single create; the key persists as null and NO dedup read is issued (web bulk-save unchanged)", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const db = idempDb({ stored: () => [], captured, inserted });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY },
+    });
+    expect(res.statusCode).toBe(201);
+    const attInserts = inserted.filter((i) => i.table === attendances);
+    expect(attInserts).toHaveLength(1);
+    expect((attInserts[0]!.values as Record<string, unknown>).idempotencyKey).toBe(null);
+    // the create issued NO attendance read at all — the replay branch is unreachable
+    // without a key, so a key-less POST cannot resolve anyone's row.
+    expect(captured.filter((c) => c.table === attendances)).toHaveLength(0);
+  });
+
+  it.each([
+    ["blank", ""],
+    ["whitespace-only", "   "],
+    ["a tab/newline", "\t\n"],
+  ])("a %s idempotency_key is treated as ABSENT — persists null, issues no dedup read, and never matches a stored NULL row", async (_label, key) => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    // A pre-existing row whose key is NULL (every row before this migration). SQL NULL
+    // is not equal to itself AND the index is partial, so it can never be resolved —
+    // this asserts the HANDLER refuses too, one layer earlier.
+    const nullKeyRow = {
+      id: "at-old", companyId: COMPANY, workerId: W1, day: DAY, ot: "0.00",
+      status: "full", dayFraction: "1", ccId: null, idempotencyKey: null, createdAt: D,
+    };
+    const db = idempDb({ stored: () => [nullKeyRow], captured, inserted });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: key },
+    });
+    expect(res.statusCode).toBe(201);
+    // a NEW row — the stored null-key row was NOT handed back as a replay.
+    expect(res.json().id).not.toBe("at-old");
+    const attInserts = inserted.filter((i) => i.table === attendances);
+    expect(attInserts).toHaveLength(1);
+    expect((attInserts[0]!.values as Record<string, unknown>).idempotencyKey).toBe(null);
+    expect(captured.filter((c) => c.table === attendances)).toHaveLength(0);
+  });
+
+  // Each case pairs the NEGATIVE (this error must NOT replay) with the POSITIVE
+  // CONTROL (attendance_idempotency_uq on the very same stub MUST replay). Both
+  // halves are needed: the negative alone is green against a handler with no catch at
+  // all (an uncaught throw is also a 500), so it would pin nothing; the pair dies on a
+  // revert AND dies if the name gate is dropped.
+  it.each([
+    ["a 23505 naming another constraint (a future unique index on this table)", uniqueViolation("attendance_worker_day_uq")],
+    ["a 23505 naming no constraint at all", uniqueViolation(null)],
+    ["a non-unique driver failure (connection lost)", Object.assign(new Error("connection lost"), { code: "08006" })],
+  ])("B-263: %s is NOT a replay — it rethrows (500) while the SAME stub replays on attendance_idempotency_uq", async (_label, boom) => {
+    // The key DOES resolve a row — so a catch that skipped the name gate would happily
+    // answer 201 with it. Only the name check keeps the negative case a 500.
+    const original = {
+      id: "at-1", companyId: COMPANY, workerId: W1, day: DAY, ot: "2.00",
+      status: "full", dayFraction: "1", ccId: null, idempotencyKey: IDEMP_KEY, createdAt: D,
+    };
+    const payload = { worker_id: W1, day: DAY, idempotency_key: IDEMP_KEY };
+    const mk = (thrown: Error, inserted: Inserted[]) => {
+      // The pre-check must MISS (read 0 → []) so only the CATCH is under test; the
+      // catch's own resolve (read 1) then sees the committed original.
+      let reads = 0;
+      return idempDb({
+        stored: () => [original],
+        byKey: { [IDEMP_KEY]: () => (reads++ === 0 ? [] : [original]) },
+        inserted,
+        insertThrows: (table) => (table === attendances ? thrown : null),
+      });
+    };
+
+    const negInserted: Inserted[] = [];
+    const neg = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: mk(boom, negInserted) })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+    expect(neg.statusCode).toBe(500);
+    expect(neg.json().id).toBeUndefined(); // never the resolvable row
+    expect(negInserted.filter((i) => i.table === attendances)).toHaveLength(0);
+
+    // POSITIVE CONTROL — same stub, same resolvable row, only the constraint NAME
+    // differs. This half is what dies when the catch is removed.
+    const posInserted: Inserted[] = [];
+    const pos = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: mk(uniqueViolation(), posInserted),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+    expect(pos.statusCode).toBe(201);
+    expect(pos.json().id).toBe("at-1");
+    expect(posInserted.filter((i) => i.table === attendances)).toHaveLength(0);
+  });
+
+  it("the replay does NOT weaken validation: an invalid status still 400s and a foreign worker still 400s, key or no key", async () => {
+    const inserted: Inserted[] = [];
+    const db = writeStub({
+      rows: [
+        [users, [userRow]],
+        [roles, [roleRow()]],
+        [workers, []], // worker not in this tenant
+        [attendances, () => [
+          { id: "at-1", companyId: COMPANY, workerId: W1, day: DAY, ot: "0.00",
+            status: "full", dayFraction: "1", ccId: null, idempotencyKey: IDEMP_KEY, createdAt: D },
+        ]],
+      ],
+      inserted,
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    // A foreign worker 400s even though the key WOULD resolve a row — the pre-check
+    // sits below the tenant gate, so a key can never be used to bypass it.
+    const foreign = await app.inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: IDEMP_KEY },
+    });
+    expect(foreign.statusCode).toBe(400);
+    expect(foreign.json().message).toMatch(/worker not found/);
+    // …and the status enum still rejects before anything is resolved or written.
+    const bad = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: idempDb({ stored: () => [] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, status: "vacation", idempotency_key: IDEMP_KEY },
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().message).toMatch(/full, half, absent/);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
   });
 });
 
