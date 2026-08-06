@@ -407,6 +407,13 @@
       "when": 1785985271077,
       "tag": "0057_attendance_idempotency_key",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1785988410420,
+      "tag": "0058_payroll_worker_period_uq",
+      "breakpoints": true
     }
   ]
 }

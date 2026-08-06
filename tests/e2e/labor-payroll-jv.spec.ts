@@ -59,6 +59,14 @@ liveDescribe("labor.payroll money=SERVER JV (live seeded stack)", () => {
     const day = String(att.find((a) => String(a.worker_id ?? a.workerId) === workerId)?.day ?? att[0]?.day ?? "2026-07-01");
     const period = day.slice(0, 7).match(/^\d{4}-\d{2}$/) ? day.slice(0, 7) : "2026-07";
 
+    // B-308: unique(worker_id, period) makes a repeat run a REPLAY of the original, so on
+    // a persistent stack a SECOND execution of this spec resolves the run the first one
+    // already posted. Read the register FIRST so the two cases stay deterministic — the
+    // alternative (assuming every create is fresh) fails the moment attendance is seeded.
+    const priorRun = (await list("labor/payroll")).find(
+      (p) => String(p.worker_id ?? p.workerId) === workerId && String(p.period) === period,
+    );
+
     const created = await owner.post("/api/v1/labor/payroll", {
       data: { worker_id: workerId, period, amount: 999999, currency_code: "USD" }, // hostile: server must ignore both
     });
@@ -68,9 +76,16 @@ liveDescribe("labor.payroll money=SERVER JV (live seeded stack)", () => {
     expect(String(run.currency_code ?? run.currencyCode ?? "THB"), "currency server-set THB").toBe("THB");
     const runId = String(run.id);
     const amount = num(run.amount);
+    if (priorRun) {
+      // B-308 replay: the ORIGINAL run, never a second postable row for the same period.
+      expect(runId, "a repeat run replays the original id").toBe(String(priorRun.id));
+    }
 
     const posted = await owner.post(`/api/v1/labor/payroll/${runId}/post`);
-    if (amount > 0) {
+    if (priorRun && amount > 0) {
+      // this run was already posted by an earlier execution → idempotent 409, no 2nd JV.
+      expect(posted.status(), "an already-posted run does not post twice").toBe(409);
+    } else if (amount > 0) {
       expect(posted.status(), "a non-zero payroll posts to the GL").toBe(200);
       // the money invariant: the JV posted for this payroll BALANCES (Dr total == Cr total).
       const jvs = rowsOf((await (await owner.get("/api/v1/gl/jv")).json()) as Record<string, unknown>);

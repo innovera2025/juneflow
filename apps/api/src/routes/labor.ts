@@ -52,6 +52,11 @@
 //   - the payroll → GL post is idempotent: source_doc `payroll:<id>` is unique
 //     under the jv_source_doc_uq index (migration 0037), so a double-post trips
 //     23505 → 409 (the pre-check + the DB constraint are both enforced).
+//   - B-308 (money): that per-ROW guard does NOT stop a duplicate RUN — two runs mint
+//     two ids and both post legitimately. The CREATE is therefore idempotent on its
+//     own natural key unique(worker_id, period) (migration 0058): a second run replays
+//     the ORIGINAL row's 201. Cost of the ruling: `amount` is frozen at create, so
+//     attendance corrected AFTER a run can no longer be picked up through the API.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq } from "drizzle-orm";
@@ -521,6 +526,73 @@ async function createLaborAttendance(
 }
 
 // ---------------------------------------------------------------------------
+// POST /labor/payroll — B-308 idempotency (natural key + unique index + replay)
+// ---------------------------------------------------------------------------
+
+/** The unique index the B-308 replay branch gates on BY NAME (B-263). */
+const PAYROLL_PERIOD_CONSTRAINT = "payroll_worker_period_uq";
+
+/**
+ * Resolve the ORIGINAL payroll run for a worker+period. TWO filters, both load-bearing:
+ *   - the TENANT scope — `payroll` carries company_id directly, so it is a plain
+ *     TenantTable and db.select() AND-binds company_id by construction (NO
+ *     selectThrough / zero hops, like attendance and unlike gr);
+ *   - the NATURAL key itself (worker_id + period) — the exact pair the unique index
+ *     enforces, so the row this hands back is BY DEFINITION the row that blocked the
+ *     insert. Unlike B-307's client key there is no separate anchor to disagree with:
+ *     the key IS the anchor.
+ * Resolving to null is possible only if the colliding row lives in ANOTHER company
+ * (worker_id FKs a tenant-owned worker, so that means corrupt data, not normal use);
+ * the caller then answers an honest 409 rather than fabricating or leaking a row.
+ * Used by BOTH the pre-check and the 23505 catch — ONE resolver, so the two paths
+ * can never diverge on what counts as "the run that already exists".
+ */
+async function findPayrollByWorkerPeriod(
+  db: TenantDb,
+  args: { workerId: string; period: string },
+): Promise<PayrollRow | null> {
+  const [existing] = (await db.select(
+    payrolls,
+    and(eq(payrolls.workerId, args.workerId), eq(payrolls.period, args.period)),
+  )) as PayrollRow[];
+  return existing ?? null;
+}
+
+/**
+ * Send the 201 create body for an ALREADY-PERSISTED payroll run — same id, same
+ * SERVER-COMPUTED amount, never a second write and never a second postable row. The
+ * ONLY place a replay 201 is produced (both the pre-check and the 23505 catch call
+ * it), so a replayed POST is byte-identical to the original create BY CONSTRUCTION
+ * rather than by two hand-built shapes happening to agree today. payrollWire is a
+ * pure function of the one row, so byte-identity needs no envelope re-derivation.
+ */
+function sendPayrollCreated(
+  reply: FastifyReply,
+  existing: PayrollRow,
+): FastifyReply {
+  return reply.code(201).send(payrollWire(existing));
+}
+
+/**
+ * B-308 REPLAY, reached from the 23505 CATCH. The insert tripped
+ * payroll_worker_period_uq: this worker+period was ALREADY run. This is the
+ * CONCURRENCY BACKSTOP for the pre-check — the pre-check read nothing, then a racing
+ * double-click committed before our insert. Kept deliberately: an app-level pre-check
+ * is NOT a substitute for the unique index + catch (money-post-idempotency lesson).
+ * A collision that resolves to nothing in THIS tenant is a 409 — never a leak, never
+ * a fabricated record.
+ */
+async function replayExistingPayroll(
+  db: TenantDb,
+  reply: FastifyReply,
+  args: { workerId: string; period: string },
+): Promise<FastifyReply> {
+  const existing = await findPayrollByWorkerPeriod(db, args);
+  if (!existing) return conflict(reply, "payroll already run for this worker and period");
+  return sendPayrollCreated(reply, existing);
+}
+
+// ---------------------------------------------------------------------------
 // POST /labor/payroll — run a worker's payroll for a period (labor.jsx Payroll)
 // ---------------------------------------------------------------------------
 // Body (opaque Entity): { worker_id, period, cc_id? }. Gated finance.create;
@@ -530,6 +602,21 @@ async function createLaborAttendance(
 // attendance rows whose `day` falls in the period, day_rate × day_fraction +
 // ot × (day_rate/8) × 1.5 (day_rate from the worker; day_fraction + ot per row),
 // round2'd. No attendance in the period → amount 0 (honest). Returns 201.
+//
+// B-308 (money · Wei = ก): the SAME worker+period can only be run ONCE. Two runs mint
+// two ids, and the downstream GL guard keys on `source_doc = payroll:<id>`
+// (jv_source_doc_uq) — so BOTH posted as clean balanced JVs and paid the work twice
+// (reproduced live: JV-2026-0419 + JV-2026-0420, 687.50 each). The natural key
+// unique(worker_id, period) closes it at the DB; a second POST replays the ORIGINAL
+// row as its original 201 instead of creating a second postable run.
+//
+// CONSEQUENCE, stated plainly (not a defect — the cost of the ruling): `amount` is
+// frozen at create time and nothing recomputes it. Once a period is run, attendance
+// added or corrected afterwards can NO LONGER be picked up through the API — the
+// re-run WAS the only recompute path, and it is exactly the path that double-paid.
+// A replay therefore returns the FIRST run's (possibly stale) amount with no signal
+// that a recalculation was refused. A correction/recompute endpoint is a separate,
+// unallocated follow-up.
 async function createLaborPayroll(
   db: TenantDb,
   request: FastifyRequest,
@@ -554,6 +641,13 @@ async function createLaborPayroll(
   )) as WorkerRow[];
   if (!worker) return badRequest(reply, "worker not found in this tenant");
 
+  // B-308 PRE-CHECK: this worker+period already run? It sits BELOW all validation on
+  // purpose, so a replay can never bypass the tenant / period-format gates. Not a
+  // substitute for the index + catch below: it only saves the amount re-computation in
+  // the common (already-committed) case; a concurrent double-click still races past it.
+  const prior = await findPayrollByWorkerPeriod(db, { workerId, period });
+  if (prior) return sendPayrollCreated(reply, prior);
+
   // amount = SERVER-COMPUTED (money=SERVER · B-140 RG-3): sum the worker's
   // in-period attendance of day_rate × day_fraction + ot × (day_rate/8) × 1.5.
   const dayRate = num(worker.dayRate);
@@ -571,17 +665,37 @@ async function createLaborPayroll(
   }
   const amount = round2(total); // 0 when there is no attendance in the period.
 
-  const [payroll] = (await db
-    .insert(payrolls, {
-      workerId,
-      period,
-      amount: moneyStr(amount),
-      currencyCode: "THB",
-      ccId,
-    })
-    .returning()) as PayrollRow[];
+  // B-308: a DOUBLE-CLICK (or any second run) trips payroll_worker_period_uq → 23505;
+  // we catch it and return the ORIGINAL run instead of a second row the GL would post
+  // as its own clean balanced JV. Entering that branch needs BOTH SQLSTATE 23505 and —
+  // B-263 — the violated constraint being payroll_worker_period_uq BY NAME. The name
+  // check is the load-bearing hardening: 23505 alone only says "SOME unique
+  // constraint", so a future unique index on `payroll` would otherwise silently
+  // inherit the replay path and answer a wrong row. Anything else rethrows to the 500
+  // handler — the safe failure for a money write (no row written, client retries)
+  // rather than a confidently wrong answer.
+  let payroll: PayrollRow | undefined;
+  try {
+    [payroll] = (await db
+      .insert(payrolls, {
+        workerId,
+        period,
+        amount: moneyStr(amount),
+        currencyCode: "THB",
+        ccId,
+      })
+      .returning()) as PayrollRow[];
+  } catch (err) {
+    if (
+      isUniqueViolation(err) &&
+      violatedConstraint(err) === PAYROLL_PERIOD_CONSTRAINT
+    ) {
+      return replayExistingPayroll(db, reply, { workerId, period });
+    }
+    throw err;
+  }
 
-  return reply.code(201).send(payrollWire(payroll!));
+  return sendPayrollCreated(reply, payroll!);
 }
 
 // ---------------------------------------------------------------------------

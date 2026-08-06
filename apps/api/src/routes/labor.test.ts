@@ -1012,6 +1012,357 @@ describe("POST /api/v1/labor/payroll", () => {
 });
 
 // ===========================================================================
+// B-308 — POST /labor/payroll idempotency (natural key unique(worker_id, period))
+// ---------------------------------------------------------------------------
+// WHY this is a MONEY contract: the GL guard is per payroll ROW — postLaborPayroll
+// keys source_doc `payroll:<id>` against jv_source_doc_uq — so TWO runs mint TWO ids
+// and BOTH post as clean, balanced, uncorrelatable JVs. Reproduced live before the
+// fix: JV-2026-0419 + JV-2026-0420, 687.50 each = 1,375.00 paid for one day's work.
+// The load-bearing assertion in the first test is therefore the JV COUNT, not the row
+// count: the row count alone does not reach the place the money lands.
+// ===========================================================================
+
+const PAY_UQ = "payroll_worker_period_uq";
+const PERIOD = "2026-05";
+
+/**
+ * Row-aware payroll reads. The handler issues TWO shapes against `payroll` and they
+ * must NOT answer each other: the B-308 natural-key resolve (worker_id + period, used
+ * by both the pre-check and the 23505 catch) and /post's lookup by id. A row-blind
+ * stub would hand the first stored row to both and hide a resolver that binds nothing.
+ */
+const payrollReads =
+  (stored: () => Record<string, unknown>[]) =>
+  (where: SQL | undefined): unknown[] => {
+    const params = paramsOf(where);
+    return stored().filter(
+      (r) =>
+        params.includes(r.id) ||
+        (params.includes(r.workerId) && params.includes(r.period)),
+    );
+  };
+
+/**
+ * Row-aware jv reads: an unfiltered scan is allocJvNo (it numbers off every jv); a
+ * filtered one is either the source_doc idempotency probe or insertThrough's
+ * ownership proof on the just-written parent jv (by id). Derived from what was really
+ * inserted, so a SECOND post is genuinely visible to the pre-check.
+ */
+const jvReads =
+  (stored: () => Record<string, unknown>[]) =>
+  (where: SQL | undefined): unknown[] => {
+    if (!where) return stored();
+    const params = paramsOf(where);
+    return stored().filter((r) => params.includes(r.id) || params.includes(r.sourceDoc));
+  };
+
+/** Row-aware worker reads, so a create for W2 cannot be answered with W1's row. */
+const workerReads =
+  (all: (typeof workers.$inferSelect)[]) =>
+  (where: SQL | undefined): unknown[] => {
+    const params = paramsOf(where);
+    return all.filter((w) => params.includes(w.id));
+  };
+
+/** Every payroll read this request made whose WHERE bound the natural key. */
+const keyedPayReads = (captured: Captured[], period = PERIOD): Captured[] =>
+  captured.filter((c) => c.table === payrolls && paramsOf(c.where).includes(period));
+
+/** The write-capable stub for the B-308 cases: authz + one 450/day worker + COA. */
+const payDb = (opts: {
+  storedPay?: () => Record<string, unknown>[];
+  storedJv?: () => Record<string, unknown>[];
+  payrollRows?: RowSource;
+  workerRows?: (typeof workers.$inferSelect)[];
+  attendance?: unknown[];
+  captured?: Captured[];
+  inserted?: Inserted[];
+  insertThrows?: (table: unknown, nth: number) => Error | null;
+  onInsert?: (table: unknown, rows: Record<string, unknown>[]) => void;
+}) =>
+  writeStub({
+    rows: [
+      [users, [userRow]],
+      [roles, [roleRow()]],
+      [workers, workerReads(opts.workerRows ?? [worker(W1, "สมหมาย", "450")])],
+      // one in-period full day + 2 OT hrs = 450 + 168.75 = ONE_DAY_PAY (618.75).
+      [attendances, opts.attendance ?? [att(`${PERIOD}-10`, "1", "2.00")]],
+      [payrolls, opts.payrollRows ?? payrollReads(opts.storedPay ?? (() => []))],
+      [jvs, jvReads(opts.storedJv ?? (() => []))],
+      [glAccounts, COA_ROWS],
+    ],
+    captured: opts.captured,
+    inserted: opts.inserted,
+    insertThrows: opts.insertThrows,
+    onInsert: opts.onInsert,
+  });
+
+describe("POST /api/v1/labor/payroll — B-308 idempotency (natural key + replay)", () => {
+  it("running the SAME worker+period twice → ONE payroll row, the replay returns the ORIGINAL byte-for-byte, and exactly ONE JV posts (618.75 once, not 1237.50 as two JVs)", async () => {
+    const inserted: Inserted[] = [];
+    // Both stored views are DERIVED from what the handler actually wrote — so if the
+    // replay created a second run, the second /post really would mint its own JV and
+    // this test would go red. That is the whole point.
+    const storedPay: Record<string, unknown>[] = [];
+    const storedJv: Record<string, unknown>[] = [];
+    const db = payDb({
+      storedPay: () => storedPay,
+      storedJv: () => storedJv,
+      inserted,
+      onInsert: (table, out) => {
+        if (table === payrolls) storedPay.push(...out);
+        if (table === jvs) storedJv.push(...out);
+      },
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const payload = { worker_id: W1, period: PERIOD };
+
+    const res1 = await app.inject({ method: "POST", url: "/api/v1/labor/payroll", payload });
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/labor/payroll", payload });
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+
+    // THE MONEY ASSERTION FIRST, deliberately: post BOTH returned ids to the GL. Before
+    // B-308 they were DIFFERENT ids, so jv_source_doc_uq saw two unrelated docs and
+    // both posted — 2 balanced JVs, 1,237.50 for one day (live: JV-2026-0419 +
+    // JV-2026-0420). Now they are the SAME id, so the second post is the already-posted
+    // case → 409 and the ledger carries ONE JV for ONE amount. It leads the test so the
+    // REVERT PROBE dies HERE, on the ledger, rather than on an earlier row-shape
+    // assertion — a test that never reaches the money is not encoding the defect.
+    const post1 = await app.inject({ method: "POST", url: `/api/v1/labor/payroll/${res1.json().id}/post` });
+    const post2 = await app.inject({ method: "POST", url: `/api/v1/labor/payroll/${res2.json().id}/post` });
+    const jvInserts = inserted.filter((i) => i.table === jvs);
+    expect(jvInserts).toHaveLength(1); // ONE JV, not two
+    expect(storedJv).toHaveLength(1);
+    // …and it books the day ONCE: Σ Dr === Σ Cr === 618.75, not 1237.50.
+    const lines = inserted
+      .filter((i) => i.table === jvLines)
+      .flatMap((i) => i.values as Record<string, unknown>[]);
+    expect(lines.reduce((s, l) => s + Number(l.dr), 0)).toBe(ONE_DAY_PAY);
+    expect(lines.reduce((s, l) => s + Number(l.cr), 0)).toBe(ONE_DAY_PAY);
+    expect(post1.statusCode).toBe(200);
+    expect(post1.json().amount).toBe(ONE_DAY_PAY);
+    expect(post2.statusCode).toBe(409);
+    expect(post2.json().message).toMatch(/already posted/);
+
+    // …and the row half: the second run is idempotent — the operator sees the run that
+    // already exists (same id), byte-identical by construction (one sender, one wire fn).
+    expect(res2.json()).toEqual(res1.json());
+    expect(res2.json().id).toBe(res1.json().id);
+    expect(res1.json().amount).toBe(ONE_DAY_PAY);
+    // exactly ONE row written across BOTH requests.
+    expect(inserted.filter((i) => i.table === payrolls)).toHaveLength(1);
+    expect(storedPay).toHaveLength(1);
+  });
+
+  it("the 23505 backstop fires when the PRE-CHECK misses (the real concurrent double-click) → 201 with the ORIGINAL, still one row", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const storedPay: Record<string, unknown>[] = [];
+    // The real race: resolves 0 (run #1) and 1 (run #2's pre-check) both happen BEFORE
+    // the original is visible to us; our insert then trips the index, and resolve 2
+    // (the catch's, after that commit) finds it. Exactly the window an app-level
+    // pre-check cannot close — which is why the catch is kept.
+    let keyedReadNo = 0;
+    const racePay = (where: SQL | undefined): unknown[] => {
+      const params = paramsOf(where);
+      if (params.includes(W1) && params.includes(PERIOD)) {
+        return keyedReadNo++ < 2 ? [] : storedPay;
+      }
+      return storedPay.filter((r) => params.includes(r.id));
+    };
+    const db = payDb({
+      payrollRows: racePay,
+      inserted,
+      captured,
+      onInsert: (table, out) => {
+        if (table === payrolls) storedPay.push(...out);
+      },
+      // the 2nd insert (the replay) trips payroll_worker_period_uq; the 1st is fine.
+      insertThrows: (table, nth) => (table === payrolls && nth >= 1 ? uniqueViolation(PAY_UQ) : null),
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const payload = { worker_id: W1, period: PERIOD };
+    const res1 = await app.inject({ method: "POST", url: "/api/v1/labor/payroll", payload });
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/labor/payroll", payload });
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json()); // the ORIGINAL, produced by the same sender
+    expect(inserted.filter((i) => i.table === payrolls)).toHaveLength(1);
+    expect(storedPay).toHaveLength(1);
+    // 3 keyed resolves: run#1's pre-check, run#2's pre-check (missed), the catch's.
+    expect(keyedPayReads(captured)).toHaveLength(3);
+  });
+
+  it("N simultaneous double-clicks on the same worker+period → ONE row and one shared id (every loser replays the winner)", async () => {
+    const inserted: Inserted[] = [];
+    const storedPay: Record<string, unknown>[] = [];
+    const N = 4;
+    // Honest model of TRUE simultaneity — and deliberately NOT "run the injects through
+    // Promise.all and hope they interleave": in-process they do not, every loser's
+    // pre-check then finds the winner and the index is never exercised (the first cut
+    // of this test proved exactly that, via the `thrown` assertion below). So the
+    // window is modelled explicitly: EVERY pre-check is blind, and only a resolve that
+    // follows a 23505 — i.e. the catch's — can see the winner.
+    let thrown = 0;
+    let sawViolation = false;
+    const racePay = (where: SQL | undefined): unknown[] => {
+      const params = paramsOf(where);
+      if (!(params.includes(W1) && params.includes(PERIOD))) {
+        return storedPay.filter((r) => params.includes(r.id));
+      }
+      if (sawViolation) {
+        sawViolation = false;
+        return storedPay;
+      }
+      return [];
+    };
+    const db = payDb({
+      payrollRows: racePay,
+      inserted,
+      onInsert: (table, out) => {
+        if (table === payrolls) storedPay.push(...out);
+      },
+      insertThrows: (table, nth) => {
+        if (table !== payrolls || nth < 1) return null;
+        thrown++;
+        sawViolation = true;
+        return uniqueViolation(PAY_UQ);
+      },
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    const results = await Promise.all(
+      Array.from({ length: N }, () =>
+        app.inject({ method: "POST", url: "/api/v1/labor/payroll", payload: { worker_id: W1, period: PERIOD } }),
+      ),
+    );
+    expect(results.map((r) => r.statusCode)).toEqual(Array(N).fill(201));
+    const ids = new Set(results.map((r) => r.json().id));
+    expect(ids.size).toBe(1); // one run, N callers — no second postable row exists
+    expect(inserted.filter((i) => i.table === payrolls)).toHaveLength(1);
+    expect(storedPay).toHaveLength(1);
+    // every loser got past its pre-check and was stopped by the INDEX, not the app.
+    expect(thrown).toBe(N - 1);
+  });
+
+  it("a DIFFERENT period and a DIFFERENT worker still create (the key rejects nothing that is real work)", async () => {
+    const inserted: Inserted[] = [];
+    const storedPay: Record<string, unknown>[] = [];
+    const db = payDb({
+      storedPay: () => storedPay,
+      workerRows: [worker(W1, "สมหมาย", "450"), worker(W2, "บุญมี", "420")],
+      inserted,
+      onInsert: (table, out) => {
+        if (table === payrolls) storedPay.push(...out);
+      },
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    for (const payload of [
+      { worker_id: W1, period: PERIOD }, // the original run
+      { worker_id: W1, period: "2026-06" }, // same worker, NEXT period
+      { worker_id: W2, period: PERIOD }, // same period, ANOTHER worker
+    ]) {
+      const r = await app.inject({ method: "POST", url: "/api/v1/labor/payroll", payload });
+      expect(r.statusCode).toBe(201);
+    }
+    const payInserts = inserted.filter((i) => i.table === payrolls);
+    expect(payInserts).toHaveLength(3);
+    expect(new Set(payInserts.map((i) => (i.values as Record<string, unknown>).period)).size).toBe(2);
+    // …and only the exact repeat dedups.
+    const repeat = await app.inject({
+      method: "POST",
+      url: "/api/v1/labor/payroll",
+      payload: { worker_id: W1, period: PERIOD },
+    });
+    expect(repeat.statusCode).toBe(201);
+    expect(inserted.filter((i) => i.table === payrolls)).toHaveLength(3); // no 4th row
+  });
+
+  it("the natural-key resolve is TENANT-scoped (binds company_id + worker_id + period, never another company)", async () => {
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: payDb({ captured }) })
+    ).inject({ method: "POST", url: "/api/v1/labor/payroll", payload: { worker_id: W1, period: PERIOD } });
+    expect(res.statusCode).toBe(201);
+    const keyed = keyedPayReads(captured);
+    expect(keyed.length).toBeGreaterThan(0);
+    for (const c of keyed) {
+      const params = paramsOf(c.where);
+      // payroll carries company_id directly → the plain scoped door binds it (zero
+      // hops, no selectThrough). Company B therefore cannot resolve company A's run.
+      expect(params).toContain(COMPANY);
+      expect(params).toContain(W1);
+      expect(params).toContain(PERIOD);
+      expect(params).not.toContain(OTHER_COMPANY);
+    }
+  });
+
+  it("409s when the collision resolves to NO row in this tenant (a cross-tenant clash — never a leak, never a fabricated success)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: payDb({
+          // the colliding row belongs to ANOTHER company → invisible through our door
+          storedPay: () => [],
+          inserted,
+          insertThrows: (table) => (table === payrolls ? uniqueViolation(PAY_UQ) : null),
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/payroll", payload: { worker_id: W1, period: PERIOD } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/already run for this worker and period/);
+    expect(res.json().id).toBeUndefined();
+    expect(inserted.filter((i) => i.table === payrolls)).toHaveLength(0);
+  });
+
+  it("a 23505 from a DIFFERENT constraint is NOT swallowed as a replay (B-263 name gate) → rethrows, no fabricated 201", async () => {
+    const inserted: Inserted[] = [];
+    const storedPay = [
+      { id: "pay-other", companyId: COMPANY, workerId: W1, period: PERIOD, amount: "1.00", currencyCode: "THB", ccId: null, createdAt: D },
+    ];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: payDb({
+          // a row IS resolvable — so a handler gating on bare 23505 would happily echo
+          // it. Only the constraint-NAME check keeps this honest.
+          storedPay: () => storedPay,
+          payrollRows: (where) => (paramsOf(where).includes(PERIOD) ? [] : storedPay),
+          inserted,
+          insertThrows: (table) => (table === payrolls ? uniqueViolation("payroll_pkey") : null),
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/payroll", payload: { worker_id: W1, period: PERIOD } });
+    expect(res.statusCode).toBe(500); // the safe failure for a money write
+    expect(res.json().id).toBeUndefined();
+    expect(inserted.filter((i) => i.table === payrolls)).toHaveLength(0);
+  });
+
+  it("validation still runs ABOVE the dedup — a foreign worker 400s even when a prior run exists (a repeat can never bypass the tenant gate)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: payDb({
+          workerRows: [], // the worker is not this tenant's
+          storedPay: () => [
+            { id: "pay-x", companyId: COMPANY, workerId: W1, period: PERIOD, amount: "5.00", currencyCode: "THB", ccId: null, createdAt: D },
+          ],
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/payroll", payload: { worker_id: W1, period: PERIOD } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/worker not found/);
+    expect(inserted.filter((i) => i.table === payrolls)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
 // POST /api/v1/labor/payroll/:id/post  (Dr 1140 / Cr 1020 balanced JV)
 // ===========================================================================
 describe("POST /api/v1/labor/payroll/:id/post", () => {
