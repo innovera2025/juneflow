@@ -421,6 +421,13 @@
       "when": 1785997284968,
       "tag": "0059_material_issue_idempotency_key",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1786010096346,
+      "tag": "0060_ap_deposit_idempotency_key",
+      "breakpoints": true
     }
   ]
 }
