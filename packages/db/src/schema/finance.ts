@@ -303,6 +303,24 @@ export const apDeposits = pgTable("ap_deposit", {
   used: numeric("used", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("approved"),
+  // B-313 (migration 0060): the client-supplied idempotency key for the mobile
+  // offline SyncProcessor's at-least-once replay. POST /ap/deposit MINTS a fresh
+  // deposit id per request and posts a Dr 1160 / Cr 1010 JV keyed `dep:<that fresh
+  // id>` — so jv_source_doc_uq can NEVER see a replay (two different source_docs,
+  // two clean balanced JVs) and the cash credit is doubled. Proven live: two
+  // byte-identical posts of ฿250,000 → DP-2026-0001 + DP-2026-0002, JV-2026-0419 +
+  // JV-2026-0420, Σ Dr 1160 = Σ Cr 1010 = 500,000.00 for ONE payment.
+  // No natural key exists, and BOTH halves were proven live rather than argued:
+  //   - NULL-escapable — with a unique index on (company_id, vendor_id, po_id,
+  //     amount) in place, a byte-identical row still INSERTED (po_id is NULL, and
+  //     SQL NULL is not equal to itself). vendor_id/po_id/wo_id/pct are ALL nullable.
+  //   - legitimately repeatable — set a real po_id on two equal instalments and that
+  //     same index CANNOT EVEN BE BUILT ("Key (…)=(…) is duplicated"). Two equal
+  //     instalments to one vendor against one PO is ordinary business.
+  // Hence the B-307 CLIENT-key shape, not B-308's natural key. `no` is NOT NULL but
+  // SERVER-allocated — an output, not a client key. NULLABLE: pre-existing rows and
+  // web clients that omit it carry none and never collide.
+  idempotencyKey: text("idempotency_key"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -315,6 +333,16 @@ export const apDeposits = pgTable("ap_deposit", {
   index("ap_deposit_vendor_idx").on(t.vendorId),
   index("ap_deposit_po_idx").on(t.poId),
   index("ap_deposit_wo_idx").on(t.woId),
+  // B-313 (migration 0060): PARTIAL unique index — a replayed POST /ap/deposit
+  // carrying a previously-seen idempotency_key trips 23505 → the handler returns the
+  // ORIGINAL deposit (no duplicate row, no second JV, no second cash credit).
+  // Partial (WHERE idempotency_key IS NOT NULL) so the pre-existing / key-less
+  // deposits are exempt and never collide (mirrors gr_idempotency_uq /
+  // attendance_idempotency_uq / material_issue_idempotency_uq). Proven to apply
+  // cleanly on real seeded data.
+  uniqueIndex("ap_deposit_idempotency_uq")
+    .on(t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
 ]);
 
 // ---------------------------------------------------------------------------
