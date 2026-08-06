@@ -1631,6 +1631,8 @@ paths:
       responses:
         "201":
           $ref: "#/components/responses/EntityCreated"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -3154,6 +3156,8 @@ paths:
       responses:
         "201":
           $ref: "#/components/responses/EntityCreated"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /labor/payroll:
@@ -4774,6 +4778,20 @@ components:
   responses:
     Unauthorized:
       description: Missing/invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationError:
+      description: >-
+        Request body failed validation — always code VALIDATION with a message
+        naming the offending field. B-311 (Wei = ก, 2026-08-06): declared on the
+        two ops that gate a client-supplied idempotency_key, so a generated
+        client has a typed branch for a key of the wrong TYPE (B-309: a
+        present-but-non-string key is refused rather than silently disabling
+        dedup on a money write). NOTE: other ops in this spec also return 400
+        without declaring it — this response is reusable so that gap can be
+        closed op-by-op without inventing a second shape.
       content:
         application/json:
           schema:
