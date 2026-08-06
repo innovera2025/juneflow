@@ -44,6 +44,19 @@ export interface PlotRow {
   stage: string;
   /** Tenure code (buy|lease|negotiate|own, not enumerated) — drives the status badge. */
   tenure: string;
+  /**
+   * SERVER-computed total assessed value in FULL units (plotWire.total_value =
+   * round2(area-in-rai x price/rai)). null when the plot carries no area/price -- the
+   * screen renders an em-dash for a null and never substitutes a locally-derived figure
+   * (B-316/A2, money=SERVER).
+   */
+  totalValue: number | null;
+  /**
+   * SERVER-computed 10% buy-deal deposit in FULL units (plotWire.deal_deposit). This is
+   * the SAME value POST /land/plots/:id/deal posts to the Dr 1150 / Cr 2010 JV, so the
+   * number land.dd shows is the number the ledger books. null when unpriced (em-dash).
+   */
+  dealDeposit: number | null;
 }
 
 /** Read a string field off an opaque row ({ [k]: unknown }); "" when absent. */
@@ -62,9 +75,25 @@ function num(v: unknown): number {
 }
 
 /**
+ * Read a finite MONEY field off an opaque row; null when absent/invalid.
+ *
+ * Deliberately NOT num(): a money field that the server did not send is unknown, not
+ * zero. Coercing it to 0 would render a confident "0" where the truth is "no figure"
+ * (B-316/A2). Callers surface the null as an em-dash.
+ */
+function moneyOrNull(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number.parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
  * Narrow an opaque /land/plots Entity row to the PlotRow the table needs. Multi-word
  * fields accept snake_case (server convention, plotWire) or camelCase for robustness
- * (mirrors boq-rows.toBoqRow). Missing fields default (0 / "").
+ * (mirrors boq-rows.toBoqRow). Missing fields default (0 / "" / null for money).
  */
 export function toPlotRow(e: Record<string, unknown>): PlotRow {
   return {
@@ -77,6 +106,9 @@ export function toPlotRow(e: Record<string, unknown>): PlotRow {
     currencyCode: str(e.currency_code ?? e.currencyCode),
     stage: str(e.stage),
     tenure: str(e.tenure),
+    // money=SERVER (B-316/A2) — read, never derived.
+    totalValue: moneyOrNull(e.total_value ?? e.totalValue),
+    dealDeposit: moneyOrNull(e.deal_deposit ?? e.dealDeposit),
   };
 }
 

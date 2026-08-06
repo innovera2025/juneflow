@@ -269,8 +269,15 @@ export function LandDueDiligence() {
   const itemCount = DD_ITEM_KEYS.length;
   const passedPct = itemCount > 0 ? (passed / itemCount) * 100 : 0;
 
-  /** A price term as a `num` money string, or the honest em-dash when no plot is available. */
-  const money = (n: number | undefined): string => (n == null ? DASH : formatMoney(n));
+  /**
+   * A price term as a `num` money string, or the honest em-dash.
+   *
+   * B-316/A2: null is a REAL state, not just "no plot" — total/deposit come from the
+   * server (plotWire.total_value / deal_deposit) and are null for a plot with no
+   * area/price. The em-dash is the correct render for that; there is no local fallback
+   * formula, and 0 would be a fabricated figure.
+   */
+  const money = (n: number | null | undefined): string => (n == null ? DASH : formatMoney(n));
 
   return (
     <Page

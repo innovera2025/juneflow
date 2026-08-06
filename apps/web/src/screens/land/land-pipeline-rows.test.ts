@@ -39,6 +39,9 @@ function plot(over: Partial<PipelinePlot> = {}): PipelinePlot {
     currencyCode: "THB",
     stage: "nego",
     tenure: "negotiate",
+    // SERVER money (plotWire.total_value / deal_deposit): 18.6 rai x 4.2M = 78,120,000.
+    totalValue: 78120000,
+    dealDeposit: 7812000,
     // ASCII placeholders (the narrowing/composition is language-agnostic; the real wire
     // values are Thai server data — kept out of .ts per B-073, mirror land-bank-rows.test).
     title: "Plot Bangbuathong Zone C",
@@ -64,6 +67,8 @@ describe("toPipelinePlot", () => {
         title: "Plot Ratchaphruek Phase 4",
         amphoe: "Bangkruai",
         prov: "Nonthaburi",
+        total_value: 163200000,
+        deal_deposit: 16320000,
         created_at: "2026-07-01T00:00:00Z",
       }),
     ).toEqual({
@@ -79,6 +84,8 @@ describe("toPipelinePlot", () => {
       title: "Plot Ratchaphruek Phase 4",
       amphoe: "Bangkruai",
       prov: "Nonthaburi",
+      totalValue: 163200000,
+      dealDeposit: 16320000,
     });
   });
 

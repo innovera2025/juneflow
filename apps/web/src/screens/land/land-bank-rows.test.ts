@@ -41,6 +41,9 @@ function plot(over: Partial<PlotRow> = {}): PlotRow {
     currencyCode: "THB",
     stage: "nego",
     tenure: "negotiate",
+    // SERVER money (plotWire.total_value / deal_deposit): 18.6 rai x 4.2M = 78,120,000.
+    totalValue: 78120000,
+    dealDeposit: 7812000,
     ...over,
   };
 }
@@ -58,6 +61,8 @@ describe("toPlotRow", () => {
         currency_code: "THB",
         stage: "dd",
         tenure: "buy",
+        total_value: 163200000,
+        deal_deposit: 16320000,
         created_at: "2026-07-01T00:00:00Z",
       }),
     ).toEqual({
@@ -70,6 +75,8 @@ describe("toPlotRow", () => {
       currencyCode: "THB",
       stage: "dd",
       tenure: "buy",
+      totalValue: 163200000,
+      dealDeposit: 16320000,
     });
   });
 
@@ -93,8 +100,37 @@ describe("toPlotRow", () => {
       currencyCode: "",
       stage: "",
       tenure: "",
+      // B-316/A2: absent SERVER money is null ("unknown"), never 0 ("free").
+      totalValue: null,
+      dealDeposit: null,
     });
     expect(toPlotRow({ id: "z", area_sqm: null, price_per_rai: null }).areaSqm).toBe(0);
+  });
+
+  // B-316/A2 — the money fields are READ, never derived. A row whose area/price the
+  // server left unpriced yields null money, and the values are taken verbatim off the
+  // wire even when they disagree with what area x price would give (that disagreement is
+  // exactly the bug: the server rounds to 2 dp, the old browser copy to whole baht).
+  it("reads SERVER money verbatim and nulls it when unpriced", () => {
+    const unpriced = toPlotRow({ id: "u", area_sqm: null, price_per_rai: null });
+    expect(unpriced.totalValue).toBeNull();
+    expect(unpriced.dealDeposit).toBeNull();
+
+    // area x price would be 100,000; the wire says otherwise -> the wire wins.
+    const r = toPlotRow({
+      id: "v",
+      area_sqm: 1600,
+      price_per_rai: 100000,
+      total_value: 604708125,
+      deal_deposit: 60470812.5,
+    });
+    expect(r.totalValue).toBe(604708125);
+    expect(r.dealDeposit).toBe(60470812.5);
+
+    // numeric strings (pg numeric arrives as a string over JSON) parse to numbers.
+    expect(toPlotRow({ id: "w", total_value: "333", deal_deposit: "33.3" }).dealDeposit).toBe(33.3);
+    // a non-numeric value is unknown, not zero.
+    expect(toPlotRow({ id: "x", deal_deposit: "n/a" }).dealDeposit).toBeNull();
   });
 
   it("does not consume created_at (not a table field)", () => {

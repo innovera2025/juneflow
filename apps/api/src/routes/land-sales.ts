@@ -99,6 +99,30 @@ const SQM_PER_RAI = 1600;
 /** A land buy-deal deposit is 10% of the plot's total price (B-161 buy branch). */
 const DEAL_DEPOSIT_RATE = 0.1;
 
+/**
+ * A plot's total assessed value in FULL units — area-in-rai × price/rai, 2 dp.
+ * The deposit's base; also shipped on plotWire so the browser never recomputes it.
+ */
+function plotTotalValue(areaSqm: number, pricePerRai: number): number {
+  return round2((areaSqm / SQM_PER_RAI) * pricePerRai);
+}
+
+/**
+ * The buy-deal deposit in FULL units — DEAL_DEPOSIT_RATE of the plot total, 2 dp.
+ *
+ * B-316/A2 — money=SERVER, SINGLE SOURCE. This is the ONLY deposit formula in the repo:
+ * both the read (plotWire.deal_deposit, what land.dd renders) and the write
+ * (POST /land/plots/:id/deal, what the Dr 1150 / Cr 2010 JV books) call it, so the
+ * number a person reads on the due-diligence screen is by construction the number the
+ * ledger posts. Before this, the browser rounded its own copy to whole baht
+ * (Math.round) while this side rounded to 2 dp — up to a 0.50 baht disagreement, and a
+ * 1-baht disagreement in the rendered string. Reintroducing a second copy anywhere
+ * re-opens that seam; land-sales.test.ts asserts read === write on the same plot.
+ */
+function plotDealDeposit(areaSqm: number, pricePerRai: number): number {
+  return round2(plotTotalValue(areaSqm, pricePerRai) * DEAL_DEPOSIT_RATE);
+}
+
 // ---------------------------------------------------------------------------
 // Reply helpers (flat contract Error shape {code,message})
 // ---------------------------------------------------------------------------
@@ -210,15 +234,27 @@ function leadWire(l: LeadRow): Record<string, unknown> {
 
 // GET /land/plots — the land-plot register (land.jsx). price_per_rai is money →
 // currency_code. area_sqm is the plot area. Ordered newest-first.
+//
+// B-316/A2: total_value + deal_deposit are money the DUE-DILIGENCE screen displays
+// (land.dd buy tab). They are computed HERE, by the same helpers the deal write posts
+// with, so the browser has nothing left to compute. Both are null when area_sqm or
+// price_per_rai is absent — the screen renders an em-dash for a null and NEVER falls
+// back to a local formula (a fallback formula is the same defect with a nicer name).
 function plotWire(p: LandPlotRow): Record<string, unknown> {
+  const areaSqm = num(p.areaSqm);
+  const pricePerRai = num(p.pricePerRai);
+  const priced = areaSqm != null && pricePerRai != null;
   return {
     id: p.id,
     project_id: p.projectId,
     deed_no: p.deedNo,
-    area_sqm: num(p.areaSqm),
+    area_sqm: areaSqm,
     gps: p.gps,
-    price_per_rai: num(p.pricePerRai),
+    price_per_rai: pricePerRai,
     currency_code: p.currencyCode,
+    // money=SERVER (B-316/A2) — null when the plot carries no area/price.
+    total_value: priced ? plotTotalValue(areaSqm, pricePerRai) : null,
+    deal_deposit: priced ? plotDealDeposit(areaSqm, pricePerRai) : null,
     stage: p.stage,
     tenure: p.tenure,
     // LA-2 (0042): Land Bank registry columns (null → em-dash in the UI).
@@ -743,9 +779,10 @@ async function createSalesDown(
 // ---------------------------------------------------------------------------
 
 // POST /land/plots/:id/deal — close a land deal (land.jsx). Load the plot (404).
-// `type === "buy"`: the deposit is COMPUTED server-side =
-// round2(round2(area_sqm / 1600 × price_per_rai) × 10%) (money=SERVER — the client
-// terms are never read for the amount). A null area/price → honest 409. Posts
+// `type === "buy"`: the deposit is COMPUTED server-side by plotDealDeposit() — the same
+// helper plotWire ships as `deal_deposit`, so what land.dd DISPLAYS is by construction
+// what this posts (B-316/A2; money=SERVER — the client terms are never read for the
+// amount, and the client no longer holds a formula). A null area/price → honest 409. Posts
 // Dr 1150 land-held / Cr 2010 AP = deposit, keyed source_doc `deal:<plotId>`.
 // `type === "lease"` (B-161 · Wei=ง, rent code B-173=ก): the first-period land-lease
 // rent is an OPERATING EXPENSE. money=SERVER posts the CLIENT-supplied rent verbatim
@@ -840,7 +877,8 @@ async function createLandPlotDeal(
       "land plot is missing area_sqm or price_per_rai — cannot compute a deal deposit",
     );
   }
-  const deposit = round2(round2((area / SQM_PER_RAI) * price) * DEAL_DEPOSIT_RATE);
+  // B-316/A2: the SAME helper plotWire ships as deal_deposit — read and write cannot drift.
+  const deposit = plotDealDeposit(area, price);
   if (deposit <= 0) {
     return conflict(reply, "computed deal deposit is not positive");
   }

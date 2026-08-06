@@ -324,6 +324,47 @@ describe("GET /api/v1/land/plots", () => {
     expect(res.json().total).toBe(0);
     expect(res.json().data).toEqual([]);
   });
+
+  // B-316/A2 — money=SERVER. The due-diligence screen used to compute the plot total and
+  // the 10% deposit in the BROWSER, rounding to whole baht where this side rounds to 2 dp.
+  // The wire now carries both, so the browser has nothing left to compute.
+  it("ships total_value + deal_deposit (2 dp), so the browser computes no money", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          // 115-0-73 rai @ 5,250,000/rai = 184,292 sqm -> total 604,708,125.00 and a
+          // 2-dp deposit of 60,470,812.50. The browser's whole-baht copy said
+          // 60,470,813 — the 0.50 baht seam this closes.
+          rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: "184292.0000", pricePerRai: "5250000.00" })]]],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0]).toMatchObject({ total_value: 604708125, deal_deposit: 60470812.5 });
+    expect(res.json().data[0].deal_deposit).not.toBe(Math.round(604708125 * 0.1));
+  });
+
+  it("nulls total_value + deal_deposit for an unpriced plot (em-dash, never 0)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: null, pricePerRai: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].total_value).toBeNull();
+    expect(res.json().data[0].deal_deposit).toBeNull();
+
+    // one side missing is still unknown — never a half-computed figure
+    const half = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p1", "d", D0, { pricePerRai: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(half.json().data[0].deal_deposit).toBeNull();
+  });
 });
 
 describe("GET /api/v1/sales/loans", () => {
@@ -944,6 +985,45 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     expect(bill.status).toBe("draft");
     expect(bill.currencyCode).toBe("THB");
     expect(bill.vendorId).toBeNull(); // a land deal has no vendor FK — never invented
+  });
+
+  /*
+   * B-316/A2 — THE ANTI-DRIFT ASSERTION. This is the whole point of the fix: the deposit
+   * the due-diligence screen READS (GET /land/plots -> deal_deposit) must be the deposit
+   * the deal WRITE posts to the Dr 1150 / Cr 2010 JV and the AP subledger. Both come from
+   * plotDealDeposit(), so they cannot disagree; give either side its own formula again and
+   * this test goes red.
+   *
+   * The plot is deliberately one where 2-dp and whole-baht rounding differ (a .50 tail),
+   * so a re-introduced Math.round on either side is caught rather than masked by a total
+   * that happens to divide evenly — which is true of every plot in the seed.
+   */
+  it("READ deal_deposit === WRITE deposit === the posted JV line, on the same plot", async () => {
+    const inserted: Inserted[] = [];
+    const plots = [plot("p1", "d", D0, { areaSqm: "184292.0000", pricePerRai: "5250000.00" })];
+
+    const read = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, plots]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    const shown = read.json().data[0].deal_deposit as number;
+
+    const write = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: dealDb({ inserted, plots }) })
+    ).inject({ method: "POST", url: "/api/v1/land/plots/p1/deal", payload: { type: "buy" } });
+    expect(write.statusCode).toBe(200);
+
+    // what the user read == what the endpoint returns == what the ledger books
+    expect(shown).toBe(60470812.5);
+    expect(write.json().deposit).toBe(shown);
+    const lines = inserted.find((i) => i.table === jvLines)!.values as Record<string, unknown>[];
+    expect(lines.find((l) => l.accountId === ACC_LAND)!.dr).toBe("60470812.50");
+    expect(lines.find((l) => l.accountId === ACC_AP)!.cr).toBe("60470812.50");
+    expect(Number(lines.find((l) => l.accountId === ACC_LAND)!.dr)).toBe(shown);
+    const bill = inserted.find((i) => i.table === apBillings)!.values as Record<string, unknown>;
+    expect(Number(bill.amount)).toBe(shown);
   });
 
   it("lease deal: posts the CLIENT first-period rent Dr 5100 (ccId) / Cr 2010 + ap_billing, source deal:<id>:lease (B-161 Wei=ง)", async () => {
