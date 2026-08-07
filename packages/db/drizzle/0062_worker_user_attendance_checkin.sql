@@ -6,4 +6,5 @@ ALTER TABLE "attendance" ADD COLUMN "checkout_lat" numeric(9, 6);--> statement-b
 ALTER TABLE "attendance" ADD COLUMN "checkout_lng" numeric(9, 6);--> statement-breakpoint
 ALTER TABLE "worker" ADD COLUMN "user_id" uuid;--> statement-breakpoint
 ALTER TABLE "worker" ADD CONSTRAINT "worker_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "worker_user_uq" ON "worker" USING btree ("user_id") WHERE "worker"."user_id" IS NOT NULL;
+CREATE UNIQUE INDEX "worker_user_uq" ON "worker" USING btree ("user_id") WHERE "worker"."user_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "attendance_self_day_uq" ON "attendance" USING btree ("worker_id","day") WHERE "attendance"."cc_id" IS NULL;

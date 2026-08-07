@@ -1049,6 +1049,97 @@ describe("POST /api/v1/labor/attendance — B-307 idempotency (client key + repl
     expect(posInserted.filter((i) => i.table === attendances)).toHaveLength(0);
   });
 
+  // =========================================================================
+  // B-336 — THE CATCH for attendance_self_day_uq.
+  //
+  // WHAT THESE TESTS PROVE, AND WHAT THEY EXPLICITLY DO NOT. They prove the
+  // HANDLER's mapping of a 23505 naming attendance_self_day_uq: 409 instead of
+  // 500, the right message, and the replay-before-name ordering. They inject
+  // that violation through the db stub, so they DO NOT — cannot — prove that a
+  // real Postgres raises it. Deleting the index from finance.ts and migration
+  // 0062 leaves every one of these green; the probe was run. What dies on that
+  // deletion is packages/db/src/schema/attendance-self-day.test.ts (3 tests) and
+  // the live burst in tests/e2e/b332-checkin-schema.spec.ts. Said plainly here
+  // because the review before this one found a test named for an index that only
+  // ever proved the stub, and the fix for that is labelling, not another stub.
+  //
+  // These are still worth having: the 500 they rule out is not cosmetic. The
+  // mobile SyncProcessor DEFERS a 5xx and stops draining, so the whole offline
+  // write queue wedges behind one duplicate check-in. Measured live at the
+  // index-without-catch SHA: a burst of 2 answered [201,500], and the roster's
+  // sequential duplicate answered 500 as well.
+  // =========================================================================
+  describe("B-336: a 23505 naming attendance_self_day_uq is a 409 duplicate, never a 500", () => {
+    const SELF_DAY_UQ = "attendance_self_day_uq";
+    const original = {
+      id: "at-1", companyId: COMPANY, workerId: W1, day: DAY, ot: "0.00",
+      status: "full", dayFraction: "1", ccId: null, idempotencyKey: IDEMP_KEY, createdAt: D,
+    };
+    /** The pre-check MISSES (read 0) so only the CATCH is under test. */
+    const mk = (thrown: Error, inserted: Inserted[], stored: () => unknown[]) => {
+      let reads = 0;
+      return idempDb({
+        stored,
+        byKey: { [IDEMP_KEY]: () => (reads++ === 0 ? [] : stored()) },
+        inserted,
+        insertThrows: (table) => (table === attendances ? thrown : null),
+      });
+    };
+    const post = async (db: ReturnType<typeof idempDb>, payload: Record<string, unknown>) =>
+      (await buildTestApp({ resolveTenant: async () => SESSION, db })).inject({
+        method: "POST", url: "/api/v1/labor/attendance", payload,
+      });
+
+    it("KEYLESS — the burst case. The catch must not require an idempotency_key, or the one violation it exists for rethrows to 500", async () => {
+      const inserted: Inserted[] = [];
+      const res = await post(
+        mk(uniqueViolation(SELF_DAY_UQ), inserted, () => [original]),
+        { worker_id: W1, day: DAY }, // no key — exactly what the phone's burst sends
+      );
+      expect(res.statusCode).toBe(409);
+      expect(res.json().message).toBe("this day is already recorded for this worker");
+      expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+    });
+
+    it("KEYED, and the key resolves the caller's OWN row — the REPLAY wins over the duplicate, whichever constraint Postgres happened to name", async () => {
+      // The ordering that matters: resolveAttendanceConflict looks the key up BEFORE
+      // it looks at the name. A catch that dispatched on the name first would answer
+      // 409 here — and the phone DEAD-LETTERS a 4xx, so this worker's day would be
+      // lost rather than retried.
+      const inserted: Inserted[] = [];
+      const res = await post(
+        mk(uniqueViolation(SELF_DAY_UQ), inserted, () => [original]),
+        { worker_id: W1, day: DAY, idempotency_key: IDEMP_KEY },
+      );
+      expect(res.statusCode).toBe(201);
+      expect(res.json().id).toBe("at-1");
+      expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+    });
+
+    it("KEYED, and the key resolves NOTHING — a NEW key onto a day already recorded is a DUPLICATE, and says so rather than blaming the key", async () => {
+      // The screen-remount class: a new key for the same worker+day passes
+      // attendance_idempotency_uq untouched and lands on this index instead. The two
+      // constraints mean different things, so the 409s carry different messages.
+      const inserted: Inserted[] = [];
+      const res = await post(
+        mk(uniqueViolation(SELF_DAY_UQ), inserted, () => []),
+        { worker_id: W1, day: DAY, idempotency_key: IDEMP_KEY },
+      );
+      expect(res.statusCode).toBe(409);
+      expect(res.json().message).toBe("this day is already recorded for this worker");
+    });
+
+    it("CONTROL — the key index's own unresolvable 409 still blames the KEY, so adding the second name did not collapse the two outcomes", async () => {
+      const inserted: Inserted[] = [];
+      const res = await post(
+        mk(uniqueViolation(ATT_IDEMP_UQ), inserted, () => []),
+        { worker_id: W1, day: DAY, idempotency_key: IDEMP_KEY },
+      );
+      expect(res.statusCode).toBe(409);
+      expect(res.json().message).toBe("idempotency_key already used");
+    });
+  });
+
   it("the replay does NOT weaken validation: an invalid status still 400s and a foreign worker still 400s, key or no key", async () => {
     const inserted: Inserted[] = [];
     const db = writeStub({

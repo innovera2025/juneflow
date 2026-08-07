@@ -20,21 +20,28 @@ import {
 //
 // WHAT ONLY REAL POSTGRES CAN SETTLE, and why every one of these is here:
 //
-//   A. THE CONSTRAINT REJECTS NO LEGITIMATE WORK. The design refused a
-//      unique(worker_id, day) natural key. A stub cannot prove that refusal was
-//      right, because a stub has no index to reject anything. Three cases are
-//      exercised against the real table: a cost-centre-split day, a night shift
-//      crossing midnight, and a correction filed AFTER check-out. Each is a real
-//      INSERT that a unique(worker_id, day) would have turned into a 23505.
-//      The correction case is the decisive one: there is no UPDATE/PUT/PATCH/DELETE
-//      on attendance anywhere, so a second INSERT is the ONLY way to correct a day.
+//   A. THE CONSTRAINT REJECTS NO LEGITIMATE WORK. The design refused the FULL
+//      unique(worker_id, day) natural key, and B-336 then added a PARTIAL one
+//      (attendance_self_day_uq — one UNCOSTED row per worker per day). A stub cannot
+//      prove either judgement, because a stub has no index to reject anything. Three
+//      shapes are exercised against the real table: a cost-centre-split day, a night
+//      shift crossing midnight, and a MIXED split (one costed half, one uncosted).
+//      Each is a real INSERT that the full natural key would have turned into a
+//      23505 and the partial one lets through. A FOURTH case, the "correction" filed
+//      after check-out, was in this list until B-336 and is now REFUSED: it corrected
+//      nothing (payroll SUMS rows, so it paid MORE for less work), which is why it
+//      moved from the legitimate list to the duplicate class.
 //
-//   B. THE CONCURRENT SECOND CHECK-OUT. A parallel burst proves NOTHING here — the
-//      single-threaded API serialises it. The race is CONSTRUCTED: a second psql
-//      session holds an uncommitted colliding UPDATE open, the API fires into the
-//      row lock, and the test asserts the API genuinely BLOCKED before answering.
-//      That is what distinguishes a guard on the UPDATE's own WHERE (correct) from
-//      a guard on a preceding SELECT (B-149: two round trips, both writers pass).
+//   B. CONCURRENCY, in two different shapes because the two writes need different
+//      proofs. The CHECK-OUT race is CONSTRUCTED — a second psql session holds an
+//      uncommitted colliding UPDATE open, the API fires into the row lock, and the
+//      test asserts the API genuinely BLOCKED before answering; that is what
+//      distinguishes a guard on the UPDATE's own WHERE (correct) from a guard on a
+//      preceding SELECT (B-149: two round trips, both writers pass). The CHECK-IN
+//      needs the opposite: a real parallel BURST, because the defect is two INSERTs
+//      racing a SELECT-then-INSERT pre-check (B-336). The burst tests are the only
+//      ones in the repository that die when attendance_self_day_uq is dropped from a
+//      live database — the api suite stays fully green without it, probed.
 //
 //   C. THE B-307 KEY STILL DEDUPS after the new columns and the new gate land.
 //
@@ -251,6 +258,81 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
       "POST /labor/payroll",
     );
     expect(payroll.amount).toBe(DAY_RATE);
+  });
+
+  // B-336 — THE CONCURRENT CLASS. THE ONLY TESTS IN THE REPOSITORY THAT DIE WHEN
+  // attendance_self_day_uq IS DROPPED FROM A LIVE DATABASE.
+  //
+  // The test above fires five taps IN SERIES and passes on the pre-check alone. These
+  // fire them AT ONCE, which is what a double-tapped phone actually does, and at the
+  // pre-check-only SHA that wrote two rows and paid the day twice in 2 of 3 runs — the
+  // B-165/B-167 lesson exactly: a guard proven sequentially is not proven, and the
+  // static reviews did not see it either. Under READ COMMITTED both requests complete
+  // findRecordedDay's SELECT before either INSERT commits, so only a DB-layer
+  // constraint can settle it.
+  //
+  // NO KEY IS SENT, deliberately — attendance_idempotency_uq is PARTIAL and exempts
+  // NULL keys, so this burst passes straight through it and ONLY the B-336 index can
+  // catch it. That is what makes the assertion sharp: it cannot pass on some other
+  // constraint by accident.
+  //
+  // WHY IT IS BOTH A MONEY AND A STATUS ASSERTION. One row is the money. The 409s are
+  // the phone: at the index-WITHOUT-catch SHA this burst answered [201,500], which
+  // keeps the money right but wedges the SyncProcessor's whole write drain behind a
+  // deferred 5xx. Both halves have to hold.
+  //
+  // FLAKE-HONEST: the race is probabilistic, so a PASS on one run is weak evidence and
+  // a FAIL is strong evidence. Two widths trade a little runtime for that asymmetry.
+  for (const n of [2, 10]) {
+    test(`CONCURRENT — a burst of ${n} simultaneous self-service check-ins is ONE row and ONE day's pay (B-336)`, async () => {
+      const day = `${YEAR}-02-${String(n).padStart(2, "0")}`;
+
+      // Built first, awaited together: a map that awaited INSIDE would serialise them
+      // and the test would pass against the very defect it exists to catch.
+      const inFlight = [];
+      for (let i = 0; i < n; i += 1) {
+        inFlight.push(site.post("/api/v1/labor/attendance", { data: { worker_id: workerId, day } }));
+      }
+      const statuses = (await Promise.all(inFlight)).map((r) => r.status());
+
+      // EXACTLY ONE 201; every other caller refused, and refused with a 4xx it can act
+      // on rather than a 5xx it defers.
+      expect(statuses.filter((s) => s === 201)).toHaveLength(1);
+      expect(statuses.filter((s) => s === 409)).toHaveLength(n - 1);
+      expect(await rowsFor(workerId, day)).toHaveLength(1);
+    });
+  }
+
+  test("CONCURRENT — the burst does not cost the offline REPLAY its 201: the same key in flight four times still resolves to one row, for every caller", async () => {
+    // The case where BOTH indexes are violated by one INSERT. Postgres names only one
+    // of them, so a catch that dispatched on the constraint NAME before resolving the
+    // caller's own key could answer 409 here — and the phone DEAD-LETTERS a 4xx, which
+    // silently loses this worker's day. Measured on PG 16 the name that arrives is
+    // attendance_idempotency_uq (relation index OID order), which is not a contract, so
+    // this asserts the OUTCOME rather than the name.
+    const day = `${YEAR}-02-20`;
+    const payload = { worker_id: workerId, day, idempotency_key: key("burst-replay") };
+    const inFlight = [];
+    for (let i = 0; i < 4; i += 1) {
+      inFlight.push(site.post("/api/v1/labor/attendance", { data: payload }));
+    }
+    const settled = await Promise.all(inFlight);
+    expect(settled.map((r) => r.status())).toEqual([201, 201, 201, 201]);
+
+    const ids = new Set(await Promise.all(settled.map(async (r) => String((await r.json()).id))));
+    expect(ids.size).toBe(1); // one row, handed back to every caller
+    expect(await rowsFor(workerId, day)).toHaveLength(1);
+  });
+
+  test("the money after the bursts: three days recorded, three days paid — not the sixteen check-ins that were asked for", async () => {
+    // The three tests above requested 2 + 10 + 4 = 16 check-ins across three days in
+    // one period. Payroll SUMS rows, so this is where any leak surfaces as cash rather
+    // than as a row count.
+    const payroll = await okJson(
+      await md.post("/api/v1/labor/payroll", { data: { worker_id: workerId, period: `${YEAR}-02` } }),
+      "POST /labor/payroll",
+    );
+    expect(payroll.amount).toBe(DAY_RATE * 3);
   });
 
   test("a REMOUNT is caught where the idempotency key could not see it — a NEW key for the same worker+day is a DUPLICATE, not a replay", async () => {
@@ -499,23 +581,31 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
     expect(await rowsFor(workerId, day)).toHaveLength(1);
   });
 
-  // B-332 gate-4.5 finding 2 — THIS TEST'S NAME USED TO SAY "a correction". It does not
-  // correct anything, and the claim that it did was the decisive justification for
-  // refusing unique(worker_id, day). createLaborPayroll SUMS ROWS, so the second row is
-  // ADDED to the first: on a 500/day worker, one `full` day paid 500 and filing the
-  // `half` "correction" paid 750 — reducing the day RAISED the pay, where a day
-  // genuinely corrected to half owes 250. Asserted below so the file cannot drift back
-  // into claiming otherwise.
+  // B-332 gate-4.5 finding 2 — THIS TEST'S NAME USED TO SAY "a correction", then "a
+  // second row is ACCEPTED". It now says REFUSED, and the history matters because the
+  // 201 it used to assert was the decisive justification for refusing a unique key.
   //
-  // What the test still legitimately proves is the narrower thing the index question
-  // actually turns on: a SECOND row on one date is ACCEPTED rather than 23505'd. There
-  // is no correction path at all today — no UPDATE/PUT/PATCH/DELETE on attendance
-  // anywhere in registerLaborRoute, no supersede column — and B-335 is open for one.
-  test("LEGITIMATE #3 — a second row on one date is ACCEPTED after check-out (and it ADDS to the day's pay rather than correcting it — B-335)", async () => {
+  // The claim was that a second INSERT is the only way to correct a day. The INSERT was
+  // accepted, but it corrected nothing: createLaborPayroll SUMS ROWS, so on a 500/day
+  // worker one `full` day paid 500 and filing the `half` "correction" paid 750 —
+  // reducing the day RAISED the pay, where a day genuinely corrected to half owes 250.
+  //
+  // B-336 therefore reclassifies this INSERT from "legitimate work a natural key would
+  // reject" to "the duplicate class", and attendance_self_day_uq now refuses it on BOTH
+  // doors. Note carefully what did and did not change:
+  //   - NOTHING is corrected. There is still no UPDATE/PUT/PATCH/DELETE on attendance
+  //     anywhere in registerLaborRoute and no supersede column. B-335 is open for a real
+  //     correction path, and this index does not foreclose it — that path will be an
+  //     UPDATE or a supersede marker, not a second INSERT;
+  //   - what IS closed is the inflation. The day stays at one day's pay instead of
+  //     climbing to 1.5, which is the assertion this test now carries.
+  // The three genuinely legitimate shapes are LEGITIMATE #1, #2 and the mixed split
+  // below, all still 201 — that is what keeps the predicate honest.
+  test("RECLASSIFIED (B-336) — the `correction` second row on one date is REFUSED, and the day stays at one day's pay instead of climbing to 1.5", async () => {
     const day = `${YEAR}-05-20`;
     const period = `${YEAR}-05`;
     const k = key("second-row");
-    // A worker of this test's own, so the period's payroll covers only these two rows.
+    // A worker of this test's own, so the period's payroll covers only these rows.
     const solo = await okJson(
       await md.post("/api/v1/labor/workers", {
         data: { name: `B-332 second-row ${RUN}`, day_rate: DAY_RATE },
@@ -535,22 +625,59 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
     });
 
     // The supervisor now files what everyone calls the correction: he worked HALF a day.
+    // This is the ROSTER door (finance.create, and md holds it), which has no
+    // application pre-check — so a 409 here can ONLY have come from the index + catch.
+    // A 500 would mean the catch stopped naming the constraint; a 201, that the index
+    // is gone.
     const second = await md.post("/api/v1/labor/attendance", {
       data: { worker_id: soloId, day, status: "half", idempotency_key: key("second-row-2") },
     });
-    expect(second.status()).toBe(201);
-    const rows = await rowsOf(
+    expect(second.status()).toBe(409);
+    expect((await second.json()).message).toMatch(/already recorded/i);
+
+    const rows = rowsOf(
       await okJson(await md.get("/api/v1/labor/attendance"), "GET /labor/attendance"),
     ).filter((r) => r.worker_id === soloId && r.day === day);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(1);
 
-    // …and it ADDED. 1.0 + 0.5 = 1.5 days, not the 0.5 a correction would leave.
+    // THE MONEY. This paid DAY_RATE * 1.5 before the index. It does not correct the day
+    // down to 250 — nothing does yet (B-335) — but it no longer pays MORE for less work.
     const payroll = await okJson(
       await md.post("/api/v1/labor/payroll", { data: { worker_id: soloId, period } }),
       "POST /labor/payroll",
     );
-    expect(payroll.amount).toBe(DAY_RATE * 1.5);
-    expect(payroll.amount).toBeGreaterThan(DAY_RATE / 2); // what a real correction owes
+    expect(payroll.amount).toBe(DAY_RATE);
+  });
+
+  test("LEGITIMATE #4 — a MIXED split: one half charged to a cost centre, one left uncosted. Only ONE row is cc_id NULL, so the index sees no collision", async () => {
+    // The shape that proves the predicate is doing real discrimination rather than
+    // banning second rows outright: two rows, one date, one worker, and it passes
+    // because exactly one of them falls inside `WHERE cc_id IS NULL`.
+    const day = `${YEAR}-05-25`;
+    const period = `${YEAR}-05`;
+    const ccs = rowsOf(await okJson(await md.get("/api/v1/cost-centers"), "GET /cost-centers"));
+    test.skip(ccs.length === 0, "needs a seeded cost centre");
+    const solo = await okJson(
+      await md.post("/api/v1/labor/workers", {
+        data: { name: `B-332 mixed-split ${RUN}`, day_rate: DAY_RATE },
+      }),
+      "POST /labor/workers (mixed-split subject)",
+    );
+    const soloId = String(solo.id);
+
+    const costed = await md.post("/api/v1/labor/attendance", {
+      data: { worker_id: soloId, day, status: "half", cc_id: ccs[0]!.id },
+    });
+    const uncosted = await md.post("/api/v1/labor/attendance", {
+      data: { worker_id: soloId, day, status: "half" },
+    });
+    expect([costed.status(), uncosted.status()]).toEqual([201, 201]);
+
+    const payroll = await okJson(
+      await md.post("/api/v1/labor/payroll", { data: { worker_id: soloId, period } }),
+      "POST /labor/payroll",
+    );
+    expect(payroll.amount).toBe(DAY_RATE); // 0.5 + 0.5 — one day, correctly split
   });
 
   // -------------------------------------------------------------------------

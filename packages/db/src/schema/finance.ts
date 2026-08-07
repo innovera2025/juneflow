@@ -988,6 +988,12 @@ export const attendances = pgTable("attendance", {
   //      rethrows to a 500. On the phone a 5xx is deferred and the drain STOPS, so the
   //      whole write queue wedges behind it. The name gate correctly prevents
   //      answering the WRONG ROW; it is not a licence to add the index.
+  //      B-336 NOTE: this is a cost of ANY new unique index here, including the partial
+  //      attendance_self_day_uq added below — it is paid there by naming that
+  //      constraint in the catch too, not by leaving the money defect open. It remains
+  //      an argument against the FULL key because a full key would charge that cost on
+  //      the legitimate cost-centre split as well, where there is no honest answer to
+  //      give; the partial one charges it only on a duplicate, where 409 IS the answer.
   //   3. RETRACTED — "THE CORRECTION PATH". This said a second INSERT is the ONLY way
   //      to correct a day, so a unique index would turn every correction into a 23505.
   //      The INSERT is accepted, but IT DOES NOT CORRECT ANYTHING. createLaborPayroll
@@ -1010,20 +1016,86 @@ export const attendances = pgTable("attendance", {
   // that test is not what makes a key right: an inescapable index is exactly as
   // dangerous as it is strong when it is the wrong constraint.
   // A check-in the user genuinely initiates twice is a DUPLICATE, not a replay, and
-  // the honest answer to it is a 409 from an explicit pre-check — not a 23505 from a
-  // second index. B-332's gate-4.5 review found that pre-check named here but never
-  // built, on a door that had just been opened to the payee: five keyless self-service
-  // POSTs for one day were five 201s and a 5× payout. It now exists in labor.ts
-  // (findRecordedDay), scoped to the self-service door and keyed on cc_id so reason 1
-  // survives it.
-  // HONEST LIMIT (B-336, OPEN · money): "a 409 from an explicit pre-check" holds only
-  // SEQUENTIALLY. With no unique index behind it that pre-check loses a concurrent race,
-  // measured live — a burst of 2 parallel self-service check-ins wrote 2 rows and paid
-  // the day twice. That is the standing cost of refusing a natural key on this table,
-  // and it is why this comment no longer offers the pre-check as a complete answer.
+  // the honest answer to it is a 409. B-332's gate-4.5 review found that answer named
+  // here but never built, on a door that had just been opened to the payee: five
+  // keyless self-service POSTs for one day were five 201s and a 5× payout. It now
+  // exists twice over — the pre-check in labor.ts (findRecordedDay) for the sequential
+  // class, and attendance_self_day_uq below for the concurrent one.
   uniqueIndex("attendance_idempotency_uq")
     .on(t.idempotencyKey)
     .where(sql`${t.idempotencyKey} IS NOT NULL`),
+  // B-336 (migration 0062 · MONEY): at most ONE UNCOSTED attendance row per worker per
+  // day. This is the constraint the pre-check above could not be: an application
+  // pre-check with nothing behind it does not survive concurrency, and a double-tap on
+  // a phone IS two concurrent requests. Measured live at the pre-check-only SHA, same
+  // worker, same day, ten separate client processes:
+  //
+  //     burst of  2 parallel → [201,201]        2 rows · payroll 1000 for a 500/day man
+  //     burst of 10 parallel → [201,…,201,409…] 2 rows · payroll 1000
+  //
+  // Under READ COMMITTED both requests run the pre-check's SELECT before either INSERT
+  // commits, so only a DB-layer constraint can settle it (the money-post-idempotency
+  // lesson: a pre-check is never a substitute for the index + catch).
+  //
+  // WHAT THE PREDICATE MEANS, EXACTLY — and what it does NOT mean. It was proposed as
+  // "the self-service door, which is the door with no other guard", because a
+  // self-service caller is refused cc_id outright (labor.ts) so every self-service row
+  // has cc_id NULL. THAT IMPLICATION RUNS ONE WAY ONLY. self-service ⇒ cc_id IS NULL;
+  // cc_id IS NULL does NOT ⇒ self-service. The roster (finance.create) door writes
+  // uncosted rows too, and this index constrains those identically. Recorded in this
+  // direction deliberately: the review before this one found a comment on this very
+  // table claiming a safety it did not have, and a money constraint justified by a
+  // one-way implication read as an equivalence is the same failure.
+  //
+  // SO WHAT DOES IT REJECT ON THE ROSTER DOOR? Exactly one class: a SECOND uncosted row
+  // for a worker+day. That class is not real work — it is the "correction" reason 3
+  // above retracted. Proven live on a 500/day worker at the pre-check-only SHA: a full
+  // day paid 500, and filing the `half` correction paid 750. It ADDS. Refusing it with
+  // a 409 removes no correction path (there is none — B-335), and forecloses none: when
+  // B-335 lands it is an UPDATE or a supersede marker, not a second INSERT.
+  //
+  // WHAT IT DOES NOT TOUCH, each proven live rather than reasoned:
+  //   - the COST-CENTRE SPLIT (reason 1, the load-bearing refusal of a FULL natural
+  //     key): both rows carry cc_id NOT NULL, so the predicate does not see them at
+  //     all. Two `half` rows, one date, [201,201], day_fraction summing to 1.0;
+  //   - a MIXED split — one half charged to a cost centre, one left uncosted. Only ONE
+  //     row is NULL, so there is no collision. [201,201];
+  //   - the NIGHT SHIFT across midnight: check-out is a COLUMN on the check-in's row
+  //     (above), so one shift is one row; the next night is a different `day`;
+  //   - every day OTHER than a repeat — the index is per (worker, DAY).
+  // This is why the FULL unique(worker_id, day) stays refused and this one is added:
+  // the predicate is what separates the split from the duplicate.
+  //
+  // NULL-DISTINCTNESS — the test B-307 and B-308 answered in opposite directions, and
+  // the reason this index is not the B-307 trap. B-307 refused a natural key BECAUSE a
+  // nullable column makes an index escapable (NULLs are distinct, so the constrained
+  // rows slip out from under it). Here the predicate deliberately TARGETS the NULL
+  // case: the rows it covers are exactly the rows whose cc_id is NULL, and within them
+  // both indexed columns are NOT NULL. There is nothing to escape through — a row can
+  // leave this index's coverage only by acquiring a real cc_id, which is precisely the
+  // legitimate split, and which the self-service door refuses.
+  //
+  // NO company_id COLUMN, unlike attendance_idempotency_uq's honest global-index
+  // caveat: worker_id is a server-assigned FK to a worker that carries exactly one
+  // company_id, so (worker_id, day) already determines the tenant. A cross-tenant clash
+  // is physically impossible here, where on a CLIENT-supplied key it is not.
+  //
+  // IT NEEDS THE CATCH, and the catch needs an order. A trip here surfaces as 23505
+  // naming attendance_self_day_uq, which the B-263 name gate in labor.ts would rethrow
+  // to a 500 — and on the phone a 5xx stops the whole drain. labor.ts now names this
+  // constraint too, and resolves the caller's OWN idempotency key FIRST, before
+  // dispatching on the name: a concurrent replay violates BOTH indexes with one INSERT
+  // and Postgres reports only one of them, so a catch that branched on the name alone
+  // would answer 409 to a legitimate replay the phone then dead-letters.
+  //
+  // OPERATOR NOTE (the B-318 lesson): this statement was ADDED to migration 0062 rather
+  // than filed as 0063, which is safe only because 0062 is unmerged. A database that
+  // already applied the earlier 0062 will SKIP it (journal-registered) and end up
+  // without the index, silently. Rebuild such a stack; do not re-migrate it. The live
+  // burst in tests/e2e/b332-checkin-schema.spec.ts is what detects it if you don't.
+  uniqueIndex("attendance_self_day_uq")
+    .on(t.workerId, t.day)
+    .where(sql`${t.ccId} IS NULL`),
 ]);
 
 /**

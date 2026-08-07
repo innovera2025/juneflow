@@ -631,6 +631,18 @@ function optCoordPair(
 const ATTENDANCE_IDEMPOTENCY_CONSTRAINT = "attendance_idempotency_uq";
 
 /**
+ * B-336: the partial unique index behind the duplicate pre-check — at most ONE UNCOSTED
+ * attendance row per worker per day (migration 0062, `WHERE cc_id IS NULL`). Named here
+ * for the same B-263 reason as the key index: an unnamed 23505 rethrows to a 500, and
+ * on the phone a 5xx is deferred and STOPS the whole write drain behind it.
+ */
+const ATTENDANCE_SELF_DAY_CONSTRAINT = "attendance_self_day_uq";
+
+/** The ONE 409 message for a day already on the books — pre-check AND catch, so the
+ * concurrent loser and the sequential loser cannot be told apart by the client. */
+const DUPLICATE_DAY_MESSAGE = "this day is already recorded for this worker";
+
+/**
  * Resolve the ORIGINAL attendance row behind a client idempotency_key. THREE filters,
  * all load-bearing:
  *   - the TENANT scope — `attendance` carries company_id directly, so it is a plain
@@ -692,33 +704,36 @@ async function findAttendanceByIdempotencyKey(
  * degenerates to (worker_id, day) there — which is the bound that makes the guard hold:
  * were the payee allowed to name cost centres, he could re-inflate once per centre.
  *
- * A PRE-CHECK, NOT AN INDEX. unique(worker_id, day) is still refused for the reasons in
- * finance.ts, and this deliberately does not emulate one: it constrains ONLY the new
- * self-service door, leaving the finance.create roster — corrections, bulk save, the
- * split — exactly as it shipped.
+ * NOT AN INDEX BY ITSELF — see B-336 below. The FULL unique(worker_id, day) is still
+ * refused for the reasons in finance.ts, and this pre-check deliberately does not
+ * emulate one: it constrains ONLY the new self-service door, leaving the finance.create
+ * roster's split and bulk save exactly as they shipped.
  *
- * ========================= WHAT THIS DOES NOT CLOSE (B-336) =========================
- * OPEN, money. A pre-check with NO unique index behind it does not survive CONCURRENCY,
- * and this one measurably does not. Under READ COMMITTED two requests can both run this
- * SELECT before either INSERT commits, and nothing downstream stops the second row:
- * attendance_idempotency_uq exempts NULL keys, and the table carries no other
- * constraint. Measured live on real Postgres, same worker, same day:
+ * ===================== WHAT THIS COULD NOT CLOSE ALONE (B-336) =====================
+ * A pre-check with NO unique index behind it does not survive CONCURRENCY, and this one
+ * measurably did not. Under READ COMMITTED two requests both run this SELECT before
+ * either INSERT commits, and at that SHA nothing downstream stopped the second row:
+ * attendance_idempotency_uq exempts NULL keys, and the table carried no other
+ * constraint. Measured live on real Postgres, same worker, same day, N separate client
+ * processes (a double-tap on a phone IS two concurrent requests — the ordinary case):
  *
- *     burst of  2 parallel → [201,201]                  2 rows · payroll 2x  (2 of 3 runs)
- *     burst of 10 parallel → [201,201,201,409,409,…]    3 rows · payroll 3x  (3 of 3 runs)
+ *     burst of  2 parallel → [201,201]                 2 rows · payroll 2x  (2 of 3 runs)
+ *     burst of 10 parallel → [201,409,201,409,…]       2 rows · payroll 2x  (2 of 3 runs)
  *
- * A double-tap on a phone IS two concurrent requests, so this is the ordinary case and
- * not an exotic one. What the guard DOES close is the sequential class the review found
- * — five taps in series, and the screen remount the idempotency key cannot see — both
- * proven live. Recorded here rather than left implied: an earlier comment on this very
- * door claimed a safety it did not have (gate-4.5 finding 5), and repeating that on a
- * money guard would be worse than the gap.
+ * CLOSED by attendance_self_day_uq (finance.ts + migration 0062): a PARTIAL unique index
+ * on (worker_id, day) WHERE cc_id IS NULL. The pre-check is kept in front of it — it is
+ * the readable statement of the rule and it answers without burning a failed INSERT —
+ * but the index is what is TRUE under concurrency, and the catch below maps its 23505
+ * onto the SAME 409 this returns, so the concurrent loser and the sequential loser are
+ * indistinguishable to the client. That layering is the B-261 money-write template, and
+ * the money-post-idempotency lesson in one line: a pre-check is never a substitute for
+ * the index + catch.
  *
- * Closing it needs a decision outside what this round was scoped to make — every route
- * leaves the area: a unique index (schema + the SACRED migration, and the design
- * deliberately refused one), a row lock (a new door on the security-core TenantDb; no
- * FOR UPDATE / advisory-lock pattern exists anywhere in apps/api today), or SERIALIZABLE
- * isolation. B-336 carries the measurements and the options.
+ * The predicate is NOT a synonym for "the self-service door" — self-service ⇒ cc_id IS
+ * NULL, not the converse — so the roster door is constrained on uncosted days too. The
+ * one thing that refuses is a SECOND uncosted row for a worker+day, which ADDS pay
+ * rather than correcting it (B-335). finance.ts carries the full argument and the four
+ * legitimate shapes that were checked live and are untouched.
  * ===================================================================================
  */
 async function findRecordedDay(
@@ -756,23 +771,52 @@ function sendExistingAttendance(
 }
 
 /**
- * B-307 idempotency REPLAY, reached from the 23505 CATCH. The insert tripped
- * attendance_idempotency_uq: a POST carrying a previously-seen idempotency_key is the
- * mobile SyncProcessor's at-least-once retry, NOT a second day worked. This is the
- * CONCURRENCY BACKSTOP for the pre-check — the pre-check read nothing, then a racing
- * replay of the same key committed before our insert. Kept deliberately: an app-level
- * pre-check is NOT a substitute for the unique index + catch (money-post-idempotency
- * lesson). A key that collided at the DB layer but resolves to nothing in THIS
- * tenant/worker/day is a 409 — never a leak, never a fabricated record.
+ * The 23505 CATCH for POST /labor/attendance — the CONCURRENCY BACKSTOP behind both
+ * pre-checks above. Reached when a racing writer committed between our SELECT and our
+ * INSERT; an app-level pre-check is NOT a substitute for the unique index + catch
+ * (money-post-idempotency lesson), so this is where the money defect is actually closed.
+ *
+ * TWO indexes on this table can now put us here, so B-336 had to decide what happens
+ * when they disagree:
+ *
+ *   THE REPLAY IS RESOLVED FIRST, BEFORE THE CONSTRAINT NAME IS CONSULTED. One INSERT
+ *   can violate BOTH indexes at once — a concurrent SyncProcessor retry carries the SAME
+ *   key AND lands on the same (worker, day, uncosted) tuple — and Postgres reports only
+ *   ONE of the constraints an insert breaks. HONEST ABOUT THE STRENGTH OF THIS: measured
+ *   on PG 16, the both-violated insert names attendance_idempotency_uq, because a
+ *   relation's indexes are checked in OID order and the key index is the older one. So
+ *   on a stack built the way this one is, a name-dispatching catch would reach the same
+ *   answer. This ordering is defence against an order Postgres does not CONTRACT (a
+ *   drop-and-recreate of the key index for maintenance reverses the OIDs), not a repair
+ *   of a flip that was observed. It costs nothing and removes the dependency: whichever
+ *   name arrives, a caller whose own key resolves gets its original row's 201, and the
+ *   phone DEAD-LETTERS a 4xx, so guessing wrong here would silently lose a worker's day.
+ *
+ *   THE NAME STILL DECIDES THE 409 (B-263). When nothing resolves — no key, or a key
+ *   whose tenant/worker/day anchors don't match — the two constraints mean genuinely
+ *   different things and get different messages. Anything OTHER than these two names
+ *   rethrows to the 500 handler, so a future unique index on `attendance` cannot
+ *   silently inherit either outcome and answer a wrong row.
+ *
+ * A key that collided at the DB layer but resolves to nothing in THIS tenant/worker/day
+ * is a 409 — never a leak, never a fabricated record.
  */
-async function replayExistingAttendance(
+async function resolveAttendanceConflict(
   db: TenantDb,
   reply: FastifyReply,
-  args: { idempotencyKey: string; workerId: string; day: string },
+  args: { constraint: string; idempotencyKey: string | null; workerId: string; day: string },
 ): Promise<FastifyReply> {
-  const existing = await findAttendanceByIdempotencyKey(db, args);
-  if (!existing) return conflict(reply, "idempotency_key already used");
-  return sendExistingAttendance(reply, existing);
+  const { constraint, idempotencyKey, workerId, day } = args;
+  if (idempotencyKey) {
+    const existing = await findAttendanceByIdempotencyKey(db, { idempotencyKey, workerId, day });
+    if (existing) return sendExistingAttendance(reply, existing);
+  }
+  return conflict(
+    reply,
+    constraint === ATTENDANCE_SELF_DAY_CONSTRAINT
+      ? DUPLICATE_DAY_MESSAGE
+      : "idempotency_key already used",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -891,30 +935,37 @@ async function createLaborAttendance(
   // seen must still get its original row's 201, and only a request that is NOT a replay
   // can reach here and be judged a duplicate.
   //
-  // Self-service ONLY. The finance.create roster keeps every behaviour it shipped with,
-  // including the second INSERT that is currently the only way to touch a recorded day
-  // (finance.ts, and B-335 for why that is not actually a correction).
+  // Self-service ONLY — but B-336 means that is no longer the whole rule. The roster
+  // door is now bounded too, by attendance_self_day_uq at the DB layer, which refuses a
+  // second UNCOSTED row for a worker+day on EITHER door. It is not pre-checked here
+  // because the catch below answers it with the same 409 and without a TOCTOU window;
+  // the roster's cost-centre split and bulk save are untouched (both carry a cc_id, or
+  // land on a day nothing else has claimed).
   //
   // 409, not a silent 200: the day IS already recorded, so there is nothing to write,
   // and the phone dead-letters a 4xx instead of retrying forever.
   if (authz.selfService) {
     const recorded = await findRecordedDay(db, { workerId, day, ccId, idempotencyKey });
     if (recorded) {
-      return conflict(reply, "this day is already recorded for this worker");
+      return conflict(reply, DUPLICATE_DAY_MESSAGE);
     }
   }
 
-  // B-307: the row carries the client key. A REPLAY (the SyncProcessor retrying a
-  // create it never heard back on) trips attendance_idempotency_uq → 23505; we catch
-  // it and return the ORIGINAL row instead of a duplicate the payroll would pay again.
-  // Entering that branch needs ALL THREE of: a key present (the partial index exempts
-  // nulls, so a key-less insert can never dedup), SQLSTATE 23505, and — B-263 — the
-  // violated constraint being attendance_idempotency_uq BY NAME. The name check is the
-  // load-bearing hardening: 23505 alone only says "SOME unique constraint", so a future
-  // unique index on `attendance` (say the unique(worker_id, day) this deliberately did
-  // NOT add) would otherwise silently inherit the replay path and answer a wrong row.
-  // Anything else rethrows to the 500 handler — the safe failure for a money write (no
-  // row written, client retries) rather than a confidently wrong answer.
+  // THE TWO INDEXES THIS INSERT CAN TRIP, and why both are caught by NAME (B-263):
+  //   - attendance_idempotency_uq — a REPLAY. The SyncProcessor is retrying a create it
+  //     never heard back on; the answer is the ORIGINAL row, not a duplicate the payroll
+  //     would pay again.
+  //   - attendance_self_day_uq (B-336) — a DUPLICATE. A second UNCOSTED row for this
+  //     worker+day, which payroll would SUM into a second day's pay. The answer is 409.
+  // 23505 alone only says "SOME unique constraint", so both are matched by name and
+  // ANYTHING ELSE RETHROWS to the 500 handler — the safe failure for a money write (no
+  // row written, client retries) rather than a confidently wrong answer. A future unique
+  // index on `attendance` therefore cannot silently inherit either outcome.
+  //
+  // Which of the two outcomes applies is NOT decided here: one INSERT can violate both
+  // at once and Postgres names only one of them, so resolveAttendanceConflict resolves
+  // the caller's own key BEFORE looking at the name. See its comment — getting this
+  // backwards turns a legitimate offline replay into a 4xx the phone dead-letters.
   let attendance: AttendanceRow | undefined;
   try {
     [attendance] = (await db
@@ -936,12 +987,15 @@ async function createLaborAttendance(
       })
       .returning()) as AttendanceRow[];
   } catch (err) {
+    // NOTE the missing `idempotencyKey &&`: the B-336 index fires on KEYLESS inserts too
+    // (that is the burst it exists for), so requiring a key here would have rethrown the
+    // duplicate to a 500 and left the phone's drain wedged on the one case that matters.
+    const constraint = isUniqueViolation(err) ? violatedConstraint(err) : undefined;
     if (
-      idempotencyKey &&
-      isUniqueViolation(err) &&
-      violatedConstraint(err) === ATTENDANCE_IDEMPOTENCY_CONSTRAINT
+      constraint === ATTENDANCE_IDEMPOTENCY_CONSTRAINT ||
+      constraint === ATTENDANCE_SELF_DAY_CONSTRAINT
     ) {
-      return replayExistingAttendance(db, reply, { idempotencyKey, workerId, day });
+      return resolveAttendanceConflict(db, reply, { constraint, idempotencyKey, workerId, day });
     }
     throw err;
   }
