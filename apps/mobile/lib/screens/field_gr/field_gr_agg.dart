@@ -310,6 +310,16 @@ DateTime? receiptDateOf(FieldGrEnt gr) {
   return DateTime.tryParse(raw);
 }
 
+/// True when this screen may honestly render [gr] — the ONE eligibility rule,
+/// applied to every candidate on every route into the screen.
+///
+/// It lives in a named predicate rather than inline so that neither branch of
+/// [selectReceipt] can quietly grow past it: a pushed id and the bare tab route
+/// are two ways of choosing WHICH receipt, never two standards for WHETHER a
+/// receipt may be shown. See [kFieldGrReceivedStatus] for why the rule exists.
+bool _isEligible(FieldGrEnt gr) =>
+    fieldGrStr(gr, const <String>['status']) == kFieldGrReceivedStatus;
+
 /// Choose the receipt to show.
 ///
 /// With a [grId] the screen has a real subject pushed into it and shows exactly
@@ -322,11 +332,19 @@ DateTime? receiptDateOf(FieldGrEnt gr) {
 /// share a timestamp (a seeded batch does) and a row with no parseable date sorts
 /// last rather than winning by accident.
 ///
-/// Only [kFieldGrReceivedStatus] rows are eligible — see that constant.
+/// Only [kFieldGrReceivedStatus] rows are eligible, on BOTH routes ([_isEligible]).
+/// A pushed id naming a `returned` or `cancelled` receipt therefore resolves to
+/// null and the screen renders empty — the same answer it gives a foreign id, and
+/// for the same reason: there is no status pill on this surface, so showing that
+/// document under the *items received* heading would silently assert that goods
+/// are held which went back to the vendor. No route into this screen may show one.
 FieldGrEnt? selectReceipt(List<FieldGrEnt> grs, {String? grId}) {
   if (grId != null) {
     for (final FieldGrEnt gr in grs) {
-      if (fieldGrStr(gr, const <String>['id']) == grId) return gr;
+      // `id` is the primary key, so the first match settles it: an ineligible
+      // match resolves to null rather than falling through to another receipt.
+      if (fieldGrStr(gr, const <String>['id']) != grId) continue;
+      return _isEligible(gr) ? gr : null;
     }
     return null;
   }
@@ -334,8 +352,7 @@ FieldGrEnt? selectReceipt(List<FieldGrEnt> grs, {String? grId}) {
   DateTime? bestAt;
   String? bestId;
   for (final FieldGrEnt gr in grs) {
-    final String? status = fieldGrStr(gr, const <String>['status']);
-    if (status != kFieldGrReceivedStatus) continue;
+    if (!_isEligible(gr)) continue;
     final String? id = fieldGrStr(gr, const <String>['id']);
     if (id == null) continue;
     final DateTime? at = receiptDateOf(gr);

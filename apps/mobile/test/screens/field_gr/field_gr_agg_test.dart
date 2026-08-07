@@ -247,6 +247,47 @@ void main() {
       },
     );
 
+    test(
+      'WITHHELD: a pushed id for a RETURNED receipt resolves to nothing',
+      () {
+        // The eligibility rule is a property of the SCREEN, not of one route
+        // into it: a receipt that went back to the vendor may not be rendered
+        // under the *items received* heading just because an id was pushed.
+        // Distinct from the foreign-id case above — this id EXISTS and is the
+        // caller's real subject; it is refused on status alone.
+        final FieldGrEnt? got = selectReceipt(<FieldGrEnt>[
+          _gr(id: 'gr-1'),
+          _gr(id: 'gr-r', status: 'returned'),
+        ], grId: 'gr-r');
+        expect(got, isNull);
+      },
+    );
+
+    test(
+      'WITHHELD: a pushed id for a CANCELLED receipt resolves to nothing',
+      () {
+        final FieldGrEnt? got = selectReceipt(<FieldGrEnt>[
+          _gr(id: 'gr-1'),
+          _gr(id: 'gr-x', status: 'cancelled'),
+        ], grId: 'gr-x');
+        expect(got, isNull);
+      },
+    );
+
+    test(
+      'an ineligible pushed id yields NOTHING, never the next eligible receipt',
+      () {
+        // The refusal must not degrade into the bare-route fallback: answering a
+        // pushed id with a DIFFERENT document is the one failure worse than an
+        // empty screen (the foreign-id precedent above).
+        final FieldGrEnt? got = selectReceipt(<FieldGrEnt>[
+          _gr(id: 'gr-r', status: 'returned'),
+          _gr(id: 'gr-ok', date: '2026-05-29T00:00:00.000Z'),
+        ], grId: 'gr-r');
+        expect(got, isNull);
+      },
+    );
+
     test('an empty register resolves to nothing', () {
       expect(selectReceipt(const <FieldGrEnt>[]), isNull);
     });

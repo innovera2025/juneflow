@@ -433,6 +433,33 @@ void main() {
       expect(find.text('รายการที่รับ'), findsNothing);
     });
 
+    testWidgets(
+      'WITHHELD: a pushed id for a returned receipt renders empty, never its items',
+      (WidgetTester tester) async {
+        // The visible consequence of the eligibility rule, and the reason it is
+        // enforced on the pushed-id route too: this screen has NO status pill, so
+        // a returned receipt drawn here would put real goods under the heading
+        // "items received" with nothing on screen to say they went back.
+        await _pump(
+          tester,
+          _FakeRepo(
+            grs: <FieldGrEnt>[
+              _gr(
+                id: 'gr-r',
+                status: 'returned',
+                vendor: 'บจก. ซีแพคคอนกรีต',
+                items: _prototypeLines,
+              ),
+            ],
+          ),
+          grId: 'gr-r',
+        );
+        expect(find.text('รายการที่รับ'), findsNothing);
+        expect(find.text('บจก. ซีแพคคอนกรีต'), findsNothing);
+        expect(find.text('ปูน 50kg'), findsNothing);
+      },
+    );
+
     testWidgets('the screen reads once on mount', (WidgetTester tester) async {
       final _FakeRepo repo = _FakeRepo(grs: <FieldGrEnt>[_gr()]);
       await _pump(tester, repo);
