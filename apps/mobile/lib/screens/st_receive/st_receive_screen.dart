@@ -84,6 +84,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -188,19 +190,56 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
 
   StRecvState _state = StRecvState.idle;
 
-  /// The stable client idempotency key for this receipt. Generated on the first
-  /// submit and REUSED on every manual retry, so a re-tap can never create a
-  /// second GR (the queue's enqueue is idempotent on this id, and the server
-  /// resolves the replay by this key — B-261/B-264).
+  /// The stable client idempotency key for this receipt.
+  ///
+  /// Minted on the first submit and REUSED on every later attempt — including
+  /// attempts made after the app was KILLED and relaunched, because [_resumeQueued]
+  /// re-adopts the id of the receipt still pending in the DURABLE queue for THIS PO
+  /// (B-330). A re-tap therefore only ever re-drains that one op; it can never mint
+  /// a second key and post a second GR.
+  ///
+  /// That last clause used to be false. Before the rehydration this field was
+  /// session-only: a restart while the receipt was still queued left it null, the
+  /// next tap minted a FRESH key, and two queued ops carrying two DIFFERENT keys
+  /// each wrote their own GR (and their own JV). `gr_idempotency_uq` cannot catch
+  /// that — two distinct keys are legitimately two distinct receipts — so the
+  /// duplicate has to be prevented here, by not minting the second key.
+  ///
+  /// Null means exactly "nothing of mine is queued": either nothing was ever
+  /// submitted, or a drain has already synced it away.
   String? _opId;
 
   @override
   void initState() {
     super.initState();
     _future = _load();
-    // (a) on-mount trigger: flush anything a prior session left queued. It does
-    // not change this screen's idle state; it just keeps the queue moving.
-    if (widget.poId != null) unawaited(widget.repo.drain());
+    if (widget.poId != null) unawaited(_resumeQueued());
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
+  /// app kill (B-330).
+  ///
+  /// The drain runs FIRST and is awaited, so the online case resolves normally and
+  /// leaves nothing to adopt. Whatever is STILL pending for this PO afterwards is a
+  /// receipt this device captured and the server has not accepted yet, so the screen
+  /// takes its id back and shows the honest queued state rather than presenting a
+  /// clean slate that would mint a second key on the next tap.
+  Future<void> _resumeQueued() async {
+    final String? poId = widget.poId;
+    if (poId == null) return;
+    await widget.repo.drain();
+    if (!mounted) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      stReceiveOpIdentity(poId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = StRecvState.queued;
+    });
   }
 
   /// The real read chain: PO -> its `pr_id` -> that PR's priced lines.
@@ -251,10 +290,11 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
     if (poId == null || _lines.isEmpty) return;
     if (_state == StRecvState.submitting) return;
 
-    // A null [_opId] is exactly "nothing enqueued yet": the first tap enqueues +
-    // drains, every later tap only re-drains the SAME op. That is what keeps a
-    // retry from becoming a second receipt on the client side, before the
-    // server's idempotency key is ever consulted.
+    // A null [_opId] is exactly "nothing of mine is queued" — which [_resumeQueued]
+    // is what makes true across an app kill, not just within this session. So the
+    // first tap enqueues + drains and every later tap only re-drains the SAME op.
+    // That is what keeps a retry from becoming a second receipt on the client side,
+    // before the server's idempotency key is ever consulted.
     final bool firstAttempt = _opId == null;
     final String opId = _opId ??= _newOpId();
     setState(() => _state = StRecvState.submitting);

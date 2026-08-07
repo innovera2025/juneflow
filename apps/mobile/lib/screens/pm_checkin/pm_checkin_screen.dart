@@ -34,6 +34,8 @@ import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../app/gps_source.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -133,9 +135,15 @@ class PmCheckinScreen extends StatefulWidget {
 class _PmCheckinScreenState extends State<PmCheckinScreen> {
   PmCheckinState _state = PmCheckinState.idle;
 
-  /// The stable client idempotency key for this screen's check-in. Generated on the
-  /// first submit and REUSED on every manual retry, so a re-tap never duplicates the
-  /// write (the queue's enqueue is idempotent on this id).
+  /// The stable client idempotency key for this screen's check-in.
+  ///
+  /// Minted on the first submit and REUSED on every later attempt — including after
+  /// an app kill, because [_resumeQueued] re-adopts the id of the check-in still
+  /// pending in the DURABLE queue for THIS work order (B-330). Without that, a
+  /// restart while the write was queued minted a fresh key and enqueued a second
+  /// op, so the server saw two check-ins.
+  ///
+  /// Null means exactly "nothing of mine is queued".
   String? _opId;
 
   /// The honest client submit time, shown in the confirmed state (the server's
@@ -149,11 +157,35 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   @override
   void initState() {
     super.initState();
-    // (a) on-mount trigger: flush any writes a prior session left queued. It does
-    // not change this fresh screen's idle state; it just keeps the queue moving.
     if (widget.workOrderId != null) {
-      unawaited(widget.repo.drain());
+      unawaited(_resumeQueued());
     }
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
+  /// app kill (B-330).
+  ///
+  /// The drain runs FIRST and is awaited, so the online case resolves normally and
+  /// leaves nothing to adopt. A check-in STILL pending for this work order afterwards
+  /// is one this device captured and the server has not accepted, so the screen takes
+  /// its id back and shows the honest queued state instead of a clean slate that
+  /// would mint a second key on the next tap.
+  Future<void> _resumeQueued() async {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    await widget.repo.drain();
+    if (!mounted) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      pmCheckinOpIdentity(woId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = PmCheckinState.queued;
+    });
   }
 
   String _t(String field) => widget.i18n.t(widget.strings[field]);

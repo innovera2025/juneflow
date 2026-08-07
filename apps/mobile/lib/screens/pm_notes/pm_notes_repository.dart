@@ -58,9 +58,21 @@
 //   writes and is not required here.
 import 'package:dio/dio.dart';
 
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import 'pm_notes_agg.dart';
+
+/// What one work order's queued maintenance-log write looks like in the shared
+/// queue.
+///
+/// The ONE definition of this write's entity type + endpoint: the enqueue below
+/// builds its [SyncOperation] from it, and the screen matches its own still-pending
+/// op with it after a restart (B-330), so the matcher cannot drift from the builder.
+SyncOpIdentity pmNotesOpIdentity(String workOrderId) => SyncOpIdentity(
+  entityType: 'pm_notes',
+  endpoint: '/pm/workorders/$workOrderId/close',
+);
 
 /// Read the work orders and queue the maintenance-log write.
 abstract class PmNotesRepository {
@@ -126,11 +138,12 @@ class DioPmNotesRepository implements PmNotesRepository {
     required Map<String, Object?> body,
     required DateTime now,
   }) async {
+    final SyncOpIdentity identity = pmNotesOpIdentity(workOrderId);
     final SyncOperation op = SyncOperation(
       id: opId,
-      entityType: 'pm_notes',
+      entityType: identity.entityType,
       kind: SyncOpKind.update,
-      endpoint: '/pm/workorders/$workOrderId/close',
+      endpoint: identity.endpoint,
       method: 'POST',
       payload: body,
       createdAt: now,

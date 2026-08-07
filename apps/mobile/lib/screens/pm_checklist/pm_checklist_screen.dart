@@ -47,6 +47,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -153,22 +155,51 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
   PmChecklistSaveState _state = PmChecklistSaveState.idle;
 
   /// The stable client idempotency key of the op currently awaiting resolution.
-  /// Reused on a manual retry so a re-tap never enqueues a second op; cleared once
-  /// the op resolves or the technician edits a result again (a new payload is a
-  /// new write).
+  ///
+  /// Reused on every later attempt — including after an app kill, because
+  /// [_resumeQueued] re-adopts the id of the checklist write still pending in the
+  /// DURABLE queue for THIS work order (B-330). Without that, a restart while the
+  /// write was queued minted a fresh key and enqueued a second op.
+  ///
+  /// Cleared once the op resolves, or when the technician edits a result again (a
+  /// new payload is a new write). Null means "nothing of mine is queued".
   String? _opId;
 
   @override
   void initState() {
     super.initState();
     if (widget.workOrderId != null) {
-      // (a) on-mount trigger: flush anything a prior session left queued. It does
-      // not change this screen's state; it just keeps the queue moving.
-      unawaited(widget.repo.drain());
+      unawaited(_resumeQueued());
       unawaited(_load());
     } else {
       _loaded = true;
     }
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
+  /// app kill (B-330).
+  ///
+  /// The drain runs FIRST and is awaited, so the online case resolves normally and
+  /// leaves nothing to adopt. A checklist write STILL pending for this work order
+  /// afterwards is one this device captured and the server has not accepted, so the
+  /// screen takes its id back and shows the honest queued state instead of a clean
+  /// slate that would mint a second key on the next save.
+  Future<void> _resumeQueued() async {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    await widget.repo.drain();
+    if (!mounted) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      pmChecklistOpIdentity(woId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = PmChecklistSaveState.queued;
+    });
   }
 
   Future<void> _load() async {

@@ -85,6 +85,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -191,9 +193,14 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   PmNotesSaveState _state = PmNotesSaveState.idle;
 
   /// The stable client idempotency key of the op currently awaiting resolution.
-  /// Reused on a manual retry so a re-tap never enqueues a second op; cleared once
-  /// the op resolves or the technician edits a field again (a new body is a new
-  /// write).
+  ///
+  /// Reused on every later attempt — including after an app kill, because
+  /// [_resumeQueued] re-adopts the id of the log write still pending in the DURABLE
+  /// queue for THIS work order (B-330). Without that, a restart while the write was
+  /// queued minted a fresh key and enqueued a second op.
+  ///
+  /// Cleared once the op resolves, or when the technician edits a field again (a new
+  /// body is a new write). Null means "nothing of mine is queued".
   String? _opId;
 
   @override
@@ -207,13 +214,45 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
       c.addListener(_onEdited);
     }
     if (widget.workOrderId != null) {
-      // (a) on-mount trigger: flush anything a prior session left queued. It does
-      // not change this screen's state; it just keeps the queue moving.
-      unawaited(widget.repo.drain());
-      unawaited(_load());
+      unawaited(_resumeQueued());
     } else {
       _loaded = true;
     }
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
+  /// app kill (B-330).
+  ///
+  /// The drain runs FIRST, so the online case resolves normally and leaves nothing
+  /// to adopt. A log write STILL pending for this work order afterwards is one this
+  /// device captured and the server has not accepted, so the screen takes its id back
+  /// and shows the honest queued state instead of a clean slate that would mint a
+  /// second key on the next save.
+  ///
+  /// ORDER MATTERS HERE, unlike on the other four screens. `_load` seeds the three
+  /// controllers, which fires [_onEdited], which DROPS `_opId` — because a typed
+  /// character genuinely does mean "new body, new write". Seeding is not typing, so
+  /// the read is started in parallel (no online delay) but AWAITED before the
+  /// adoption: by then the controllers have settled and the only thing that can clear
+  /// the adopted id afterwards is a real edit.
+  Future<void> _resumeQueued() async {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    final Future<void> loading = _load();
+    await widget.repo.drain();
+    await loading;
+    if (!mounted) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      pmNotesOpIdentity(woId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = PmNotesSaveState.queued;
+    });
   }
 
   @override

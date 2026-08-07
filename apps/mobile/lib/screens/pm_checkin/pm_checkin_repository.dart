@@ -15,8 +15,20 @@
 // fabricated. When no fix can be obtained (permission denied / location off) the
 // screen renders an honest error and NEVER enqueues (so no gps-blank 400 dead-letter
 // is ever created).
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
+
+/// What one work order's queued check-in looks like in the shared queue.
+///
+/// The ONE definition of this write's entity type + endpoint: the enqueue below
+/// builds its [SyncOperation] from it, and the screen matches its own still-pending
+/// op with it after a restart (B-330). Because both sides read the same expression,
+/// the matcher cannot silently drift away from the builder.
+SyncOpIdentity pmCheckinOpIdentity(String workOrderId) => SyncOpIdentity(
+  entityType: 'pm_checkin',
+  endpoint: '/pm/workorders/$workOrderId/checkin',
+);
 
 /// Enqueue a check-in write and drive the (a) drain; expose the queue state so the
 /// screen can resolve its op's honest outcome.
@@ -60,11 +72,12 @@ class QueueBackedPmCheckinRepository implements PmCheckinRepository {
     required String gps,
     required DateTime now,
   }) async {
+    final SyncOpIdentity identity = pmCheckinOpIdentity(workOrderId);
     final SyncOperation op = SyncOperation(
       id: opId,
-      entityType: 'pm_checkin',
+      entityType: identity.entityType,
       kind: SyncOpKind.create,
-      endpoint: '/pm/workorders/$workOrderId/checkin',
+      endpoint: identity.endpoint,
       method: 'POST',
       // The REAL device coordinate the screen just obtained. The server owns
       // everything; the client sends only the true fix.
