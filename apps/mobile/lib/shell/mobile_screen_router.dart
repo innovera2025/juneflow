@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../screens/approvals_inbox/approvals_inbox_screen.dart';
 import '../screens/exec/exec_screen.dart';
+import '../screens/field_gr/field_gr_screen.dart';
 import '../screens/field_pr/field_pr_screen.dart';
 import '../screens/field_progress/field_progress_screen.dart';
 import '../screens/fm_accept/fm_accept_screen.dart';
@@ -124,6 +125,17 @@ Widget _buildFieldProgress(BuildContext context) =>
 /// lines → POST /pr + /submit). ONLINE ONLY — see the screen header / B-295.
 Widget _buildFieldPr(BuildContext context) => const FieldPrScreenHost();
 
+/// Builds the `field-gr` goods-receipt REVIEW screen — the site's read of a
+/// RECORDED receipt (GET /gr, whose rows carry the resolved vendor and the
+/// gr_item lines), not a second count-and-receive form. It is the distinct
+/// sibling of `st-receive`, which ENTERS counts against a PO; the evidence for
+/// that split is in field_gr_agg.dart and the fork is raised as B-324. Its grId
+/// is nullable like the rest of the pushed-subject screens: nothing lists GRs on
+/// mobile today, so a bare tab route follows the register's newest RECEIVED
+/// receipt (the srv-track precedent) and the push seam is ready for a future
+/// list. It performs NO write — see field_gr_repository.dart.
+Widget _buildFieldGr(BuildContext context) => const FieldGrScreenHost();
+
 /// Builders for the routes that have a real ported screen. A screen port adds
 /// `'<id>': _buildX` here (a const-tearoff) and its id to [kBuiltRouteIds].
 const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
@@ -147,6 +159,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'fm-accept': _buildFmAccept,
   'field-progress': _buildFieldProgress,
   'field-pr': _buildFieldPr,
+  'field-gr': _buildFieldGr,
 };
 
 /// Resolves [routeId] to its widget: the built screen if registered, otherwise an

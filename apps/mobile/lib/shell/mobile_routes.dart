@@ -97,6 +97,14 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// field-progress lists the tenant's subcon contracts when no contract id is pushed
 /// and loads the tapped one's periods, and field-pr picks a BOQ then one of its
 /// lines.
+/// `field-gr` is the site's REVIEW of a recorded goods receipt (GET /gr — the
+/// vendor and the gr_item lines the wire already resolves). It is NOT a second
+/// `st-receive`: that screen ENTERS counts against a PO, this one displays a
+/// receipt that already exists, which is the only reading under which its own
+/// partial line can be rendered at all (field_gr_agg.dart; fork raised as B-324).
+/// Nothing lists GRs on mobile yet, so a bare tab route follows the register's
+/// newest RECEIVED receipt (the srv-track precedent) and the nullable-id push
+/// seam is ready for a future list. It performs NO write.
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -118,6 +126,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'fm-accept',
   'field-progress',
   'field-pr',
+  'field-gr',
 };
 
 /// The set of all known route ids.
