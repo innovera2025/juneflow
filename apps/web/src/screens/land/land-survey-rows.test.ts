@@ -43,6 +43,9 @@ function plot(over: Partial<PlotRow> = {}): PlotRow {
     // SERVER money (plotWire.total_value / deal_deposit): 24 rai x 6.8M = 163,200,000.
     totalValue: 163200000,
     dealDeposit: 16320000,
+    // B-319: fee/SBT are SERVER money too (plotWire.transfer_fee / sbt, 2% / 3.3%).
+    transferFee: 3264000,
+    sbt: 5385600,
     ...over,
   };
 }

@@ -8,12 +8,16 @@
  * Land Bank register reads, use-land-bank.ts). {@link pickDealPlot} selects the plot in
  * due diligence for the active project.
  *
- * MONEY = SERVER (B-316/A2). The buy tab's total and 10% deposit are READ off the plot
- * wire (total_value / deal_deposit), computed by land-sales.ts plotTotalValue /
- * plotDealDeposit — the same helper the deal WRITE posts with. So the deposit shown on
- * this screen is, by construction, the deposit the Dr 1150 / Cr 2010 JV books. This
- * module previously kept a second copy of the formula (Math.round(total * 0.1)) whose
- * rounding disagreed with the server's; that copy is gone and must not come back.
+ * MONEY = SERVER (B-316/A2, B-319). ALL FOUR buy terms are READ off the plot wire
+ * (total_value / deal_deposit / transfer_fee / sbt), computed by land-sales.ts
+ * plotTotalValue / plotDealDeposit / plotTransferFee / plotSbt. The deposit comes from
+ * the same helper the deal WRITE posts with, so the figure shown here is, by
+ * construction, the figure the Dr 1150 / Cr 2010 JV books. This module used to keep a
+ * second copy of the deposit formula (Math.round(total * 0.1)) whose rounding disagreed
+ * with the server's, and — worse — the ONLY copies in the entire system of two statutory
+ * Thai rates (TRANSFER_FEE_RATE = 0.02, SBT_RATE = 0.033). Those rates now live in
+ * @juneflow/tax-engine/thailand (THAILAND_RATES); this module computes nothing and must
+ * not start again.
  *
  * DERIVED TERMS ARE REAL, the rest is honestly absent. The prototype's buy tab mixed four
  * price-derived DealFields (total / deposit / transfer-fee / SBT) with two hardcoded mock
@@ -39,8 +43,8 @@ import { type PlotRow } from "./land-bank-rows";
  *
  *   total       <- plotWire.total_value    SERVER
  *   deposit     <- plotWire.deal_deposit   SERVER (the figure the JV books)
- *   transferFee = round(total x 0.02)      client, 2% transfer fee   [B-316/A2 note below]
- *   sbt         = round(total x 0.033)     client, 3.3% specific business tax
+ *   transferFee <- plotWire.transfer_fee   SERVER (2%, THAILAND_RATES)
+ *   sbt         <- plotWire.sbt            SERVER (3.3%, THAILAND_RATES)
  */
 export interface DealTerms {
   total: number | null;
@@ -50,30 +54,22 @@ export interface DealTerms {
 }
 
 /**
- * Thai land-transfer fee rate, ported verbatim from the prototype (land2.jsx L243).
+ * Read the buy-deal terms off a real plot. Pure projection — NO arithmetic.
  *
- * B-316/A2 — UNSOURCED, and knowingly left here. This rate and SBT_RATE have NO server
- * counterpart, no packages/tax-engine entry and no spec anywhere in this repo: they exist
- * only in the prototype and in this file. They stay client-side DELIBERATELY, because
- * moving an invented statutory rate into a route file would launder it, not source it.
- * Establishing their provenance (and then homing them in packages/tax-engine beside
- * VAT/WHT) is its own blocker. Unlike the deposit, neither figure reaches a ledger --
- * both are display-only, and no write on this screen sends either one.
- */
-const TRANSFER_FEE_RATE = 0.02;
-
-/** Thai specific-business-tax rate, ported verbatim (land2.jsx L244). See TRANSFER_FEE_RATE. */
-const SBT_RATE = 0.033;
-
-/**
- * Read the buy-deal terms off a real plot.
- *
- * money=SERVER (B-316/A2): `total` and `deposit` are READ from the wire, never computed.
- * The deposit is the exact figure POST /land/plots/:id/deal posts to the Dr 1150 /
- * Cr 2010 JV -- both come from land-sales.ts plotDealDeposit -- so the number the user
- * reads here is the number the ledger books. The browser used to keep its own copy,
+ * money=SERVER (B-316/A2, B-319): every term is READ from the wire, never computed. The
+ * deposit is the exact figure POST /land/plots/:id/deal posts to the Dr 1150 / Cr 2010
+ * JV (both come from land-sales.ts plotDealDeposit), so the number the user reads here is
+ * the number the ledger books. The browser used to keep its own copy,
  * `Math.round(total * 0.1)`, which disagreed with the server's 2-dp rounding by up to
  * 0.50 baht (and by a whole baht in the rendered string ~0.3% of the time).
+ *
+ * B-319: the transfer fee and SBT arrived here the same way — `Math.round(total * 0.02)`
+ * and `* 0.033`, where those two STATUTORY rates existed nowhere else in the system, not
+ * in the API, not in packages, not in the spec. The rates are now THAILAND_RATES in
+ * @juneflow/tax-engine/thailand and the server ships the fees on the wire. A rate must
+ * never come back into a screen file: this module is not where tax law belongs, and
+ * apps/web deliberately does NOT depend on @juneflow/tax-engine, so it cannot be
+ * "fixed" by importing the table here either.
  *
  * There is deliberately NO fallback formula: when the server sends no figure the term is
  * null and the screen shows an em-dash. `serverValue ?? computeLocally()` would be the
@@ -83,12 +79,11 @@ const SBT_RATE = 0.033;
  */
 export function dealTerms(plot: PlotRow | undefined | null): DealTerms | null {
   if (!plot) return null;
-  const total = plot.totalValue;
   return {
-    total,
+    total: plot.totalValue,
     deposit: plot.dealDeposit,
-    transferFee: total == null ? null : Math.round(total * TRANSFER_FEE_RATE),
-    sbt: total == null ? null : Math.round(total * SBT_RATE),
+    transferFee: plot.transferFee,
+    sbt: plot.sbt,
   };
 }
 

@@ -14,8 +14,11 @@
  *     click-to-cycle control is honest-DISABLED (it is a mock local write, §0 rule 3). With
  *     no confirmed status, 0 of 7 checks are "passed" and the progress bar sits at 0.
  *   - DEAL TERMS: the buy tab's four price fields (total / 10% deposit / 2% transfer fee /
- *     3.3% SBT) are derived CLIENT-SIDE from a REAL plot (GET /land/plots, pickDealPlot ->
- *     dealTerms), replacing the prototype's hardcoded 'L-071' mock. The buy contract-type +
+ *     3.3% SBT) are ALL SERVER money, read off a REAL plot's wire (GET /land/plots,
+ *     pickDealPlot -> dealTerms), replacing the prototype's hardcoded 'L-071' mock. The
+ *     browser computes none of them: the total + deposit moved server-side in B-316/A2 and
+ *     the fee + SBT in B-319, whose statutory rates now live in @juneflow/tax-engine/
+ *     thailand (THAILAND_RATES) instead of in a screen file. The buy contract-type +
  *     transfer-appointment and the ENTIRE lease tab were hardcoded mock figures with no
  *     wire (land2.jsx L239/242/255-260), so those values render an em-dash. No plot in the
  *     register -> the deal is honest-empty (all em-dash).
@@ -272,10 +275,10 @@ export function LandDueDiligence() {
   /**
    * A price term as a `num` money string, or the honest em-dash.
    *
-   * B-316/A2: null is a REAL state, not just "no plot" — total/deposit come from the
-   * server (plotWire.total_value / deal_deposit) and are null for a plot with no
-   * area/price. The em-dash is the correct render for that; there is no local fallback
-   * formula, and 0 would be a fabricated figure.
+   * B-316/A2 + B-319: null is a REAL state, not just "no plot" — all four buy terms come
+   * from the server (plotWire.total_value / deal_deposit / transfer_fee / sbt) and are
+   * null for a plot with no area/price. The em-dash is the correct render for that; there
+   * is no local fallback formula, and 0 would be a fabricated figure.
    */
   const money = (n: number | null | undefined): string => (n == null ? DASH : formatMoney(n));
 

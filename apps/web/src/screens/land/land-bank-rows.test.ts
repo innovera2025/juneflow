@@ -44,6 +44,9 @@ function plot(over: Partial<PlotRow> = {}): PlotRow {
     // SERVER money (plotWire.total_value / deal_deposit): 18.6 rai x 4.2M = 78,120,000.
     totalValue: 78120000,
     dealDeposit: 7812000,
+    // B-319: the fee/SBT are SERVER money too (plotWire.transfer_fee / sbt, 2% / 3.3%).
+    transferFee: 1562400,
+    sbt: 2577960,
     ...over,
   };
 }
@@ -63,6 +66,8 @@ describe("toPlotRow", () => {
         tenure: "buy",
         total_value: 163200000,
         deal_deposit: 16320000,
+        transfer_fee: 3264000,
+        sbt: 5385600,
         created_at: "2026-07-01T00:00:00Z",
       }),
     ).toEqual({
@@ -77,6 +82,8 @@ describe("toPlotRow", () => {
       tenure: "buy",
       totalValue: 163200000,
       dealDeposit: 16320000,
+      transferFee: 3264000,
+      sbt: 5385600,
     });
   });
 
@@ -100,9 +107,11 @@ describe("toPlotRow", () => {
       currencyCode: "",
       stage: "",
       tenure: "",
-      // B-316/A2: absent SERVER money is null ("unknown"), never 0 ("free").
+      // B-316/A2, B-319: absent SERVER money is null ("unknown"), never 0 ("free").
       totalValue: null,
       dealDeposit: null,
+      transferFee: null,
+      sbt: null,
     });
     expect(toPlotRow({ id: "z", area_sqm: null, price_per_rai: null }).areaSqm).toBe(0);
   });
@@ -115,6 +124,8 @@ describe("toPlotRow", () => {
     const unpriced = toPlotRow({ id: "u", area_sqm: null, price_per_rai: null });
     expect(unpriced.totalValue).toBeNull();
     expect(unpriced.dealDeposit).toBeNull();
+    expect(unpriced.transferFee).toBeNull();
+    expect(unpriced.sbt).toBeNull();
 
     // area x price would be 100,000; the wire says otherwise -> the wire wins.
     const r = toPlotRow({
@@ -123,14 +134,29 @@ describe("toPlotRow", () => {
       price_per_rai: 100000,
       total_value: 604708125,
       deal_deposit: 60470812.5,
+      transfer_fee: 12094162.5,
+      sbt: 19955368.13,
     });
     expect(r.totalValue).toBe(604708125);
     expect(r.dealDeposit).toBe(60470812.5);
+    // B-319: the 2-dp server fee, NOT the whole-baht value the browser used to compute.
+    expect(r.transferFee).toBe(12094162.5);
+    expect(r.transferFee).not.toBe(Math.round(604708125 * 0.02));
+    expect(r.sbt).toBe(19955368.13);
+    expect(r.sbt).not.toBe(Math.round(604708125 * 0.033));
 
     // numeric strings (pg numeric arrives as a string over JSON) parse to numbers.
     expect(toPlotRow({ id: "w", total_value: "333", deal_deposit: "33.3" }).dealDeposit).toBe(33.3);
+    expect(toPlotRow({ id: "w2", transfer_fee: "6.66", sbt: "10.99" })).toMatchObject({
+      transferFee: 6.66,
+      sbt: 10.99,
+    });
     // a non-numeric value is unknown, not zero.
     expect(toPlotRow({ id: "x", deal_deposit: "n/a" }).dealDeposit).toBeNull();
+    expect(toPlotRow({ id: "x2", transfer_fee: "n/a", sbt: "n/a" })).toMatchObject({
+      transferFee: null,
+      sbt: null,
+    });
   });
 
   it("does not consume created_at (not a table field)", () => {

@@ -32,7 +32,9 @@ import {
   users,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
+import { THAILAND_RATES } from "@juneflow/tax-engine/thailand";
 import { buildApp, type AppDeps } from "../app.js";
+import { round2 } from "./money.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -364,6 +366,83 @@ describe("GET /api/v1/land/plots", () => {
       })
     ).inject({ method: "GET", url: "/api/v1/land/plots" });
     expect(half.json().data[0].deal_deposit).toBeNull();
+  });
+
+  // B-319 (Wei = ก) — the last two figures on land.dd the BROWSER computed, off statutory
+  // rates that existed nowhere but a React screen file. The rates now come from
+  // @juneflow/tax-engine/thailand and the fee lands on the wire.
+  //
+  // The plot is chosen so 2-dp and whole-baht rounding DISAGREE (12,094,162.50 vs the
+  // browser's old 12,094,163) — a self-consistent, evenly-dividing total would pass
+  // against a re-introduced client formula too.
+  it("ships transfer_fee + sbt (2 dp) at the tax-engine rates, so the browser computes no money", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          // 115-0-73 rai @ 5,250,000/rai -> total 604,708,125.00
+          rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: "184292.0000", pricePerRai: "5250000.00" })]]],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    const row = res.json().data[0];
+
+    // PINNED literals: a statutory rate changing must break a build, not slip through.
+    expect(row).toMatchObject({ transfer_fee: 12094162.5, sbt: 19955368.13 });
+    // ...and the wire must actually FOLLOW the rate table, not a stray literal that
+    // happens to agree with it today. Edit THAILAND_RATES without editing the handler
+    // (or vice versa) and this pair goes red.
+    expect(row.transfer_fee).toBe(round2((604708125 * THAILAND_RATES.landTransferFeePercent) / 100));
+    expect(row.sbt).toBe(round2((604708125 * THAILAND_RATES.specificBusinessTaxPercent) / 100));
+    // the whole-baht values the browser used to invent — must NOT be what we ship
+    expect(row.transfer_fee).not.toBe(Math.round(604708125 * 0.02));
+    expect(row.sbt).not.toBe(Math.round(604708125 * 0.033));
+  });
+
+  it("nulls transfer_fee + sbt for an unpriced plot (em-dash, never 0)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: null, pricePerRai: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].transfer_fee).toBeNull();
+    expect(res.json().data[0].sbt).toBeNull();
+
+    // one side missing is still unknown — a fee on a half-known plot is a fabricated fee
+    const half = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p1", "d", D0, { areaSqm: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(half.json().data[0].transfer_fee).toBeNull();
+    expect(half.json().data[0].sbt).toBeNull();
+  });
+
+  /*
+   * G5 PIXEL GUARD (server side). tests/visual/reference/app-baseline/land-dd.png was
+   * captured against the seeded dd-stage plot (โฉนด 11902, 24 rai @ 6,800,000/rai) while
+   * the BROWSER computed these two figures. Moving them to the server must not move a
+   * pixel — the seeded price divides evenly, so 2-dp equals whole baht here.
+   */
+  it("renders the G5 baseline plot's fees unchanged (โฉนด 11902, 24 rai x 6.8M)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[landPlots, [plot("p0", "โฉนด 11902", D0, { areaSqm: "38400.0000", pricePerRai: "6800000.00" })]]],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.json().data[0]).toMatchObject({
+      total_value: 163200000,
+      deal_deposit: 16320000,
+      transfer_fee: 3264000, // what the browser's round(total x 0.02) produced
+      sbt: 5385600, // what the browser's round(total x 0.033) produced
+    });
   });
 });
 
