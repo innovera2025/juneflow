@@ -213,6 +213,119 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   });
 
   // -------------------------------------------------------------------------
+  // B2. THE PAYEE MAY NOT INFLATE HIS OWN PAY (B-332 gate-4.5 finding 1)
+  //
+  // Door 2 handed the attendance write to the person who RECEIVES the money, and
+  // createLaborPayroll pays by SUMMING ROWS. Before the fix this was five 201s and a
+  // 5× payout behind a clean balanced JV — requested by the beneficiary, and invisible
+  // to jv_source_doc_uq because the inflated amount posts as ONE correct-looking JV.
+  //
+  // This is a LIVE test rather than a unit test for a specific reason: the unit suite
+  // can only show the handler asks the question, while this shows the real table
+  // answers it — and the payroll figure at the end is the only assertion that proves
+  // the defect was about money and not about status codes.
+  // -------------------------------------------------------------------------
+
+  test("FIVE self-service check-ins for one day are ONE row and ONE day's pay — the 5× payout, closed", async () => {
+    const day = `${YEAR}-01-02`;
+    const period = `${YEAR}-01`;
+
+    // Exactly the reviewer's probe: the payee, five taps, NO idempotency key (a key
+    // would not have mattered — a screen remount mints a new one, see below).
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const res = await site.post("/api/v1/labor/attendance", {
+        data: { worker_id: workerId, day },
+      });
+      statuses.push(res.status());
+    }
+    expect(statuses).toEqual([201, 409, 409, 409, 409]);
+
+    const rows = await rowsFor(workerId, day);
+    expect(rows).toHaveLength(1);
+    expect(rows.reduce((s, r) => s + Number(r.day_fraction), 0)).toBe(1);
+
+    // THE money assertion. Five accepted rows paid 5 × DAY_RATE here before the guard.
+    const payroll = await okJson(
+      await md.post("/api/v1/labor/payroll", { data: { worker_id: workerId, period } }),
+      "POST /labor/payroll",
+    );
+    expect(payroll.amount).toBe(DAY_RATE);
+  });
+
+  test("a REMOUNT is caught where the idempotency key could not see it — a NEW key for the same worker+day is a DUPLICATE, not a replay", async () => {
+    const day = `${YEAR}-01-03`;
+    const first = await site.post("/api/v1/labor/attendance", {
+      data: { worker_id: workerId, day, idempotency_key: key("remount-1") },
+    });
+    expect(first.status()).toBe(201);
+    // The phone mints its key per screen instance, so this passes
+    // attendance_idempotency_uq untouched — which is exactly why a key requirement
+    // would NOT have closed finding 1 and an explicit pre-check was needed.
+    const remount = await site.post("/api/v1/labor/attendance", {
+      data: { worker_id: workerId, day, idempotency_key: key("remount-2") },
+    });
+    expect(remount.status()).toBe(409);
+    expect(await rowsFor(workerId, day)).toHaveLength(1);
+  });
+
+  test("the guard is PER DAY, and a genuine replay still returns the original row — no legitimate case is refused", async () => {
+    // A different day is ordinary work, not a duplicate.
+    const nextDay = await site.post("/api/v1/labor/attendance", {
+      data: { worker_id: workerId, day: `${YEAR}-01-04` },
+    });
+    expect(nextDay.status()).toBe(201);
+
+    // And the B-307 replay path is untouched: same key twice → the ORIGINAL row, 201.
+    const day = `${YEAR}-01-05`;
+    const payload = { worker_id: workerId, day, idempotency_key: key("dup-replay") };
+    const a = await site.post("/api/v1/labor/attendance", { data: payload });
+    const b = await site.post("/api/v1/labor/attendance", { data: payload });
+    expect([a.status(), b.status()]).toEqual([201, 201]);
+    expect((await b.json()).id).toBe((await a.json()).id);
+    expect(await rowsFor(workerId, day)).toHaveLength(1);
+  });
+
+  test("self-service may not assert a COST CENTRE — it is the duplicate guard's own escape hatch (one re-inflation per centre)", async () => {
+    const day = `${YEAR}-01-06`;
+    const ccs = rowsOf(await okJson(await md.get("/api/v1/cost-centers"), "GET /cost-centers"));
+    test.skip(ccs.length === 0, "needs a seeded cost centre");
+    const res = await site.post("/api/v1/labor/attendance", {
+      data: { worker_id: workerId, day, status: "half", cc_id: ccs[0]!.id },
+    });
+    expect(res.status()).toBe(400);
+    expect((await res.json()).message).toMatch(/cc_id cannot be set on a self-service check-in/i);
+    expect(await rowsFor(workerId, day)).toHaveLength(0);
+  });
+
+  test("DEACTIVATING a worker revokes the new door — and does NOT revoke the supervisor's (B-332 gate-4.5 finding 4)", async () => {
+    test.skip(!PG_URL, "needs DATABASE_URL — there is no PUT/PATCH on worker to flip `active`");
+    const day = `${YEAR}-01-07`;
+    const pg = new Client({ connectionString: PG_URL });
+    await pg.connect();
+    try {
+      await pg.query("UPDATE worker SET active = false WHERE id = $1", [workerId]);
+      // `active` is the only "off the roster" flag there is; before this the only real
+      // revocation was deleting the user account.
+      const self = await site.post("/api/v1/labor/attendance", {
+        data: { worker_id: workerId, day, idempotency_key: key("inactive-self") },
+      });
+      expect(self.status()).toBe(403);
+      expect(await rowsFor(workerId, day)).toHaveLength(0);
+
+      // Door 1 is deliberately NOT gated on it: a supervisor must still be able to
+      // record a corrected day for a worker who has since left.
+      const roster = await md.post("/api/v1/labor/attendance", {
+        data: { worker_id: workerId, day, idempotency_key: key("inactive-roster") },
+      });
+      expect(roster.status()).toBe(201);
+    } finally {
+      await pg.query("UPDATE worker SET active = true WHERE id = $1", [workerId]);
+      await pg.end();
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // C. THE POINT OF THE WHOLE DESIGN — check-out is a column, not a row
   // -------------------------------------------------------------------------
 
@@ -294,6 +407,33 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
     expect(await rowsFor(workerId, day)).toHaveLength(1);
   });
 
+  test("a check-out EARLIER than its own check-in is refused, and the row keeps its open state (B-332 gate-4.5 finding 6)", async () => {
+    const day = `${YEAR}-04-04`;
+    const k = key("backwards");
+    await okJson(
+      await site.post("/api/v1/labor/attendance", {
+        data: { worker_id: workerId, day, idempotency_key: k, checked_in_at: `${day}T08:00:00.000Z` },
+      }),
+      "check-in for the backwards close",
+    );
+    // The coordinates were range-checked from the start; the instant pair was not, so
+    // this stored happily and answered 200 before the guard. 400 (not 409) matches how
+    // a bad coordinate is refused — and a 5xx would wedge the phone's whole drain.
+    const backwards = await site.post("/api/v1/labor/attendance/checkout", {
+      data: { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T06:00:00.000Z` },
+    });
+    expect(backwards.status()).toBe(400);
+    expect((await backwards.json()).message).toMatch(/earlier than checked_in_at/i);
+    // Nothing was written: the day is still open, so the honest close below can happen.
+    const [open] = await rowsFor(workerId, day);
+    expect(open?.checked_out_at).toBeNull();
+
+    const honest = await site.post("/api/v1/labor/attendance/checkout", {
+      data: { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T17:00:00.000Z` },
+    });
+    expect(honest.status()).toBe(200);
+  });
+
   test("a check-out for a key that never checked in is an honest 404 — it does not create the row it failed to find", async () => {
     const day = `${YEAR}-04-03`;
     const res = await site.post("/api/v1/labor/attendance/checkout", {
@@ -359,25 +499,58 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
     expect(await rowsFor(workerId, day)).toHaveLength(1);
   });
 
-  test("LEGITIMATE #3 — a correction filed AFTER check-out: a second INSERT is the ONLY correction path that exists, and it is accepted", async () => {
+  // B-332 gate-4.5 finding 2 — THIS TEST'S NAME USED TO SAY "a correction". It does not
+  // correct anything, and the claim that it did was the decisive justification for
+  // refusing unique(worker_id, day). createLaborPayroll SUMS ROWS, so the second row is
+  // ADDED to the first: on a 500/day worker, one `full` day paid 500 and filing the
+  // `half` "correction" paid 750 — reducing the day RAISED the pay, where a day
+  // genuinely corrected to half owes 250. Asserted below so the file cannot drift back
+  // into claiming otherwise.
+  //
+  // What the test still legitimately proves is the narrower thing the index question
+  // actually turns on: a SECOND row on one date is ACCEPTED rather than 23505'd. There
+  // is no correction path at all today — no UPDATE/PUT/PATCH/DELETE on attendance
+  // anywhere in registerLaborRoute, no supersede column — and B-335 is open for one.
+  test("LEGITIMATE #3 — a second row on one date is ACCEPTED after check-out (and it ADDS to the day's pay rather than correcting it — B-335)", async () => {
     const day = `${YEAR}-05-20`;
-    const k = key("correct");
+    const period = `${YEAR}-05`;
+    const k = key("second-row");
+    // A worker of this test's own, so the period's payroll covers only these two rows.
+    const solo = await okJson(
+      await md.post("/api/v1/labor/workers", {
+        data: { name: `B-332 second-row ${RUN}`, day_rate: DAY_RATE },
+      }),
+      "POST /labor/workers (second-row subject)",
+    );
+    const soloId = String(solo.id);
+
     await okJson(
       await md.post("/api/v1/labor/attendance", {
-        data: { worker_id: workerId, day, status: "absent", idempotency_key: k },
+        data: { worker_id: soloId, day, status: "full", idempotency_key: k },
       }),
-      "original (marked absent)",
+      "original (a full day)",
     );
     await md.post("/api/v1/labor/attendance/checkout", {
-      data: { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T10:00:00.000Z` },
+      data: { worker_id: soloId, day, check_in_key: k, checked_out_at: `${day}T10:00:00.000Z` },
     });
-    // He actually worked half a day. There is no UPDATE/PUT/PATCH/DELETE on
-    // attendance anywhere in registerLaborRoute, so this INSERT is the correction.
-    const fix = await md.post("/api/v1/labor/attendance", {
-      data: { worker_id: workerId, day, status: "half", idempotency_key: key("correct-2") },
+
+    // The supervisor now files what everyone calls the correction: he worked HALF a day.
+    const second = await md.post("/api/v1/labor/attendance", {
+      data: { worker_id: soloId, day, status: "half", idempotency_key: key("second-row-2") },
     });
-    expect(fix.status()).toBe(201);
-    expect(await rowsFor(workerId, day)).toHaveLength(2);
+    expect(second.status()).toBe(201);
+    const rows = await rowsOf(
+      await okJson(await md.get("/api/v1/labor/attendance"), "GET /labor/attendance"),
+    ).filter((r) => r.worker_id === soloId && r.day === day);
+    expect(rows).toHaveLength(2);
+
+    // …and it ADDED. 1.0 + 0.5 = 1.5 days, not the 0.5 a correction would leave.
+    const payroll = await okJson(
+      await md.post("/api/v1/labor/payroll", { data: { worker_id: soloId, period } }),
+      "POST /labor/payroll",
+    );
+    expect(payroll.amount).toBe(DAY_RATE * 1.5);
+    expect(payroll.amount).toBeGreaterThan(DAY_RATE / 2); // what a real correction owes
   });
 
   // -------------------------------------------------------------------------

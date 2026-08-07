@@ -304,6 +304,15 @@ type AttendanceAuthz =
  * balanced JV — silently-zero, which nobody notices. Name-matching is worse:
  * worker.name has no unique constraint (B-323 recorded two สมชาย tying), so it could
  * attach one man's clock-in to another man's pay.
+ *
+ * B-332 gate-4.5 finding 4 — DOOR 2 ALSO REQUIRES `worker.active`. `active` is the only "off
+ * the roster" flag the schema has, and before this it governed nothing: a worker
+ * deactivated on his last day could still clock himself in, because the only real
+ * revocation was deleting his user account. That was tolerable while attendance was
+ * a finance.create-only roster (someone else was always doing the recording); it is
+ * not tolerable now the worker holds the pen on a table that sums into payroll.
+ * Door 1 is deliberately NOT gated on it — a supervisor must still be able to
+ * record a corrected day for a worker who has since left.
  */
 async function authorizeAttendanceWrite(
   db: TenantDb,
@@ -329,6 +338,13 @@ async function authorizeAttendanceWrite(
       reply,
       "this action requires the finance create permission, or a worker record linked to this user",
     );
+    return { ok: false };
+  }
+  // B-332 gate-4.5: off the roster. Reached ONLY after self.id === workerId, so the caller is
+  // asking about HIMSELF — a distinct message here leaks nothing about anybody else's
+  // row and telling him "not linked" when he is linked-but-inactive would be a lie.
+  if (!self.active) {
+    forbidden(reply, "this worker record is not active");
     return { ok: false };
   }
   return { ok: true, selfService: true };
@@ -467,6 +483,27 @@ async function createLaborWorker(
   if (userId) {
     const [linkedUser] = (await db.select(users, eq(users.id, userId))) as UserRow[];
     if (!linkedUser) return badRequest(reply, "user not found in this tenant");
+
+    // B-332 gate-4.5 finding 3 — the APPLICATION-LEVEL half of "one user resolves to at
+    // most one worker". worker_user_uq enforces it in Postgres, but nothing that CI runs
+    // could tell whether the index was there: deleting it from both the schema and
+    // migration 0062 left api and db fully green, because the only unit test in its name
+    // injects a uniqueViolation through the db stub and therefore proves the stub. The
+    // live spec is the only thing that dies, and E2E_LIVE appears nowhere in ci.yml.
+    //
+    // This check is what makes the PROPERTY testable by the default suite: it reads the
+    // real (stubbable) rows and refuses without inserting, so a test can exercise it
+    // without constructing the failure it claims to detect.
+    //
+    // It does NOT replace the index (money-post-idempotency lesson — an app pre-check
+    // loses the race it is meant to prevent), and the two are not even the same shape:
+    // this read is TENANT-SCOPED, while worker_user_uq is GLOBAL. So the index still
+    // catches two cases this cannot — the concurrent double-link, and the cross-tenant
+    // squat — and the 23505 catch below stays exactly as it was.
+    const alreadyLinked = await findWorkerByUserId(db, userId);
+    if (alreadyLinked) {
+      return conflict(reply, "this user is already linked to another worker");
+    }
   }
 
   let worker: WorkerRow | undefined;
@@ -630,6 +667,80 @@ async function findAttendanceByIdempotencyKey(
 }
 
 /**
+ * B-332 gate-4.5 finding 1 — resolve a day ALREADY RECORDED for this worker, in this
+ * cost centre, that is NOT this request's own replay.
+ *
+ * WHY THIS EXISTS. Door 2 handed the attendance write to the person who RECEIVES the
+ * money, and createLaborPayroll pays by SUMMING ROWS. Five self-service POSTs for one
+ * day, carrying no key, were five 201s and a 5× payout behind a clean balanced JV —
+ * requested by the beneficiary, invisible to jv_source_doc_uq because the inflated
+ * amount posts as ONE correct-looking JV. Proven live before the fix.
+ *
+ * WHY NOT "REQUIRE AN IDEMPOTENCY KEY" INSTEAD. A key dedups a REPLAY; this is a
+ * DUPLICATE. The phone mints a key per screen instance, so a remount produces a NEW
+ * key for the same worker+day — it passes attendance_idempotency_uq untouched. The key
+ * cannot see this class at all; only an explicit pre-check can.
+ *
+ * THE `NOT MY OWN REPLAY` FILTER is what keeps this from breaking B-307. A genuine
+ * retry carries the SAME key as the row it already created; excluding that row lets the
+ * request fall through to the insert, trip the key index, and take the replay branch to
+ * its original 201. Without the filter a concurrent retry — one that raced past the
+ * B-307 pre-check — would come back 409, and the phone dead-letters a 4xx.
+ *
+ * KEYED ON cc_id, so a cost-centre-split day stays legitimate work rather than becoming
+ * a conflict. On the self-service path cc_id is refused outright (see below), so this
+ * degenerates to (worker_id, day) there — which is the bound that makes the guard hold:
+ * were the payee allowed to name cost centres, he could re-inflate once per centre.
+ *
+ * A PRE-CHECK, NOT AN INDEX. unique(worker_id, day) is still refused for the reasons in
+ * finance.ts, and this deliberately does not emulate one: it constrains ONLY the new
+ * self-service door, leaving the finance.create roster — corrections, bulk save, the
+ * split — exactly as it shipped.
+ *
+ * ========================= WHAT THIS DOES NOT CLOSE (B-336) =========================
+ * OPEN, money. A pre-check with NO unique index behind it does not survive CONCURRENCY,
+ * and this one measurably does not. Under READ COMMITTED two requests can both run this
+ * SELECT before either INSERT commits, and nothing downstream stops the second row:
+ * attendance_idempotency_uq exempts NULL keys, and the table carries no other
+ * constraint. Measured live on real Postgres, same worker, same day:
+ *
+ *     burst of  2 parallel → [201,201]                  2 rows · payroll 2x  (2 of 3 runs)
+ *     burst of 10 parallel → [201,201,201,409,409,…]    3 rows · payroll 3x  (3 of 3 runs)
+ *
+ * A double-tap on a phone IS two concurrent requests, so this is the ordinary case and
+ * not an exotic one. What the guard DOES close is the sequential class the review found
+ * — five taps in series, and the screen remount the idempotency key cannot see — both
+ * proven live. Recorded here rather than left implied: an earlier comment on this very
+ * door claimed a safety it did not have (gate-4.5 finding 5), and repeating that on a
+ * money guard would be worse than the gap.
+ *
+ * Closing it needs a decision outside what this round was scoped to make — every route
+ * leaves the area: a unique index (schema + the SACRED migration, and the design
+ * deliberately refused one), a row lock (a new door on the security-core TenantDb; no
+ * FOR UPDATE / advisory-lock pattern exists anywhere in apps/api today), or SERIALIZABLE
+ * isolation. B-336 carries the measurements and the options.
+ * ===================================================================================
+ */
+async function findRecordedDay(
+  db: TenantDb,
+  args: { workerId: string; day: string; ccId: string | null; idempotencyKey: string | null },
+): Promise<AttendanceRow | null> {
+  const { workerId, day, ccId, idempotencyKey } = args;
+  const sameDay = (await db.select(
+    attendances,
+    and(
+      eq(attendances.workerId, workerId),
+      eq(attendances.day, day),
+      // NULL is not equal to itself in SQL, so an un-costed day needs IS NULL.
+      ccId ? eq(attendances.ccId, ccId) : isNull(attendances.ccId),
+    ),
+  )) as AttendanceRow[];
+  return (
+    sameDay.find((row) => !idempotencyKey || row.idempotencyKey !== idempotencyKey) ?? null
+  );
+}
+
+/**
  * Send the 201 create body for an ALREADY-PERSISTED attendance row — same id, same
  * SERVER-DERIVED day_fraction, never a second write. The ONLY place a replay 201 is
  * produced (both the pre-check and the 23505 catch call it), so a replayed POST is
@@ -706,13 +817,34 @@ async function createLaborAttendance(
   // the hourly rate — it multiplies pay and is a supervisor's judgement about hours
   // that were actually worked; the field-check-in screen has no OT affordance at all.
   // A refusal, not a silent zero: telling a client its OT was accepted when it was
-  // discarded is the same class of lie as B-309's silent dedup-off. This is the ONE
-  // restriction the new door adds, and it can only ever REDUCE a payout.
+  // discarded is the same class of lie as B-309's silent dedup-off.
+  //
+  // B-332 gate-4.5 finding 5 — WHAT THIS IS NOT. An earlier version of this comment
+  // claimed the restriction "can only ever REDUCE a payout", which read as an
+  // assurance that the new door is pay-neutral. It is not. Door 2 is a
+  // payout-INCREASING capability handed to the person who receives the money: one
+  // extra accepted row is one extra day paid. Refusing OT narrows that capability; it
+  // does not make it safe. What bounds it is the duplicate pre-check below.
   if (authz.selfService && otRaw != null && otRaw > 0) {
     return badRequest(reply, "overtime cannot be recorded on a self-service check-in");
   }
   const ot = otRaw != null && otRaw > 0 ? otRaw : 0;
   const ccId = str(pick(body, "cc_id", "ccId")).trim() || null;
+  // B-332 gate-4.5 finding 1 — a SELF-SERVICE caller may not assert a cost centre,
+  // for the same reason he may not assert overtime: charging a day to a cost centre is
+  // an accounting judgement, and the field check-in screen has no cc affordance (cc_id
+  // has no UI in the prototype at all — labor-attendance-rows.ts records that, and the
+  // shipped web register does not POST attendance).
+  //
+  // It is ALSO the duplicate guard's own escape hatch. That guard is keyed on
+  // (worker_id, day, cc_id) so a split day stays legitimate; if the payee could name
+  // the cost centre he would simply re-inflate once per centre and the bound would be
+  // "however many cost centres this tenant has" instead of one. Refused loudly rather
+  // than silently nulled — a client told its cc was accepted when it was dropped is
+  // B-309's lie again.
+  if (authz.selfService && ccId) {
+    return badRequest(reply, "cc_id cannot be set on a self-service check-in");
+  }
 
   // B-332: the field check-in stamp + device fix. All optional — the web bulk-save
   // sends none of them and is unchanged.
@@ -752,6 +884,24 @@ async function createLaborAttendance(
       day,
     });
     if (existing) return sendExistingAttendance(reply, existing);
+  }
+
+  // B-332 gate-4.5 finding 1: THE DUPLICATE GATE ON THE SELF-SERVICE DOOR. Ordered
+  // strictly AFTER the B-307 replay pre-check above — a retry of a key we have already
+  // seen must still get its original row's 201, and only a request that is NOT a replay
+  // can reach here and be judged a duplicate.
+  //
+  // Self-service ONLY. The finance.create roster keeps every behaviour it shipped with,
+  // including the second INSERT that is currently the only way to touch a recorded day
+  // (finance.ts, and B-335 for why that is not actually a correction).
+  //
+  // 409, not a silent 200: the day IS already recorded, so there is nothing to write,
+  // and the phone dead-letters a 4xx instead of retrying forever.
+  if (authz.selfService) {
+    const recorded = await findRecordedDay(db, { workerId, day, ccId, idempotencyKey });
+    if (recorded) {
+      return conflict(reply, "this day is already recorded for this worker");
+    }
   }
 
   // B-307: the row carries the client key. A REPLAY (the SyncProcessor retrying a
@@ -819,6 +969,15 @@ async function createLaborAttendance(
 // check-in dead-lettered on a 4xx, this resolves nothing and answers an honest 404,
 // which the phone dead-letters too — correct, and visible.
 //
+// B-332 gate-4.5 finding 7 — `day` IS THE CHECK-IN'S DAY, NOT THE CHECK-OUT'S. It is
+// one third of the address (with the tenant and worker_id), so it must match the value
+// the check-in was filed under. On a night shift those differ: a man who clocks in on
+// the 10th and out at 06:00 on the 11th is closed by sending day = the 10th. Sending
+// the check-out's own calendar day resolves nothing and answers 404 — honest, but it is
+// exactly the shape a naive client produces, so it is stated here and in the openapi
+// description rather than left to be discovered. Nothing about the stored instants
+// changes: checked_out_at is a timestamptz and carries its own real date.
+//
 // The resolver is findAttendanceByIdempotencyKey — the SAME one the create path's
 // pre-check and 23505 catch use, so "the client's own row" can never mean two
 // different things in two places. Its three filters all carry weight here: the tenant
@@ -872,6 +1031,23 @@ async function checkoutLaborAttendance(
     day,
   });
   if (!existing) return notFound(reply, "no check-in found for this check_in_key");
+
+  // B-332 gate-4.5 finding 6 — TEMPORAL ORDERING. A day cannot be closed before it was
+  // opened. Both instants are CLIENT-supplied (deliberately — see optInstant), and
+  // nothing else constrains them: the coordinates are range-checked but the instant
+  // pair was not, so a check-out two hours BEFORE its own check-in stored happily and
+  // returned 200. Refused as a 400, matching how a bad coordinate is refused, and for
+  // the same reason — a 500 from a constraint would wedge the phone's whole drain.
+  //
+  // Guarded on `checked_in_at` being present: the web bulk-save records a day with no
+  // instants at all, and a row with no opening instant has nothing to be ordered
+  // against. Strict `<` only — an equal pair is a zero-length shift, which is odd but
+  // not a lie, and refusing it would serve no one. This does NOT constrain the night
+  // shift: 06:00 on the 11th is later than 22:00 on the 10th as an INSTANT, which is
+  // what is compared here, regardless of the `day` both are filed under.
+  if (existing.checkedInAt && checkedOut.value.getTime() < existing.checkedInAt.getTime()) {
+    return badRequest(reply, "checked_out_at cannot be earlier than checked_in_at");
+  }
 
   // ATOMIC close. The `checked_out_at IS NULL` predicate is ON THE UPDATE'S OWN WHERE,
   // not on a preceding SELECT — the B-149 lesson: a resolve-then-update pair is two

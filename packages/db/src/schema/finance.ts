@@ -968,22 +968,19 @@ export const attendances = pgTable("attendance", {
   // wrong uniqueness constraint on a money table rejects real work at the door.
   //
   // B-332 REVISITED the "undecided" half and STILL adds no such index. Check-out is
-  // now decided (a column above, so the pair no longer needs two rows), but three
-  // independent things still argue against unique(worker_id, day) and one of them is
-  // decisive:
-  //   1. THE CORRECTION PATH. There is no UPDATE / PUT / PATCH / DELETE on attendance
-  //      anywhere in registerLaborRoute — a second INSERT is the ONLY way to correct a
-  //      day (someone marked absent who actually worked half a day). A unique index
-  //      turns every correction into a 23505. B-310 is open RIGHT NOW because B-308's
-  //      unique(worker_id, period) froze payroll with no recompute path; the same
-  //      mistake one table upstream, on the INPUT, would also make B-310 unfixable —
-  //      its remedy depends on attendance being correctable.
-  //   2. THE COST-CENTRE SPLIT above. Honest qualification: the shipped web register
-  //      keys its state one entry per worker and has no cc selector, so a split day is
-  //      producible only through the API today — coherent-but-unbuilt. That makes it
-  //      an argument about foreclosing a future, not about breaking production, and it
-  //      is the WEAKER of the two.
-  //   3. IT WOULD FIGHT THE B-307 KEY. attendance_idempotency_uq below dedups a
+  // now decided (a column above, so the pair no longer needs two rows). Two things
+  // argue against unique(worker_id, day) — and a THIRD argument that stood here until
+  // B-332's gate-4.5 review has been RETRACTED as false; it is kept below, corrected,
+  // because it was the one presented as decisive.
+  //   1. THE COST-CENTRE SPLIT above — the load-bearing reason. A day legitimately
+  //      split across two cost centres is two `half` rows on one date (the cc_id column
+  //      exists for exactly that), and a full natural key makes that a 23505. Proven
+  //      live: both rows 201, day_fraction summing to exactly 1.0. Honest qualification,
+  //      unchanged: the shipped web register keys its state one entry per worker and has
+  //      no cc selector, so a split day is producible only through the API today. That
+  //      makes this an argument about foreclosing a real data shape rather than about
+  //      breaking a shipped screen — which is why reason 2 is carried alongside it.
+  //   2. IT WOULD FIGHT THE B-307 KEY. attendance_idempotency_uq below dedups a
   //      REPLAY; a natural key dedups a DUPLICATE. A screen remount mints a NEW
   //      idempotency key for the same worker+day (the key is per screen instance), so
   //      that request passes the key index and trips the natural key — and the catch
@@ -991,15 +988,39 @@ export const attendances = pgTable("attendance", {
   //      rethrows to a 500. On the phone a 5xx is deferred and the drain STOPS, so the
   //      whole write queue wedges behind it. The name gate correctly prevents
   //      answering the WRONG ROW; it is not a licence to add the index.
+  //   3. RETRACTED — "THE CORRECTION PATH". This said a second INSERT is the ONLY way
+  //      to correct a day, so a unique index would turn every correction into a 23505.
+  //      The INSERT is accepted, but IT DOES NOT CORRECT ANYTHING. createLaborPayroll
+  //      pays by SUMMING ROWS, so the second row is ADDED to the first. Proven live on
+  //      a 500/day worker: one `full` day paid 500; filing the `half` correction paid
+  //      750. Reducing a man's day RAISED his pay, and a day genuinely corrected to
+  //      half owes 250. The argument was not merely weak, it pointed the wrong way —
+  //      the constraint was refused partly to protect a path that does not exist.
+  //      THERE IS NO CORRECTION PATH ON attendance TODAY: no UPDATE, PUT, PATCH or
+  //      DELETE anywhere in registerLaborRoute, and no supersede/void column here. The
+  //      only way to change a recorded day is direct SQL. B-335 is open for a real one;
+  //      note that when it lands it will be an UPDATE or a supersede marker, NOT a
+  //      second INSERT, so it is not an argument against this index either way.
+  //      (The B-310 lineage still stands on its own: B-308's unique(worker_id, period)
+  //      froze payroll with no recompute path, and its remedy needs attendance to be
+  //      correctable — which, per the above, it currently is not.)
   // NULL-distinctness, checked explicitly since B-307 and B-308 answered that same
   // test in opposite directions: worker_id and day are BOTH NOT NULL, so such an
   // index would be FULL and INESCAPABLE — the B-308 case, not the B-307 case. Passing
   // that test is not what makes a key right: an inescapable index is exactly as
-  // dangerous as it is strong when it is the wrong constraint. B-332 is caught by
-  // reason 1, not by the NULL trap.
+  // dangerous as it is strong when it is the wrong constraint.
   // A check-in the user genuinely initiates twice is a DUPLICATE, not a replay, and
   // the honest answer to it is a 409 from an explicit pre-check — not a 23505 from a
-  // second index.
+  // second index. B-332's gate-4.5 review found that pre-check named here but never
+  // built, on a door that had just been opened to the payee: five keyless self-service
+  // POSTs for one day were five 201s and a 5× payout. It now exists in labor.ts
+  // (findRecordedDay), scoped to the self-service door and keyed on cc_id so reason 1
+  // survives it.
+  // HONEST LIMIT (B-336, OPEN · money): "a 409 from an explicit pre-check" holds only
+  // SEQUENTIALLY. With no unique index behind it that pre-check loses a concurrent race,
+  // measured live — a burst of 2 parallel self-service check-ins wrote 2 rows and paid
+  // the day twice. That is the standing cost of refusing a natural key on this table,
+  // and it is why this comment no longer offers the pre-check as a complete answer.
   uniqueIndex("attendance_idempotency_uq")
     .on(t.idempotencyKey)
     .where(sql`${t.idempotencyKey} IS NOT NULL`),

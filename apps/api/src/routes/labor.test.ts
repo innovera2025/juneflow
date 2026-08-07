@@ -1786,11 +1786,50 @@ describe("B-332 POST /api/v1/labor/workers — the worker↔user auth link", () 
     expect(inserted).toHaveLength(0);
   });
 
-  it("409s when the user is ALREADY linked to another worker (worker_user_uq) — never hands back the other worker's row", async () => {
+  // B-332 gate-4.5 finding 3 — THE HONEST HALF of "one user resolves to at most one
+  // worker". This exercises the APPLICATION pre-check: the stub is asked for the rows
+  // that already exist and answers with a worker carrying the link, exactly as the real
+  // scoped read would. Nothing about the failure is supplied by the test — no injected
+  // 23505 — so the assertion dies if and only if the pre-check is removed.
+  //
+  // The reviewer's probe is why this exists: deleting worker_user_uq from BOTH
+  // packages/db/src/schema/finance.ts AND migration 0062 left api 1542 + db 19 fully
+  // green, because the only test in the index's name injected the violation it claimed
+  // to detect. That test still runs (below) but it proves the CATCH BRANCH, not the index.
+  it("409s BEFORE inserting when the user is already linked to another worker — the app-level check, exercised without injecting the violation", async () => {
+    const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
         db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(true)]],
+            // The user ALREADY resolves to a worker — the real read's answer, not a throw.
+            [workers, workerSource({ self: [linkedWorker("w-incumbent", LINK_USER)] })],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/workers",
+      payload: { name: "impostor", user_id: LINK_USER },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already linked to another worker/);
+    // Refused BEFORE the write, and never handing back the incumbent's row.
+    expect(inserted).toHaveLength(0);
+    expect(res.json().id).toBeUndefined();
+  });
+
+  it("409s when the INSERT trips worker_user_uq — the concurrency backstop the pre-check cannot be (an app read loses the race, and the index is GLOBAL where the read is tenant-scoped)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          // No `workers` rows → the pre-check reads nothing, exactly as it would when a
+          // racing link committed after it ran. Only then is the injected 23505 reached.
           rows: [[users, userSource()], [roles, [roleRow(true)]]],
           insertThrows: (table) => (table === workers ? uniqueViolation("worker_user_uq") : null),
         }),
@@ -1947,6 +1986,332 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().ot).toBe(4);
+  });
+
+  // B-332 gate-4.5 finding 4 — `active` is the only "off the roster" flag there is, and
+  // before this it governed nothing: the only real revocation was deleting the account.
+  it("403s a DEACTIVATED worker clocking himself in — `active` is the only off-the-roster flag, and it now revokes the new door (no insert)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(false, false)]],
+            [
+              workers,
+              workerSource({
+                self: [{ ...linkedWorker(W1, "u-0"), active: false }],
+                byId: [{ ...linkedWorker(W1, "u-0"), active: false }],
+              }),
+            ],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toMatch(/not active/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("a supervisor WITH finance.create may still record a day for a deactivated worker (door 1 is deliberately not gated on `active` — a corrected day for a man who has left)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(true)]],
+            [workers, [{ ...linkedWorker(W1, null), active: false }]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// B-332 gate-4.5 finding 1 — THE PAYEE MAY NOT INFLATE HIS OWN PAY
+// ===========================================================================
+// Door 2 handed the attendance write to the person who RECEIVES the money, and
+// createLaborPayroll pays by SUMMING ROWS. Live, before the fix: five self-service
+// POSTs for one day, no idempotency key → 201,201,201,201,201 and a 5× payout behind
+// a clean balanced JV, requested by the beneficiary. The idempotency key cannot see
+// this class at all (a screen remount mints a NEW key for the same worker+day), so the
+// remedy is the explicit pre-check finance.ts named and B-332 shipped without.
+describe("B-332 gate-4.5 POST /api/v1/labor/attendance — the self-service duplicate gate", () => {
+  const DAY = "2026-08-07";
+  /** A day already on file for W1 (what the real scoped read would return). */
+  const recorded = (over: Record<string, unknown> = {}): typeof attendances.$inferSelect =>
+    ({
+      id: "at-existing",
+      companyId: COMPANY,
+      workerId: W1,
+      day: DAY,
+      ot: "0.00",
+      status: "full",
+      dayFraction: "1",
+      ccId: null,
+      idempotencyKey: null,
+      checkedInAt: null,
+      checkedOutAt: null,
+      createdAt: D,
+      updatedAt: D,
+      ...over,
+    }) as typeof attendances.$inferSelect;
+
+  const db = (opts: {
+    selfId?: string | null;
+    financeCreate?: boolean;
+    onFile?: unknown[];
+    inserted?: Inserted[];
+  }) =>
+    writeStub({
+      rows: [
+        [users, userSource()],
+        [roles, [roleRow(opts.financeCreate ?? false, false)]],
+        [
+          workers,
+          workerSource({
+            self: opts.selfId === null ? [] : [linkedWorker(opts.selfId ?? W1, "u-0")],
+            byId: [linkedWorker(W1, "u-0")],
+          }),
+        ],
+        [attendances, opts.onFile ?? []],
+      ],
+      inserted: opts.inserted,
+    });
+
+  it("409s the SECOND self-service check-in for a day already recorded — the 5× payout, closed (no insert)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: db({ onFile: [recorded()], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already recorded/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("201s the FIRST self-service check-in — no legitimate case is refused", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: db({ onFile: [], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+  });
+
+  it("does NOT fire on a DIFFERENT day — the guard is per-day, not a one-check-in-ever lock", async () => {
+    const inserted: Inserted[] = [];
+    const onFile = recorded({ day: "2026-08-06" });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(false, false)]],
+            [workers, workerSource({ self: [linkedWorker(W1, "u-0")], byId: [linkedWorker(W1, "u-0")] })],
+            // The stub FILTERS on the day the predicate asks for, as the real index-backed
+            // read does. Answering the row unconditionally would make this assertion
+            // vacuous — it would pass whether or not the guard scopes to a day.
+            [
+              attendances,
+              (where: SQL | undefined) =>
+                paramsOf(where).includes(onFile.day) ? [onFile] : [],
+            ],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+  });
+
+  // THE regression this guard could most easily have caused. B-307's own pre-check
+  // normally answers a replay first, so to reach the duplicate gate at all the retry has
+  // to be CONCURRENT — the key-anchored read finds nothing because the original had not
+  // committed yet, and then the day-anchored read finds it. Without the "not my own
+  // replay" filter that is a 409, and the phone dead-letters a 4xx: a genuine retry would
+  // be thrown away. Modelled by making ONLY the key-anchored read miss.
+  it("B-307 SURVIVES a CONCURRENT replay: the key-anchored read misses, the day-anchored read finds the caller's OWN row, and it is not treated as a duplicate", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(false, false)]],
+            [workers, workerSource({ self: [linkedWorker(W1, "u-0")], byId: [linkedWorker(W1, "u-0")] })],
+            [
+              attendances,
+              (where: SQL | undefined) =>
+                // key-anchored (B-307 pre-check) → nothing, as during the race;
+                // day-anchored (the duplicate gate) → the row this very key created.
+                paramsOf(where).includes("k-1") ? [] : [recorded({ idempotencyKey: "k-1" })],
+            ],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: "k-1" },
+    });
+    // Falls through to the insert, where attendance_idempotency_uq + the 23505 catch are
+    // what settle it — the same backstop B-307 always relied on.
+    expect(res.statusCode).toBe(201);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+  });
+
+  it("a replay resolved by the B-307 pre-check still returns the ORIGINAL row, not a 409", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: db({ onFile: [recorded({ id: "at-original", idempotencyKey: "k-1" })] }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: "k-1" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().id).toBe("at-original");
+  });
+
+  it("a REMOUNT (new key, same worker+day) is a DUPLICATE, not a replay — the key index would have let it through", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // findAttendanceByIdempotencyKey resolves nothing for the NEW key (the stub row
+        // carries the old one), so the B-307 pre-check misses — exactly as in production.
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(false, false)]],
+            [workers, workerSource({ self: [linkedWorker(W1, "u-0")], byId: [linkedWorker(W1, "u-0")] })],
+            [
+              attendances,
+              (where: SQL | undefined) =>
+                paramsOf(where).includes("k-2") ? [] : [recorded({ idempotencyKey: "k-1" })],
+            ],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, idempotency_key: "k-2" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("leaves the finance.create ROSTER path untouched — a second row for a recorded day is still accepted there (corrections, bulk save, the cc split)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(true)]],
+            [workers, [linkedWorker(W1, null)]],
+            [attendances, [recorded()]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, status: "half" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+  });
+
+  it("400s a self-service caller asserting cc_id — it is the guard's own escape hatch (one re-inflation per cost centre) and the check-in screen has no cc affordance", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: db({ onFile: [], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, cc_id: "cc-1" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/cc_id cannot be set on a self-service check-in/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("keys the duplicate read on worker + day + cc_id, so a cost-centre split is a distinct day rather than a conflict", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(false, false)]],
+            [workers, workerSource({ self: [linkedWorker(W1, "u-0")], byId: [linkedWorker(W1, "u-0")] })],
+            [attendances, []],
+          ],
+          captured,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY },
+    });
+    const dupRead = captured.filter((c) => c.table === attendances).at(-1);
+    const sql = new PgDialect().sqlToQuery(dupRead!.where!).sql;
+    expect(sql).toMatch(/"cc_id" is null/i);
+    const params = paramsOf(dupRead?.where);
+    expect(params).toContain(COMPANY); // still tenant-scoped by the door
+    expect(params).toContain(W1);
+    expect(params).toContain(DAY);
   });
 });
 
@@ -2301,5 +2666,58 @@ describe("B-332 POST /api/v1/labor/attendance/checkout — close the day on the 
     });
     expect(res.statusCode).toBe(400);
     expect(updated).toHaveLength(0);
+  });
+
+  // B-332 gate-4.5 finding 6 — the coordinates were range-checked; the instant pair was
+  // not. Live before the fix: an 08:00 check-in closed at 06:00 stored happily, 200.
+  it("400s a check-out EARLIER than its own check-in — a day cannot be closed before it was opened (no update)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: checkoutDb({ updated }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      // The row's checked_in_at is 00:45Z; this closes it two hours before that.
+      payload: body({ checked_out_at: "2026-08-06T22:45:00.000Z" }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/cannot be earlier than checked_in_at/);
+    expect(updated).toHaveLength(0);
+  });
+
+  it("accepts a NIGHT SHIFT closing on the next calendar day — the guard compares INSTANTS, not the `day` the pair is filed under", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: checkoutDb({
+          row: [{ ...checkedIn(), checkedInAt: new Date("2026-08-07T15:00:00.000Z") }],
+          updated,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      // 22:00 Bangkok on the 7th → 06:00 Bangkok on the 8th, still `day` = the 7th.
+      payload: body({ checked_out_at: "2026-08-07T23:00:00.000Z" }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(updated.filter((u) => u.table === attendances)).toHaveLength(1);
+  });
+
+  it("does not constrain a row with NO check-in instant — the web bulk-save records a day with neither stamp, and there is nothing to order against", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: checkoutDb({ row: [{ ...checkedIn(), checkedInAt: null }], updated }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: body({ checked_out_at: "2026-08-06T22:45:00.000Z" }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(updated.filter((u) => u.table === attendances)).toHaveLength(1);
   });
 });
