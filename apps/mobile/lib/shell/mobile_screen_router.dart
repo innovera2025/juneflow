@@ -12,6 +12,7 @@ import '../screens/exec/exec_screen.dart';
 import '../screens/field_gr/field_gr_screen.dart';
 import '../screens/field_pr/field_pr_screen.dart';
 import '../screens/field_progress/field_progress_screen.dart';
+import '../screens/field_stock/field_stock_screen.dart';
 import '../screens/fm_accept/fm_accept_screen.dart';
 import '../screens/notif/notif_screen.dart';
 import '../screens/pm_checkin/pm_checkin_screen.dart';
@@ -136,6 +137,20 @@ Widget _buildFieldPr(BuildContext context) => const FieldPrScreenHost();
 /// list. It performs NO write — see field_gr_repository.dart.
 Widget _buildFieldGr(BuildContext context) => const FieldGrScreenHost();
 
+/// Builds the `field-stock` on-site material-issue screen (GET
+/// /inventory/warehouses -> GET /inventory/stock for that warehouse, plus GET
+/// /projects for the REQUIRED attribution; POST /inventory/issues through the
+/// offline queue carrying a B-312 idempotency key). Its warehouseId is nullable
+/// like the rest of the pushed-subject screens: nothing lists warehouses on mobile
+/// today, so a bare tab route follows the newest (the srv-track precedent).
+///
+/// The prototype's CTA carries a money total and this one does NOT — no endpoint
+/// prices a basket before it is posted, so the figure could only be computed on the
+/// client, which is the B-316 defect on the button that posts the JV. See
+/// field_stock_agg.dart "THE 18,000 ฿". money = SERVER: the payload carries item
+/// ids and quantities only.
+Widget _buildFieldStock(BuildContext context) => const FieldStockScreenHost();
+
 /// Builders for the routes that have a real ported screen. A screen port adds
 /// `'<id>': _buildX` here (a const-tearoff) and its id to [kBuiltRouteIds].
 const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
@@ -160,6 +175,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'field-progress': _buildFieldProgress,
   'field-pr': _buildFieldPr,
   'field-gr': _buildFieldGr,
+  'field-stock': _buildFieldStock,
 };
 
 /// Resolves [routeId] to its widget: the built screen if registered, otherwise an

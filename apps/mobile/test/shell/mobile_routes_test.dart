@@ -77,6 +77,15 @@ void main() {
     expect(kMobileRouteIds, contains('detail')); // still a known route
   });
 
+  test('field-stock is a built FIELD tab route (feature/mobile-field-stock)', () {
+    // The on-site material issue — the heaviest write on mobile (one transaction
+    // cuts the stock ledger AND posts a Dr 1140 / Cr 5020 JV), which is why it
+    // carries a B-312 idempotency key.
+    expect(kBuiltRouteIds, contains('field-stock'));
+    expect(mobileScreenBuilders.containsKey('field-stock'), isTrue);
+    expect(sectionForRoute('field-stock'), MobileSection.field);
+  });
+
   testWidgets('the router renders an honest placeholder for an unbuilt route', (
     WidgetTester tester,
   ) async {
@@ -219,12 +228,13 @@ void main() {
     }
   });
 
-  test('route parity: 21 of the 26 known routes are built', () {
+  test('route parity: 22 of the 26 known routes are built', () {
     // The count is asserted explicitly so a port that registers a BUILDER without
     // its built id (or the reverse) is caught as a number, not only as a set
-    // mismatch. 19 -> 20 with st-receive; 20 -> 21 with field-gr.
-    expect(kBuiltRouteIds.length, 21);
-    expect(mobileScreenBuilders.length, 21);
+    // mismatch. 19 -> 20 with st-receive; 20 -> 21 with field-gr; 21 -> 22 with
+    // field-stock.
+    expect(kBuiltRouteIds.length, 22);
+    expect(mobileScreenBuilders.length, 22);
     expect(mobileScreenBuilders.keys.toSet(), kBuiltRouteIds);
   });
 }
