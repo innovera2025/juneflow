@@ -69,9 +69,12 @@ import { listEnvelope } from "./list-envelope.js";
 import {
   ACCT,
   allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
   isUniqueViolation,
   resolveAccountIds,
   violatedConstraint,
+  withDocNoRetry,
 } from "./gl-post.js";
 
 type WorkerRow = typeof workers.$inferSelect;
@@ -758,7 +761,8 @@ async function postLaborPayroll(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenPost below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = payroll.currencyCode ?? "THB";
   const ccId = payroll.ccId;
@@ -771,7 +775,9 @@ async function postLaborPayroll(
   // ONE transaction (mirror ar.ts approveCn + retention.ts release): the jv header
   // + its lines are all-or-nothing. insertThrough re-proves this tenant owns the
   // just-created parent jv (jv_line has no company_id).
-  try {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry).
+  const allocThenPost = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(jvs, {
@@ -783,7 +789,13 @@ async function postLaborPayroll(
         .returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
+  };
+  try {
+    await withDocNoRetry(allocThenPost);
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — a 409 here would falsely claim the payroll was already posted.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     // A concurrent/duplicate post trips the 0037 source_doc UNIQUE index — map it
     // to the same 409 as the pre-check (never a 500, never a double post).
     if (isUniqueViolation(err)) {

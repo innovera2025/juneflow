@@ -343,6 +343,18 @@ export const apDeposits = pgTable("ap_deposit", {
   uniqueIndex("ap_deposit_idempotency_uq")
     .on(t.idempotencyKey)
     .where(sql`${t.idempotencyKey} IS NOT NULL`),
+  // B-318 (migration 0061): the deposit NUMBER is unique per tenant. allocDepositNo
+  // is a plain `max(suffix)+1` read, so two CONCURRENT (genuinely distinct) creates
+  // both saw the same max and minted the same DP-<year>-<NNNN> — observed live, three
+  // numbers across six real deposits. That is NOT what the 0060 idempotency key
+  // covers: a key dedupes REPLAYS of ONE request; this is two different payments
+  // colliding on a voucher number, and a duplicated voucher number is exactly what
+  // makes the money trail un-auditable. FULL (not partial): `no` is NOT NULL, so
+  // there is no NULL to exempt and a predicate would only add an escape hatch.
+  // Mirrors ar_invoice_company_no_uq (0047) — the same problem already solved on AR.
+  // The allocator side is withDocNoRetry() in ap-deposit.ts: the index alone would
+  // turn the collision into a false 409 for a real payment.
+  uniqueIndex("ap_deposit_company_no_uq").on(t.companyId, t.no),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -510,6 +522,17 @@ export const jvs = pgTable("jv", {
   uniqueIndex("jv_source_doc_uq")
     .on(t.sourceDoc)
     .where(sql`${t.sourceDoc} ~ '^(pv|rv|gr|payroll|fa|cn|apcn|apdn|ret|dep|booking|down|transfer|deal|petty):'`),
+  // B-318 / B-168 (migration 0061): the JV NUMBER is unique per tenant. jv_source_doc_uq
+  // guards WHAT was posted (a source doc posts at most once); it says nothing about the
+  // number the posting was FILED under. allocJvNo is a plain `max(suffix)+1` read shared
+  // by 17 insert sites, so two concurrent posts of DIFFERENT source docs both read the
+  // same max and file under the same JV-<year>-<NNNN> — observed live, four numbers
+  // across six real JVs. Nothing crashes and no amount is wrong; the books simply stop
+  // being traceable, and jv_no is what every ActionOk hands the user as the voucher
+  // reference. FULL (not partial): `no` is NOT NULL, so there is no NULL to exempt.
+  // The allocator side is withDocNoRetry() at every insert site (gl-post.ts) — this
+  // index without it would convert the collision into a false "already posted" 409.
+  uniqueIndex("jv_company_no_uq").on(t.companyId, t.no),
 ]);
 
 /**

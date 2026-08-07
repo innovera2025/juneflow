@@ -24,6 +24,7 @@
 // not hardcoded — Wei C-177. Codes resolve to ids per-tenant at post time.)
 import { inArray } from "drizzle-orm";
 import { glAccounts, jvs } from "@juneflow/db/schema";
+import type { FastifyReply } from "fastify";
 import type { TenantDb } from "../db/tenant-db.js";
 
 /**
@@ -181,4 +182,150 @@ export async function allocJvNo(db: TenantDb): Promise<string> {
     if (m) max = Math.max(max, Number(m[1]));
   }
   return `${prefix}${String(max + 1).padStart(4, "0")}`;
+}
+
+// ---------------------------------------------------------------------------
+// B-318 / B-168 — doc-number allocation under concurrency
+// ---------------------------------------------------------------------------
+// THE DEFECT (observed live, not theorised): allocJvNo and ap-deposit's
+// allocDepositNo are plain `max(numeric suffix) + 1` reads with nothing behind
+// them. Six concurrent, genuinely DISTINCT POST /ap/deposit produced three deposit
+// numbers and four JV numbers — DP-2026-0001 ×3, JV-2026-0419 ×2. No amount is
+// wrong; the AUDIT TRAIL is, and jv_no is what every ActionOk hands back as the
+// voucher reference. This SURVIVES the B-261/B-312/B-313 idempotency work: a client
+// key dedupes REPLAYS of one request, whereas this is two different requests
+// colliding on a number.
+//
+// THE FIX IS TWO HALVES AND NEITHER WORKS ALONE (migration 0061):
+//   (a) unique(company_id, no) on jv + ap_deposit — makes a duplicate impossible;
+//   (b) this retry — makes a LOSER re-allocate instead of being refused.
+// Shipping (a) without (b) is a REGRESSION, measured: with both indexes and no
+// retry, four of six legitimate vendor deposits came back 409 "already posted" —
+// false, nothing was posted, the NUMBER collided — and
+// apps/mobile/lib/offline/sync_processor.dart dead-letters every 4xx PERMANENTLY.
+// That would turn a duplicated-number problem into silently refused payments.
+
+/** unique(company_id, no) on jv — migration 0061. */
+export const JV_COMPANY_NO_CONSTRAINT = "jv_company_no_uq";
+/** unique(company_id, no) on ap_deposit — migration 0061. */
+export const DEPOSIT_COMPANY_NO_CONSTRAINT = "ap_deposit_company_no_uq";
+
+/** The constraint set a JV-posting handler retries on (every jv insert site). */
+export const JV_NO_CONSTRAINTS: readonly string[] = [JV_COMPANY_NO_CONSTRAINT];
+/** POST /ap/deposit writes BOTH numbered rows in one tx → it retries on both. */
+export const DEPOSIT_NO_CONSTRAINTS: readonly string[] = [
+  DEPOSIT_COMPANY_NO_CONSTRAINT,
+  JV_COMPANY_NO_CONSTRAINT,
+];
+
+/**
+ * Doc-number allocation lost the race `attempts` times running.
+ *
+ * Deliberately NOT a 23505 and NOT an Error the `isUniqueViolation` catches can
+ * recognise: every money handler already has a bare `if (isUniqueViolation(err))`
+ * arm that answers "already posted" / "already approved" / "already released", and
+ * re-throwing the raw driver error would let one of them swallow exhaustion into a
+ * confident lie about a posting that never happened. A distinct class forces each
+ * handler to add ONE explicit branch, placed FIRST in its catch.
+ *
+ * NOTHING WAS COMMITTED when this is thrown — the last attempt's transaction rolled
+ * back, so the caller may safely retry the whole request.
+ */
+export class DocNoExhaustedError extends Error {
+  /** The unique index that kept tripping. */
+  readonly constraintName: string;
+  /** How many allocate-and-write attempts were made. */
+  readonly attempts: number;
+  constructor(constraintName: string, attempts: number) {
+    super(
+      `document-number allocation lost the race ${attempts} times (${constraintName}) — nothing was committed`,
+    );
+    this.name = "DocNoExhaustedError";
+    this.constraintName = constraintName;
+    this.attempts = attempts;
+  }
+}
+
+/**
+ * How many allocate-and-write attempts before giving up. MEASURED, not guessed:
+ * simulating the exact design (allocate → insert → retry on the named 23505)
+ * against a live PG 16 on one tenant, `attempts` = 5 with no backoff starved the
+ * tail badly (N=10 → 6 succeeded; N=20 → 8). With the jittered backoff below,
+ * 10 attempts carried N=20 → 20/20 (worst case 8 attempts, 648 ms). DUPLICATE
+ * NUMBERS MINTED: zero in every configuration — the only failure mode the bound
+ * governs is exhaustion, never a duplicate. Those are single-node localhost
+ * numbers with no network RTT; real latency widens each race window, so treat 10
+ * as a measured FLOOR, not a tuned production value.
+ */
+const DOC_NO_ATTEMPTS = 10;
+
+/**
+ * Run `fn` — which MUST perform the number ALLOCATION as well as the write —
+ * retrying when it trips one of `constraints` BY NAME.
+ *
+ * Two things about this are load-bearing:
+ *
+ * 1. THE ALLOCATION MUST BE INSIDE `fn`. Retrying the transaction with the same
+ *    stale number just collides again forever; the point of the retry is to
+ *    re-read the (now advanced) max.
+ *
+ * 2. NO SAVEPOINT IS NEEDED, and a naive in-transaction retry would be a no-op
+ *    that looks like a fix. Verified against a live PG 16: after a 23505, further
+ *    commands in that transaction fail 25P02 "current transaction is aborted", so
+ *    an inner retry can never succeed. It works here because of WHERE the
+ *    transaction sits: `request.db` is a TenantDb over the ROOT POOLED database
+ *    (plugins/tenant-scope.ts) and TenantDb.transaction delegates straight to it,
+ *    so every `db.transaction()` in these handlers is TOP-LEVEL. A failed attempt
+ *    is therefore already rolled back and its connection released before `fn` is
+ *    called again, and the next attempt is a clean BEGIN. (fa.ts allocates INSIDE
+ *    its transaction — there the retry wraps the whole `db.transaction()` CALL,
+ *    which is still top-level, so the rule holds unchanged.)
+ *
+ * Gating on the constraint NAME (B-263) is what keeps this from retrying somebody
+ * else's uniqueness: an idempotency-key replay, a duplicate source_doc, a duplicate
+ * down-payment instalment are all 23505 too, and all of them must propagate on the
+ * FIRST throw so their own handler branch answers.
+ */
+export async function withDocNoRetry<R>(
+  fn: () => Promise<R>,
+  constraints: readonly string[] = JV_NO_CONSTRAINTS,
+  attempts: number = DOC_NO_ATTEMPTS,
+): Promise<R> {
+  let lastName = constraints[0] ?? JV_COMPANY_NO_CONSTRAINT;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const name = violatedConstraint(err);
+      // Not OUR collision → propagate untouched, first time, every time.
+      if (!isUniqueViolation(err) || !name || !constraints.includes(name)) throw err;
+      lastName = name;
+      if (i === attempts) break;
+      // Jittered backoff. Without it the losers all wake together and thunder onto
+      // the same next number, so the tail starves (measured: N=20 → 12/20 with no
+      // backoff vs 20/20 with it). Grows with the attempt so a heavily contended
+      // tenant spreads out instead of hot-looping.
+      await new Promise((resolve) =>
+        setTimeout(resolve, 5 + Math.floor(Math.random() * 20 * i)),
+      );
+    }
+  }
+  throw new DocNoExhaustedError(lastName, attempts);
+}
+
+/**
+ * The honest terminal answer when withDocNoRetry gives up: 503, NOT 409.
+ *
+ * Exhaustion is TRANSIENT contention and nothing was committed, so the request is
+ * safe — and correct — to repeat. 409 would be a lie twice over: it claims a
+ * business conflict that does not exist, and apps/mobile sync_processor.dart
+ * dead-letters every 4xx permanently while treating 5xx as deferred/retryable, so a
+ * 409 here would strand a payment the user still owes with no in-app recovery.
+ */
+export function docNoExhausted(reply: FastifyReply): FastifyReply {
+  return reply.code(503).send({
+    code: "RETRY",
+    message:
+      "could not allocate a document number under concurrent load — nothing was posted; please retry",
+  });
 }

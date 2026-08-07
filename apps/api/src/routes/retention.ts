@@ -67,7 +67,15 @@ import { round2 } from "./money.js";
 import { pick, str } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  withDocNoRetry,
+} from "./gl-post.js";
 
 type RetentionLedgerRow = typeof retentionLedgers.$inferSelect;
 type VendorRow = typeof vendors.$inferSelect;
@@ -404,7 +412,8 @@ async function releaseRetention(
     return conflict(reply, `retention ledger ${ledgerId} already released`);
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenRelease below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = ledger.currencyCode ?? "THB";
   // Balanced double entry: Dr 2030 retention-payable / Cr 1020 bank = balance.
@@ -416,7 +425,10 @@ async function releaseRetention(
   // ONE transaction (mirror ar.ts approveCn + fa.ts writeOff): jv header + its
   // lines + the ledger flip are all-or-nothing. insertThrough re-proves this
   // tenant owns the just-created parent jv (jv_line has no company_id).
-  try {
+  // B-318: allocate + release is ONE retryable unit (see withDocNoRetry). The
+  // ledger flip is inside the tx, so a losing attempt un-flips on rollback.
+  const allocThenRelease = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(jvs, {
@@ -437,7 +449,13 @@ async function releaseRetention(
         )
         .returning();
     });
+  };
+  try {
+    await withDocNoRetry(allocThenRelease);
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — a 409 here would falsely claim the retention was already released.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     // A concurrent/duplicate release trips the 0038 source_doc UNIQUE index — map
     // it to the same 409 as the pre-check (never a 500, never a double PV).
     if (isUniqueViolation(err)) {

@@ -59,7 +59,15 @@ import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  withDocNoRetry,
+} from "./gl-post.js";
 
 type FixedAssetRow = typeof fixedAssets.$inferSelect;
 type FaAdjustmentRow = typeof faAdjustments.$inferSelect;
@@ -329,7 +337,14 @@ async function updateAsset(
 // COA account skips + reports (C10 — never invented). Returns ActionOk {period,
 // posted:[{asset_id, amount, jv_no}], skipped:[{asset_id, reason}], currency_code}.
 
-/** Post one month of depreciation for one asset in a single transaction. */
+/**
+ * Post one month of depreciation for one asset in a single transaction.
+ *
+ * B-318 note: unlike every other posting handler, allocJvNo runs INSIDE the
+ * transaction here. That is fine — the retry wraps the CALL to this function (see
+ * the caller), so a rolled-back attempt re-enters with a fresh BEGIN and re-reads
+ * the advanced max. No SAVEPOINT: `db.transaction()` is top-level over the pool.
+ */
 async function postDepreciation(
   db: TenantDb,
   asset: FixedAssetRow,
@@ -469,10 +484,27 @@ async function runDepreciation(
     }
 
     try {
-      const jvNo = await postDepreciation(db, asset, monthly, period, exprId, ppeId, accum);
+      // B-318: the whole transaction (which allocates its own JV number inside) is
+      // the retried unit — a concurrent post of another money doc that read the same
+      // JV max trips jv_company_no_uq → roll back → re-enter → re-allocate.
+      const jvNo = await withDocNoRetry(() =>
+        postDepreciation(db, asset, monthly, period, exprId, ppeId, accum),
+      );
       posted.push({ asset_id: asset.id, amount: monthly, jv_no: jvNo });
       postedKeys.add(key); // reflect this post (defensive against a duplicate row)
     } catch (err) {
+      // B-318 FIRST, and it must NOT reuse the "already depreciated" reason: nothing
+      // was posted for this asset. This endpoint answers 200 with posted/skipped
+      // (some assets in the batch DID commit), so an honest per-asset skip is the
+      // truthful analogue of the 503 the single-doc handlers return — never a claim
+      // that the depreciation exists.
+      if (err instanceof DocNoExhaustedError) {
+        skipped.push({
+          asset_id: asset.id,
+          reason: "document-number allocation contended — nothing posted, retry",
+        });
+        continue;
+      }
       // P2-BE-52: a concurrent run posted this asset+period first — the 0037
       // source_doc UNIQUE index tripped. Map to the same idempotent skip as the
       // pre-check (never a 500, never a double post).
@@ -572,60 +604,68 @@ async function writeOff(
 
   let jvNo: string | null;
   try {
-    jvNo = await db.transaction(async (tx): Promise<string | null> => {
-    // Take the asset out of service. B-149 optimistic guard: only an 'active'
-    // asset can be written off — a concurrent write-off that already flipped it
-    // matches 0 rows here → roll back (no duplicate adjustment/JV) → 409. The
-    // source_doc fa:<adjustmentId> is a FRESH uuid per call, so the unique index
-    // does NOT block a double-write-off; this guard is what does.
-    const flipped = await tx
-      .update(
-        fixedAssets,
-        { status: "written_off" },
-        and(eq(fixedAssets.id, assetId), eq(fixedAssets.status, "active")),
-      )
-      .returning();
-    if (flipped.length === 0) {
-      throw new StaleStateError(
-        `fixed asset ${assetId} is not active (already written off or disposed)`,
-      );
-    }
-    // Record the adjustment FIRST so the JV's source_doc can reference it.
-    await tx
-      .insert(faAdjustments, {
-        id: adjustmentId,
-        assetId,
-        kind: "write_off",
-        amount: moneyStr(bookValue),
-        currencyCode: currency,
-        status: "approved",
-        memo: `write-off ${asset.name}`,
-        jvId: null,
-      })
-      .returning();
+    // B-318: the whole transaction is the retried unit (allocJvNo runs inside it, at
+    // the bottom). A rolled-back attempt also un-does the status flip, so the B-149
+    // 'active' guard sees the original state again on the next attempt.
+    jvNo = await withDocNoRetry(() =>
+      db.transaction(async (tx): Promise<string | null> => {
+        // Take the asset out of service. B-149 optimistic guard: only an 'active'
+        // asset can be written off — a concurrent write-off that already flipped it
+        // matches 0 rows here → roll back (no duplicate adjustment/JV) → 409. The
+        // source_doc fa:<adjustmentId> is a FRESH uuid per call, so the unique index
+        // does NOT block a double-write-off; this guard is what does.
+        const flipped = await tx
+          .update(
+            fixedAssets,
+            { status: "written_off" },
+            and(eq(fixedAssets.id, assetId), eq(fixedAssets.status, "active")),
+          )
+          .returning();
+        if (flipped.length === 0) {
+          throw new StaleStateError(
+            `fixed asset ${assetId} is not active (already written off or disposed)`,
+          );
+        }
+        // Record the adjustment FIRST so the JV's source_doc can reference it.
+        await tx
+          .insert(faAdjustments, {
+            id: adjustmentId,
+            assetId,
+            kind: "write_off",
+            amount: moneyStr(bookValue),
+            currencyCode: currency,
+            status: "approved",
+            memo: `write-off ${asset.name}`,
+            jvId: null,
+          })
+          .returning();
 
-    if (!canPost) {
-      // C10 honest-empty: no REAL account to post against, or nothing to remove.
-      return null; // GAP: GL posting deferred (jvId stays null).
-    }
+        if (!canPost) {
+          // C10 honest-empty: no REAL account to post against, or nothing to remove.
+          return null; // GAP: GL posting deferred (jvId stays null).
+        }
 
-    const amount = moneyStr(bookValue);
-    const no = await allocJvNo(tx);
-    const lineRows: (typeof jvLines.$inferInsert)[] = [
-      { jvId, accountId: exprId, dr: amount, cr: "0.00", currencyCode: currency },
-      { jvId, accountId: ppeId, dr: "0.00", cr: amount, currencyCode: currency },
-    ];
-    await tx
-      .insert(jvs, { id: jvId, no, sourceDoc: `fa:${adjustmentId}`, memo: `writeoff:${assetId}` })
-      .returning();
-    await tx.insertThrough(jvLines, jvs, jvId, lineRows);
-    // Back-link the adjustment to its posted JV.
-    await tx
-      .update(faAdjustments, { jvId }, eq(faAdjustments.id, adjustmentId))
-      .returning();
-    return no;
-    });
+        const amount = moneyStr(bookValue);
+        const no = await allocJvNo(tx);
+        const lineRows: (typeof jvLines.$inferInsert)[] = [
+          { jvId, accountId: exprId, dr: amount, cr: "0.00", currencyCode: currency },
+          { jvId, accountId: ppeId, dr: "0.00", cr: amount, currencyCode: currency },
+        ];
+        await tx
+          .insert(jvs, { id: jvId, no, sourceDoc: `fa:${adjustmentId}`, memo: `writeoff:${assetId}` })
+          .returning();
+        await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+        // Back-link the adjustment to its posted JV.
+        await tx
+          .update(faAdjustments, { jvId }, eq(faAdjustments.id, adjustmentId))
+          .returning();
+        return no;
+      }),
+    );
   } catch (err) {
+    // B-318 FIRST: allocation exhausted — the asset is still active, nothing was
+    // written off, so a 409 "already written off" would be a lie.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (err instanceof StaleStateError) {
       return reply.code(409).send({ code: "INVALID_STATE", message: err.message });
     }

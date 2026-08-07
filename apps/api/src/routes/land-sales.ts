@@ -60,7 +60,15 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { pick, str, toNum } from "./procurement.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  withDocNoRetry,
+} from "./gl-post.js";
 import { loadCaller, permAllowed } from "./authz.js";
 
 /** Financial-authz module key (B-082 F1). */
@@ -621,7 +629,8 @@ async function createSalesBooking(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE the retried closure below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = existing?.currencyCode ?? "THB";
   const lineRows: (typeof jvLines.$inferInsert)[] = [
@@ -632,8 +641,12 @@ async function createSalesBooking(
     return conflict(reply, "internal: booking journal entry does not balance");
   }
 
-  try {
-    const savedUnit = await db.transaction(async (tx) => {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry). The
+  // jv_source_doc_uq `booking:<unit>` 23505 names a DIFFERENT constraint, so a real
+  // double-booking still lands on the 409 below on its FIRST throw.
+  const allocThenBook = async (): Promise<SalesUnitRow> => {
+    jvNo = await allocJvNo(db);
+    return db.transaction(async (tx) => {
       let unit: SalesUnitRow;
       if (existing) {
         const set: Partial<Omit<typeof salesUnits.$inferInsert, "companyId">> = {
@@ -662,8 +675,14 @@ async function createSalesBooking(
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
       return unit;
     });
+  };
+  try {
+    const savedUnit = await withDocNoRetry(allocThenBook);
     return reply.code(201).send({ ...unitWire(savedUnit), jv_no: jvNo });
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — a 409 here would falsely claim the unit was already booked.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (isUniqueViolation(err)) {
       return reply
         .code(409)
@@ -728,7 +747,8 @@ async function createSalesDown(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenRecord below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = unit.currencyCode ?? "THB";
   const sourceDoc = `down:${salesUnitId}:${seq}`;
@@ -740,11 +760,15 @@ async function createSalesDown(
     return conflict(reply, "internal: down journal entry does not balance");
   }
 
-  try {
-    // The instalment row (down_payment_txn = authoritative) + the balanced receipt JV
-    // in ONE tx. unique(sales_unit_id, seq) on the CLIENT instalment_no is the dedup
-    // point: a concurrent/duplicate submit of the same instalment trips 23505 → the
-    // whole tx rolls back → 409 (no duplicate instalment, no duplicate receipt JV).
+  // The instalment row (down_payment_txn = authoritative) + the balanced receipt JV
+  // in ONE tx. unique(sales_unit_id, seq) on the CLIENT instalment_no is the dedup
+  // point: a concurrent/duplicate submit of the same instalment trips 23505 → the
+  // whole tx rolls back → 409 (no duplicate instalment, no duplicate receipt JV).
+  // B-318: allocate + record is ONE retryable unit. That B-167 instalment 23505
+  // names a DIFFERENT constraint, so it is never retried — the dedup still fires on
+  // the FIRST throw and a duplicate instalment is still a 409, not a re-attempt.
+  const allocThenRecord = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(downPaymentTxns, { salesUnitId, seq, amount: moneyStr(amt), currencyCode, paidAt })
@@ -754,6 +778,9 @@ async function createSalesDown(
         .returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
+  };
+  try {
+    await withDocNoRetry(allocThenRecord);
     return reply.code(201).send({
       sales_unit_id: salesUnitId,
       unit_id: unit.unitId,
@@ -764,6 +791,10 @@ async function createSalesDown(
       jv_no: jvNo,
     });
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — a 409 would falsely claim this instalment was already recorded,
+    // and mobile dead-letters every 4xx permanently.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (isUniqueViolation(err)) {
       return reply.code(409).send({
         code: "INVALID_STATE",
@@ -827,7 +858,8 @@ async function createLandPlotDeal(
       );
     }
 
-    const jvNo = await allocJvNo(db);
+    // B-318: assigned INSIDE allocThenPost below (a retry must re-read the max).
+    let jvNo = "";
     const jvId = randomUUID();
     const currencyCode = plot.currencyCode ?? "THB";
     const lineRows: (typeof jvLines.$inferInsert)[] = [
@@ -838,7 +870,9 @@ async function createLandPlotDeal(
       return conflict(reply, "internal: lease deal journal entry does not balance");
     }
 
-    try {
+    // B-318: allocate + post is ONE retryable unit (see withDocNoRetry).
+    const allocThenPost = async (): Promise<void> => {
+      jvNo = await allocJvNo(db);
       await db.transaction(async (tx) => {
         await tx
           .insert(apBillings, {
@@ -855,8 +889,13 @@ async function createLandPlotDeal(
           .returning();
         await tx.insertThrough(jvLines, jvs, jvId, lineRows);
       });
+    };
+    try {
+      await withDocNoRetry(allocThenPost);
       return reply.code(200).send({ plot_id: plotId, type, amount: rentAmt, jv_no: jvNo });
     } catch (err) {
+      // B-318 FIRST: allocation exhausted — nothing committed, so never a 409.
+      if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
       if (isUniqueViolation(err)) {
         return reply
           .code(409)
@@ -897,7 +936,8 @@ async function createLandPlotDeal(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenPost below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = plot.currencyCode ?? "THB";
   const lineRows: (typeof jvLines.$inferInsert)[] = [
@@ -908,7 +948,9 @@ async function createLandPlotDeal(
     return conflict(reply, "internal: deal journal entry does not balance");
   }
 
-  try {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry).
+  const allocThenPost = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       // B-164 (Wei=ก): the Cr 2010 AP is a real payable to the land owner — record it
       // in the AP subledger (ap_billing) so it surfaces in GET /ap/billings + aging,
@@ -929,8 +971,13 @@ async function createLandPlotDeal(
       await tx.insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `land-deal ${plotId}` }).returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
+  };
+  try {
+    await withDocNoRetry(allocThenPost);
     return reply.code(200).send({ plot_id: plotId, type, deposit, jv_no: jvNo });
   } catch (err) {
+    // B-318 FIRST: allocation exhausted — nothing committed, so never a 409.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (isUniqueViolation(err)) {
       return reply
         .code(409)

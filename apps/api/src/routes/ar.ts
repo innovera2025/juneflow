@@ -74,7 +74,15 @@ import { round2 } from "./money.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  withDocNoRetry,
+} from "./gl-post.js";
 
 type ArInvoiceRow = typeof arInvoices.$inferSelect;
 type RvRow = typeof rvs.$inferSelect;
@@ -452,54 +460,69 @@ async function createArInvoice(
       "the tenant chart of accounts is missing a required posting account (AR / revenue / VAT-output)",
     );
   }
-  const jvNo = await allocJvNo(db);
+  // B-318: allocated INSIDE the retried closure below (a retry must re-read the
+  // advanced max, not re-use the stale number).
+  let jvNo = "";
 
   // B-097 + B-216: header + lines + the revenue JV are ONE db.transaction — a JV
   // failure rolls back the invoice (no invoice without its accrual posting). The
   // JV debits AR the gross and credits net revenue + output VAT:
   //   Dr AR (amount + vat) / Cr revenue (amount = net) / Cr VAT-output (vat).
-  const created = await db.transaction(async (tx) => {
-    const [inv] = (await tx
-      .insert(arInvoices, {
-        customerId,
-        projectId,
-        no,
-        amount: moneyStr(amount),
-        vat: moneyStr(vat),
-        currencyCode: "THB",
-        creditTerm,
-        dueDate,
-        status: "open",
-        etaxStatus: "queued",
-      })
-      .returning()) as ArInvoiceRow[];
-    const lineRows = lineInputs.map((li) => ({ arInvoiceId: inv!.id, ...li }));
-    await tx.insertThrough(arInvoiceLines, arInvoices, inv!.id, lineRows);
+  //
+  // B-318: the retry wraps allocate + transaction. A concurrent post of ANOTHER
+  // money doc that read the same JV max now trips jv_company_no_uq (0061) → roll
+  // back → re-allocate → write. The ar_invoice_company_no_uq 23505 this handler
+  // already maps to a 409 names a DIFFERENT constraint, so it is never retried.
+  let created: ArInvoiceRow | null;
+  try {
+    created = await withDocNoRetry(async () => {
+      jvNo = await allocJvNo(db);
+      return db.transaction(async (tx) => {
+        const [inv] = (await tx
+          .insert(arInvoices, {
+            customerId,
+            projectId,
+            no,
+            amount: moneyStr(amount),
+            vat: moneyStr(vat),
+            currencyCode: "THB",
+            creditTerm,
+            dueDate,
+            status: "open",
+            etaxStatus: "queued",
+          })
+          .returning()) as ArInvoiceRow[];
+        const lineRows = lineInputs.map((li) => ({ arInvoiceId: inv!.id, ...li }));
+        await tx.insertThrough(arInvoiceLines, arInvoices, inv!.id, lineRows);
 
-    const jvId = randomUUID();
-    const jvLineRows: (typeof jvLines.$inferInsert)[] = [
-      { jvId, accountId: arId, dr: moneyStr(amount + vat), cr: moneyStr(0), currencyCode: "THB" },
-      { jvId, accountId: revenueId, dr: moneyStr(0), cr: moneyStr(amount), currencyCode: "THB" },
-      { jvId, accountId: vatOutputId, dr: moneyStr(0), cr: moneyStr(vat), currencyCode: "THB" },
-    ];
-    await tx
-      .insert(jvs, {
-        id: jvId,
-        no: jvNo,
-        sourceDoc: `invoice:${inv!.id}`,
-        memo: `ar-invoice ${no}`,
-      })
-      .returning();
-    await tx.insertThrough(jvLines, jvs, jvId, jvLineRows);
-    return inv!;
-  }).catch((err: unknown) => {
+        const jvId = randomUUID();
+        const jvLineRows: (typeof jvLines.$inferInsert)[] = [
+          { jvId, accountId: arId, dr: moneyStr(amount + vat), cr: moneyStr(0), currencyCode: "THB" },
+          { jvId, accountId: revenueId, dr: moneyStr(0), cr: moneyStr(amount), currencyCode: "THB" },
+          { jvId, accountId: vatOutputId, dr: moneyStr(0), cr: moneyStr(vat), currencyCode: "THB" },
+        ];
+        await tx
+          .insert(jvs, {
+            id: jvId,
+            no: jvNo,
+            sourceDoc: `invoice:${inv!.id}`,
+            memo: `ar-invoice ${no}`,
+          })
+          .returning();
+        await tx.insertThrough(jvLines, jvs, jvId, jvLineRows);
+        return inv!;
+      });
+    });
+  } catch (err) {
+    // B-318 FIRST: allocation lost the race to exhaustion. Nothing committed.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     // B-217: a concurrent create raced past the in-memory pre-check with the same
     // (company_id, no) — the 0047 ar_invoice(company_id, no) UNIQUE index tripped
     // 23505 and the whole tx rolled back (no partial invoice + no orphan JV). Map
     // to the same 409 as the pre-check (never a 500, never a double revenue JV).
-    if (isUniqueViolation(err)) return null;
-    throw err;
-  });
+    if (isUniqueViolation(err)) created = null;
+    else throw err;
+  }
 
   if (created === null) return conflict(reply, `invoice ${no} already exists`);
   return reply.code(201).send(invoiceWire(created));
@@ -817,7 +840,9 @@ async function approveCn(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenPost below — a retry must re-read the advanced
+  // max, so the allocation cannot sit out here where it would be re-used stale.
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = cn.currencyCode ?? "THB";
   const lineRows: (typeof jvLines.$inferInsert)[] = [
@@ -828,7 +853,10 @@ async function approveCn(
 
   // B-097: jv header + its lines are ONE post (insertThrough re-proves this tenant
   // owns the just-created parent jv inside the same transaction).
-  try {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry). jvId is
+  // stable across attempts — the losing attempt rolled back, so the uuid is free.
+  const allocThenPost = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(jvs, {
@@ -840,7 +868,13 @@ async function approveCn(
         .returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
+  };
+  try {
+    await withDocNoRetry(allocThenPost);
   } catch (err) {
+    // B-318 FIRST: allocation lost the race to exhaustion. Nothing committed, and a
+    // 409 here would falsely claim the CN was already approved.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     // P2-BE-52: a concurrent approve posted this CN first — the 0037 source_doc
     // (`cn:<id>`) UNIQUE index tripped. Map to the same 409 as the pre-check
     // (never a 500, never a duplicate reversal JV).

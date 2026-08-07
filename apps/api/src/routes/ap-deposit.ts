@@ -93,9 +93,13 @@ import { listEnvelope } from "./list-envelope.js";
 import {
   ACCT,
   allocJvNo,
+  DEPOSIT_NO_CONSTRAINTS,
+  docNoExhausted,
+  DocNoExhaustedError,
   isUniqueViolation,
   resolveAccountIds,
   violatedConstraint,
+  withDocNoRetry,
 } from "./gl-post.js";
 
 type ApDepositRow = typeof apDeposits.$inferSelect;
@@ -546,11 +550,8 @@ async function createDeposit(
     );
   }
 
-  // Pre-resolve the ids so source_doc dep:<depositId> references the row, and the
-  // JV number, before the transaction (deterministic reads outside the write block).
+  // Pre-resolve the ids so source_doc dep:<depositId> references the row.
   const depositId = randomUUID();
-  const no = await allocDepositNo(db);
-  const jvNo = await allocJvNo(db);
   const jvId = randomUUID();
   // The prototype form has no currency selector — a deposit is THB (the ap_deposit
   // schema default); the JV inherits the deposit's currency (== THB).
@@ -561,48 +562,69 @@ async function createDeposit(
     { jvId, accountId: advanceId, dr: moneyAmount, cr: moneyStr(0), currencyCode },
     { jvId, accountId: cashId, dr: moneyStr(0), cr: moneyAmount, currencyCode },
   ];
+  // B-318: the two doc numbers are assigned INSIDE the retried closure below (the
+  // whole point of the retry is to re-read the advanced max), but the catch and the
+  // 201 body both need the numbers that were actually attempted/committed — so they
+  // live out here and the closure writes them.
+  let no = "";
+  let jvNo = "";
 
   // ONE transaction (mirror ar.ts createArInvoice + approveCn): the ap_deposit row,
   // the jv header + its lines are all-or-nothing. The JV amount reads the value
   // just stored on the deposit (money=SERVER). insertThrough re-proves this tenant
   // owns the just-created parent jv (jv_line has no company_id).
+  //
+  // B-318: allocate + write is wrapped in withDocNoRetry on BOTH numbered rows this
+  // tx writes (ap_deposit.no and jv.no). A concurrent DISTINCT deposit that read the
+  // same max now trips 0061 → this rolls back → re-allocate → write again, instead
+  // of the false "already posted" 409 the index alone would produce. The B-313
+  // idempotency-key 23505 names a DIFFERENT constraint, so it is never retried: it
+  // propagates on the first throw to its own branch below.
   let created: ApDepositRow;
   try {
-    created = await db.transaction(async (tx) => {
-      const [deposit] = (await tx
-        .insert(apDeposits, {
-          id: depositId,
-          no,
-          vendorId,
-          poId,
-          woId,
-          reason,
-          pct,
-          amount: moneyAmount,
-          used: "0",
-          currencyCode,
-          status: "approved",
-          // B-313: the deposit carries the client key. A REPLAY that raced past the
-          // pre-check trips ap_deposit_idempotency_uq → 23505 → the catch below
-          // returns the ORIGINAL. This is the FIRST write in the tx, so that 23505
-          // rolls the whole block back BEFORE the JV header or either leg exists —
-          // the replay-safety of the posting is structural, not a compensating
-          // action.
-          idempotencyKey,
-        })
-        .returning()) as ApDepositRow[];
-      await tx
-        .insert(jvs, {
-          id: jvId,
-          no: jvNo,
-          sourceDoc: `dep:${depositId}`,
-          memo: `vendor-deposit ${no}`,
-        })
-        .returning();
-      await tx.insertThrough(jvLines, jvs, jvId, lineRows);
-      return deposit!;
-    });
+    created = await withDocNoRetry(async () => {
+      no = await allocDepositNo(db);
+      jvNo = await allocJvNo(db);
+      return db.transaction(async (tx) => {
+        const [deposit] = (await tx
+          .insert(apDeposits, {
+            id: depositId,
+            no,
+            vendorId,
+            poId,
+            woId,
+            reason,
+            pct,
+            amount: moneyAmount,
+            used: "0",
+            currencyCode,
+            status: "approved",
+            // B-313: the deposit carries the client key. A REPLAY that raced past the
+            // pre-check trips ap_deposit_idempotency_uq → 23505 → the catch below
+            // returns the ORIGINAL. This is the FIRST write in the tx, so that 23505
+            // rolls the whole block back BEFORE the JV header or either leg exists —
+            // the replay-safety of the posting is structural, not a compensating
+            // action.
+            idempotencyKey,
+          })
+          .returning()) as ApDepositRow[];
+        await tx
+          .insert(jvs, {
+            id: jvId,
+            no: jvNo,
+            sourceDoc: `dep:${depositId}`,
+            memo: `vendor-deposit ${no}`,
+          })
+          .returning();
+        await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+        return deposit!;
+      });
+    }, DEPOSIT_NO_CONSTRAINTS);
   } catch (err) {
+    // B-318 FIRST: the allocate-and-write loop above gave up. Nothing is committed,
+    // and this is transient contention — a 409 would both lie about a business
+    // conflict and (mobile sync_processor) dead-letter a payment the user still owes.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     // B-313 CONCURRENCY BACKSTOP, checked FIRST. Our pre-check read before the
     // original committed; our insert then hit the index. Entering this branch needs
     // ALL THREE of: a key present (the partial index exempts nulls, so a key-less
