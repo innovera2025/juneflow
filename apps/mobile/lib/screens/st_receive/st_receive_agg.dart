@@ -252,6 +252,12 @@ bool anyShort(List<StRecvLine> lines, List<double> counts) {
   return false;
 }
 
+/// The body key that carries the receipt's subject PO. Named rather than inlined
+/// because it is the ONLY thing that pins a queued `/gr` op to one PO — the endpoint
+/// is `/gr` for every receipt — so the screen's post-restart adoption matcher
+/// (`stReceiveOpIdentity`, B-330) has to read the same key this builder writes.
+const String grPoIdField = 'po_id';
+
 /// Build the POST /gr body for this receipt.
 ///
 /// Deliberately minimal, and every omission is load-bearing — see the header:
@@ -266,12 +272,6 @@ bool anyShort(List<StRecvLine> lines, List<double> counts) {
 ///   * `qty_rejected` is 0 on every line — the screen has one count and cannot
 ///     honestly express a damaged quantity.
 ///
-/// The body key that carries the receipt's subject PO. Named rather than inlined
-/// because it is the ONLY thing that pins a queued `/gr` op to one PO — the endpoint
-/// is `/gr` for every receipt — so the screen's post-restart adoption matcher
-/// (`stReceiveOpIdentity`, B-330) has to read the same key this builder writes.
-const String grPoIdField = 'po_id';
-
 /// [idempotencyKey] MUST be the owning SyncOperation's id: the queue replays
 /// `op.payload` verbatim and does NOT inject the key, so this is the only place
 /// the B-261 contract can be honoured. A whole count is emitted as an int so the

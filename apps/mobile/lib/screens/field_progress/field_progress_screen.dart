@@ -320,9 +320,34 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
     if (_state == FieldDeliverState.sending) return;
     if (!period.deliverable) return;
 
+    // Read the slot BEFORE the flip below overwrites `_pendingPeriodId`: this is the
+    // question "is the op I am already tracking THIS period's?", and the answer has to
+    // be taken while `_pendingPeriodId` still names the period the op belongs to.
     final String? pending = _opId;
-    if (pending != null && _pendingPeriodId == period.id) {
-      setState(() => _state = FieldDeliverState.sending);
+    final bool retryThisPeriod =
+        pending != null && _pendingPeriodId == period.id;
+
+    // Flip busy SYNCHRONOUSLY, before ANY await — both fields, so the spinner lands on
+    // the tapped row exactly as the branches below leave it.
+    //
+    // The `sending` guard at the top of this method is the ONLY thing standing between
+    // two taps, and until this line nothing set `_state` before an await. That was safe
+    // on dev because the mint path held no await at all: guard → mint → setState. The
+    // pre-mint queue read (B-330) put a real await in FRONT of the guard's own
+    // precondition — a drift/SQLite `pending()` is disk I/O — so a second tap during
+    // that read would sail straight past into a SECOND enqueue of a delivery that is
+    // already waiting. Offline that is two ops under two keys; online the server takes
+    // the first and 409s the replay (the C3 guard at `subcon.ts:758` admits only a
+    // `pending` period), which parks a permanent 4xx dead-letter every future drain
+    // skips (B-330 F2) and paints the failed bar over a delivery that SUCCEEDED.
+    //
+    // The other four offline-write screens already flip synchronously; this one is
+    // where the pre-mint pattern was copied FROM and was the last without the companion
+    // guard.
+    _pendingPeriodId = period.id;
+    setState(() => _state = FieldDeliverState.sending);
+
+    if (retryThisPeriod) {
       final DrainReport report = await widget.repo.drain();
       await _resolve(pending, report);
       return;
@@ -342,19 +367,15 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
     );
     if (already != null) {
       if (!mounted) return;
-      _pendingPeriodId = period.id;
-      setState(() {
-        _opId = already.id;
-        _state = FieldDeliverState.sending;
-      });
+      // `_state` and `_pendingPeriodId` were already set by the synchronous flip
+      // above — that is the point of it — so only the adopted id is new here.
+      setState(() => _opId = already.id);
       final DrainReport report = await widget.repo.drain();
       await _resolve(already.id, report);
       return;
     }
 
     final String opId = _opId = _newOpId();
-    _pendingPeriodId = period.id;
-    setState(() => _state = FieldDeliverState.sending);
     final DrainReport report = await widget.repo.deliver(
       periodId: period.id,
       opId: opId,

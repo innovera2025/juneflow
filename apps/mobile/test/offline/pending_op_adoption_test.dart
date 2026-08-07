@@ -140,12 +140,19 @@ void main() {
       expect(found?.id, 'k-live');
     });
 
-    test('adopts the OLDEST match — the one the next drain reaches first', () {
+    test('adopts the FIRST match in the order it was given — the op the next drain '
+        'reaches first', () {
+      // Deliberately NOT phrased as "the oldest". `findAdoptableOpAmong` does no
+      // sorting: it walks `due` as handed to it and returns the first match. A
+      // `createdAt` on these two fixtures would be pure decoration — swap them and
+      // this still returns the first element — so the oldest-first property is not
+      // this function's to hold. It belongs to `SyncQueue.pending()`, and it is
+      // exercised where it actually lives, over the REAL queue below.
       final SyncOperation? found = findAdoptableOp(<SyncOperation>[
-        _op(id: 'k-old', minute: 1),
-        _op(id: 'k-new', minute: 2),
+        _op(id: 'k-first'),
+        _op(id: 'k-second'),
       ], _notesWo1);
-      expect(found?.id, 'k-old');
+      expect(found?.id, 'k-first');
     });
   });
 
@@ -242,6 +249,25 @@ void main() {
         findAdoptableOp(await queue.pending(), _notesWo1),
         isNull,
       ); // …but never adopted
+    });
+
+    test('the OLDEST op is adopted, and it is the QUEUE that makes that true — '
+        'enqueue order is not `createdAt` order', () async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      // Enqueued newest FIRST, so insertion order and age disagree. This is the
+      // one place `createdAt` can decide anything: `findAdoptableOpAmong` walks
+      // the list it is handed, and `pending()` is what sorts that list.
+      await queue.enqueue(_op(id: 'k-new', minute: 2));
+      await queue.enqueue(_op(id: 'k-old', minute: 1));
+
+      expect(
+        findAdoptableOp(await queue.pending(), _notesWo1)?.id,
+        'k-old',
+        reason:
+            'the next drain replays the oldest first, so that is the op the '
+            'screen must take back — adopting the newer one would leave the '
+            'older write about to be sent under a key nobody is tracking',
+      );
     });
   });
 }

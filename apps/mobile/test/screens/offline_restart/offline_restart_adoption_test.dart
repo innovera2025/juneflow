@@ -71,10 +71,6 @@ class _Transport implements SyncApiClient {
   bool offline;
   int status;
 
-  /// Per-endpoint status override, for the tests that must tell two ops apart by
-  /// their outcome within one drain.
-  final Map<String, int> statusByEndpoint = <String, int>{};
-
   /// When non-null every replay BLOCKS on it before doing anything, which is how the
   /// window tests hold a drain IN FLIGHT while the user taps. It needs no faking to
   /// be realistic: `AppServices` builds Dio with no `connectTimeout`, so on a slow or
@@ -106,7 +102,7 @@ class _Transport implements SyncApiClient {
       endpoint: endpoint,
       payload: Map<String, Object?>.of(payload),
     ));
-    return SyncApiResponse(statusCode: statusByEndpoint[endpoint] ?? status);
+    return SyncApiResponse(statusCode: status);
   }
 }
 
@@ -146,19 +142,36 @@ class _NotesRepo extends DioPmNotesRepository {
   ];
 }
 
-/// pm-notes' read, deliberately SLOWER than the drain AND carrying stored text.
+/// pm-notes' read for a work order that ALREADY CARRIES a stored log — the ORDINARY
+/// production case (any work order closed out once before), and the only fixture
+/// shape in which seeding the form does anything observable at all.
+///
+/// [_NotesRepo] above returns bare `{'id': 'wo-1'}`, so `_seed` writes `''` into three
+/// already-empty controllers: `TextEditingController.text = ''` assigns an EQUAL
+/// `TextEditingValue` and notifies NOBODY. A test built on that fixture cannot fire
+/// the edit listener from a seed, and therefore cannot exercise — in either direction
+/// — any guard that lives inside the listener (`_seeding`) or any ordering rule about
+/// when the seed lands (`await loading`). Stored text is what makes the seed NOISY.
+class _StoredNotesRepo extends _NotesRepo {
+  _StoredNotesRepo(super.p);
+
+  /// The log this work order was closed out with before — what the read returns and
+  /// what a seed therefore puts back on screen.
+  static const String storedCause = 'บันทึกเดิม';
+
+  @override
+  Future<List<PmNotesEnt>> listWorkOrders() async => <PmNotesEnt>[
+    <String, Object?>{'id': 'wo-1', 'cause': storedCause},
+  ];
+}
+
+/// The same noisy read, deliberately SLOWER than the drain.
 ///
 /// `_resumeQueued` starts the read and the drain together but AWAITS the read before
 /// adopting, because seeding the three controllers fires the edit listener and an
 /// edit legitimately drops `_opId`. Every other test in this file stubs a read that
 /// resolves first anyway, so the ordering is never exercised by them.
-///
-/// The stored body is load-bearing, not scenery: `TextEditingController.text = ''`
-/// on an already-empty controller sets an EQUAL `TextEditingValue` and therefore
-/// notifies nobody, so a work order with no stored log cannot fire the listener at
-/// all. Only a seed that genuinely CHANGES the field can undo an adoption — which is
-/// exactly the case the ordering guard exists for.
-class _SlowNotesRepo extends _NotesRepo {
+class _SlowNotesRepo extends _StoredNotesRepo {
   _SlowNotesRepo(super.p, {required this.delay});
 
   final Duration delay;
@@ -166,9 +179,7 @@ class _SlowNotesRepo extends _NotesRepo {
   @override
   Future<List<PmNotesEnt>> listWorkOrders() async {
     await Future<void>.delayed(delay);
-    return <PmNotesEnt>[
-      <String, Object?>{'id': 'wo-1', 'cause': 'บันทึกเดิม'},
-    ];
+    return super.listWorkOrders();
   }
 }
 
@@ -216,6 +227,37 @@ class _ProgressRepo extends DioFieldProgressRepository {
           'status': 'pending',
         },
       ];
+}
+
+/// [_ProgressRepo] whose QUEUE READ takes real time.
+///
+/// `due()` is `SyncQueue.pending()`, and in the app that is drift/SQLite — disk I/O,
+/// not a synchronous getter. Every other repository in this file resolves it in a
+/// microtask, which collapses the gap the pre-mint queue read opens and makes any
+/// second tap land either wholly before or wholly after it.
+///
+/// THE ROWS ARE SNAPSHOTTED AT THE CALL AND HANDED BACK AFTER THE DELAY, and that
+/// order is the whole fixture. Delaying FIRST and reading after would let the second
+/// tap's read observe the FIRST tap's enqueue, and the pre-mint check would then
+/// dedupe the pair by itself — which is not what a real queue does and would make a
+/// double-tap test pass with or without the busy guard. It measured exactly that:
+/// the delay-then-read version left the suite GREEN under the revert probe.
+///
+/// Snapshot-then-delay is the faithful ordering, not a convenience. On one drift
+/// connection the second tap's SELECT is queued behind the first tap's SELECT but
+/// AHEAD of the INSERT, because the first tap cannot issue that INSERT until its own
+/// SELECT has returned. So both reads necessarily see the pre-insert state.
+class _SlowDueProgressRepo extends _ProgressRepo {
+  _SlowDueProgressRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<List<SyncOperation>> due() async {
+    final List<SyncOperation> rows = await super.due();
+    await Future<void>.delayed(delay);
+    return rows;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -469,11 +511,12 @@ Future<void> _mountChecklist(
 Future<void> _mountProgress(
   WidgetTester tester,
   InMemorySyncQueue queue,
-  _Transport transport,
-) => _mount(
+  _Transport transport, {
+  FieldProgressRepository? repo,
+}) => _mount(
   tester,
   FieldProgressScreen(
-    repo: _ProgressRepo(_processor(queue, transport)),
+    repo: repo ?? _ProgressRepo(_processor(queue, transport)),
     strings: _progressStrings,
     i18n: _i18n,
     contractId: 'c1',
@@ -832,6 +875,92 @@ void main() {
   });
 
   // =========================================================================
+  // 1c-b. SEEDING IS NOT TYPING — the `_seeding` flag, on the ordinary work
+  //       order: one that already HAS a stored log.
+  //
+  //       `_onEdited` cannot tell a seed from a keystroke, and inside the
+  //       adoption window it cannot infer it from the state either (`_state` is
+  //       idle and `_opId` null for both). If a seed is counted as an edit,
+  //       `_edited` is set before the technician has touched anything, the
+  //       pre-mint check in `_onSave` is skipped, and the save mints a second key
+  //       whose body is THE TEXT THE READ JUST PUT THERE.
+  //
+  //       That is not a plain duplicate: FIFO replays the queued op first and the
+  //       minted one last, so the STALE stored log lands on top of the real one.
+  // =========================================================================
+  group('pm-notes: seeding a stored log is not an edit', () {
+    testWidgets(
+      'saving inside the window without typing ADOPTS — a work order that '
+      'already carries a log must not re-submit that log as a new close-out',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+        PmNotesRepository stored() =>
+            _StoredNotesRepo(_processor(queue, transport));
+
+        // Session 1, offline. The work order already carries a log, so the form
+        // opens with it; the technician replaces it with what he actually found.
+        await _mountNotes(tester, queue, transport, repo: stored());
+        expect(
+          find.text(_StoredNotesRepo.storedCause),
+          findsOneWidget,
+          reason: 'the fixture must really seed, or this test proves nothing',
+        );
+        await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+        await _flush(tester);
+        await _tap(tester, _saveNotes);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        // Session 2, INSIDE the adoption window: the signal is back but the replay
+        // is held open, so `_opId` is still null and the CTA is live. The read is
+        // NOT held — it still returns the OLD stored log, because the queued write
+        // never reached the server — so the form re-seeds it.
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountNotes(tester, queue, transport, repo: stored());
+
+        expect(find.text(_queuedCard), findsNothing); // nothing adopted yet
+        expect(
+          find.text(_StoredNotesRepo.storedCause),
+          findsOneWidget,
+          reason:
+              'the seed fired for real — the listener DID run, which is the '
+              'whole condition `_seeding` exists to classify',
+        );
+
+        // He taps save. He has typed nothing: the only thing that touched the
+        // controllers is the read.
+        await _tap(tester, _saveNotes);
+
+        expect(
+          await _queuedIds(queue),
+          <String>[k1],
+          reason:
+              'counting the seed as an edit skips the pre-mint check, and the '
+              'second key sits right here as a second close-out',
+        );
+
+        gate.complete();
+        await _flush(tester, 20);
+
+        expect(transport.accepted.length, 1);
+        expect(
+          transport.accepted.single.payload['cause'],
+          'สายพานขาด',
+          reason:
+              'and FIFO lands the SECOND body last, so the stale stored log '
+              'would overwrite the real one — input loss, not a duplicate. '
+              '(pm-notes carries no `idempotency_key` in its body — B-261 is a '
+              'money contract — so the op id in the QUEUE is the whole key.)',
+        );
+        expect(await queue.length(), 0);
+      },
+    );
+  });
+
+  // =========================================================================
   // 1d. AN EDIT IS A NEW WRITE — the boundary the pre-mint check must not cross.
   //
   //     `_opId` is null in two situations that mean opposite things: nothing of
@@ -965,6 +1094,106 @@ void main() {
         reason: 'adopting k1 here would re-send the UNCHECKED list',
       );
     });
+  });
+
+  // =========================================================================
+  // 1e. A SECOND TAP INSIDE THE PRE-MINT QUEUE READ.
+  //
+  //     The pre-mint check is itself an `await`, and it was put in FRONT of the
+  //     handler's own double-tap guard. On dev the mint path held no await at all
+  //     (guard -> mint -> setState), so the guard was sufficient; adding the queue
+  //     read opened a gap the guard no longer covers unless the busy state is
+  //     flipped SYNCHRONOUSLY first.
+  //
+  //     SCOPE, stated rather than implied: this covers `field-progress`, which was
+  //     the one handler that did not flip synchronously. The other four flip before
+  //     their first await, and that is asserted only by reading them — they have no
+  //     double-tap test of their own, and would each need their own slow-`due()`
+  //     fixture to get one.
+  // =========================================================================
+  group('a second tap while the pre-mint queue read is still in flight', () {
+    testWidgets('field-progress: two taps on ONE period enqueue ONE delivery', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountProgress(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueProgressRepo(
+          _processor(queue, transport),
+          delay: const Duration(milliseconds: 120),
+        ),
+      );
+      // Let the on-mount adoption finish first (it reads the queue too), so the
+      // only read in flight below is the one the tap opens.
+      await tester.pump(const Duration(milliseconds: 200));
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsNothing); // nothing was queued yet
+
+      // The foreman taps the period's CTA twice — the first tap has not repainted
+      // yet, which is exactly why he taps again.
+      await tester.tap(find.text(_deliver).first);
+      await tester.tap(find.text(_deliver).first);
+      await tester.pump(const Duration(milliseconds: 300));
+      await _flush(tester, 20);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(
+        ops.length,
+        1,
+        reason:
+            'a second op here is a second POST /periods/p1/deliver; the C3 '
+            'guard (subcon.ts:758) takes the first and 409s the replay, which '
+            'parks a permanent dead-letter (B-330 F2) and paints the failed '
+            'bar over a delivery that SUCCEEDED',
+      );
+      expect(ops.single.endpoint, '/periods/p1/deliver');
+
+      // And when the signal returns the server is hit exactly once.
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets(
+      'field-progress: two taps on DIFFERENT periods are still two deliveries — '
+      'the flip must not swallow a genuinely separate write',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        await _mountProgress(
+          tester,
+          queue,
+          transport,
+          repo: _SlowDueProgressRepo(
+            _processor(queue, transport),
+            delay: const Duration(milliseconds: 120),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        await _flush(tester);
+
+        await _tap(tester, _deliver); // p1
+        await tester.pump(const Duration(milliseconds: 300));
+        await _flush(tester);
+        await tester.tap(find.text(_deliver).at(1)); // p2
+        await tester.pump(const Duration(milliseconds: 300));
+        await _flush(tester, 20);
+
+        final List<SyncOperation> ops = await _queued(queue);
+        expect(ops.length, 2);
+        expect(ops.map((SyncOperation o) => o.endpoint).toList(), <String>[
+          '/periods/p1/deliver',
+          '/periods/p2/deliver',
+        ]);
+      },
+    );
   });
 
   // =========================================================================
