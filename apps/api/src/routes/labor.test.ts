@@ -250,12 +250,29 @@ interface WriteStubOpts {
    * later payroll SUM (a hand-seeded array would hide exactly the defect under test).
    */
   onInsert?: (table: unknown, rows: Record<string, unknown>[]) => void;
+  /**
+   * B-332: the rows an UPDATE ... RETURNING hands back. Returning [] models the
+   * guarded-update MISS (`WHERE ... AND checked_out_at IS NULL` matched 0 rows) —
+   * the only way to reach the checkout replay/409 branch without a real Postgres.
+   * Receives the running 0-based per-table update count so a test can let the first
+   * close through and starve only the second.
+   */
+  updateReturns?: (table: unknown, nth: number) => Record<string, unknown>[] | null;
 }
 
-/** Db stub with insert/transaction doors (the read-only stubDb above cannot write). */
-function writeStub(opts: WriteStubOpts): Db {
+/** B-332: a captured UPDATE (which table, the WHERE, and the SET payload). */
+interface Updated {
+  table: unknown;
+  where: SQL | undefined;
+  set: Record<string, unknown>;
+}
+
+/** Db stub with insert/update/transaction doors (the read-only stubDb above cannot write). */
+function writeStub(opts: WriteStubOpts & { updated?: Updated[] }): Db {
   const { rows, captured = [], inserted = [], insertThrows, onInsert } = opts;
+  const updated = opts.updated ?? [];
   const insertCount = new Map<unknown, number>();
+  const updateCount = new Map<unknown, number>();
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -301,6 +318,26 @@ function writeStub(opts: WriteStubOpts): Db {
       }),
     }),
   };
+  // B-332: the UPDATE door. Captures the SET payload AND the composed WHERE, so a
+  // test can assert the guard predicate is on the UPDATE itself (the B-149 lesson:
+  // a guard on a preceding SELECT is two round trips and both writers pass it).
+  raw.update = (table: unknown) => ({
+    set: (set: Record<string, unknown>) => ({
+      where: (where: SQL) => ({
+        returning: () => {
+          const nth = updateCount.get(table) ?? 0;
+          updateCount.set(table, nth + 1);
+          updated.push({ table, where, set });
+          const canned = opts.updateReturns?.(table, nth);
+          if (canned) return Promise.resolve(canned);
+          // Default: the guard matched. Echo the SET over the first canned row so
+          // the response reflects what was really written, never a hand-built shape.
+          const base = (rowsFor(table, where)[0] ?? {}) as Record<string, unknown>;
+          return Promise.resolve([{ ...base, ...set }]);
+        },
+      }),
+    }),
+  });
   // The transaction door runs its callback against this SAME stub (no real
   // BEGIN/COMMIT — it proves the door threads one scoped handle · B-097).
   raw.transaction = (cb: (tx: unknown) => unknown) => cb(raw);
@@ -1653,5 +1690,616 @@ describe("POST /api/v1/labor/payroll/:id/post", () => {
     ).inject({ method: "POST", url: `/api/v1/labor/payroll/${P0}/post` });
     expect(res.statusCode).toBe(409);
     expect(res.json().message).toMatch(/no amount to post/);
+  });
+});
+
+// ===========================================================================
+// B-332 — worker.user_id, the split attendance gate, and POST /labor/attendance/checkout
+// ===========================================================================
+// Migration 0062 adds the auth link (worker.user_id + worker_user_uq) and the
+// field check-in/out columns. These pin the BRANCHES; the DB-level truths a stub
+// can only fabricate — the partial index really rejecting a second link, the
+// guarded UPDATE really blocking a concurrent writer on a row lock, and the three
+// legitimate-work cases NOT being rejected — are proven on real Postgres in
+// tests/e2e/b332-checkin-schema.spec.ts.
+
+/** A user row other than the caller's — the target of a worker↔user link. */
+const LINK_USER = "u-link";
+const linkUserRow = { ...userRow, id: LINK_USER, email: "linked@rungrueang.co.th" };
+
+/** A worker carrying (or not) the B-332 auth link. */
+const linkedWorker = (id: string, userId: string | null): typeof workers.$inferSelect =>
+  ({
+    id,
+    companyId: COMPANY,
+    name: `worker-${id}`,
+    dayRate: "500.00",
+    currencyCode: "THB",
+    userId,
+    active: true,
+    createdAt: D,
+    updatedAt: D,
+  }) as typeof workers.$inferSelect;
+
+/**
+ * Route the two DIFFERENT reads that both hit `workers` by the predicate's params:
+ *   - the SELF lookup filters on user_id (findWorkerByUserId → the caller's id);
+ *   - the TENANT lookup filters on worker id.
+ * Discriminating on the params is what lets one stub answer both without the test
+ * hand-waving which read it is serving.
+ */
+const workerSource =
+  (opts: { self?: unknown[]; byId?: unknown[] }) =>
+  (where: SQL | undefined): unknown[] => {
+    const params = paramsOf(where);
+    const isSelfLookup = params.includes("u-0") || params.includes(LINK_USER);
+    return (isSelfLookup ? opts.self : opts.byId) ?? [];
+  };
+
+/** Route the caller's email lookup (loadUserByEmail) vs the link-target id lookup. */
+const userSource =
+  (linkTarget: unknown[] = [linkUserRow]) =>
+  (where: SQL | undefined): unknown[] =>
+    paramsOf(where).includes(SESSION.user.email) ? [userRow] : linkTarget;
+
+// NB: `uniqueViolation(constraint)` is the SAME helper the B-307 replay tests use
+// (defined above) — the 23505 shape violatedConstraint() reads. Reused, never
+// redefined, so a change to that error shape cannot leave half this file lying.
+
+describe("B-332 POST /api/v1/labor/workers — the worker↔user auth link", () => {
+  it("stores user_id after resolving the user through the SCOPED tenant door", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [[users, userSource()], [roles, [roleRow(true)]], [workers, []]],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/workers",
+      payload: { name: "ปรานี", day_rate: 500, user_id: LINK_USER },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().user_id).toBe(LINK_USER);
+    const values = inserted.find((i) => i.table === workers)?.values as Record<string, unknown>;
+    expect(values.userId).toBe(LINK_USER);
+  });
+
+  it("400s a user_id that is not in THIS tenant — the only place the cross-tenant FK invariant can be established (no insert)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // The scoped users door resolves nothing for the link target.
+        db: writeStub({ rows: [[users, userSource([])], [roles, [roleRow(true)]]], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/workers",
+      payload: { name: "ปรานี", user_id: "00000000-0000-0000-0000-000000000000" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/user not found in this tenant/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("409s when the user is ALREADY linked to another worker (worker_user_uq) — never hands back the other worker's row", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [[users, userSource()], [roles, [roleRow(true)]]],
+          insertThrows: (table) => (table === workers ? uniqueViolation("worker_user_uq") : null),
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/workers",
+      payload: { name: "impostor", user_id: LINK_USER },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already linked to another worker/);
+  });
+
+  it("B-263: a 23505 on a DIFFERENT constraint is NOT swallowed as the link conflict (rethrows → 500, never a confidently wrong 409)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [[users, userSource()], [roles, [roleRow(true)]]],
+          insertThrows: (table) => (table === workers ? uniqueViolation("some_future_worker_uq") : null),
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/workers",
+      payload: { name: "impostor", user_id: LINK_USER },
+    });
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("a create WITHOUT user_id never touches the link path (the 8 seeded workers stay unlinked)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({ rows: [[users, userSource()], [roles, [roleRow(true)]]], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/workers", payload: { name: "สมหมาย" } });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().user_id).toBeNull();
+    const values = inserted.find((i) => i.table === workers)?.values as Record<string, unknown>;
+    expect(values.userId).toBeNull();
+  });
+});
+
+describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING RECORDED", () => {
+  /** A caller with NO finance.create, linked through worker.user_id to `selfId`. */
+  const selfServiceDb = (selfId: string | null, inserted: Inserted[] = []) =>
+    writeStub({
+      rows: [
+        [users, userSource()],
+        [roles, [roleRow(false, false)]],
+        [
+          workers,
+          workerSource({
+            self: selfId ? [linkedWorker(selfId, "u-0")] : [],
+            byId: [linkedWorker(W1, "u-0")],
+          }),
+        ],
+      ],
+      inserted,
+    });
+
+  it("201s a worker clocking THEMSELVES in with NO finance.create — the Site Engineer defect, closed", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(W1, inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+  });
+
+  it("403s a caller with NO finance.create recording SOMEBODY ELSE's day (no insert)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(W2, inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("403s a user with NO worker row — never auto-creates one (a fabricated worker has day_rate NULL and is paid 0.00 behind a clean 201)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(null, inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("answers the SAME 403 for 'no worker row' and 'somebody else's worker' — an unauthorized caller cannot probe which worker ids exist", async () => {
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(null) });
+    const noRow = await app.inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07" },
+    });
+    const app2 = await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(W2) });
+    const otherWorker = await app2.inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07" },
+    });
+    expect(noRow.json()).toEqual(otherWorker.json());
+  });
+
+  it("keeps the 403-BEFORE-400 ordering: an unauthorized caller sending no worker_id still gets 403, never a body-validation hint", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(null) })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance", payload: { day: "2026-08-07" } });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("400s a self-service caller asserting OVERTIME — the 1.5× premium is a supervisor judgement (refusal, not a silent zero; no insert)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(W1, inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", ot: 4 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/overtime cannot be recorded on a self-service check-in/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("a caller WITH finance.create may still record overtime (the shipped web roster is unchanged)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [[users, userSource()], [roles, [roleRow(true)]], [workers, [linkedWorker(W1, null)]]],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", ot: 4 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().ot).toBe(4);
+  });
+});
+
+describe("B-332 POST /api/v1/labor/attendance — the field check-in stamp + device fix", () => {
+  const financeDb = (inserted: Inserted[] = []) =>
+    writeStub({
+      rows: [[users, userSource()], [roles, [roleRow(true)]], [workers, [linkedWorker(W1, null)]]],
+      inserted,
+    });
+
+  it("stores the CLIENT-supplied check-in instant and the coordinate pair (a queued op may drain hours later — a server now() would record the SYNC time)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: financeDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: {
+        worker_id: W1,
+        day: "2026-08-07",
+        checked_in_at: "2026-08-07T00:45:00.000Z",
+        checkin_lat: 13.8076,
+        checkin_lng: 100.4519,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const values = inserted.find((i) => i.table === attendances)?.values as Record<string, unknown>;
+    expect((values.checkedInAt as Date).toISOString()).toBe("2026-08-07T00:45:00.000Z");
+    // 6 dp == the mobile formatter's precision (formatGpsFix toStringAsFixed(6)).
+    expect(values.checkinLat).toBe("13.807600");
+    expect(values.checkinLng).toBe("100.451900");
+    // The create never writes the check-out half AT ALL — the column is absent from
+    // the insert payload and defaults to NULL, and it is later stamped onto THIS row
+    // by the checkout UPDATE, never by a second insert.
+    // (The real column then defaults to NULL — proven on Postgres in the live spec,
+    // which a stub echoing its own insert payload cannot show.)
+    expect(Object.keys(values)).not.toContain("checkedOutAt");
+    expect(Object.keys(values)).not.toContain("checkoutLat");
+    expect(Object.keys(values)).not.toContain("checkoutLng");
+  });
+
+  it("a check-in with NO coordinate is accepted — GpsSource returns a plain null for denied/off/no-fix and never fabricates one", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: financeDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", checked_in_at: "2026-08-07T00:45:00.000Z" },
+    });
+    expect(res.statusCode).toBe(201);
+    const values = inserted.find((i) => i.table === attendances)?.values as Record<string, unknown>;
+    expect(values.checkinLat).toBeNull();
+    expect(values.checkinLng).toBeNull();
+  });
+
+  it("400s an out-of-range latitude (numeric(9,6) would raise 22003 → a 500, and the phone DEFERS a 5xx and stops the whole drain)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: financeDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", checkin_lat: 999, checkin_lng: 100.4 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("400s a PRESENT but unparseable coordinate instead of letting it collapse to the absent path (B-309's failure shape, one column over)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: financeDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", checkin_lat: "abc", checkin_lng: "xyz" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/must be a number/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("treats an explicit null coordinate as ABSENT (the wire form of 'no fix'), not as an error", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: financeDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", checkin_lat: null, checkin_lng: null },
+    });
+    expect(res.statusCode).toBe(201);
+    const values = inserted.find((i) => i.table === attendances)?.values as Record<string, unknown>;
+    expect(values.checkinLat).toBeNull();
+  });
+
+  it("400s a LONE latitude — half a coordinate would leave a row that looks located and cannot be measured", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: financeDb() })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", checkin_lat: 13.8 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/must be supplied together/);
+  });
+
+  it("400s an unparseable check-in instant instead of silently dropping it (a phone that recorded 07:45 must not be told it succeeded)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: financeDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "2026-08-07", checked_in_at: "not-a-timestamp" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+});
+
+describe("B-332 POST /api/v1/labor/attendance/checkout — close the day on the SAME row", () => {
+  const KEY = "ck-1";
+  const OUT_AT = "2026-08-07T10:30:00.000Z";
+  const checkedIn = (): typeof attendances.$inferSelect =>
+    ({
+      id: "at-1",
+      companyId: COMPANY,
+      workerId: W1,
+      day: "2026-08-07",
+      ot: "0.00",
+      status: "full",
+      dayFraction: "1",
+      ccId: null,
+      idempotencyKey: KEY,
+      checkedInAt: new Date("2026-08-07T00:45:00.000Z"),
+      checkedOutAt: null,
+      createdAt: D,
+      updatedAt: D,
+    }) as typeof attendances.$inferSelect;
+
+  const checkoutDb = (opts: {
+    row?: unknown[];
+    inserted?: Inserted[];
+    updated?: Updated[];
+    updateReturns?: WriteStubOpts["updateReturns"];
+    financeCreate?: boolean;
+  }) =>
+    writeStub({
+      rows: [
+        [users, userSource()],
+        [roles, [roleRow(opts.financeCreate ?? true)]],
+        [workers, workerSource({ self: [linkedWorker(W1, "u-0")], byId: [linkedWorker(W1, null)] })],
+        [attendances, opts.row ?? [checkedIn()]],
+      ],
+      inserted: opts.inserted,
+      updated: opts.updated,
+      updateReturns: opts.updateReturns,
+    });
+
+  const body = (over: Record<string, unknown> = {}) => ({
+    worker_id: W1,
+    day: "2026-08-07",
+    check_in_key: KEY,
+    checked_out_at: OUT_AT,
+    ...over,
+  });
+
+  it("401s flat without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: body(),
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+
+  it("stamps checked_out_at onto the EXISTING row — an UPDATE, never a second row (a second row carries its own day_fraction and pays the day twice)", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: checkoutDb({ inserted, updated }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: body({ checkout_lat: 13.8077, checkout_lng: 100.452 }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe("at-1");
+    expect(res.json().checked_out_at).toBe(OUT_AT);
+    // THE assertion of the whole design decision: zero inserts, exactly one update.
+    expect(inserted).toHaveLength(0);
+    expect(updated.filter((u) => u.table === attendances)).toHaveLength(1);
+    const set = updated[0]!.set;
+    expect((set.checkedOutAt as Date).toISOString()).toBe(OUT_AT);
+    expect(set.checkoutLat).toBe("13.807700");
+    expect(set.checkoutLng).toBe("100.452000");
+  });
+
+  it("puts the `checked_out_at IS NULL` guard on the UPDATE's OWN where, not on a preceding select (B-149: a resolve-then-update pair is two round trips and both writers pass the read)", async () => {
+    const updated: Updated[] = [];
+    await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: checkoutDb({ updated }) })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance/checkout", payload: body() });
+    const sql = new PgDialect().sqlToQuery(updated[0]!.where!).sql;
+    expect(sql).toMatch(/"checked_out_at" is null/i);
+    // …AND the tenant predicate is still AND-ed in by the scoped door.
+    expect(paramsOf(updated[0]!.where)).toContain(COMPANY);
+  });
+
+  it("200s a REPLAY: the guard matched 0 rows but the stored instant equals the requested one → the original row, no second write", async () => {
+    const closed = { ...checkedIn(), checkedOutAt: new Date(OUT_AT) };
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: checkoutDb({ row: [closed], updated, updateReturns: () => [] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance/checkout", payload: body() });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe("at-1");
+    expect(res.json().checked_out_at).toBe(OUT_AT);
+  });
+
+  it("409s a GENUINE second check-out: the guard matched 0 rows and the stored instant DIFFERS — the first close is the record and is never overwritten", async () => {
+    const closed = { ...checkedIn(), checkedOutAt: new Date("2026-08-07T09:00:00.000Z") };
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: checkoutDb({ row: [closed], updateReturns: () => [] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance/checkout", payload: body() });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already checked out/);
+  });
+
+  it("404s a check_in_key that resolves nothing — the phone dead-letters a 4xx, so a check-in that itself died is visibly, not silently, unmatched", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: checkoutDb({ row: [] }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: body({ check_in_key: "never-existed" }),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("resolves the row through the tenant + worker + day anchors (attendance_idempotency_uq is a GLOBAL index on the key alone)", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(true)]],
+            [workers, workerSource({ self: [], byId: [linkedWorker(W1, null)] })],
+            [attendances, [checkedIn()]],
+          ],
+          captured,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance/checkout", payload: body() });
+    const attRead = captured.find((c) => c.table === attendances);
+    const params = paramsOf(attRead?.where);
+    expect(params).toContain(COMPANY);
+    expect(params).toContain(KEY);
+    expect(params).toContain(W1);
+    expect(params).toContain("2026-08-07");
+  });
+
+  it("403s a caller with NO finance.create closing SOMEBODY ELSE's day, BEFORE the row is resolved (else 404-vs-403 leaks which keys exist)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(false, false)]],
+            [workers, workerSource({ self: [linkedWorker(W2, "u-0")], byId: [linkedWorker(W1, null)] })],
+            [attendances, [checkedIn()]],
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance/checkout", payload: body() });
+    expect(res.statusCode).toBe(403);
+    expect(updated).toHaveLength(0);
+  });
+
+  it("200s a worker closing their OWN day with no finance.create", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: checkoutDb({ financeCreate: false }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance/checkout", payload: body() });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("400s a missing checked_out_at — a server now() would differ on every replay and turn each retry into a 409", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: checkoutDb({}) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: { worker_id: W1, day: "2026-08-07", check_in_key: KEY },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/checked_out_at is required/);
+  });
+
+  it("400s a missing check_in_key (the row has no other address the phone can hold offline)", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: checkoutDb({}) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: { worker_id: W1, day: "2026-08-07", checked_out_at: OUT_AT },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/check_in_key is required/);
+  });
+
+  it("B-309 inherited: a present-but-NON-STRING check_in_key is a 400, not a silently-nulled key that 404s a real day", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: checkoutDb({}) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: body({ check_in_key: 123 }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/check_in_key must be a string/);
+  });
+
+  it("400s an out-of-range check-out coordinate (no update)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: checkoutDb({ updated }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: body({ checkout_lat: 13.8, checkout_lng: 999 }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(updated).toHaveLength(0);
   });
 });

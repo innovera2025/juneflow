@@ -3160,6 +3160,35 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /labor/attendance/checkout:
+    post:
+      tags: [finance]
+      summary: Close a worker's day by stamping check-out onto the existing attendance row (B-332)
+      description: >-
+        Addresses the row by the CHECK-IN's client idempotency key (check_in_key), not by a
+        server-assigned id: the mobile queue mints the key offline before the row exists and
+        cannot substitute a server id into a queued op's path. Updates the SAME row - a
+        check-out is never a second row, which would carry its own day_fraction and pay the
+        day twice. Replaying the identical checked_out_at returns 200 with the original row;
+        a different instant on an already-closed day is 409.
+      operationId: checkoutLaborAttendance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Entity"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /labor/payroll:
     get:
       tags: [finance]

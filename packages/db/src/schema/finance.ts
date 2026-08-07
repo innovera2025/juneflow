@@ -837,13 +837,41 @@ export const workers = pgTable("worker", {
   skill: text("skill"),
   payType: text("pay_type"),
   active: boolean("active").notNull().default(true),
+  // B-332 (migration 0062): the auth link. Before this column `worker` and `user`
+  // had NO relationship in either direction, so a mobile field check-in could not
+  // answer "which worker is this caller?" — the server could only take a client-
+  // supplied worker_id on trust. NULLABLE and it must stay that way: workers are
+  // day-labourers and most will never hold a login (the 8 seeded rows carry none,
+  // and there is no backfill value that would not be a fabrication).
+  //
+  // ON DELETE set null, NOT cascade — load-bearing. Deleting a user account must
+  // drop the login link and KEEP the worker: cascading would delete the worker and
+  // (through attendance/payroll's own cascade) that worker's PAYROLL HISTORY.
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("worker_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("worker_company_idx").on(t.companyId),
+  // B-332: one user resolves to AT MOST one worker. Without it "which worker am I?"
+  // is ambiguous at the check-in door and the handler would have to pick — which on
+  // a table that sums into payroll means clocking one man's day onto another man's
+  // pay. PARTIAL (WHERE user_id IS NOT NULL) because the column is nullable and
+  // Postgres treats NULLs as DISTINCT: a full index would admit all 8 unlinked
+  // workers today but is the wrong shape to reason about (B-307's NULL-distinctness
+  // trap — the opposite call from B-308's payroll_worker_period_uq, whose two
+  // columns are both NOT NULL). The predicate also makes the intent explicit: many
+  // workers with no login, never two workers with the same login.
+  //
+  // ONE index, not two: this same btree serves the `WHERE user_id = $1` self-lookup
+  // (the equality implies the predicate), so no separate worker_user_idx is added.
+  uniqueIndex("worker_user_uq")
+    .on(t.userId)
+    .where(sql`${t.userId} IS NOT NULL`),
+]);
 
 /**
  * Attendance — a worker's daily time record (erd.html labor "worker_id, day, ot,
@@ -874,6 +902,53 @@ export const attendances = pgTable("attendance", {
   // below is the dedup point (mirrors the B-261 gr contract). NULLABLE: pre-existing
   // rows and the web bulk-save carry none and never collide.
   idempotencyKey: text("idempotency_key"),
+  // B-332 (migration 0062): the mobile field check-in/check-out pair. The mapping
+  // the comment below called "undecided" is now decided: CHECK-OUT IS A SECOND
+  // COLUMN ON THIS ROW, never a second row.
+  //
+  // WHY a column and not a row — the reason is arithmetic, not indexing.
+  // createLaborPayroll pays by SUMMING ROWS (`total += dayRate * day_fraction + …`)
+  // and day_fraction is NOT NULL DEFAULT 1, so a check-out written as its own row
+  // would carry its own full day_fraction and the worker would be paid 2.0 days for
+  // one day worked. The B-307 key would NOT catch it either: a check-in and a
+  // check-out are two distinct client operations carrying two distinct legitimate
+  // idempotency keys, so nothing collides. It is the B-307 double-pay defect
+  // re-entering through a different door.
+  //
+  // CLIENT-SUPPLIED timestamps, not server now(): the phone queues these offline and
+  // the SyncProcessor may drain hours later, so now()-at-sync would record the sync
+  // time instead of the time the worker actually stood at the gate. Client-supplied
+  // is also what makes the check-out replay-safe (the retry re-sends the same
+  // instant, so "same value stored" is provably a replay rather than a second event).
+  // Neither column feeds the payroll sum — day_fraction and ot do — so a client value
+  // here is a RECORD, not money.
+  checkedInAt: timestamp("checked_in_at", { withTimezone: true, mode: "date" }),
+  checkedOutAt: timestamp("checked_out_at", { withTimezone: true, mode: "date" }),
+  // B-332: the device fix at each event, WGS-84 decimal degrees (the format
+  // Geolocator.getCurrentPosition returns). numeric(9,6) — 6 dp is ~0.11 m and is
+  // EXACTLY the mobile formatter's precision (formatGpsFix toStringAsFixed(6)), so
+  // nothing is lost crossing the wire; 3 integer digits hold ±180.
+  //
+  // Deliberately NUMERIC, diverging from the shipped `text` precedent
+  // (pm_workorder.checkin_gps, land_plot.gps, both "13.8076, 100.4519"): those are
+  // DISPLAY strings that are never computed against. A radius/geofence check is a
+  // distance calculation, and a text column has to be parsed for it — where
+  // unparseable text fails silently.
+  //
+  // NULLABLE is load-bearing, not laziness. GpsSource.currentFix() returns a plain
+  // null for permission-denied / location-services-off / no-fix and NEVER fabricates
+  // a coordinate. NOT NULL here would mean a worker with location off cannot clock
+  // in at all — the same "reject real work at the door" failure as a wrong unique
+  // key, arriving through a different column.
+  //
+  // NOT captured: Position.accuracy (metres). The mobile seam returns only a
+  // formatted lat/lng, and a radius verdict computed without an accuracy figure is
+  // misleading (a ±500 m fix reported as "within 12 m"). Widening the seam is a
+  // prerequisite for the geofence, not a column to add speculatively here.
+  checkinLat: numeric("checkin_lat", { precision: 9, scale: 6 }),
+  checkinLng: numeric("checkin_lng", { precision: 9, scale: 6 }),
+  checkoutLat: numeric("checkout_lat", { precision: 9, scale: 6 }),
+  checkoutLng: numeric("checkout_lng", { precision: 9, scale: 6 }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -891,6 +966,40 @@ export const attendances = pgTable("attendance", {
   // two `half` rows with different cc_id (the column exists for exactly that), and the
   // mobile check-in/check-out pair's mapping onto this single POST is undecided — a
   // wrong uniqueness constraint on a money table rejects real work at the door.
+  //
+  // B-332 REVISITED the "undecided" half and STILL adds no such index. Check-out is
+  // now decided (a column above, so the pair no longer needs two rows), but three
+  // independent things still argue against unique(worker_id, day) and one of them is
+  // decisive:
+  //   1. THE CORRECTION PATH. There is no UPDATE / PUT / PATCH / DELETE on attendance
+  //      anywhere in registerLaborRoute — a second INSERT is the ONLY way to correct a
+  //      day (someone marked absent who actually worked half a day). A unique index
+  //      turns every correction into a 23505. B-310 is open RIGHT NOW because B-308's
+  //      unique(worker_id, period) froze payroll with no recompute path; the same
+  //      mistake one table upstream, on the INPUT, would also make B-310 unfixable —
+  //      its remedy depends on attendance being correctable.
+  //   2. THE COST-CENTRE SPLIT above. Honest qualification: the shipped web register
+  //      keys its state one entry per worker and has no cc selector, so a split day is
+  //      producible only through the API today — coherent-but-unbuilt. That makes it
+  //      an argument about foreclosing a future, not about breaking production, and it
+  //      is the WEAKER of the two.
+  //   3. IT WOULD FIGHT THE B-307 KEY. attendance_idempotency_uq below dedups a
+  //      REPLAY; a natural key dedups a DUPLICATE. A screen remount mints a NEW
+  //      idempotency key for the same worker+day (the key is per screen instance), so
+  //      that request passes the key index and trips the natural key — and the catch
+  //      in labor.ts gates on the constraint NAME (B-263), so a different name
+  //      rethrows to a 500. On the phone a 5xx is deferred and the drain STOPS, so the
+  //      whole write queue wedges behind it. The name gate correctly prevents
+  //      answering the WRONG ROW; it is not a licence to add the index.
+  // NULL-distinctness, checked explicitly since B-307 and B-308 answered that same
+  // test in opposite directions: worker_id and day are BOTH NOT NULL, so such an
+  // index would be FULL and INESCAPABLE — the B-308 case, not the B-307 case. Passing
+  // that test is not what makes a key right: an inescapable index is exactly as
+  // dangerous as it is strong when it is the wrong constraint. B-332 is caught by
+  // reason 1, not by the NULL trap.
+  // A check-in the user genuinely initiates twice is a DUPLICATE, not a replay, and
+  // the honest answer to it is a 409 from an explicit pre-check — not a 23505 from a
+  // second index.
   uniqueIndex("attendance_idempotency_uq")
     .on(t.idempotencyKey)
     .where(sql`${t.idempotencyKey} IS NOT NULL`),

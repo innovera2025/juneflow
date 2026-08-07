@@ -147,11 +147,29 @@ export type IdempotencyKeyResult =
  * idempotency_key / idempotencyKey decides, so `{ idempotency_key: 123 }` is a 400 even
  * if a valid camelCase twin is also present. Answering from the twin would hide exactly
  * the client bug this guard exists to surface.
+ *
+ * B-332 widened the FIELD NAMES only, never the classification. `POST
+ * /labor/attendance/checkout` addresses the row to close by the CHECK-IN's key, which
+ * it carries under a different name (`check_in_key`) — so the names are a parameter
+ * and every rule above still applies verbatim. Defaults reproduce the two shipped call
+ * sites byte-for-byte, including the exported message string.
  */
-export function readIdempotencyKey(body: Record<string, unknown>): IdempotencyKeyResult {
-  const raw = pick(body, "idempotency_key", "idempotencyKey");
+export function readIdempotencyKey(
+  body: Record<string, unknown>,
+  snakeKey = "idempotency_key",
+  camelKey = "idempotencyKey",
+): IdempotencyKeyResult {
+  const raw = pick(body, snakeKey, camelKey);
   if (raw === undefined || raw === null) return { ok: true, key: null };
-  if (typeof raw !== "string") return { ok: false, message: IDEMPOTENCY_KEY_TYPE_MESSAGE };
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      message:
+        snakeKey === "idempotency_key"
+          ? IDEMPOTENCY_KEY_TYPE_MESSAGE
+          : `${snakeKey} must be a string`,
+    };
+  }
   return { ok: true, key: raw.trim() || null };
 }
 

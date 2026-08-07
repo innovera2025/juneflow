@@ -14,6 +14,7 @@
 //   POST /labor/workers          → EntityCreated — add a worker    (createLaborWorker)
 //   POST /labor/attendance       → EntityCreated — record a day    (createLaborAttendance)
 //   POST /labor/payroll          → EntityCreated — run payroll     (createLaborPayroll)
+//   POST /labor/attendance/checkout → EntityOk — close the day     (checkoutLaborAttendance)
 //   POST /labor/payroll/{id}/post→ ActionOk      — post to the GL   (postLaborPayroll)
 // Each row/body is the opaque Entity (snake_case wire of the REAL columns). A
 // read/POST on an opaque endpoint needs no contract change (FLOW-A opaque-Entity).
@@ -46,6 +47,12 @@
 // lacking the perm. Reads gate on the resolved tenant only. AuditLog fires
 // automatically (middleware) on a 2xx.
 //
+// B-332 SPLITS the attendance gate by WHO IS BEING RECORDED (see
+// authorizeAttendanceWrite): recording SOMEBODY ELSE's day stays finance.create;
+// a worker clocking THEMSELVES in is an identity question answered by the new
+// worker.user_id FK, not a finance right. Nothing loses access — the finance.create
+// door is checked first and is unchanged.
+//
 // HONEST notes (C10 — flagged, never fabricated):
 //   - a payroll with no attendance in the period computes amount 0 (honest, not an
 //     error) — the register then simply shows a zero run.
@@ -59,8 +66,8 @@
 //     attendance corrected AFTER a run can no longer be picked up through the API.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, eq } from "drizzle-orm";
-import { attendances, jvLines, jvs, payrolls, workers } from "@juneflow/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
+import { attendances, jvLines, jvs, payrolls, users, workers } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { has, pick, readIdempotencyKey, str, toNum } from "./procurement.js";
@@ -79,6 +86,7 @@ import {
 } from "./gl-post.js";
 
 type WorkerRow = typeof workers.$inferSelect;
+type UserRow = typeof users.$inferSelect;
 type AttendanceRow = typeof attendances.$inferSelect;
 type PayrollRow = typeof payrolls.$inferSelect;
 type JvRow = typeof jvs.$inferSelect;
@@ -225,6 +233,108 @@ async function requireFinanceApprove(
 }
 
 // ---------------------------------------------------------------------------
+// B-332 — the worker↔user link and the attendance write gate
+// ---------------------------------------------------------------------------
+
+/** The partial unique index the worker↔user link conflict is gated on BY NAME (B-263). */
+const WORKER_USER_CONSTRAINT = "worker_user_uq";
+
+/**
+ * Resolve the worker row this CALLER is (the B-332 auth link), or null.
+ *
+ * `worker` carries company_id, so db.select() AND-binds the tenant BY CONSTRUCTION —
+ * zero hops, no selectThrough, no join at the /me door. That is also the mitigation
+ * for the one risk Postgres cannot express: an FK cannot require the referenced user
+ * to share company_id, so a bug could link tenant A's worker to tenant B's user. On
+ * the READ side that link is simply INVISIBLE (this select can only ever return a
+ * worker of the caller's own tenant), and the WRITE side resolves the user through
+ * the scoped users door before storing it — see createLaborWorker.
+ *
+ * At most one row can come back: worker_user_uq makes the link 1:1.
+ */
+async function findWorkerByUserId(
+  db: TenantDb,
+  userId: string,
+): Promise<WorkerRow | null> {
+  const [worker] = (await db.select(
+    workers,
+    eq(workers.userId, userId),
+  )) as WorkerRow[];
+  return worker ?? null;
+}
+
+/** The outcome of the attendance write gate. */
+type AttendanceAuthz =
+  /** Authorized. `selfService` = the caller passed as the WORKER, holding no finance.create. */
+  | { ok: true; selfService: boolean }
+  /** Refused — the 403 has already been sent. */
+  | { ok: false };
+
+/**
+ * B-332 — the attendance write gate, split by WHO IS BEING RECORDED.
+ *
+ * The defect this replaces: `POST /labor/attendance` gated on `finance.create`
+ * alone, and against the seeded 8×11×5 perms matrix that means **Sales / REM can
+ * clock in a construction worker while a Site Engineer cannot** — and "Site
+ * Engineer" is the field-check-in screen's own persona. `finance.create` is the
+ * right question for the web roster (recording somebody else's day is a financial
+ * act) and the wrong question for a worker clocking themselves in.
+ *
+ * Two doors, and the ORDER is load-bearing:
+ *   1. finance.create → allowed, unchanged. Checking this FIRST means every caller
+ *      that ships today takes the byte-identical path it took before B-332,
+ *      including the 403-before-400 error ordering (an unauthorized caller must not
+ *      learn from the status code whether its body was well-formed).
+ *   2. otherwise — the ONLY remaining door is self-service: the caller must resolve,
+ *      through worker.user_id, to the very worker the body names. That is an
+ *      identity question, not a permission question, and the new FK is what answers
+ *      it. Precedent: B-169 fixed createSalesBooking with exactly this shape (an
+ *      in-tenant ownership check, not a perm).
+ *
+ * No new perms module is invented. A 12th module would change the prototype's
+ * hardcoded 11-module matrix in two places (master.jsx UsersPermissions +
+ * RoleAddForm) — a design-fidelity violation, so it is a BLOCKER, not this round's
+ * call. (Root cause worth recording: NAV-ROUTES files `labor.attendance` under a
+ * nav parent `labor` that has NO perms counterpart at all. Labor is governed by
+ * nothing; finance.create was borrowed.)
+ *
+ * A user with NO worker row is REFUSED (403), never auto-created and never
+ * name-matched. Creating one would mint a worker with day_rate NULL, and num(null)
+ * is 0, so createLaborPayroll would pay that worker 0.00 behind a clean 201 and a
+ * balanced JV — silently-zero, which nobody notices. Name-matching is worse:
+ * worker.name has no unique constraint (B-323 recorded two สมชาย tying), so it could
+ * attach one man's clock-in to another man's pay.
+ */
+async function authorizeAttendanceWrite(
+  db: TenantDb,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  workerId: string,
+): Promise<AttendanceAuthz> {
+  const caller = await loadCaller(request);
+  if (!caller) {
+    forbidden(reply, "caller cannot be attributed");
+    return { ok: false };
+  }
+  // Door 1 — the existing financial gate. Unchanged for every shipped caller.
+  if (permAllowed(caller.perms, FINANCE_MODULE, "create")) {
+    return { ok: true, selfService: false };
+  }
+  // Door 2 — self-service. ONE honest message for both misses (no worker row, and
+  // someone else's worker id): a caller without the perm must not be able to probe
+  // which worker ids exist or which users are linked.
+  const self = await findWorkerByUserId(db, caller.userId);
+  if (!self || !workerId || self.id !== workerId) {
+    forbidden(
+      reply,
+      "this action requires the finance create permission, or a worker record linked to this user",
+    );
+    return { ok: false };
+  }
+  return { ok: true, selfService: true };
+}
+
+// ---------------------------------------------------------------------------
 // Wire serializers (snake_case wire of the REAL columns — C10, no fabrication)
 // ---------------------------------------------------------------------------
 
@@ -243,6 +353,8 @@ function workerWire(w: WorkerRow): Record<string, unknown> {
     skill: w.skill,
     pay_type: w.payType,
     active: w.active,
+    // B-332: the auth link (null for every worker without a login — the normal case).
+    user_id: w.userId,
     created_at: w.createdAt,
   };
 }
@@ -259,6 +371,15 @@ function attendanceWire(a: AttendanceRow): Record<string, unknown> {
     status: a.status,
     day_fraction: num(a.dayFraction),
     cc_id: a.ccId,
+    // B-332 field check-in/out. checked_out_at null = the day is still open. The
+    // coordinates are the raw device fixes; this endpoint states WHERE a fix was
+    // taken and never a distance or an in-radius verdict — see the checkout handler.
+    checked_in_at: a.checkedInAt,
+    checked_out_at: a.checkedOutAt,
+    checkin_lat: a.checkinLat != null ? num(a.checkinLat) : null,
+    checkin_lng: a.checkinLng != null ? num(a.checkinLng) : null,
+    checkout_lat: a.checkoutLat != null ? num(a.checkoutLat) : null,
+    checkout_lng: a.checkoutLng != null ? num(a.checkoutLng) : null,
     created_at: a.createdAt,
   };
 }
@@ -333,21 +454,136 @@ async function createLaborWorker(
   const dayRate = dayRateRaw != null ? moneyStr(dayRateRaw) : null;
   const active = has(body, "active") ? boolOr(pick(body, "active"), true) : true;
 
-  const [worker] = (await db
-    .insert(workers, {
-      name,
-      dayRate,
-      currencyCode: "THB",
-      code: optText(body, "code"),
-      team: optText(body, "team"),
-      supervisor: optText(body, "supervisor"),
-      skill: optText(body, "skill"),
-      payType: optText(body, "pay_type", "payType"),
-      active,
-    })
-    .returning()) as WorkerRow[];
+  // B-332: the auth link. IN SCOPE for this slice and not optional polish — without
+  // it `worker.user_id` ships unpopulated AND unpopulatable (there is no PUT/PATCH on
+  // worker anywhere in registerLaborRoute), so the self-service door below could
+  // never open for anyone and the whole field-check-in feature would be inert.
+  //
+  // Resolved through the SCOPED users door before it is stored. This is the write-side
+  // half of the cross-tenant mitigation: Postgres cannot express "the referenced user
+  // must share company_id", so the only place that invariant can be established is
+  // here, at the moment the link is created. A foreign / unknown user id is a 400.
+  const userId = optText(body, "user_id", "userId");
+  if (userId) {
+    const [linkedUser] = (await db.select(users, eq(users.id, userId))) as UserRow[];
+    if (!linkedUser) return badRequest(reply, "user not found in this tenant");
+  }
+
+  let worker: WorkerRow | undefined;
+  try {
+    [worker] = (await db
+      .insert(workers, {
+        name,
+        dayRate,
+        currencyCode: "THB",
+        code: optText(body, "code"),
+        team: optText(body, "team"),
+        supervisor: optText(body, "supervisor"),
+        skill: optText(body, "skill"),
+        payType: optText(body, "pay_type", "payType"),
+        active,
+        userId,
+      })
+      .returning()) as WorkerRow[];
+  } catch (err) {
+    // B-332: the user is already linked to another worker (worker_user_uq). An honest
+    // 409 — NOT a replay: two different workers claiming one login is a data error, so
+    // handing back the OTHER worker's row would answer a question nobody asked. Gated
+    // on the constraint NAME (B-263) so a future unique index on `worker` cannot
+    // silently inherit this branch; anything else rethrows to the 500 handler.
+    if (
+      userId &&
+      isUniqueViolation(err) &&
+      violatedConstraint(err) === WORKER_USER_CONSTRAINT
+    ) {
+      return conflict(reply, "this user is already linked to another worker");
+    }
+    throw err;
+  }
 
   return reply.code(201).send(workerWire(worker!));
+}
+
+// ---------------------------------------------------------------------------
+// B-332 — field check-in/out body parsing (timestamps + coordinates)
+// ---------------------------------------------------------------------------
+
+/** A parsed optional field: a value, or a rejection carrying its own 400 message. */
+type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
+
+/**
+ * An optional CLIENT-supplied instant. Absent → null. Present but unparseable → 400
+ * (never silently dropped: a phone that believes it recorded 07:45 must not be told
+ * it succeeded while the column stayed null).
+ *
+ * Client-supplied is deliberate. The mobile SyncProcessor drains a queued check-in
+ * whenever the network returns, which can be hours after the worker stood at the
+ * gate — a server now() would record the SYNC time and quietly corrupt the record.
+ * Neither timestamp feeds the payroll sum (day_fraction and ot do), so this is a
+ * record, not a money value.
+ */
+function optInstant(body: Record<string, unknown>, ...keys: string[]): Parsed<Date | null> {
+  if (!has(body, ...keys)) return { ok: true, value: null };
+  const raw = pick(body, ...keys);
+  if (raw === null || raw === undefined) return { ok: true, value: null };
+  if (typeof raw !== "string" || !raw.trim()) {
+    return { ok: false, message: `${keys[0]} must be an ISO-8601 instant` };
+  }
+  const at = new Date(raw.trim());
+  if (Number.isNaN(at.getTime())) {
+    return { ok: false, message: `${keys[0]} must be an ISO-8601 instant` };
+  }
+  return { ok: true, value: at };
+}
+
+/**
+ * An optional WGS-84 coordinate PAIR, as the numeric-column strings. Both or neither:
+ * a lone latitude is not a position, and storing half of one would leave a row that
+ * looks located and cannot be measured.
+ *
+ * Range-checked in the handler rather than left to the column: numeric(9,6) holds
+ * ±180 exactly, so an out-of-range value would raise 22003 and surface as a 500. A
+ * 400 is the honest answer, and on the phone the difference is decisive — the
+ * SyncProcessor dead-letters a 4xx permanently but DEFERS a 5xx and STOPS the drain,
+ * so a 500 here would wedge every write queued behind it.
+ *
+ * ABSENT is a first-class outcome, not an error. GpsSource.currentFix() returns a
+ * plain null for permission-denied / services-off / no-fix and never fabricates a
+ * coordinate, so a worker with location off must still be able to clock in.
+ */
+function optCoordPair(
+  body: Record<string, unknown>,
+  latKeys: [string, string],
+  lngKeys: [string, string],
+): Parsed<{ lat: string | null; lng: string | null }> {
+  // PRESENCE first, value second — and the order matters. Reading the value alone
+  // would let a PRESENT but unparseable coordinate (`"abc"`, `true`, `{}`) collapse
+  // to null and take the ABSENT path: 201, no coordinate stored, no error, and a
+  // phone that believes it recorded a fix. That is B-309's exact failure shape, one
+  // column over, so a present key that does not parse to a number is a 400.
+  const hasLat = has(body, ...latKeys);
+  const hasLng = has(body, ...lngKeys);
+  const rawLat = hasLat ? pick(body, ...latKeys) : null;
+  const rawLng = hasLng ? pick(body, ...lngKeys) : null;
+  // An explicit null is ABSENT (the wire form of "no fix"), matching readIdempotencyKey.
+  const presentLat = hasLat && rawLat !== null && rawLat !== undefined;
+  const presentLng = hasLng && rawLng !== null && rawLng !== undefined;
+  if (!presentLat && !presentLng) return { ok: true, value: { lat: null, lng: null } };
+  if (!presentLat || !presentLng) {
+    return { ok: false, message: `${latKeys[0]} and ${lngKeys[0]} must be supplied together` };
+  }
+  const latRaw = toNum(rawLat);
+  const lngRaw = toNum(rawLng);
+  if (latRaw == null) return { ok: false, message: `${latKeys[0]} must be a number` };
+  if (lngRaw == null) return { ok: false, message: `${lngKeys[0]} must be a number` };
+  if (!Number.isFinite(latRaw) || latRaw < -90 || latRaw > 90) {
+    return { ok: false, message: `${latKeys[0]} must be between -90 and 90` };
+  }
+  if (!Number.isFinite(lngRaw) || lngRaw < -180 || lngRaw > 180) {
+    return { ok: false, message: `${lngKeys[0]} must be between -180 and 180` };
+  }
+  // 6 dp == the mobile formatter's precision (formatGpsFix toStringAsFixed(6)).
+  return { ok: true, value: { lat: latRaw.toFixed(6), lng: lngRaw.toFixed(6) } };
 }
 
 // ---------------------------------------------------------------------------
@@ -448,9 +684,13 @@ async function createLaborAttendance(
   body: Record<string, unknown>,
   reply: FastifyReply,
 ): Promise<FastifyReply> {
-  if (!(await requireFinanceCreate(request, reply))) return reply;
-
+  // B-332: worker_id is read BEFORE the gate because the gate's second door needs to
+  // know who is being recorded. Reading it is pure string extraction — no DB, no
+  // leak — and a failed gate still answers 403 regardless of what the body held.
   const workerId = str(pick(body, "worker_id", "workerId")).trim();
+  const authz = await authorizeAttendanceWrite(db, request, reply, workerId);
+  if (!authz.ok) return reply;
+
   if (!workerId) return badRequest(reply, "worker_id is required");
   const day = str(pick(body, "day")).trim();
   if (!day) return badRequest(reply, "day is required");
@@ -462,8 +702,24 @@ async function createLaborAttendance(
     return badRequest(reply, "status must be one of full, half, absent");
   }
   const otRaw = toNum(pick(body, "ot"));
+  // B-332: a SELF-SERVICE caller may not assert overtime. OT is the 1.5× premium on
+  // the hourly rate — it multiplies pay and is a supervisor's judgement about hours
+  // that were actually worked; the field-check-in screen has no OT affordance at all.
+  // A refusal, not a silent zero: telling a client its OT was accepted when it was
+  // discarded is the same class of lie as B-309's silent dedup-off. This is the ONE
+  // restriction the new door adds, and it can only ever REDUCE a payout.
+  if (authz.selfService && otRaw != null && otRaw > 0) {
+    return badRequest(reply, "overtime cannot be recorded on a self-service check-in");
+  }
   const ot = otRaw != null && otRaw > 0 ? otRaw : 0;
   const ccId = str(pick(body, "cc_id", "ccId")).trim() || null;
+
+  // B-332: the field check-in stamp + device fix. All optional — the web bulk-save
+  // sends none of them and is unchanged.
+  const checkedIn = optInstant(body, "checked_in_at", "checkedInAt");
+  if (!checkedIn.ok) return badRequest(reply, checkedIn.message);
+  const checkinCoord = optCoordPair(body, ["checkin_lat", "checkinLat"], ["checkin_lng", "checkinLng"]);
+  if (!checkinCoord.ok) return badRequest(reply, checkinCoord.message);
   // B-307: the client's replay key. Absent / explicit null / blank / whitespace-only →
   // null, so the web bulk-save is unchanged and no dedup path fires without a key. A
   // null NEVER enters the replay branch and never matches a stored null — the index is
@@ -521,6 +777,12 @@ async function createLaborAttendance(
         dayFraction: DAY_FRACTION[status]!,
         ccId,
         idempotencyKey,
+        // B-332: the check-in half. checked_out_at / checkout_* stay NULL until the
+        // check-out endpoint stamps THIS SAME ROW (never a second row — a second row
+        // would carry its own day_fraction and pay the day twice).
+        checkedInAt: checkedIn.value,
+        checkinLat: checkinCoord.value.lat,
+        checkinLng: checkinCoord.value.lng,
       })
       .returning()) as AttendanceRow[];
   } catch (err) {
@@ -535,6 +797,119 @@ async function createLaborAttendance(
   }
 
   return reply.code(201).send(attendanceWire(attendance!));
+}
+
+// ---------------------------------------------------------------------------
+// POST /labor/attendance/checkout — B-332, close the day on the SAME row
+// ---------------------------------------------------------------------------
+// Body (opaque Entity): { worker_id, day, check_in_key, checked_out_at,
+// checkout_lat?, checkout_lng? }. Returns 200 (an UPDATE, not a create).
+//
+// WHY THE ROW IS ADDRESSED BY THE CHECK-IN'S IDEMPOTENCY KEY, not by /{id}/checkout.
+// The phone must be able to QUEUE a check-out while offline, and at that moment the
+// check-in's server-assigned id does not exist yet:
+//   - the SyncProcessor replays FIFO by createdAt and has NO mechanism to substitute
+//     a server-assigned id into a later op's path — `op.path` is fixed at enqueue;
+//   - but the key IS known offline, because the phone mints it locally before any
+//     server contact (the queue replays op.payload VERBATIM and does not inject the
+//     key, so the client is the only place it can come from).
+// This is exactly why the shipped POST /pm/workorders/{id}/checkin shape cannot be
+// copied here: pm-checkin addresses a work order the phone ALREADY had, not a row the
+// server was about to create. FIFO guarantees the check-in drains first; if the
+// check-in dead-lettered on a 4xx, this resolves nothing and answers an honest 404,
+// which the phone dead-letters too — correct, and visible.
+//
+// The resolver is findAttendanceByIdempotencyKey — the SAME one the create path's
+// pre-check and 23505 catch use, so "the client's own row" can never mean two
+// different things in two places. Its three filters all carry weight here: the tenant
+// scope (attendance_idempotency_uq is a GLOBAL index on the key alone, so a
+// cross-tenant key clash is physically possible), and the worker + day anchors.
+//
+// NO NEW UNIQUE CONSTRAINT IS ADDED. The write is an UPDATE guarded by
+// `checked_out_at IS NULL`, which is naturally idempotent and needs no key of its own.
+async function checkoutLaborAttendance(
+  db: TenantDb,
+  request: FastifyRequest,
+  body: Record<string, unknown>,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  // The gate runs on the BODY's worker_id, BEFORE the row is resolved — otherwise an
+  // unauthorized caller could distinguish 404 from 403 and probe which check-in keys
+  // exist. Same two doors as the create path.
+  const workerId = str(pick(body, "worker_id", "workerId")).trim();
+  const authz = await authorizeAttendanceWrite(db, request, reply, workerId);
+  if (!authz.ok) return reply;
+
+  if (!workerId) return badRequest(reply, "worker_id is required");
+  const day = str(pick(body, "day")).trim();
+  if (!day) return badRequest(reply, "day is required");
+
+  // The check-in's client key — the address of the row to close. Reuses the SHARED
+  // B-309 parser, so a present-but-non-string key is a 400 here exactly as it is on
+  // the create path (a silently-nulled key would resolve nothing and 404 a real day).
+  const idem = readIdempotencyKey(body, "check_in_key", "checkInKey");
+  if (!idem.ok) return badRequest(reply, idem.message);
+  const checkInKey = idem.key;
+  if (!checkInKey) return badRequest(reply, "check_in_key is required");
+
+  // REQUIRED, and client-supplied: it is what makes a replay provable. The
+  // SyncProcessor re-sends the identical instant, so "the stored value equals the
+  // requested one" distinguishes a retry from a genuine second check-out. A server
+  // now() would differ on every replay and turn every retry into a 409.
+  const checkedOut = optInstant(body, "checked_out_at", "checkedOutAt");
+  if (!checkedOut.ok) return badRequest(reply, checkedOut.message);
+  if (!checkedOut.value) return badRequest(reply, "checked_out_at is required");
+  const checkoutCoord = optCoordPair(
+    body,
+    ["checkout_lat", "checkoutLat"],
+    ["checkout_lng", "checkoutLng"],
+  );
+  if (!checkoutCoord.ok) return badRequest(reply, checkoutCoord.message);
+
+  const existing = await findAttendanceByIdempotencyKey(db, {
+    idempotencyKey: checkInKey,
+    workerId,
+    day,
+  });
+  if (!existing) return notFound(reply, "no check-in found for this check_in_key");
+
+  // ATOMIC close. The `checked_out_at IS NULL` predicate is ON THE UPDATE'S OWN WHERE,
+  // not on a preceding SELECT — the B-149 lesson: a resolve-then-update pair is two
+  // round trips under READ COMMITTED and both writers can pass the read. Here the
+  // second writer BLOCKS on the row lock, re-evaluates the predicate against the
+  // newly-committed version, and matches 0 rows. Two concurrent check-outs therefore
+  // cannot both win, and this is an UPDATE so neither can create a second row.
+  const [updated] = (await db
+    .update(
+      attendances,
+      {
+        checkedOutAt: checkedOut.value,
+        checkoutLat: checkoutCoord.value.lat,
+        checkoutLng: checkoutCoord.value.lng,
+      },
+      and(eq(attendances.id, existing.id), isNull(attendances.checkedOutAt)),
+    )
+    .returning()) as AttendanceRow[];
+
+  if (!updated) {
+    // 0 rows — the day was ALREADY closed (by a replay, or by a real second attempt).
+    // Re-resolve and let the stored instant decide, the B-156 shape: identical time =
+    // the SyncProcessor's retry → 200 with the original row (idempotent, no second
+    // write); a DIFFERENT time = a genuine second check-out → 409. Never overwrite:
+    // the first close is the record, and silently replacing it would let a later
+    // request rewrite when a worker left.
+    const current = await findAttendanceByIdempotencyKey(db, {
+      idempotencyKey: checkInKey,
+      workerId,
+      day,
+    });
+    if (current?.checkedOutAt?.getTime() === checkedOut.value.getTime()) {
+      return reply.code(200).send(attendanceWire(current));
+    }
+    return conflict(reply, "attendance is already checked out");
+  }
+
+  return reply.code(200).send(attendanceWire(updated));
 }
 
 // ---------------------------------------------------------------------------
@@ -843,6 +1218,15 @@ export function registerLaborRoute(app: FastifyInstance): void {
     const db = request.db;
     if (!db) return unauthenticated(reply);
     return createLaborAttendance(db, request, body(request), reply);
+  });
+
+  // B-332. NOTE the literal path is registered BEFORE nothing else can shadow it —
+  // there is no /labor/attendance/{id} route anywhere, so there is no ambiguity to
+  // resolve; this is recorded so a future :id route is added knowingly.
+  app.post("/labor/attendance/checkout", async (request, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+    return checkoutLaborAttendance(db, request, body(request), reply);
   });
 
   app.post("/labor/payroll", async (request, reply) => {
