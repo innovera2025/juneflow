@@ -260,6 +260,73 @@ class _SlowDueProgressRepo extends _ProgressRepo {
   }
 }
 
+/// The same slow queue read for the OTHER FOUR screens, which flip their busy state
+/// synchronously and — until this round — had nothing but a reading of the source to
+/// say so.
+///
+/// One rule, stated once: SNAPSHOT AT THE CALL, hand the rows back after [delay]. The
+/// long form of why is on [_SlowDueProgressRepo] above; the short form is that delaying
+/// FIRST and reading after lets the second tap's read observe the first tap's enqueue,
+/// so the pre-mint check dedupes the pair by itself and the revert probe comes back
+/// GREEN with the flip gone. That is not what a real queue does — on one drift
+/// connection the second tap's SELECT is queued behind the first tap's SELECT but AHEAD
+/// of its INSERT — and it has already been measured on this branch once.
+///
+/// Four classes rather than one, because the four repositories share no supertype and
+/// each test has to be able to go red ALONE.
+Future<List<SyncOperation>> _slowDue(
+  Future<List<SyncOperation>> rows,
+  Duration delay,
+) async {
+  final List<SyncOperation> snapshot = await rows;
+  await Future<void>.delayed(delay);
+  return snapshot;
+}
+
+class _SlowDueRecvRepo extends _RecvRepo {
+  _SlowDueRecvRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
+}
+
+class _SlowDueCheckinRepo extends _CheckinRepo {
+  _SlowDueCheckinRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
+}
+
+class _SlowDueChecklistRepo extends _ChecklistRepo {
+  _SlowDueChecklistRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
+}
+
+/// pm-notes' slow read is parented on [_StoredNotesRepo], not [_NotesRepo], for a
+/// reason the double-tap test depends on: the pre-mint queue check is SKIPPED once
+/// `_edited` is set, and on a blank work order the only way to get a realistic body
+/// into the form is to type one — which sets `_edited`, takes the handler down the
+/// straight-to-mint path where no await sits between the guard and `_newOpId()`, and
+/// leaves a test that passes with the flip removed. A work order that already CARRIES
+/// a log gives the save a real body via the seed, which `_seeding` correctly does not
+/// count as typing, so the tap goes through the queue read this test is about.
+class _SlowDueNotesRepo extends _StoredNotesRepo {
+  _SlowDueNotesRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
+}
+
 // ---------------------------------------------------------------------------
 // i18n + sidecars (the real field names; dict values from docs/extract/i18n-full.json)
 // ---------------------------------------------------------------------------
@@ -451,10 +518,11 @@ Future<void> _mountRecv(
   InMemorySyncQueue queue,
   _Transport transport, {
   String poId = 'po-A',
+  StReceiveRepository? repo,
 }) => _mount(
   tester,
   StReceiveScreen(
-    repo: _RecvRepo(_processor(queue, transport)),
+    repo: repo ?? _RecvRepo(_processor(queue, transport)),
     strings: _recvStrings,
     i18n: _i18n,
     poId: poId,
@@ -466,10 +534,11 @@ Future<void> _mountCheckin(
   InMemorySyncQueue queue,
   _Transport transport, {
   String workOrderId = 'wo-1',
+  PmCheckinRepository? repo,
 }) => _mount(
   tester,
   PmCheckinScreen(
-    repo: _CheckinRepo(_processor(queue, transport)),
+    repo: repo ?? _CheckinRepo(_processor(queue, transport)),
     gpsSource: const _FixedGps(),
     strings: _checkinStrings,
     i18n: _i18n,
@@ -498,10 +567,11 @@ Future<void> _mountChecklist(
   InMemorySyncQueue queue,
   _Transport transport, {
   String workOrderId = 'wo-1',
+  PmChecklistRepository? repo,
 }) => _mount(
   tester,
   PmChecklistScreen(
-    repo: _ChecklistRepo(_processor(queue, transport)),
+    repo: repo ?? _ChecklistRepo(_processor(queue, transport)),
     strings: _checklistStrings,
     i18n: _i18n,
     workOrderId: workOrderId,
@@ -1105,11 +1175,12 @@ void main() {
   //     read opened a gap the guard no longer covers unless the busy state is
   //     flipped SYNCHRONOUSLY first.
   //
-  //     SCOPE, stated rather than implied: this covers `field-progress`, which was
-  //     the one handler that did not flip synchronously. The other four flip before
-  //     their first await, and that is asserted only by reading them — they have no
-  //     double-tap test of their own, and would each need their own slow-`due()`
-  //     fixture to get one.
+  //     ALL FIVE SCREENS ARE COVERED HERE. `field-progress` was the one handler
+  //     that did not flip synchronously (round 3); the other four were given the
+  //     flip in round 2 and then asserted only by READING them, which is one tidy-up
+  //     away from gone — move the flip below the `due()` await, exactly the shape
+  //     field-progress had on dev, and nothing in the suite notices. Each screen
+  //     drives its OWN slow-`due()` fixture so each goes red ALONE.
   // =========================================================================
   group('a second tap while the pre-mint queue read is still in flight', () {
     testWidgets('field-progress: two taps on ONE period enqueue ONE delivery', (
@@ -1194,6 +1265,179 @@ void main() {
         ]);
       },
     );
+
+    testWidgets(
+      'st-receive (MONEY — two ops are two GR + two JV): two taps on confirm '
+      'enqueue ONE receipt',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        await _mountRecv(
+          tester,
+          queue,
+          transport,
+          repo: _SlowDueRecvRepo(
+            _processor(queue, transport),
+            delay: const Duration(milliseconds: 120),
+          ),
+        );
+        // Let the on-mount adoption finish first (it reads the queue too), so the
+        // only read in flight below is the one the tap opens.
+        await tester.pump(const Duration(milliseconds: 200));
+        await _flush(tester);
+        expect(find.text(_queuedCard), findsNothing); // nothing was queued yet
+
+        // The storekeeper taps confirm twice — the first tap has not repainted yet,
+        // which is exactly why he taps again.
+        await tester.tap(find.text(_confirmRecv).first);
+        await tester.tap(find.text(_confirmRecv).first);
+        await tester.pump(const Duration(milliseconds: 300));
+        await _flush(tester, 20);
+
+        final List<SyncOperation> ops = await _queued(queue);
+        expect(
+          ops.length,
+          1,
+          reason:
+              'a second op here is a second POST /gr under a SECOND key, and '
+              '`gr_idempotency_uq` is a partial unique index on the key ALONE — '
+              'it correctly admits both, as two goods receipts and two journal '
+              'vouchers',
+        );
+        expect(ops.single.endpoint, '/gr');
+        expect(ops.single.payload[grPoIdField], 'po-A');
+
+        // And when the signal returns the server is hit exactly once.
+        transport.offline = false;
+        await _processor(queue, transport).drain();
+        expect(transport.acceptedKeys, <String>[ops.single.id]);
+        expect(await queue.length(), 0);
+      },
+    );
+
+    testWidgets('pm-checkin: two taps enqueue ONE check-in', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountCheckin(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueCheckinRepo(
+          _processor(queue, transport),
+          delay: const Duration(milliseconds: 120),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsNothing);
+
+      await tester.tap(find.text(_checkinBtn).first);
+      await tester.tap(find.text(_checkinBtn).first);
+      await tester.pump(const Duration(milliseconds: 300));
+      await _flush(tester, 20);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(
+        ops.length,
+        1,
+        reason: 'a second op here is a second check-in on the same work order',
+      );
+      expect(ops.single.endpoint, '/pm/workorders/wo-1/checkin');
+
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('pm-checklist: two taps enqueue ONE checklist write', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountChecklist(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueChecklistRepo(
+          _processor(queue, transport),
+          delay: const Duration(milliseconds: 120),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsNothing);
+      // Nothing has been toggled, so `_edited` is false and the tap goes through
+      // the pre-mint queue read — which is the await this test is about.
+      await tester.tap(find.text(_saveChecklist).first);
+      await tester.tap(find.text(_saveChecklist).first);
+      await tester.pump(const Duration(milliseconds: 300));
+      await _flush(tester, 20);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(
+        ops.length,
+        1,
+        reason: 'the second op would overwrite the first with the same results',
+      );
+      expect(ops.single.endpoint, '/pm/workorders/wo-1/checklist');
+
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('pm-notes: two taps enqueue ONE close-out', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountNotes(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueNotesRepo(
+          _processor(queue, transport),
+          delay: const Duration(milliseconds: 120),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsNothing);
+      expect(
+        find.text(_StoredNotesRepo.storedCause),
+        findsOneWidget,
+        reason:
+            'the seeded body is what makes this save a REAL write without an '
+            'edit — and `_seeding` is what keeps the seed from setting '
+            '`_edited`, which would route the tap past the queue read entirely',
+      );
+
+      await tester.tap(find.text(_saveNotes).first);
+      await tester.tap(find.text(_saveNotes).first);
+      await tester.pump(const Duration(milliseconds: 300));
+      await _flush(tester, 20);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(
+        ops.length,
+        1,
+        reason: 'the second op would re-close the same work order',
+      );
+      expect(ops.single.endpoint, '/pm/workorders/wo-1/close');
+
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+    });
   });
 
   // =========================================================================
