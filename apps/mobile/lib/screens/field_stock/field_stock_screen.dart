@@ -85,8 +85,25 @@
 //     one. This matters more here than on st-receive: the negative-stock 409 is a
 //     4xx, and today it is the response EVERY issue gets (see the empty-ledger note
 //     in the agg / B-328), so this is the common path, not the rare one.
-// A confirmed issue pops back, as st-receive does: the state change IS the
-// confirmation, and no unbacked success copy is asserted.
+//
+// A CONFIRMED issue EMPTIES THE BASKET and re-arms the CTA. It does NOT pop, and
+// the difference from st_receive is structural, not stylistic: st-receive is PUSHED
+// from st-grlist with a poId, so it has a caller to pop back to. `field-stock` has
+// no pusher anywhere — mobile_shell.dart renders MobileScreenRouter as the TAB BODY,
+// so this route is always `isFirst` and `Navigator.maybePop` would bubble past it
+// and do nothing at all, leaving the storekeeper on an unchanged screen. So the
+// principle st-receive states — the state change IS the confirmation, and no
+// unbacked success copy is asserted — is honoured HERE by the one state change this
+// screen can actually make: the staged quantities go back to 0 and the CTA greys
+// out. That costs no key, and it re-arms the screen for the NEXT issue in the same
+// mount, which is the normal case for a storekeeper working a tab.
+//
+// THE INVARIANT that makes all of the above safe: `_opId != null` means a live op
+// owns the basket, and the basket is FROZEN while it does — because a queued op is
+// replayed VERBATIM from its stored payload, so an edit made after the enqueue would
+// be displayed but never sent. Both TERMINAL outcomes clear it: `confirmed` (the op
+// is done) and `failed` (nothing was written and the next tap mints a fresh key), so
+// after either the basket is editable again and the CTA works.
 import 'dart:async';
 import 'dart:math';
 
@@ -215,9 +232,26 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
 
   /// The stable client idempotency key of the CURRENT attempt. Generated on the
   /// first submit and REUSED on every retry of an UNKNOWN outcome, so a re-tap can
-  /// never post a second issue. Reset to null only after a permanent 4xx, where
-  /// nothing was written — see the file header.
+  /// never post a second issue.
+  ///
+  /// Non-null == A LIVE OP OWNS THE BASKET. Cleared by [_resolve] on BOTH terminal
+  /// outcomes — `confirmed` (the op is done, and the basket is emptied with it) and
+  /// `failed` (a permanent 4xx wrote nothing, and the dead-letter is never replayed,
+  /// so the retry must be a FRESH op with a FRESH key). Leaving it set after
+  /// `confirmed` is what made every later tap in the same mount a no-op drain of an
+  /// empty queue — a button that silently did nothing for the rest of the mount.
   String? _opId;
+
+  /// True while a live op owns the basket ([submitting] / [queued]).
+  ///
+  /// The queue replays `op.payload` VERBATIM, so what is on screen must not diverge
+  /// from what will be sent: the steppers and the project picker are frozen here
+  /// rather than accepting an edit that is displayed and then never posted. Not
+  /// re-enqueued on edit either — that would mint a SECOND write of the same
+  /// material. Both terminal outcomes clear [_opId], so a failed issue is fully
+  /// editable again (the negative-stock 409 is a 4xx, and reducing the quantity is
+  /// its only recovery).
+  bool get _locked => _opId != null;
 
   @override
   void initState() {
@@ -311,10 +345,12 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     picks: _picks,
   );
 
-  /// The primary tap. With no live write it enqueues + drains; while an outcome is
+  /// The primary tap. With no live op it enqueues + drains; while an outcome is
   /// UNKNOWN (queued) it re-drains the SAME op — a manual retry, never a second
-  /// enqueue. After a permanent 4xx it starts a fresh op, because nothing was
-  /// written under the old key and the dead-letter is never replayed.
+  /// enqueue. After either TERMINAL outcome [_opId] is already null, so the next tap
+  /// starts a fresh op: after a 4xx because nothing was written under the old key
+  /// and the dead-letter is never replayed, and after a confirmed issue because the
+  /// storekeeper is staging the NEXT issue in the same mount.
   Future<void> _onConfirm() async {
     if (_state == FieldStockState.submitting) return;
     final String? projectId = _projectId;
@@ -322,7 +358,6 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     final List<FieldStockPick> picks = _picks;
     if (projectId == null || warehouseId == null || picks.isEmpty) return;
 
-    if (_state == FieldStockState.failed) _opId = null;
     final bool firstAttempt = _opId == null;
     final String opId = _opId ??= _newOpId();
     setState(() => _state = FieldStockState.submitting);
@@ -342,12 +377,24 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     final List<SyncOperation> due = await widget.repo.due();
     final FieldStockState next = resolveIssueState(opId, report, due);
     if (!mounted) return;
-    setState(() => _state = next);
-    // CONFIRMED: the server durably posted the issue — stock IS cut and the JV IS
-    // posted. No success takeover is rendered (its copy has no key, and the
-    // server's own `value`/`jv_no` are deliberately not disclosed — see the agg
-    // header); popping back IS the confirmation.
-    if (next == FieldStockState.confirmed) Navigator.maybePop(context);
+    setState(() {
+      _state = next;
+      // CONFIRMED: the server durably posted the issue — stock IS cut and the JV IS
+      // posted. No success takeover is rendered (its copy has no key, and the
+      // server's own `value`/`jv_no` are deliberately not disclosed — see the agg
+      // header) and there is nothing to pop to (this route is the tab body, always
+      // `isFirst`). CLEARING THE BASKET IS THE CONFIRMATION: the staged quantities
+      // visibly go back to 0 and the CTA greys out, using no copy at all.
+      if (next == FieldStockState.confirmed) {
+        _quantities = const <String, double>{};
+      }
+      // Either TERMINAL outcome ends the live op, so the basket unfreezes and the
+      // NEXT tap enqueues a fresh one. Without this the screen stayed permanently
+      // armed to the finished op and every later tap drained an empty queue.
+      if (next == FieldStockState.confirmed || next == FieldStockState.failed) {
+        _opId = null;
+      }
+    });
   }
 
   /// Choose the project this material is issued against. Real tenant projects, by
@@ -441,8 +488,11 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
         // of the prototype's three attributes that has a column (see DROPPED §5).
         MSection(
           title: _t('usedFor'),
+          // Frozen while a live op owns the basket ([_locked]): `project_id` is
+          // inside the enqueued payload, so re-picking here would show one project
+          // and charge another project's WIP.
           child: GestureDetector(
-            onTap: _projects.isEmpty ? null : _pickProject,
+            onTap: _projects.isEmpty || _locked ? null : _pickProject,
             behavior: HitTestBehavior.opaque,
             child: MInput(value: _projectName ?? _dash),
           ),
@@ -493,9 +543,14 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
               ],
             ),
           ),
+          // Both steppers freeze while a live op owns the basket ([_locked]) — the
+          // queue replays the STORED payload, so an edit accepted here would be
+          // shown and never sent (3 m³ displayed as 1, 3 m³ cut from the ledger).
           _stepButton(
             icon: Icons.remove,
-            onTap: () => _adjust(line.itemId, -kFieldStockStep),
+            onTap: _locked
+                ? null
+                : () => _adjust(line.itemId, -kFieldStockStep),
           ),
           SizedBox(
             width: 44,
@@ -511,14 +566,19 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
           ),
           _stepButton(
             icon: Icons.add,
-            onTap: () => _adjust(line.itemId, kFieldStockStep),
+            onTap: _locked ? null : () => _adjust(line.itemId, kFieldStockStep),
           ),
         ],
       ),
     );
   }
 
-  Widget _stepButton({required IconData icon, required VoidCallback onTap}) {
+  /// One ± stepper. A null [onTap] is the FROZEN stepper, and it is muted with the
+  /// same two tokens the disabled CTA already uses (surfaceMuted / textTertiary) so
+  /// the freeze is VISIBLE — a live-looking button that does nothing is the very
+  /// defect this round closed. It needs no copy of its own.
+  Widget _stepButton({required IconData icon, required VoidCallback? onTap}) {
+    final bool enabled = onTap != null;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -527,11 +587,19 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
         height: 30,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: JuneflowTokens.surfaceCard,
+          color: enabled
+              ? JuneflowTokens.surfaceCard
+              : JuneflowTokens.surfaceMuted,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: JuneflowTokens.surfaceBorder),
         ),
-        child: Icon(icon, size: 16, color: JuneflowTokens.textPrimary),
+        child: Icon(
+          icon,
+          size: 16,
+          color: enabled
+              ? JuneflowTokens.textPrimary
+              : JuneflowTokens.textTertiary,
+        ),
       ),
     );
   }
@@ -625,8 +693,10 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     );
   }
 
-  /// The tone of the current honest status, or null when there is nothing to show
-  /// (idle / submitting / confirmed — confirmed pops instead).
+  /// The tone of the current honest status, or null when there is nothing to show:
+  /// idle / submitting, and CONFIRMED — whose confirmation is the emptied basket and
+  /// the greyed-out CTA, not a chip (no key exists for one, and the emptied basket
+  /// is the state change itself).
   _StatusTone? _statusTone() {
     switch (_state) {
       case FieldStockState.queued:

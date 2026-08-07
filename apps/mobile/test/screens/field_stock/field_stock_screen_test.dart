@@ -77,16 +77,19 @@ FieldStockEnt _stock({
   'value': 208940,
 };
 
-FieldStockEnt _wh(String id) => <String, Object?>{
-  'id': id,
-  'name': 'คลัง Block B',
-  'created_at': '2026-01-01T00:00:00Z',
-};
+/// A warehouse wire row. [name] null = the wire resolved the warehouse but carried
+/// no name — the eyebrow's own em-dash site.
+FieldStockEnt _wh(String id, {String? name = 'คลัง Block B'}) =>
+    <String, Object?>{
+      'id': id,
+      if (name != null) 'name': name,
+      'created_at': '2026-01-01T00:00:00Z',
+    };
 
-FieldStockEnt _project(String id) => <String, Object?>{
-  'id': id,
-  'name': 'juneflow พาร์ค ราชพฤกษ์',
-};
+/// A project wire row. [name] null = a real project with no name on the wire — the
+/// used-with slot's and the picker sheet's own em-dash sites.
+FieldStockEnt _project(String id, {String? name = 'juneflow พาร์ค ราชพฤกษ์'}) =>
+    <String, Object?>{'id': id, if (name != null) 'name': name};
 
 /// A fake repo returning a scripted drain outcome. [outcome] null = the drain
 /// touched nothing.
@@ -262,7 +265,15 @@ void main() {
     ) async {
       await _pump(tester, _FakeRepo(warehouses: const <FieldStockEnt>[]));
       expect(find.text('ยืนยัน'), findsNothing);
-      expect(find.text('—'), findsWidgets);
+      // EXACTLY two, and the count is the point: a `findsWidgets` here was
+      // satisfied by the honest-empty BODY alone, so it went green even when the
+      // header eyebrow stopped em-dashing. Both sites also have their own
+      // dies-alone test in the "each em-dash site" group below.
+      expect(
+        find.text('—'),
+        findsNWidgets(2),
+        reason: 'the header eyebrow AND the honest-empty body',
+      );
     });
 
     testWidgets('an empty ledger renders honest-empty (today\'s real state)', (
@@ -316,6 +327,65 @@ void main() {
       );
       expect(find.text('ใช้กับ'), findsOneWidget);
       expect(find.text('juneflow พาร์ค ราชพฤกษ์'), findsWidgets);
+    });
+  });
+
+  // Each `?? _dash` in the screen gets a scenario where it is the ONLY em-dash in
+  // the tree, so mutating that ONE site to `?? ''` turns exactly this test red.
+  // A shared `findsWidgets` assertion cannot do that: a sibling site satisfies it
+  // and the mutation ships green — which is how the eyebrow, the used-with slot
+  // and the picker row went unpinned while the row's name/code/unit/on-hand were
+  // covered (they are pinned by the exact `'— · สต็อก — —'` string).
+  group('each em-dash site is pinned so it dies ALONE', () {
+    testWidgets('the header eyebrow — a resolved warehouse with no name', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        _FakeRepo(
+          warehouses: <FieldStockEnt>[_wh('w1', name: null)],
+          projects: <FieldStockEnt>[_project('p1')],
+        ),
+      );
+      // The stock row, the project and the title are all fully populated, so the
+      // eyebrow is the only site that can produce this glyph.
+      expect(find.text('—'), findsOneWidget);
+    });
+
+    testWidgets('the used-with slot — a real project with no name', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        _FakeRepo(projects: <FieldStockEnt>[_project('p1', name: null)]),
+      );
+      // The project resolves (it has an id, so `project_id` is set and the CTA is
+      // live) — it is only its NAME that the wire did not carry.
+      expect(find.text('ยืนยัน'), findsOneWidget);
+      expect(find.text('—'), findsOneWidget);
+    });
+
+    testWidgets('a picker-sheet row — one named project, one with no name', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        _FakeRepo(
+          projects: <FieldStockEnt>[
+            _project('p1', name: 'A'),
+            _project('p2', name: null),
+          ],
+        ),
+      );
+      expect(find.text('—'), findsNothing, reason: 'nothing dashes yet');
+
+      await tester.tap(find.text('A')); // the used-with slot
+      await tester.pumpAndSettle();
+
+      // The sheet is open: one row carries its name, the other em-dashes. The
+      // used-with slot still shows 'A', so this glyph can only be the sheet row.
+      expect(find.byType(ListTile), findsNWidgets(2));
+      expect(find.text('—'), findsOneWidget);
     });
   });
 
@@ -486,6 +556,94 @@ void main() {
       expect(find.text('รอส่ง'), findsNothing);
     });
 
+    testWidgets(
+      'a CONFIRMED issue EMPTIES the basket — that IS the confirmation, and the '
+      'CTA is then inert rather than draining an empty queue',
+      (WidgetTester tester) async {
+        // The `confirmed` branch had NO UI assertion at all: the synced tests
+        // checked repo.submits / sentPicks only, so the screen could render
+        // nothing whatsoever on a successful issue and stay green.
+        final _FakeRepo repo = _FakeRepo(
+          outcome: SyncOutcome.synced,
+          projects: <FieldStockEnt>[_project('p1')],
+        );
+        await _pump(tester, repo);
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pump();
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pumpAndSettle();
+        expect(find.text('2'), findsOneWidget);
+
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+        final int drainsAfterConfirm = repo.drains;
+
+        expect(repo.submits, 1);
+        expect(repo.sentPicks.single.single.qty, 2);
+        // THE VISIBLE CHANGE. No chip and no takeover — neither has a key — but
+        // the staged quantity is gone, which is a state change the storekeeper
+        // cannot miss and which costs no copy.
+        expect(find.text('2'), findsNothing);
+        expect(find.text('0'), findsOneWidget);
+        expect(find.text('รอส่ง'), findsNothing);
+        expect(find.text('ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง'), findsNothing);
+
+        // The emptied basket also disables the CTA, so a stray tap posts nothing
+        // and does not silently re-drain either.
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+        expect(repo.submits, 1);
+        expect(repo.drains, drainsAfterConfirm);
+      },
+    );
+
+    testWidgets(
+      'a SECOND issue in the same mount is really SUBMITTED — the CTA does not '
+      'go silently dead after one confirmed issue',
+      (WidgetTester tester) async {
+        // The 09:00 / 10:00 storekeeper: two issues from the same tab, no
+        // remount. Before this fix the second tap took the drain branch against
+        // an empty queue, resolved to `confirmed` again, rendered NOTHING, and
+        // the second issue was silently lost.
+        final _FakeRepo repo = _FakeRepo(
+          outcome: SyncOutcome.synced,
+          projects: <FieldStockEnt>[_project('p1')],
+        );
+        await _pump(tester, repo);
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+        final int drainsAfterConfirm = repo.drains;
+
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pump();
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+
+        // Asserted as a PAIR so a regression reports both halves of the defect at
+        // once: before the fix this read [submits 1, drains 2] — the second tap
+        // took the drain branch against an empty queue, resolved to `confirmed`
+        // again, and rendered nothing at all.
+        expect(
+          <int>[repo.submits, repo.drains],
+          <int>[2, drainsAfterConfirm],
+          reason:
+              'a NEW issue is an ENQUEUE, never a re-drain of a finished op',
+        );
+        expect(
+          repo.opIds.toSet(),
+          hasLength(2),
+          reason:
+              'a new issue must NOT reuse the confirmed op key — the server '
+              'would resolve it to the FIRST issue and the second would never post',
+        );
+        expect(repo.sentPicks.last.single.qty, 2);
+      },
+    );
+
     testWidgets('retrying after a 4xx starts a FRESH op with a FRESH key', (
       WidgetTester tester,
     ) async {
@@ -507,6 +665,150 @@ void main() {
       expect(repo.submits, 2);
       expect(repo.opIds.toSet(), hasLength(2), reason: 'a fresh key each time');
     });
+  });
+
+  // The queue replays `op.payload` VERBATIM. So from the moment an op is live, the
+  // basket on screen must be exactly the basket that will be posted: an edit that
+  // is accepted and displayed but not sent is a lie about how much material is
+  // leaving the warehouse.
+  group('a QUEUED basket is FROZEN — what is shown is what will be replayed', () {
+    testWidgets('the steppers cannot move a queued quantity', (
+      WidgetTester tester,
+    ) async {
+      final _FakeRepo repo = _FakeRepo(
+        outcome: SyncOutcome.deferred,
+        projects: <FieldStockEnt>[_project('p1')],
+      );
+      await _pump(tester, repo);
+      for (int i = 0; i < 3; i++) {
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('รอส่ง'), findsOneWidget);
+      expect(repo.sentPicks.single.single.qty, 3);
+
+      await tester.tap(find.byIcon(Icons.remove).first);
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.remove).first);
+      await tester.pumpAndSettle();
+
+      // 3 m³ of sand are in the queue; the screen must not read 1.
+      expect(
+        find.text('3'),
+        findsOneWidget,
+        reason: 'the displayed basket is the queued basket',
+      );
+      expect(find.text('1'), findsNothing);
+
+      // And the retry still replays the SAME op — the freeze is not a disguised
+      // re-enqueue, which would be a SECOND write of the same material.
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+      expect(repo.submits, 1);
+      expect(repo.sentPicks.single.single.qty, 3);
+    });
+
+    testWidgets('the project picker is frozen while an op is queued', (
+      WidgetTester tester,
+    ) async {
+      final _FakeRepo repo = _FakeRepo(
+        outcome: SyncOutcome.deferred,
+        projects: <FieldStockEnt>[
+          _project('p1', name: 'A'),
+          _project('p2', name: 'B'),
+        ],
+      );
+      await _pump(tester, repo);
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+      expect(find.text('รอส่ง'), findsOneWidget);
+
+      await tester.tap(find.text('A')); // the used-with slot
+      await tester.pumpAndSettle();
+
+      // `project_id` is inside the enqueued payload: re-picking here would show
+      // one project and charge a different project's WIP on the replay.
+      expect(find.byType(ListTile), findsNothing);
+      expect(find.text('B'), findsNothing);
+      expect(repo.lastProjectId, 'p1');
+    });
+
+    testWidgets('the picker WORKS when no op is live (the contrast)', (
+      WidgetTester tester,
+    ) async {
+      // Without this, "frozen" above would also pass on a picker that never
+      // opened at all.
+      final _FakeRepo repo = _FakeRepo(
+        outcome: SyncOutcome.synced,
+        projects: <FieldStockEnt>[
+          _project('p1', name: 'A'),
+          _project('p2', name: 'B'),
+        ],
+      );
+      await _pump(tester, repo);
+      await tester.tap(find.text('A'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ListTile), findsNWidgets(2));
+
+      await tester.tap(find.text('B'));
+      await tester.pumpAndSettle();
+      expect(find.text('B'), findsOneWidget, reason: 'the slot now reads B');
+
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+      expect(repo.lastProjectId, 'p2');
+    });
+
+    testWidgets(
+      'a FAILED basket is editable again, and the edit is what gets sent',
+      (WidgetTester tester) async {
+        // The negative-stock 409 is a 4xx and is TODAY the common outcome, and
+        // reducing the quantity is its only recovery — so the freeze must end
+        // with the op. Nothing was written under the old key, and the fresh op
+        // carries the EDITED basket, not the rejected one.
+        final _FakeRepo repo = _FakeRepo(
+          outcome: SyncOutcome.permanentlyFailed,
+          projects: <FieldStockEnt>[_project('p1')],
+        );
+        await _pump(tester, repo);
+        for (int i = 0; i < 3; i++) {
+          await tester.tap(find.byIcon(Icons.add).first);
+          await tester.pump();
+        }
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง'),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byIcon(Icons.remove).first);
+        await tester.pump();
+        await tester.tap(find.byIcon(Icons.remove).first);
+        await tester.pumpAndSettle();
+        expect(find.text('1'), findsOneWidget);
+
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+
+        expect(repo.submits, 2);
+        expect(repo.opIds.toSet(), hasLength(2));
+        expect(
+          repo.sentPicks.last.single.qty,
+          1,
+          reason: 'the retry sends the reduced quantity, not the rejected 3',
+        );
+      },
+    );
   });
 
   group('repository over the REAL queue + processor', () {

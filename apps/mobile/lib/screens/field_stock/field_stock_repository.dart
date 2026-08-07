@@ -38,7 +38,8 @@
 //   * the key is parsed FIRST, before any validation/read/write, by the parser
 //     shared with POST /gr and POST /labor/attendance (readIdempotencyKey);
 //   * `material_issue_idempotency_uq` is a REAL partial unique index — confirmed in
-//     packages/db/migrations/0059_*.sql, not merely asserted in a blocker row;
+//     packages/db/drizzle/0059_material_issue_idempotency_key.sql, not merely
+//     asserted in a blocker row;
 //   * the 23505 is caught and gated on the CONSTRAINT NAME (B-263), not on the
 //     error class, so an unrelated unique violation cannot be swallowed as a replay;
 //   * the original is returned WITHOUT a second write (sendExistingIssue re-reads
