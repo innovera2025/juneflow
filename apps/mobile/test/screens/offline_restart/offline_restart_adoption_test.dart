@@ -146,13 +146,18 @@ class _NotesRepo extends DioPmNotesRepository {
   ];
 }
 
-/// pm-notes' read, deliberately SLOWER than the drain.
+/// pm-notes' read, deliberately SLOWER than the drain AND carrying stored text.
 ///
 /// `_resumeQueued` starts the read and the drain together but AWAITS the read before
 /// adopting, because seeding the three controllers fires the edit listener and an
 /// edit legitimately drops `_opId`. Every other test in this file stubs a read that
-/// resolves first anyway, so the ordering is never exercised by them; this repo is
-/// what makes the guard's absence observable.
+/// resolves first anyway, so the ordering is never exercised by them.
+///
+/// The stored body is load-bearing, not scenery: `TextEditingController.text = ''`
+/// on an already-empty controller sets an EQUAL `TextEditingValue` and therefore
+/// notifies nobody, so a work order with no stored log cannot fire the listener at
+/// all. Only a seed that genuinely CHANGES the field can undo an adoption — which is
+/// exactly the case the ordering guard exists for.
 class _SlowNotesRepo extends _NotesRepo {
   _SlowNotesRepo(super.p, {required this.delay});
 
@@ -161,7 +166,9 @@ class _SlowNotesRepo extends _NotesRepo {
   @override
   Future<List<PmNotesEnt>> listWorkOrders() async {
     await Future<void>.delayed(delay);
-    return super.listWorkOrders();
+    return <PmNotesEnt>[
+      <String, Object?>{'id': 'wo-1', 'cause': 'บันทึกเดิม'},
+    ];
   }
 }
 
@@ -836,7 +843,55 @@ void main() {
   //     `_edited` is what tells the two apart; each test below goes red when it is
   //     dropped from ITS screen.
   // =========================================================================
-  group('an edit after the adoption mints instead of adopting', () {
+  group('an edit mints instead of adopting', () {
+    testWidgets(
+      'pm-notes: a body typed INSIDE the window is its own write — the check '
+      'must not swallow it into the queued op',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        await _mountNotes(tester, queue, transport);
+        await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+        await _flush(tester);
+        await _tap(tester, _saveNotes);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        // Inside the window: the replay is held, so nothing has been adopted and
+        // the screen looks exactly as it does when nothing was ever submitted —
+        // which is the whole reason the listener cannot infer "seeding" from the
+        // state and needs `_seeding` to be told.
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountNotes(tester, queue, transport);
+        expect(find.text(_queuedCard), findsNothing);
+
+        await tester.enterText(find.byType(TextField).first, 'มอเตอร์ไหม้');
+        await _flush(tester);
+        await _tap(tester, _saveNotes); // saved while still inside the window
+
+        gate.complete();
+        await _flush(tester, 20);
+
+        final List<SyncOperation> ops = await _queued(queue);
+        expect(
+          ops.length,
+          2,
+          reason: 'the typed body is a genuinely new write',
+        );
+        expect(ops.first.id, k1);
+        expect(
+          ops.map((SyncOperation o) => o.payload['cause']).toList(),
+          <String>['สายพานขาด', 'มอเตอร์ไหม้'],
+          reason:
+              'FIFO replays the old body then the new one, so the column ends '
+              'up holding what the technician actually typed; adopting k1 here '
+              'would send the OLD body ONLY and lose this text entirely',
+        );
+      },
+    );
+
     testWidgets('pm-notes: the typed body is not replaced by the queued one', (
       WidgetTester tester,
     ) async {

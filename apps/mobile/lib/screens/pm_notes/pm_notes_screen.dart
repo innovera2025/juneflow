@@ -218,6 +218,16 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   /// since rewritten would re-drain the OLD text and silently discard the edit.
   bool _edited = false;
 
+  /// True only while [_seed] is writing the stored body into the controllers.
+  ///
+  /// The listener cannot tell seeding from typing by itself, and inside the on-mount
+  /// window it cannot infer it from the state either — `_state` is idle and [_opId]
+  /// null there for BOTH. So the one place that knows says so. This flag gates ONLY
+  /// the [_edited] bookkeeping: whether a notification drops [_opId] is decided by the
+  /// state exactly as before, which is what keeps the read-before-adopt ordering in
+  /// [_resumeQueued] load-bearing rather than decorative.
+  bool _seeding = false;
+
   @override
   void initState() {
     super.initState();
@@ -314,20 +324,36 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
 
   /// Fill the controllers from the stored columns.
   ///
-  /// Seeding is not an edit, and needs no flag to say so: `_seed` is called from one
-  /// place only — `_load`, started in initState and never re-run — so the screen is
-  /// still `idle` with no op outstanding when the controllers fire, which is the
-  /// first case `_onEdited` returns on. (A guarded-but-unreachable branch here would
-  /// be decoration: no revert of it can fail a test.)
+  /// Seeding is not an edit, and [_seeding] is what says so. The state cannot: at
+  /// seed time the screen is `idle` with no op outstanding, which is indistinguishable
+  /// from a technician typing INSIDE the on-mount window (BLOCKERS.md B-330 F1) —
+  /// and those two must not be treated alike, because the second one means the queued
+  /// op no longer describes the form and must not be adopted at the next save.
+  ///
+  /// Note that a seed can also be SILENT: `TextEditingController.text = ''` on an
+  /// already-empty controller assigns an equal `TextEditingValue` and notifies nobody.
+  /// The flag is what makes the noisy case (a work order with a stored log) behave
+  /// like the silent one instead of the other way round.
   void _seed(PmNotes n) {
-    _cause.text = n.cause ?? '';
-    _fix.text = n.fix ?? '';
-    _advice.text = n.advice ?? '';
+    _seeding = true;
+    try {
+      _cause.text = n.cause ?? '';
+      _fix.text = n.fix ?? '';
+      _advice.text = n.advice ?? '';
+    } finally {
+      _seeding = false;
+    }
   }
 
   /// A typed character invalidates any resolved/unresolved save: the body changed, so
   /// the next save is a NEW write, not a retry of the old one.
   void _onEdited() {
+    // Recorded FIRST, before the returns below: a character typed inside the on-mount
+    // window arrives while the screen is still idle with no op, so the early return
+    // is exactly where a real edit hides. Missing it there would let the pre-mint
+    // check in [_onSave] adopt the queued op and re-drain the OLD body over what was
+    // just typed — one write, and the technician's text gone.
+    if (!_seeding) _edited = true;
     if (_state == PmNotesSaveState.idle && _opId == null) return;
     if (_state == PmNotesSaveState.saving) return;
     setState(() {
