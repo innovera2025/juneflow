@@ -9,7 +9,7 @@
 //   GET /inventory/stock?warehouse_id=…  (listStock) — the issuable balances:
 //                               item_code / item_name / unit / on_hand, filtered
 //                               SERVER-side to the chosen warehouse.
-//   GET /projects              (projects.ts) — the `ใช้กับ` subject and the
+//   GET /projects              (projects.ts) — the used-with subject and the
 //                               write's REQUIRED `project_id`.
 //
 // Why raw Dio, not the generated typed client: the contract models all three as the
@@ -48,8 +48,11 @@
 // HOISTED ABOVE the transaction, because the in-tx negative-stock guard would
 // otherwise run FIRST on a replay and 409 for material that really did leave —
 // "on-hand 0, issue 800" — which sync_processor dead-letters PERMANENTLY as a 4xx.
-// That ordering is precisely what makes this screen safe to enqueue, so it is
-// asserted here rather than assumed: see field_stock_repository_test.dart.
+// That ordering is precisely what makes this screen safe to enqueue. The CLIENT
+// half of that contract — that a replay re-posts the byte-identical body under the
+// same key, and that a dead-letter is never replayed — is asserted against the REAL
+// queue in field_stock_screen_test.dart, group "repository over the REAL queue +
+// processor".
 //
 // The queue replays `op.payload` VERBATIM and does not inject anything, so the
 // `idempotency_key` must be inside the body — it is written there by

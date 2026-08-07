@@ -3,9 +3,9 @@
 // (mobile_routes.dart; MobileSection.field).
 //
 // money = NONE on screen and money = SERVER on the write. The prototype's CTA
-// carries a total (`ยืนยันเบิก · 18,000 ฿`, L523) and this screen's CTA does not.
+// carries a total ("confirm-issue - 18,000 baht", L523) and this screen's CTA does not.
 // That is the single biggest deviation in the port and the reasoning is set out in
-// full in field_stock_agg.dart "THE 18,000 ฿": the number is a mock literal, no
+// full in field_stock_agg.dart "THE 18,000 BAHT": the number is a mock literal, no
 // endpoint will price a basket before it is posted, and computing it here would be
 // the B-316 A3 defect on the very button that posts a JV and cuts the stock ledger.
 //
@@ -35,7 +35,7 @@
 // ---------------------------------------------------------------------------
 // Each verified by grep against the route file and the contract this round, not
 // assumed. Reported for a ruling in BLOCKERS.md B-328.
-//   1. THE CTA's TOTAL (L523 `· 18,000 ฿`) — see the agg header. The button states
+//   1. THE CTA's TOTAL (L523 "- 18,000 baht") — see the agg header. The button states
 //      the act with no figure.
 //   2. THE QR / BARCODE SCAN trigger (L493), the whole dashed bar. `grep -i
 //      'qr|barcode|scan'` over apps/api/src/routes/inventory.ts + openapi.yaml = 0
@@ -52,7 +52,7 @@
 //      is real). Its label has no honest key either (see the sidecar's
 //      _deviations), so shipping it disabled would spend a mint on a control that
 //      cannot work. The footer becomes the single confirm CTA.
-//   5. THE `ใช้กับ` VALUE's WO · PERIOD · SCOPE (L516-517) — `material_issue` is
+//   5. THE USED-WITH VALUE's WO · PERIOD · SCOPE (L516-517) — `material_issue` is
 //      {id, company_id, no, project_id, from_warehouse_id, value, currency_code,
 //      issue_date, by_user_id, status, idempotency_key, created_at, updated_at}
 //      (packages/db/src/schema/extensions.ts L176-206). There is NO wo_id, NO
@@ -60,7 +60,7 @@
 //      entered. The slot degrades to the PROJECT, which is the one attribution the
 //      document really has — and which the merged web register prints in that very
 //      column (apps/web/src/screens/inventory/inventory-issue.tsx L77).
-//   6. THE SECTION-TITLE COUNT (L497 `(3 รายการ)`) — the count itself would be
+//   6. THE SECTION-TITLE COUNT (L497, a parenthesised item count) — the count itself would be
 //      honest (it is the real basket size), but its unit word has no key in any
 //      layer, and a bare parenthesised number next to a section title is ambiguous
 //      rather than informative. The title ships without it.
@@ -602,7 +602,7 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
                   ),
                   const SizedBox(width: 6),
                   // The CTA. NO total — see the file header and the agg's
-                  // "THE 18,000 ฿". `common.confirm` under-claims the prototype's
+                  // "THE 18,000 BAHT". `common.confirm` under-claims the prototype's
                   // "confirm issue"; `inv.issueAdd.btnSubmit` ("save issue + cut
                   // stock") was refused because it asserts an outcome that is FALSE
                   // on the queued branch (sidecar _deviations).

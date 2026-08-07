@@ -114,9 +114,15 @@ class _FakeRepo implements FieldStockRepository {
   Future<List<FieldStockEnt>> listWarehouses() async =>
       warehouses ?? <FieldStockEnt>[_wh('w1')];
 
+  /// Which warehouse ids the screen actually asked for stock on — so a pushed id
+  /// can be proven to reach the READ, not merely the eyebrow.
+  final List<String> stockReadFor = <String>[];
+
   @override
-  Future<List<FieldStockEnt>> listStock(String warehouseId) async =>
-      stock ?? <FieldStockEnt>[_stock()];
+  Future<List<FieldStockEnt>> listStock(String warehouseId) async {
+    stockReadFor.add(warehouseId);
+    return stock ?? <FieldStockEnt>[_stock()];
+  }
 
   @override
   Future<List<FieldStockEnt>> listProjects() async => projects;
@@ -174,11 +180,20 @@ SyncOperation _op(String id, SyncOpStatus status) => SyncOperation(
   status: status,
 );
 
-Future<void> _pump(WidgetTester tester, _FakeRepo repo) async {
+Future<void> _pump(
+  WidgetTester tester,
+  _FakeRepo repo, {
+  String? warehouseId,
+}) async {
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
-        body: FieldStockScreen(repo: repo, strings: _strings, i18n: _i18n),
+        body: FieldStockScreen(
+          repo: repo,
+          strings: _strings,
+          i18n: _i18n,
+          warehouseId: warehouseId,
+        ),
       ),
     ),
   );
@@ -258,6 +273,38 @@ void main() {
       await _pump(tester, _FakeRepo(stock: const <FieldStockEnt>[]));
       expect(find.text('ปูนซีเมนต์ตราเสือ'), findsNothing);
       expect(find.text('—'), findsWidgets);
+    });
+
+    testWidgets(
+      'a FOREIGN pushed warehouse id renders honest-empty — it never draws down '
+      'a different shelf',
+      (WidgetTester tester) async {
+        // The screen passes its pushed id straight to selectWarehouse, so this is
+        // a SECOND site for that rule and needs its own assertion: the agg test
+        // alone would still pass if the screen ignored a null resolution and fell
+        // back to the newest warehouse. On a screen that decrements stock and posts
+        // a JV, silently issuing from another warehouse is the worst failure
+        // available.
+        final _FakeRepo repo = _FakeRepo(
+          projects: <FieldStockEnt>[_project('p1')],
+        );
+        await _pump(tester, repo, warehouseId: 'not-my-warehouse');
+
+        expect(find.text('ปูนซีเมนต์ตราเสือ'), findsNothing);
+        expect(find.text('ยืนยัน'), findsNothing, reason: 'no action bar');
+        expect(find.text('—'), findsWidgets);
+      },
+    );
+
+    testWidgets('a pushed warehouse id is the one whose stock is read', (
+      WidgetTester tester,
+    ) async {
+      final _FakeRepo repo = _FakeRepo(
+        warehouses: <FieldStockEnt>[_wh('w1'), _wh('w2')],
+        projects: <FieldStockEnt>[_project('p1')],
+      );
+      await _pump(tester, repo, warehouseId: 'w2');
+      expect(repo.stockReadFor, <String>['w2']);
     });
 
     testWidgets('the used-with slot shows the primary project', (

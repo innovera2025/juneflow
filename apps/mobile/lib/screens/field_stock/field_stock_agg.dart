@@ -4,7 +4,7 @@
 // money = NONE on the display surface and money = SERVER on the wire: this module
 // never parses, derives, echoes or SENDS a monetary value. Not "does not today" —
 // it has no code path that can, and the tests prove it by feeding a row whose only
-// populated fields are monetary. See "THE 18,000 ฿" below, which is the whole
+// populated fields are monetary. See "THE 18,000 BAHT" below, which is the whole
 // design of this screen.
 //
 // No Flutter, no i18n and no Dio usage here — every derivation stays
@@ -14,9 +14,9 @@
 // tests construct those types directly rather than through a network.
 //
 // ---------------------------------------------------------------------------
-// THE 18,000 ฿ — WHERE IT COULD COME FROM, AND WHY THE ANSWER IS "NOWHERE"
+// THE 18,000 BAHT - WHERE IT COULD COME FROM, AND WHY THE ANSWER IS "NOWHERE"
 // ---------------------------------------------------------------------------
-// The prototype's CTA reads `ยืนยันเบิก · 18,000 ฿` (L523) — a money total inside
+// The prototype's CTA reads "confirm-issue - 18,000 baht" (L523) — a money total inside
 // the button that posts the issue. Four facts, each verified against source this
 // round, settle what happens to it:
 //
@@ -71,7 +71,7 @@
 // ---------------------------------------------------------------------------
 // MFieldStock takes no props, holds no state and has no `onClick` anywhere. Every
 // value is a literal: the warehouse name in the eyebrow, the three material rows
-// with their codes/units/on-hand/quantities, the "(3 รายการ)" count, the
+// with their codes/units/on-hand/quantities, the "(3 items)" count, the
 // WO · period · scope line, and the 18,000. None of it is ported. What ships is the
 // same SHAPE driven by the real GET /inventory/stock + /warehouses + /projects
 // wires, with every unbacked element DROPPED rather than faked.
@@ -220,7 +220,7 @@ bool _isNewer(DateTime? at, String id, DateTime? bestAt, String bestId) {
 }
 
 /// Choose the warehouse this screen draws down — the prototype's eyebrow subject
-/// (L487 `คลัง Block B`) and the write's `from_warehouse_id`.
+/// (L487, a warehouse name) and the write's `from_warehouse_id`.
 ///
 /// With a [warehouseId] the screen has a real subject pushed into it and uses
 /// exactly that one, or NOTHING when the id is not in the tenant's page: a foreign
@@ -258,7 +258,7 @@ FieldStockEnt? selectWarehouse(
   return best;
 }
 
-/// Choose the project the material is issued against — the prototype's `ใช้กับ`
+/// Choose the project the material is issued against — the prototype's used-with slot
 /// subject (L516) and the write's REQUIRED `project_id`.
 ///
 /// With a [projectId], exactly that project or null (same reasoning as

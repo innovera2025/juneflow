@@ -147,7 +147,7 @@ Widget _buildFieldGr(BuildContext context) => const FieldGrScreenHost();
 /// The prototype's CTA carries a money total and this one does NOT — no endpoint
 /// prices a basket before it is posted, so the figure could only be computed on the
 /// client, which is the B-316 defect on the button that posts the JV. See
-/// field_stock_agg.dart "THE 18,000 ฿". money = SERVER: the payload carries item
+/// field_stock_agg.dart "THE 18,000 BAHT". money = SERVER: the payload carries item
 /// ids and quantities only.
 Widget _buildFieldStock(BuildContext context) => const FieldStockScreenHost();
 

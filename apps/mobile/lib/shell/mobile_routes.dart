@@ -111,7 +111,7 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// Dr 1140 / Cr 5020 JV, which is why it carries a B-312 idempotency key. Its
 /// prototype CTA shows a money total and this screen's does NOT — no endpoint
 /// prices a basket before it is posted, so the figure could only be computed on the
-/// client (field_stock_agg.dart "THE 18,000 ฿"). Like the rest of the
+/// client (field_stock_agg.dart "THE 18,000 BAHT"). Like the rest of the
 /// pushed-subject screens its warehouse id is nullable: nothing lists warehouses on
 /// mobile today, so a bare tab route follows the newest.
 const Set<String> kBuiltRouteIds = <String>{
