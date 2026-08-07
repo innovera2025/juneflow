@@ -156,6 +156,31 @@ void main() {
     expect(kMobileRouteIds, contains('pm-close'));
   });
 
+  test('field-gr is a built route in lockstep (feature/mobile-field-gr)', () {
+    // The site's REVIEW of a recorded goods receipt — a distinct screen from
+    // st-receive, which ENTERS counts against a PO (field_gr_agg.dart; B-324).
+    // A built tab route that follows the register's newest RECEIVED receipt when
+    // mounted without a selection. Builder + built id must stay in lockstep
+    // (keys==kBuiltRouteIds, asserted above).
+    expect(kBuiltRouteIds, contains('field-gr'));
+    expect(mobileScreenBuilders.containsKey('field-gr'), isTrue);
+    expect(kMobileRouteIds, contains('field-gr'));
+  });
+
+  test('field-gr and st-receive are two DIFFERENT builders', () {
+    // Routing both ids at one screen is the near-duplicate this port exists to
+    // avoid: it would be two places to fix every future defect, and neither
+    // screen can render the other's content (st-receive has no name/unit source,
+    // field-gr has no count input).
+    expect(
+      identical(
+        mobileScreenBuilders['field-gr'],
+        mobileScreenBuilders['st-receive'],
+      ),
+      isFalse,
+    );
+  });
+
   test('the whole pm-* flow is now built end to end', () {
     // pm-jobs -> pm-checkin -> pm-checklist -> pm-notes -> pm-close. A regression
     // that dropped any one of them from the router would strand the chain at that
@@ -194,12 +219,12 @@ void main() {
     }
   });
 
-  test('route parity: 20 of the 26 known routes are built', () {
+  test('route parity: 21 of the 26 known routes are built', () {
     // The count is asserted explicitly so a port that registers a BUILDER without
     // its built id (or the reverse) is caught as a number, not only as a set
-    // mismatch. 19 -> 20 with st-receive.
-    expect(kBuiltRouteIds.length, 20);
-    expect(mobileScreenBuilders.length, 20);
+    // mismatch. 19 -> 20 with st-receive; 20 -> 21 with field-gr.
+    expect(kBuiltRouteIds.length, 21);
+    expect(mobileScreenBuilders.length, 21);
     expect(mobileScreenBuilders.keys.toSet(), kBuiltRouteIds);
   });
 }
