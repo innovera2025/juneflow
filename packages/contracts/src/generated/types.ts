@@ -7181,6 +7181,15 @@ export interface operations {
             201: components["responses"]["EntityCreated"];
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            /** @description B-332: caller holds neither finance.create nor a worker record linked to this user, or that linked worker record is not active. Self-service check-in may record only the caller's OWN worker id. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     checkoutLaborAttendance: {

@@ -1058,8 +1058,9 @@ describe("POST /api/v1/labor/attendance — B-307 idempotency (client key + repl
   // that violation through the db stub, so they DO NOT — cannot — prove that a
   // real Postgres raises it. Deleting the index from finance.ts and migration
   // 0062 leaves every one of these green; the probe was run. What dies on that
-  // deletion is packages/db/src/schema/attendance-self-day.test.ts (3 tests) and
-  // the live burst in tests/e2e/b332-checkin-schema.spec.ts. Said plainly here
+  // deletion is packages/db/src/schema/attendance-self-day.test.ts (4 of its 6 —
+  // measured: db 4 failed / 25 passed, the number BLOCKERS.md B-336 also carries)
+  // and the live burst in tests/e2e/b332-checkin-schema.spec.ts. Said plainly here
   // because the review before this one found a test named for an index that only
   // ever proved the stub, and the fix for that is labelling, not another stub.
   //
@@ -2335,7 +2336,22 @@ describe("B-332 gate-4.5 POST /api/v1/labor/attendance — the self-service dupl
     expect(inserted).toHaveLength(0);
   });
 
-  it("leaves the finance.create ROSTER path untouched — a second row for a recorded day is still accepted there (corrections, bulk save, the cc split)", async () => {
+  // B-336 gate finding 3 — RENAMED, because the tree stopped doing what the old name
+  // said. It read "…a second row for a recorded day is still accepted there
+  // (corrections, bulk save, the cc split)" and asserted 201 + one insert. LIVE, that
+  // exact request is now 409: `recorded()` carries `ccId: null`, so the second
+  // UNCOSTED row for this worker+day trips attendance_self_day_uq. It passed only
+  // because THE STUB HAS NO INDEX — the same defect this file names 1,280 lines above
+  // (the fix for a test that only ever proved the stub is labelling, not another stub).
+  // Left green rather than deleted because the branch it covers IS load-bearing and is
+  // covered nowhere else: the application pre-check is gated on `authz.selfService`, so
+  // the roster door must fall THROUGH it and reach the INSERT. What answers that insert
+  // is the DB, and the live spec asserts the 409 end-to-end (b332-checkin-schema.spec.ts
+  // "RECLASSIFIED (B-336)"). The three shapes the old name listed do not survive either:
+  // the "correction" is the refused case (B-335 — it never corrected, it ADDED), the web
+  // bulk-save has never POSTed attendance at all, and the cc split is a DIFFERENT row
+  // (cc_id NOT NULL) covered by the keyed-read test below.
+  it("does not PRE-CHECK the finance.create ROSTER door — the request falls through to the INSERT (which live is refused 409 by attendance_self_day_uq; this stub has no index)", async () => {
     const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
@@ -2355,8 +2371,10 @@ describe("B-332 gate-4.5 POST /api/v1/labor/attendance — the self-service dupl
       url: "/api/v1/labor/attendance",
       payload: { worker_id: W1, day: DAY, status: "half" },
     });
-    expect(res.statusCode).toBe(201);
+    // 201 IS THE STUB'S ANSWER, NOT PRODUCTION'S. The assertion that carries the
+    // meaning is the insert: the handler reached the DB rather than short-circuiting.
     expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
+    expect(res.statusCode).toBe(201);
   });
 
   it("400s a self-service caller asserting cc_id — it is the guard's own escape hatch (one re-inflation per cost centre) and the check-in screen has no cc affordance", async () => {
@@ -2807,6 +2825,356 @@ describe("B-332 POST /api/v1/labor/attendance/checkout — close the day on the 
       method: "POST",
       url: "/api/v1/labor/attendance/checkout",
       payload: body({ checked_out_at: "2026-08-06T22:45:00.000Z" }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(updated.filter((u) => u.table === attendances)).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// B-332 gate-4.5 finding 2 — A MALFORMED `day` IS A 400 ON BOTH NEW DOORS
+// ---------------------------------------------------------------------------
+// WHAT THESE PROVE, AND WHAT THEY CANNOT. They prove the HANDLER refuses a `day`
+// that is not a YYYY-MM-DD calendar date, on both doors, before any DB call —
+// asserted from the status, the message, and ZERO writes reaching the stub.
+//
+// They CANNOT show the 500 that used to happen: a stub has no `date` column to
+// raise 22007, so the pre-fix behaviour here was a 201 with garbage, not a 500.
+// The 500 was measured LIVE at 0de5782 against real Postgres, on both doors:
+//   POST /labor/attendance           day="not-a-date" → 500 · "2121-13-45" → 500
+//   POST /labor/attendance/checkout  day="not-a-date" → 500 · "2121-13-45" → 500
+// and the live spec now carries that end-to-end (b332-checkin-schema.spec.ts,
+// "a malformed `day` is a 400 on BOTH doors"). Said here for the reason the
+// B-336 block above says it: a test named for something it cannot see is how
+// the review before last found a suite proving its own stub.
+//
+// WHY THE 500 MATTERED ENOUGH TO SPEND A ROUND ON: the mobile SyncProcessor
+// dead-letters a 4xx permanently but DEFERS a 5xx and STOPS the drain, so ONE
+// malformed queued op wedges every write behind it for that worker.
+//
+// REVERT PROBE, run per door rather than claimed (21 tests here):
+//   - drop requireCalendarDay from the CREATE door only → 10 RED here (the 8
+//     refusals, the leap-rule test, and the never-touches-`attendance` test),
+//     and 2 RED live;
+//   - drop it from the CHECKOUT door only → 8 RED here, 1 RED live.
+// The remaining 3 are CONTROLS and stay green on either revert, deliberately:
+// `day is required` (unchanged behaviour), the accepted-shapes list (proves the
+// refusals narrow nothing that exists), and the B-337 test (proves what this
+// does NOT close). They are labelled rather than counted as proof.
+// ===========================================================================
+describe("B-332 gate-4.5 — `day` must be a YYYY-MM-DD calendar date (both attendance doors)", () => {
+  const KEY = "ck-day";
+  const stub = (touched: { inserted: Inserted[]; updated: Updated[]; captured: Captured[] }) =>
+    writeStub({
+      rows: [
+        [users, userSource()],
+        [roles, [roleRow(true)]],
+        [workers, workerSource({ self: [linkedWorker(W1, "u-0")], byId: [linkedWorker(W1, null)] })],
+        [
+          attendances,
+          [
+            {
+              id: "at-1", companyId: COMPANY, workerId: W1, day: "2026-08-07", ot: "0.00",
+              status: "full", dayFraction: "1", ccId: null, idempotencyKey: KEY,
+              checkedInAt: null, checkedOutAt: null, createdAt: D, updatedAt: D,
+            },
+          ],
+        ],
+      ],
+      inserted: touched.inserted,
+      updated: touched.updated,
+      captured: touched.captured,
+    });
+
+  /** Every shape that reached the `date` column before this fix, and what it did there. */
+  const REFUSED: Array<[string, string]> = [
+    ["not-a-date", "unparseable — 500 live (22007)"],
+    ["2121-13-45", "month 13, day 45 — 500 live (22008)"],
+    ["2121-02-30", "shape-valid, not a date — 500 live"],
+    ["2121-01-01T00:00:00Z", "an ISO INSTANT — silently coerced to 2121-01-01 and 201 live"],
+    ["01/02/2121", "AMBIGUOUS — 2121-01-02 under MDY, 1 Feb under DMY (a session GUC)"],
+    ["today", "a RELATIVE keyword — stored as the SERVER's current date, live"],
+    ["infinity", "accepted by the date column, live — a row no period query can sum"],
+    ["2026-08-07 08:00", "a timestamp — the day is not the only thing being said"],
+  ];
+
+  describe.each(REFUSED)("POST /labor/attendance day=%j", (day, why) => {
+    it(`400s and writes nothing (${why})`, async () => {
+      const touched = { inserted: [] as Inserted[], updated: [] as Updated[], captured: [] as Captured[] };
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stub(touched) })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/labor/attendance",
+        payload: { worker_id: W1, day },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().message).toBe("day must be a YYYY-MM-DD calendar date");
+      expect(touched.inserted).toHaveLength(0);
+    });
+  });
+
+  describe.each(REFUSED)("POST /labor/attendance/checkout day=%j", (day, why) => {
+    it(`400s and writes nothing (${why})`, async () => {
+      const touched = { inserted: [] as Inserted[], updated: [] as Updated[], captured: [] as Captured[] };
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stub(touched) })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/labor/attendance/checkout",
+        payload: {
+          worker_id: W1,
+          day,
+          check_in_key: KEY,
+          checked_out_at: "2026-08-07T10:00:00.000Z",
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().message).toBe("day must be a YYYY-MM-DD calendar date");
+      expect(touched.updated).toHaveLength(0);
+    });
+  });
+
+  it("keeps `day is required` distinct from `day is not a date` — an empty day is the caller omitting a field, not misspelling one", async () => {
+    const touched = { inserted: [] as Inserted[], updated: [] as Updated[], captured: [] as Captured[] };
+    for (const payload of [{ worker_id: W1 }, { worker_id: W1, day: "   " }]) {
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stub(touched) })
+      ).inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().message).toBe("day is required");
+    }
+    expect(touched.inserted).toHaveLength(0);
+  });
+
+  it("ACCEPTS the shape every caller in the tree already sends, including a leap day — the refusals above narrow nothing that exists", async () => {
+    for (const day of ["2026-08-07", "2024-02-29", "2000-02-29", "1999-01-01", "9999-12-31"]) {
+      const touched = { inserted: [] as Inserted[], updated: [] as Updated[], captured: [] as Captured[] };
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stub(touched) })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/labor/attendance",
+        // No idempotency_key: the stub answers every attendance read with its one
+        // seeded row, so a key would resolve the B-307 replay branch and never insert.
+        payload: { worker_id: W1, day },
+      });
+      expect(res.statusCode).toBe(201);
+      const v = touched.inserted.find((i) => i.table === attendances)!.values as Record<string, unknown>;
+      expect(v.day).toBe(day); // stored VERBATIM — no normalisation, no reinterpretation
+    }
+  });
+
+  it("REFUSES 2023-02-29 and 2100-02-29 — the calendar check is a real leap rule, not a 28/29 guess (2100 is divisible by 4 and is NOT a leap year)", async () => {
+    for (const day of ["2023-02-29", "2100-02-29", "2026-00-10", "2026-13-01", "2026-04-31", "0000-01-01"]) {
+      const touched = { inserted: [] as Inserted[], updated: [] as Updated[], captured: [] as Captured[] };
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stub(touched) })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/labor/attendance",
+        payload: { worker_id: W1, day },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(touched.inserted).toHaveLength(0);
+    }
+  });
+
+  it("BOUNDS THE SHAPE, NOT THE DAY — on the ROSTER door a 2121 day, a 1999 day and a 2199 day are still 201; WHICH day is B-337's separate gate", async () => {
+    // The point of stating it as a test: this validator is not the window. These stubs
+    // hold finance.create, so they take door 1 — which B-337 deliberately leaves
+    // unbounded (a supervisor records last month during a payroll correction). The
+    // SELF-SERVICE answers for the same three days are in the B-337 describe below.
+    for (const day of ["2121-01-01", "1999-01-01", "2199-12-31"]) {
+      const touched = { inserted: [] as Inserted[], updated: [] as Updated[], captured: [] as Captured[] };
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stub(touched) })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/labor/attendance",
+        payload: { worker_id: W1, day },
+      });
+      expect(res.statusCode).toBe(201);
+    }
+  });
+
+  it("a malformed day never reaches the `attendance` table AT ALL — no read and no insert, which is where the 22007 came from", async () => {
+    const touched = { inserted: [] as Inserted[], updated: [] as Updated[], captured: [] as Captured[] };
+    await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stub(touched) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: "not-a-date" },
+    });
+    // Only the gate's own reads (user/role/worker for authorizeAttendanceWrite) may
+    // have run. Both halves are load-bearing and both die on a revert: without the
+    // parser this request INSERTS, and live that insert is the 500.
+    expect(touched.captured.filter((c) => c.table === attendances)).toHaveLength(0);
+    expect(touched.inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// B-337 (Wei 2026-08-08, option ก) — WHICH day, not just what shape
+// ===========================================================================
+// The finding: at 0de5782 the payee named his own dates. Live, as the field-check-in
+// persona himself, `2121-01-01..10` were ten 201s and POST /labor/payroll
+// {period:"2121-01"} paid 5000 on a 500/day worker — payroll SUMS rows, so N dates
+// were N days' pay behind one clean balanced JV.
+//
+// THE CLOCK IS DRIVEN, NOT OBSERVED. Every test here pins SEED_FROZEN_NOW, so the
+// window's edges are exact dates rather than "roughly a week ago" — and pinning it is
+// itself an assertion: the handler reads businessNowMs() and NOT `new Date()`, because
+// a handler on the raw clock would ignore the freeze and these dates would drift.
+//
+// The window is [today - 7 … today] on the BUSINESS calendar (UTC+07:00). Its number
+// comes from pototype/labor.jsx:208 — "งวดสัปดาห์ … · 7 วัน", the labor pay period —
+// so one full pay week of offline queue-drain lag is covered.
+// ===========================================================================
+describe("B-337: the SELF-SERVICE day is bound to the business clock", () => {
+  /** 09:00 in Bangkok on 2026-08-08 → business today = 2026-08-08. */
+  const FROZEN = "2026-08-08T02:00:00.000Z";
+  const TODAY = "2026-08-08";
+  const EDGE = "2026-08-01"; // today − 7: the last day a week-late drain may still post
+  const STALE = "2026-07-31"; // today − 8
+  const TOMORROW = "2026-08-09";
+
+  const freeze = (iso: string): void => {
+    process.env.SEED_FROZEN_NOW = iso;
+  };
+  afterEach(() => {
+    delete process.env.SEED_FROZEN_NOW;
+  });
+
+  const stub = (opts: { selfService: boolean; inserted: Inserted[]; row?: unknown[] }) =>
+    writeStub({
+      rows: [
+        [users, userSource()],
+        [roles, [roleRow(!opts.selfService, false)]],
+        [
+          workers,
+          workerSource({
+            self: opts.selfService ? [linkedWorker(W1, "u-0")] : [],
+            byId: [linkedWorker(W1, opts.selfService ? "u-0" : null)],
+          }),
+        ],
+        [attendances, opts.row ?? []],
+      ],
+      inserted: opts.inserted,
+    });
+
+  const post = async (
+    payload: Record<string, unknown>,
+    selfService = true,
+  ): Promise<{ status: number; message: string; inserted: Inserted[] }> => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stub({ selfService, inserted }) })
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance", payload });
+    return { status: res.statusCode, message: String(res.json().message ?? ""), inserted };
+  };
+
+  it("REFUSES the reproduction — the ten fabricated days, the far-future day and the ancient one, all 400 with nothing written", async () => {
+    freeze(FROZEN);
+    for (let d = 1; d <= 10; d += 1) {
+      const day = `2121-01-${String(d).padStart(2, "0")}`;
+      const { status, inserted } = await post({ worker_id: W1, day });
+      expect(status, day).toBe(400);
+      expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+    }
+    expect((await post({ worker_id: W1, day: "2199-12-31" })).status).toBe(400);
+    expect((await post({ worker_id: W1, day: "1999-01-01" })).status).toBe(400);
+  });
+
+  it("ACCEPTS today, and ACCEPTS the far edge — a check-in queued a week ago with no signal must still post when the drain finally runs, or the 4xx dead-letters a real day's pay", async () => {
+    freeze(FROZEN);
+    for (const day of [TODAY, EDGE, "2026-08-04"]) {
+      const { status, inserted } = await post({ worker_id: W1, day });
+      expect(status, day).toBe(201);
+      const v = inserted.find((i) => i.table === attendances)!.values as Record<string, unknown>;
+      expect(v.day).toBe(day);
+    }
+  });
+
+  it("REFUSES one day past the edge, and refuses TOMORROW — with DIFFERENT messages, because a stale queue and a fabrication are different things to diagnose", async () => {
+    freeze(FROZEN);
+    const stale = await post({ worker_id: W1, day: STALE });
+    expect(stale.status).toBe(400);
+    expect(stale.message).toBe("day is more than 7 days old — a supervisor must record it");
+    expect(stale.inserted).toHaveLength(0);
+
+    const future = await post({ worker_id: W1, day: TOMORROW });
+    expect(future.status).toBe(400);
+    expect(future.message).toBe("day cannot be in the future");
+    expect(future.inserted).toHaveLength(0);
+  });
+
+  it("leaves DOOR 1 unbounded — a supervisor still records last month, and 2121 too: the window guards the door B-332 opened onto payroll, not the roster", async () => {
+    freeze(FROZEN);
+    for (const day of ["2121-01-01", "1999-01-01", "2026-06-15", TOMORROW]) {
+      const { status } = await post({ worker_id: W1, day }, false);
+      expect(status, `roster ${day}`).toBe(201);
+    }
+  });
+
+  it("judges the day on the BUSINESS calendar, not UTC — at 05:00 in Bangkok the date is already the 9th, and refusing that man's check-in as `future` would be a permanent dead-letter", async () => {
+    // 22:00Z on the 8th is 05:00 on the 9th in Bangkok. This is the test that dies if
+    // the +07:00 offset is dropped: a UTC-naive reading calls the 9th tomorrow, and
+    // Thai site work starts at 07:30 (pototype/mobile-screens.jsx — the board's first
+    // entry) with the check-in button at 08:00, which is 01:00Z.
+    freeze("2026-08-08T22:00:00.000Z");
+    expect((await post({ worker_id: W1, day: "2026-08-09" })).status).toBe(201);
+    // …and the window slid with it: the 1st is now 8 days back and refused.
+    expect((await post({ worker_id: W1, day: "2026-08-01" })).status).toBe(400);
+  });
+
+  it("reads the CLOCK, not the caller's own checked_in_at — binding the bound to a client value the fabricator supplies would be no bound at all", async () => {
+    freeze(FROZEN);
+    const { status, message } = await post({
+      worker_id: W1,
+      day: "2121-01-01",
+      // A perfectly plausible instant for a day that is a century away.
+      checked_in_at: `${TODAY}T01:00:00.000Z`,
+    });
+    expect(status).toBe(400);
+    expect(message).toBe("day cannot be in the future");
+  });
+
+  it("does NOT bound the CHECK-OUT door — the row it closes already passed the window when it was created, and a week-late drain closes a day it was allowed to open", async () => {
+    freeze(FROZEN);
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: writeStub({
+          rows: [
+            [users, userSource()],
+            [roles, [roleRow(false, false)]],
+            [workers, workerSource({ self: [linkedWorker(W1, "u-0")], byId: [linkedWorker(W1, "u-0")] })],
+            [
+              attendances,
+              [
+                {
+                  id: "at-1", companyId: COMPANY, workerId: W1, day: STALE, ot: "0.00",
+                  status: "full", dayFraction: "1", ccId: null, idempotencyKey: "ck-old",
+                  checkedInAt: null, checkedOutAt: null, createdAt: D, updatedAt: D,
+                },
+              ],
+            ],
+          ],
+          updated,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance/checkout",
+      payload: {
+        worker_id: W1,
+        day: STALE,
+        check_in_key: "ck-old",
+        checked_out_at: `${STALE}T10:00:00.000Z`,
+      },
     });
     expect(res.statusCode).toBe(200);
     expect(updated.filter((u) => u.table === attendances)).toHaveLength(1);

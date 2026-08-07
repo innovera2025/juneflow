@@ -84,6 +84,7 @@ import {
   violatedConstraint,
   withDocNoRetry,
 } from "./gl-post.js";
+import { businessNowMs } from "../business-clock.js";
 
 type WorkerRow = typeof workers.$inferSelect;
 type UserRow = typeof users.$inferSelect;
@@ -623,6 +624,147 @@ function optCoordPair(
   return { ok: true, value: { lat: latRaw.toFixed(6), lng: lngRaw.toFixed(6) } };
 }
 
+/** `YYYY-MM-DD`, shape only — the calendar check is separate (13-45 matches this). */
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/** Proleptic Gregorian, the calendar Postgres `date` uses. No wall clock is read. */
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+const isLeapYear = (y: number): boolean => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
+/**
+ * B-332 gate-4.5 finding 2 — the REQUIRED calendar `day`, on both attendance doors.
+ *
+ * `attendance.day` is a Postgres `date` column and the string went STRAIGHT to it, so
+ * the wire format was "whatever Postgres' date parser accepts" and anything it did not
+ * accept raised 22007/22008 and surfaced as a 500. Measured live at 0de5782, on BOTH
+ * new doors the phone drives:
+ *   POST /labor/attendance           day="not-a-date" → 500 · "2121-13-45" → 500
+ *   POST /labor/attendance/checkout  day="not-a-date" → 500 · "2121-13-45" → 500
+ * That is the rule optCoordPair states two functions above, unapplied to the one field
+ * that is part of the row's ADDRESS: the SyncProcessor dead-letters a 4xx permanently
+ * but DEFERS a 5xx and STOPS the drain, so ONE malformed queued op wedges every write
+ * behind it — for that worker, indefinitely, with no error the office can see.
+ *
+ * STRICT `YYYY-MM-DD`, and the ISO INSTANT IS REFUSED WITH THE REST — the decision, not
+ * an accident. `"2121-01-01T00:00:00Z"` used to be silently coerced to 2121-01-01 and
+ * 201'd. Accepting a second spelling means the stored day is decided by the DB rather
+ * than by the request, and the same laxity accepted, all measured live at 0de5782:
+ *   - `"01/02/2121"` → 201 stored as 2121-01-02 — AMBIGUOUS: the identical string means
+ *     1 Feb under a DateStyle of DMY. The day a man is paid for must not depend on a
+ *     session GUC;
+ *   - `"today"` → 201 stored as the SERVER's current date — a relative keyword resolved
+ *     against a clock the caller never named;
+ *   - `"infinity"` → 201, and `day = infinity` is a row no period query will ever sum
+ *     and no screen can show.
+ * One spelling is the only rule that can be checked at the edge, and it is the spelling
+ * every caller in the tree already sends (the live specs, the api tests, the generated
+ * Dart client's callers — the web has never POSTed attendance at all), so nothing that
+ * exists today changes shape. The pair 400s instead: honest, and dead-lettered.
+ *
+ * WHAT THIS DOES NOT DO, said plainly because the neighbouring comment got this wrong
+ * once already: it bounds the SHAPE of `day`, not WHICH day. On its own, `2121-01-01`,
+ * `1999-01-01` and `2199-12-31` all pass it. WHICH day is a separate, later gate —
+ * `selfServiceDayRefusal` (B-337, ruled ก by Wei on 2026-08-08) — and it applies to the
+ * self-service door only. This function stays deliberately CLOCK-FREE so the two cannot
+ * be confused: a shape error is the same answer at any hour, in any zone, forever.
+ */
+function requireCalendarDay(body: Record<string, unknown>): Parsed<string> {
+  const raw = str(pick(body, "day")).trim();
+  if (!raw) return { ok: false, message: "day is required" };
+  const fail = { ok: false, message: "day must be a YYYY-MM-DD calendar date" } as const;
+  if (!DAY_PATTERN.test(raw)) return fail;
+  const year = Number(raw.slice(0, 4));
+  const month = Number(raw.slice(5, 7));
+  const dayOfMonth = Number(raw.slice(8, 10));
+  // A DATE THAT EXISTS, not just four-two-two digits: 2121-13-45 and 2121-02-30 both
+  // match the pattern and are not days. Year 0 is excluded — there is none (1 BC is
+  // followed by AD 1), and Postgres rejects it too.
+  if (year < 1 || month < 1 || month > 12) return fail;
+  const max = month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1]!;
+  if (dayOfMonth < 1 || dayOfMonth > max) return fail;
+  return { ok: true, value: raw };
+}
+
+// ---------------------------------------------------------------------------
+// B-337 (Wei 2026-08-08, option ก) — bind the SELF-SERVICE `day` to the business clock
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THIS CLOSES, measured live at 0de5782 as the field-check-in persona
+// himself (`finance.create = false`): `2121-01-01..10 → 201 ×10`, `2199-12-31 → 201`,
+// `1999-01-01 → 201`, then `POST /labor/payroll {period:"2121-01"}` → **5000** on a
+// 500/day worker. `day` was the payee's to name, and payroll pays by SUMMING rows, so
+// N dates were N days' pay — behind one clean balanced JV that jv_source_doc_uq cannot
+// see. B-336 closed the STACKING axis (many rows on ONE day); this closes the DAY axis.
+//
+// THE WINDOW, AND WHERE ITS NUMBER COMES FROM — the tree, not taste:
+//   - UPPER BOUND = today. Not defensible under any reading to accept a day that has
+//     not happened; the screen is a GPS check-in at the site, now (the prototype has no
+//     date control at all — one "Check-in · 08:00" button and "งานมอบหมายวันนี้").
+//   - LOWER BOUND = 7 days. `pototype/labor.jsx:208` and `:197` state the labor pay
+//     period twice: "งวดสัปดาห์ 29 มิ.ย. – 5 ก.ค. 2569" and the KPI "N คน · 7 วัน" —
+//     the payroll cycle IS a 7-day week, so one full pay week of queue-drain lag is
+//     covered and no genuine field day is lost inside a period that is still open.
+//
+// WHY NOT TODAY-ONLY, which is the tightest reading of the screen: the phone writes
+// through an offline queue with NO expiry and NO timer (sync_processor.dart level (a),
+// B-242) — it drains on enqueue, screen-mount/app-resume and manual retry, so a
+// check-in taken on a Friday with no signal posts whenever the drain next succeeds,
+// which can be days later. A today-only rule would answer that genuine day with a 4xx,
+// and a 4xx is a PERMANENT dead-letter: the man simply never gets paid for it. That is
+// the failure this whole slice exists to prevent, arriving from the other side.
+//
+// THE CALENDAR IS THE BUSINESS ONE, not UTC. `businessNowMs()` returns an instant, and
+// which DATE that instant falls on depends on the zone: at 06:00 in Bangkok it is still
+// yesterday in UTC, so a UTC "today" would refuse a genuine early-morning check-in as
+// FUTURE (the prototype's own board starts at 07:30). Thailand is UTC+07:00 all year
+// with no DST, so a fixed offset is exact rather than an approximation — and the
+// product is Thailand-only by construction (THB, TaxEngine.thailand, the Thai dict).
+// A tenant outside +07:00 would need this as a company setting; recorded on B-337.
+//
+// DOOR 1 IS NOT BOUNDED BY THIS. A supervisor holding finance.create legitimately
+// records last month's attendance during a payroll correction, so the window is applied
+// ONLY where `authz.selfService` is true — the door B-332 opened onto payroll.
+//
+// A 400, never a 500 — the rule optCoordPair states above, for the third time in this
+// file: the phone must dead-letter the rejection honestly instead of deferring it and
+// wedging every write queued behind it.
+
+/** Thailand is UTC+07:00 year-round (no DST) — a fixed offset, not an approximation. */
+const BUSINESS_UTC_OFFSET_MINUTES = 7 * 60;
+/** The labor pay period: `pototype/labor.jsx:208` "งวดสัปดาห์ … · 7 วัน". */
+const SELF_SERVICE_BACKDATE_DAYS = 7;
+const MS_PER_DAY = 86_400_000;
+
+/** Whole days since the epoch for a validated YYYY-MM-DD (no clock, no zone). */
+function epochDayOf(day: string): number {
+  const year = Number(day.slice(0, 4));
+  const at = new Date(Date.UTC(year, Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))));
+  // Date.UTC maps years 0-99 onto 1900-1999; undo it so a year-0075 day is not read
+  // as 1975. Such a day is refused either way (far too old), but for the right reason.
+  if (year < 100) at.setUTCFullYear(year);
+  return Math.floor(at.getTime() / MS_PER_DAY);
+}
+
+/** TODAY on the business calendar, as whole days since the epoch. */
+function businessEpochDay(): number {
+  return Math.floor((businessNowMs() + BUSINESS_UTC_OFFSET_MINUTES * 60_000) / MS_PER_DAY);
+}
+
+/**
+ * B-337 — the self-service window. Returns the rejection message, or null to accept.
+ * Reads ONLY `businessNowMs()`: never `new Date()` (which SEED_FROZEN_NOW could not
+ * align) and never the request's own `checked_in_at`, which is precisely the value a
+ * fabricator controls — binding the bound to the client's clock would be no bound.
+ */
+function selfServiceDayRefusal(day: string): string | null {
+  const today = businessEpochDay();
+  const asked = epochDayOf(day);
+  if (asked > today) return "day cannot be in the future";
+  if (today - asked > SELF_SERVICE_BACKDATE_DAYS) {
+    return `day is more than ${SELF_SERVICE_BACKDATE_DAYS} days old — a supervisor must record it`;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // POST /labor/attendance — B-307 idempotency (client key + partial index + replay)
 // ---------------------------------------------------------------------------
@@ -847,8 +989,18 @@ async function createLaborAttendance(
   if (!authz.ok) return reply;
 
   if (!workerId) return badRequest(reply, "worker_id is required");
-  const day = str(pick(body, "day")).trim();
-  if (!day) return badRequest(reply, "day is required");
+  // B-332 gate-4.5 finding 2: SHAPE-checked here rather than left to the date column —
+  // a malformed day was a 500, and a 500 wedges the phone's whole offline drain.
+  const parsedDay = requireCalendarDay(body);
+  if (!parsedDay.ok) return badRequest(reply, parsedDay.message);
+  const day = parsedDay.value;
+  // B-337 (Wei = ก): and on the SELF-SERVICE door it must be a day the SERVER's clock
+  // agrees is plausible — today, or inside one pay week of queue-drain lag. Door 1 is
+  // deliberately untouched: a supervisor still records last month during a correction.
+  if (authz.selfService) {
+    const refusal = selfServiceDayRefusal(day);
+    if (refusal) return badRequest(reply, refusal);
+  }
 
   const status = has(body, "status")
     ? str(pick(body, "status")).trim() || "full"
@@ -868,7 +1020,28 @@ async function createLaborAttendance(
   // assurance that the new door is pay-neutral. It is not. Door 2 is a
   // payout-INCREASING capability handed to the person who receives the money: one
   // extra accepted row is one extra day paid. Refusing OT narrows that capability; it
-  // does not make it safe. What bounds it is the duplicate pre-check below.
+  // does not make it safe.
+  //
+  // AND WHAT BOUNDS IT IS NOT WHAT THIS COMMENT USED TO CLAIM. It said "the duplicate
+  // pre-check below" — which is the SAME false-bound class as the RETRACTED reason 3 it
+  // was written to correct, one axis over. The pre-check (and B-336's index behind it)
+  // bound DUPLICATES OF A DAY: at most one uncosted row per worker per `day`. They said
+  // nothing about WHICH days or HOW MANY. Measured live at 0de5782 with the index
+  // present, as the field-check-in persona himself (finance.create = false):
+  // 2121-01-01..10 → 201 ×10, 2199-12-31 → 201, 1999-01-01 → 201, and POST
+  // /labor/payroll {period:"2121-01"} → amount 5000 on a 500/day worker — the same
+  // arithmetic and the same invisibility as the 5× the earlier gate called CRITICAL,
+  // and NOT pre-existing (before B-332 no caller without finance.create could write
+  // attendance at all).
+  //
+  // TWO SEPARATE BOUNDS NOW HOLD IT, and the distinction is the point:
+  //   - HOW MANY ROWS PER DAY — the duplicate pre-check + attendance_self_day_uq (B-336);
+  //   - WHICH DAYS — selfServiceDayRefusal above (B-337, Wei = ก): the business clock,
+  //     today back to one 7-day pay week, self-service door only.
+  // Neither substitutes for the other, and OT is narrowed by neither: refusing OT still
+  // only narrows the capability, it does not make the door safe. Named individually
+  // rather than gestured at, because an unearned "what bounds it" is how the first
+  // version of this comment shipped.
   if (authz.selfService && otRaw != null && otRaw > 0) {
     return badRequest(reply, "overtime cannot be recorded on a self-service check-in");
   }
@@ -1054,8 +1227,12 @@ async function checkoutLaborAttendance(
   if (!authz.ok) return reply;
 
   if (!workerId) return badRequest(reply, "worker_id is required");
-  const day = str(pick(body, "day")).trim();
-  if (!day) return badRequest(reply, "day is required");
+  // B-332 gate-4.5 finding 2: the SAME parser as the create path — `day` is one third
+  // of the row's address, so the two doors cannot disagree about what a day is. Both
+  // 500'd on a malformed value before this, and the phone queues writes against BOTH.
+  const parsedDay = requireCalendarDay(body);
+  if (!parsedDay.ok) return badRequest(reply, parsedDay.message);
+  const day = parsedDay.value;
 
   // The check-in's client key — the address of the row to close. Reuses the SHARED
   // B-309 parser, so a present-but-non-string key is a 400 here exactly as it is on

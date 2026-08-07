@@ -75,6 +75,43 @@ const key = (suffix: string): string => `b332-${RUN}-${suffix}`;
 const YEAR = 2100 + Math.floor(Math.random() * 400);
 const DAY_RATE = 500;
 
+// ---------------------------------------------------------------------------
+// B-337 (Wei 2026-08-08, option ก) — THE SELF-SERVICE DAYS ARE REAL DAYS NOW
+// ---------------------------------------------------------------------------
+// Every SELF-SERVICE case below used to send a day in the randomised YEAR (2100-2499),
+// which is how it stayed re-runnable and how each payroll assertion covered only its
+// own rows. Wei's ruling makes a fabricated day a 400 on that door — that IS the
+// ruling — so those days now come from the server's own window instead. NOTHING that
+// any of those tests ASSERTS has changed; only the date they say it about.
+//
+// The ROSTER-door cases (LEGITIMATE #1/#2/#4, RECLASSIFIED, the constructed race, the
+// cross-tenant probe) keep their fabricated years deliberately: door 1 is NOT bounded
+// by the window, and their solo workers are what isolates them.
+//
+// Two consequences the fixtures now have to carry, both stated rather than hidden:
+//   1. RE-RUNNABILITY. Real days repeat, and attendance_self_day_uq (B-336) refuses a
+//      second uncosted row for a worker+day — so a second run on one stack would 409
+//      where the first got 201. The adopted worker's window is therefore cleared in
+//      beforeAll (raw SQL: there is no DELETE on attendance — B-335).
+//   2. PAYROLL ISOLATION. The window is 8 days, so the three fabricated MONTHS that
+//      used to separate the two money assertions no longer exist. Each money assertion
+//      gets its OWN worker linked to the Site Engineer for its duration instead, which
+//      is exactly as isolating and does not weaken what it proves.
+//
+// The window is mirrored from labor.ts rather than imported (this spec drives the API
+// black-box, over HTTP, and must not link its implementation).
+const BUSINESS_OFFSET_MS = 7 * 60 * 60_000; // Thailand, UTC+07:00 year-round, no DST
+const MS_PER_DAY = 86_400_000;
+const businessNow = (): number =>
+  process.env.SEED_FROZEN_NOW && Number.isFinite(Date.parse(process.env.SEED_FROZEN_NOW))
+    ? Date.parse(process.env.SEED_FROZEN_NOW)
+    : Date.now();
+/** The calendar date `agoDays` before the business today (0 = today). 0..7 are legal. */
+const windowDay = (agoDays: number): string =>
+  new Date(businessNow() + BUSINESS_OFFSET_MS - agoDays * MS_PER_DAY).toISOString().slice(0, 10);
+/** The payroll period (`YYYY-MM`) a window day falls in — the window can straddle one. */
+const periodOf = (day: string): string => day.slice(0, 7);
+
 liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=SERVER)", () => {
   let md: APIRequestContext; // Director — carries finance.create
   let site: APIRequestContext; // Site Engineer — finance perms are ALL false
@@ -139,7 +176,55 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
       "POST /labor/workers (unlinked)",
     );
     unlinkedWorkerId = String(unlinked.id);
+
+    // B-337: clear THIS worker's window so the run starts where the last one did.
+    // Scoped to the spec's own subject and to the 8 days the self-service door can
+    // even write — it touches no seeded row and no other worker. Skipped silently
+    // without DATABASE_URL; the self-service tests then simply require a fresh stack.
+    if (PG_URL) {
+      const pg = new Client({ connectionString: PG_URL });
+      await pg.connect();
+      try {
+        await pg.query("DELETE FROM attendance WHERE worker_id = $1 AND day >= $2", [
+          workerId,
+          windowDay(7),
+        ]);
+      } finally {
+        await pg.end();
+      }
+    }
   });
+
+  /**
+   * Run `body` with a FRESH worker linked to the Site Engineer, then put the original
+   * link back. worker_user_uq is 1:1 and there is no unlink endpoint, so the swap is
+   * raw SQL — the same reason the deactivation test below reaches for it. Used only
+   * where a payroll SUM must cover one test's rows and nothing else (B-337 collapsed
+   * the fabricated months that used to do that job).
+   */
+  async function withOwnLinkedWorker(
+    label: string,
+    body: (id: string) => Promise<void>,
+  ): Promise<void> {
+    const pg = new Client({ connectionString: PG_URL });
+    await pg.connect();
+    let ownId = "";
+    try {
+      await pg.query("UPDATE worker SET user_id = NULL WHERE id = $1", [workerId]);
+      const own = await okJson(
+        await md.post("/api/v1/labor/workers", {
+          data: { name: `B-332 ${label} ${RUN}`, day_rate: DAY_RATE, user_id: siteUserId },
+        }),
+        `POST /labor/workers (${label})`,
+      );
+      ownId = String(own.id);
+      await body(ownId);
+    } finally {
+      if (ownId) await pg.query("UPDATE worker SET user_id = NULL WHERE id = $1", [ownId]);
+      await pg.query("UPDATE worker SET user_id = $2 WHERE id = $1", [workerId, siteUserId]);
+      await pg.end();
+    }
+  }
 
   test.beforeEach(() => {
     test.skip(
@@ -189,7 +274,7 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   // -------------------------------------------------------------------------
 
   test("a Site Engineer can clock HIMSELF in with no finance.create — and still cannot clock in anybody else", async () => {
-    const day = `${YEAR}-03-04`;
+    const day = windowDay(0); // B-337: today, the shape the screen actually produces
     const self = await site.post("/api/v1/labor/attendance", {
       data: { worker_id: workerId, day, idempotency_key: key("self") },
     });
@@ -204,7 +289,7 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   });
 
   test("self-service may not assert OVERTIME — the 1.5× premium is a supervisor judgement, and the refusal is loud, not a silent zero", async () => {
-    const day = `${YEAR}-03-05`;
+    const day = windowDay(1);
     const res = await site.post("/api/v1/labor/attendance", {
       data: { worker_id: workerId, day, ot: 4, idempotency_key: key("ot") },
     });
@@ -234,30 +319,33 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   // -------------------------------------------------------------------------
 
   test("FIVE self-service check-ins for one day are ONE row and ONE day's pay — the 5× payout, closed", async () => {
-    const day = `${YEAR}-01-02`;
-    const period = `${YEAR}-01`;
+    test.skip(!PG_URL, "needs DATABASE_URL: B-337 leaves no fabricated month to isolate the SUM");
+    const day = windowDay(2);
+    const period = periodOf(day);
 
-    // Exactly the reviewer's probe: the payee, five taps, NO idempotency key (a key
-    // would not have mattered — a screen remount mints a new one, see below).
-    const statuses: number[] = [];
-    for (let i = 0; i < 5; i += 1) {
-      const res = await site.post("/api/v1/labor/attendance", {
-        data: { worker_id: workerId, day },
-      });
-      statuses.push(res.status());
-    }
-    expect(statuses).toEqual([201, 409, 409, 409, 409]);
+    await withOwnLinkedWorker("five-taps", async (subject) => {
+      // Exactly the reviewer's probe: the payee, five taps, NO idempotency key (a key
+      // would not have mattered — a screen remount mints a new one, see below).
+      const statuses: number[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        const res = await site.post("/api/v1/labor/attendance", {
+          data: { worker_id: subject, day },
+        });
+        statuses.push(res.status());
+      }
+      expect(statuses).toEqual([201, 409, 409, 409, 409]);
 
-    const rows = await rowsFor(workerId, day);
-    expect(rows).toHaveLength(1);
-    expect(rows.reduce((s, r) => s + Number(r.day_fraction), 0)).toBe(1);
+      const rows = await rowsFor(subject, day);
+      expect(rows).toHaveLength(1);
+      expect(rows.reduce((s, r) => s + Number(r.day_fraction), 0)).toBe(1);
 
-    // THE money assertion. Five accepted rows paid 5 × DAY_RATE here before the guard.
-    const payroll = await okJson(
-      await md.post("/api/v1/labor/payroll", { data: { worker_id: workerId, period } }),
-      "POST /labor/payroll",
-    );
-    expect(payroll.amount).toBe(DAY_RATE);
+      // THE money assertion. Five accepted rows paid 5 × DAY_RATE here before the guard.
+      const payroll = await okJson(
+        await md.post("/api/v1/labor/payroll", { data: { worker_id: subject, period } }),
+        "POST /labor/payroll",
+      );
+      expect(payroll.amount).toBe(DAY_RATE);
+    });
   });
 
   // B-336 — THE CONCURRENT CLASS. THE ONLY TESTS IN THE REPOSITORY THAT DIE WHEN
@@ -283,60 +371,112 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   //
   // FLAKE-HONEST: the race is probabilistic, so a PASS on one run is weak evidence and
   // a FAIL is strong evidence. Two widths trade a little runtime for that asymmetry.
-  for (const n of [2, 10]) {
-    test(`CONCURRENT — a burst of ${n} simultaneous self-service check-ins is ONE row and ONE day's pay (B-336)`, async () => {
-      const day = `${YEAR}-02-${String(n).padStart(2, "0")}`;
+  //
+  // B-337 FIXTURE NOTE: these four share ONE worker of their own, linked to the Site
+  // Engineer for the group's duration, because the money test at the end sums a PERIOD
+  // and the ruling left no fabricated month to separate it from the rest of the file.
+  // The three bursts are otherwise UNCHANGED — same widths, same absence of a key, same
+  // build-then-await construction, same assertions.
+  test.describe("B-336 the concurrent class", () => {
+    let burstWorker = "";
+    let burstDays: string[] = [];
+    let unlink: (() => Promise<void>) | null = null;
 
-      // Built first, awaited together: a map that awaited INSIDE would serialise them
-      // and the test would pass against the very defect it exists to catch.
-      const inFlight = [];
-      for (let i = 0; i < n; i += 1) {
-        inFlight.push(site.post("/api/v1/labor/attendance", { data: { worker_id: workerId, day } }));
-      }
-      const statuses = (await Promise.all(inFlight)).map((r) => r.status());
-
-      // EXACTLY ONE 201; every other caller refused, and refused with a 4xx it can act
-      // on rather than a 5xx it defers.
-      expect(statuses.filter((s) => s === 201)).toHaveLength(1);
-      expect(statuses.filter((s) => s === 409)).toHaveLength(n - 1);
-      expect(await rowsFor(workerId, day)).toHaveLength(1);
+    test.beforeAll(async () => {
+      if (rateLimited || !PG_URL) return;
+      const pg = new Client({ connectionString: PG_URL });
+      await pg.connect();
+      await pg.query("UPDATE worker SET user_id = NULL WHERE id = $1", [workerId]);
+      const own = await okJson(
+        await md.post("/api/v1/labor/workers", {
+          data: { name: `B-332 burst ${RUN}`, day_rate: DAY_RATE, user_id: siteUserId },
+        }),
+        "POST /labor/workers (burst subject)",
+      );
+      burstWorker = String(own.id);
+      // Three days inside ONE payroll period, so the money assertion still covers all
+      // three bursts. The window can straddle a month end, so they are picked, not
+      // assumed: the offset with the most window days in its own month wins.
+      const all = [0, 1, 2, 3, 4, 5, 6, 7].map(windowDay);
+      const newest = all.filter((d) => periodOf(d) === periodOf(all[0]!));
+      const oldest = all.filter((d) => periodOf(d) === periodOf(all[7]!));
+      // 8 days across at most 2 months, so one side always holds at least 4.
+      burstDays = (newest.length >= 3 ? newest : oldest).slice(0, 3);
+      expect(burstDays).toHaveLength(3);
+      unlink = async () => {
+        await pg.query("UPDATE worker SET user_id = NULL WHERE id = $1", [burstWorker]);
+        await pg.query("UPDATE worker SET user_id = $2 WHERE id = $1", [workerId, siteUserId]);
+        await pg.end();
+      };
     });
-  }
 
-  test("CONCURRENT — the burst does not cost the offline REPLAY its 201: the same key in flight four times still resolves to one row, for every caller", async () => {
-    // The case where BOTH indexes are violated by one INSERT. Postgres names only one
-    // of them, so a catch that dispatched on the constraint NAME before resolving the
-    // caller's own key could answer 409 here — and the phone DEAD-LETTERS a 4xx, which
-    // silently loses this worker's day. Measured on PG 16 the name that arrives is
-    // attendance_idempotency_uq (relation index OID order), which is not a contract, so
-    // this asserts the OUTCOME rather than the name.
-    const day = `${YEAR}-02-20`;
-    const payload = { worker_id: workerId, day, idempotency_key: key("burst-replay") };
-    const inFlight = [];
-    for (let i = 0; i < 4; i += 1) {
-      inFlight.push(site.post("/api/v1/labor/attendance", { data: payload }));
+    test.afterAll(async () => {
+      if (unlink) await unlink();
+    });
+
+    test.beforeEach(() => {
+      test.skip(!PG_URL, "needs DATABASE_URL: B-337 leaves no fabricated month to isolate the SUM");
+    });
+
+    for (const [i, n] of [2, 10].entries()) {
+      test(`CONCURRENT — a burst of ${n} simultaneous self-service check-ins is ONE row and ONE day's pay (B-336)`, async () => {
+        const day = burstDays[i]!;
+
+        // Built first, awaited together: a map that awaited INSIDE would serialise them
+        // and the test would pass against the very defect it exists to catch.
+        const inFlight = [];
+        for (let j = 0; j < n; j += 1) {
+          inFlight.push(
+            site.post("/api/v1/labor/attendance", { data: { worker_id: burstWorker, day } }),
+          );
+        }
+        const statuses = (await Promise.all(inFlight)).map((r) => r.status());
+
+        // EXACTLY ONE 201; every other caller refused, and refused with a 4xx it can act
+        // on rather than a 5xx it defers.
+        expect(statuses.filter((s) => s === 201)).toHaveLength(1);
+        expect(statuses.filter((s) => s === 409)).toHaveLength(n - 1);
+        expect(await rowsFor(burstWorker, day)).toHaveLength(1);
+      });
     }
-    const settled = await Promise.all(inFlight);
-    expect(settled.map((r) => r.status())).toEqual([201, 201, 201, 201]);
 
-    const ids = new Set(await Promise.all(settled.map(async (r) => String((await r.json()).id))));
-    expect(ids.size).toBe(1); // one row, handed back to every caller
-    expect(await rowsFor(workerId, day)).toHaveLength(1);
-  });
+    test("CONCURRENT — the burst does not cost the offline REPLAY its 201: the same key in flight four times still resolves to one row, for every caller", async () => {
+      // The case where BOTH indexes are violated by one INSERT. Postgres names only one
+      // of them, so a catch that dispatched on the constraint NAME before resolving the
+      // caller's own key could answer 409 here — and the phone DEAD-LETTERS a 4xx, which
+      // silently loses this worker's day. Measured on PG 16 the name that arrives is
+      // attendance_idempotency_uq (relation index OID order), which is not a contract, so
+      // this asserts the OUTCOME rather than the name.
+      const day = burstDays[2]!;
+      const payload = { worker_id: burstWorker, day, idempotency_key: key("burst-replay") };
+      const inFlight = [];
+      for (let i = 0; i < 4; i += 1) {
+        inFlight.push(site.post("/api/v1/labor/attendance", { data: payload }));
+      }
+      const settled = await Promise.all(inFlight);
+      expect(settled.map((r) => r.status())).toEqual([201, 201, 201, 201]);
 
-  test("the money after the bursts: three days recorded, three days paid — not the sixteen check-ins that were asked for", async () => {
-    // The three tests above requested 2 + 10 + 4 = 16 check-ins across three days in
-    // one period. Payroll SUMS rows, so this is where any leak surfaces as cash rather
-    // than as a row count.
-    const payroll = await okJson(
-      await md.post("/api/v1/labor/payroll", { data: { worker_id: workerId, period: `${YEAR}-02` } }),
-      "POST /labor/payroll",
-    );
-    expect(payroll.amount).toBe(DAY_RATE * 3);
+      const ids = new Set(await Promise.all(settled.map(async (r) => String((await r.json()).id))));
+      expect(ids.size).toBe(1); // one row, handed back to every caller
+      expect(await rowsFor(burstWorker, day)).toHaveLength(1);
+    });
+
+    test("the money after the bursts: three days recorded, three days paid — not the sixteen check-ins that were asked for", async () => {
+      // The three tests above requested 2 + 10 + 4 = 16 check-ins across three days in
+      // one period. Payroll SUMS rows, so this is where any leak surfaces as cash rather
+      // than as a row count.
+      const payroll = await okJson(
+        await md.post("/api/v1/labor/payroll", {
+          data: { worker_id: burstWorker, period: periodOf(burstDays[0]!) },
+        }),
+        "POST /labor/payroll",
+      );
+      expect(payroll.amount).toBe(DAY_RATE * 3);
+    });
   });
 
   test("a REMOUNT is caught where the idempotency key could not see it — a NEW key for the same worker+day is a DUPLICATE, not a replay", async () => {
-    const day = `${YEAR}-01-03`;
+    const day = windowDay(3);
     const first = await site.post("/api/v1/labor/attendance", {
       data: { worker_id: workerId, day, idempotency_key: key("remount-1") },
     });
@@ -354,12 +494,12 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   test("the guard is PER DAY, and a genuine replay still returns the original row — no legitimate case is refused", async () => {
     // A different day is ordinary work, not a duplicate.
     const nextDay = await site.post("/api/v1/labor/attendance", {
-      data: { worker_id: workerId, day: `${YEAR}-01-04` },
+      data: { worker_id: workerId, day: windowDay(4) },
     });
     expect(nextDay.status()).toBe(201);
 
     // And the B-307 replay path is untouched: same key twice → the ORIGINAL row, 201.
-    const day = `${YEAR}-01-05`;
+    const day = windowDay(5);
     const payload = { worker_id: workerId, day, idempotency_key: key("dup-replay") };
     const a = await site.post("/api/v1/labor/attendance", { data: payload });
     const b = await site.post("/api/v1/labor/attendance", { data: payload });
@@ -369,7 +509,7 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   });
 
   test("self-service may not assert a COST CENTRE — it is the duplicate guard's own escape hatch (one re-inflation per centre)", async () => {
-    const day = `${YEAR}-01-06`;
+    const day = windowDay(6);
     const ccs = rowsOf(await okJson(await md.get("/api/v1/cost-centers"), "GET /cost-centers"));
     test.skip(ccs.length === 0, "needs a seeded cost centre");
     const res = await site.post("/api/v1/labor/attendance", {
@@ -382,7 +522,7 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
 
   test("DEACTIVATING a worker revokes the new door — and does NOT revoke the supervisor's (B-332 gate-4.5 finding 4)", async () => {
     test.skip(!PG_URL, "needs DATABASE_URL — there is no PUT/PATCH on worker to flip `active`");
-    const day = `${YEAR}-01-07`;
+    const day = windowDay(7); // the FAR EDGE of the B-337 window
     const pg = new Client({ connectionString: PG_URL });
     await pg.connect();
     try {
@@ -412,108 +552,118 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   // -------------------------------------------------------------------------
 
   test("check-out stamps the SAME row: one row, one day's pay — a second row would have paid the day TWICE", async () => {
-    const day = `${YEAR}-04-01`;
-    const period = `${YEAR}-04`;
+    test.skip(!PG_URL, "needs DATABASE_URL: B-337 leaves no fabricated month to isolate the SUM");
+    // B-337: a real window day, on a worker of this test's own so the period SUM below
+    // still covers exactly these rows. Assertions unchanged.
+    const day = windowDay(0);
+    const period = periodOf(day);
     const k = key("pair");
+    await withOwnLinkedWorker("checkout-pair", async (workerId) => {
+      const inRes = await site.post("/api/v1/labor/attendance", {
+        data: {
+          worker_id: workerId,
+          day,
+          idempotency_key: k,
+          checked_in_at: `${day}T00:45:00.000Z`,
+          checkin_lat: 13.8076,
+          checkin_lng: 100.4519,
+        },
+      });
+      expect(inRes.status()).toBe(201);
+      const checkIn = await inRes.json();
+      expect(checkIn.checked_in_at).toBe(`${day}T00:45:00.000Z`);
+      expect(checkIn.checked_out_at).toBeNull();
 
-    const inRes = await site.post("/api/v1/labor/attendance", {
-      data: {
-        worker_id: workerId,
-        day,
-        idempotency_key: k,
-        checked_in_at: `${day}T00:45:00.000Z`,
-        checkin_lat: 13.8076,
-        checkin_lng: 100.4519,
-      },
+      const outRes = await site.post("/api/v1/labor/attendance/checkout", {
+        data: {
+          worker_id: workerId,
+          day,
+          check_in_key: k,
+          checked_out_at: `${day}T10:30:00.000Z`,
+          checkout_lat: 13.8077,
+          checkout_lng: 100.452,
+        },
+      });
+      expect(outRes.status()).toBe(200);
+      const closed = await outRes.json();
+      // THE assertion: the SAME row id came back, now carrying the check-out.
+      expect(closed.id).toBe(checkIn.id);
+      expect(closed.checked_out_at).toBe(`${day}T10:30:00.000Z`);
+      // Six decimals survive the round trip — the mobile formatter's exact precision.
+      expect(closed.checkin_lat).toBe(13.8076);
+      expect(closed.checkout_lng).toBe(100.452);
+
+      // ONE row for the day…
+      expect(await rowsFor(workerId, day)).toHaveLength(1);
+      // …and THIS is what makes it money: payroll SUMS ROWS, and day_fraction defaults
+      // to 1, so a check-out written as its own row would have paid 2.0 days here.
+      const payroll = await okJson(
+        await md.post("/api/v1/labor/payroll", { data: { worker_id: workerId, period } }),
+        "POST /labor/payroll",
+      );
+      expect(payroll.amount).toBe(DAY_RATE);
     });
-    expect(inRes.status()).toBe(201);
-    const checkIn = await inRes.json();
-    expect(checkIn.checked_in_at).toBe(`${day}T00:45:00.000Z`);
-    expect(checkIn.checked_out_at).toBeNull();
-
-    const outRes = await site.post("/api/v1/labor/attendance/checkout", {
-      data: {
-        worker_id: workerId,
-        day,
-        check_in_key: k,
-        checked_out_at: `${day}T10:30:00.000Z`,
-        checkout_lat: 13.8077,
-        checkout_lng: 100.452,
-      },
-    });
-    expect(outRes.status()).toBe(200);
-    const closed = await outRes.json();
-    // THE assertion: the SAME row id came back, now carrying the check-out.
-    expect(closed.id).toBe(checkIn.id);
-    expect(closed.checked_out_at).toBe(`${day}T10:30:00.000Z`);
-    // Six decimals survive the round trip — the mobile formatter's exact precision.
-    expect(closed.checkin_lat).toBe(13.8076);
-    expect(closed.checkout_lng).toBe(100.452);
-
-    // ONE row for the day…
-    expect(await rowsFor(workerId, day)).toHaveLength(1);
-    // …and THIS is what makes it money: payroll SUMS ROWS, and day_fraction defaults
-    // to 1, so a check-out written as its own row would have paid 2.0 days here.
-    const payroll = await okJson(
-      await md.post("/api/v1/labor/payroll", { data: { worker_id: workerId, period } }),
-      "POST /labor/payroll",
-    );
-    expect(payroll.amount).toBe(DAY_RATE);
   });
 
   test("a replayed check-out is idempotent (200, the original row); a DIFFERENT instant on a closed day is 409 and never overwrites", async () => {
-    const day = `${YEAR}-04-02`;
+    test.skip(!PG_URL, "needs DATABASE_URL: B-337 makes the check-in day a real one");
+    const day = windowDay(0); // B-337: a real window day, on this test's own worker
     const k = key("replay");
-    await okJson(
-      await site.post("/api/v1/labor/attendance", {
-        data: { worker_id: workerId, day, idempotency_key: k },
-      }),
-      "check-in",
-    );
-    const out = { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T10:00:00.000Z` };
+    await withOwnLinkedWorker("checkout-replay", async (subject) => {
+      await okJson(
+        await site.post("/api/v1/labor/attendance", {
+          data: { worker_id: subject, day, idempotency_key: k },
+        }),
+        "check-in",
+      );
+      const out = { worker_id: subject, day, check_in_key: k, checked_out_at: `${day}T10:00:00.000Z` };
 
-    const first = await site.post("/api/v1/labor/attendance/checkout", { data: out });
-    expect(first.status()).toBe(200);
-    // The SyncProcessor's at-least-once retry re-sends the identical instant.
-    const replay = await site.post("/api/v1/labor/attendance/checkout", { data: out });
-    expect(replay.status()).toBe(200);
-    expect((await replay.json()).id).toBe((await first.json()).id);
+      const first = await site.post("/api/v1/labor/attendance/checkout", { data: out });
+      expect(first.status()).toBe(200);
+      // The SyncProcessor's at-least-once retry re-sends the identical instant.
+      const replay = await site.post("/api/v1/labor/attendance/checkout", { data: out });
+      expect(replay.status()).toBe(200);
+      expect((await replay.json()).id).toBe((await first.json()).id);
 
-    const second = await site.post("/api/v1/labor/attendance/checkout", {
-      data: { ...out, checked_out_at: `${day}T18:00:00.000Z` },
+      const second = await site.post("/api/v1/labor/attendance/checkout", {
+        data: { ...out, checked_out_at: `${day}T18:00:00.000Z` },
+      });
+      expect(second.status()).toBe(409);
+      // The FIRST close is the record — a later request cannot rewrite when he left.
+      const [row] = await rowsFor(subject, day);
+      expect(row?.checked_out_at).toBe(`${day}T10:00:00.000Z`);
+      expect(await rowsFor(subject, day)).toHaveLength(1);
     });
-    expect(second.status()).toBe(409);
-    // The FIRST close is the record — a later request cannot rewrite when he left.
-    const [row] = await rowsFor(workerId, day);
-    expect(row?.checked_out_at).toBe(`${day}T10:00:00.000Z`);
-    expect(await rowsFor(workerId, day)).toHaveLength(1);
   });
 
   test("a check-out EARLIER than its own check-in is refused, and the row keeps its open state (B-332 gate-4.5 finding 6)", async () => {
-    const day = `${YEAR}-04-04`;
+    test.skip(!PG_URL, "needs DATABASE_URL: B-337 makes the check-in day a real one");
+    const day = windowDay(0); // B-337: a real window day, on this test's own worker
     const k = key("backwards");
-    await okJson(
-      await site.post("/api/v1/labor/attendance", {
-        data: { worker_id: workerId, day, idempotency_key: k, checked_in_at: `${day}T08:00:00.000Z` },
-      }),
-      "check-in for the backwards close",
-    );
+    await withOwnLinkedWorker("checkout-backwards", async (workerId) => {
+      await okJson(
+        await site.post("/api/v1/labor/attendance", {
+          data: { worker_id: workerId, day, idempotency_key: k, checked_in_at: `${day}T08:00:00.000Z` },
+        }),
+        "check-in for the backwards close",
+      );
     // The coordinates were range-checked from the start; the instant pair was not, so
     // this stored happily and answered 200 before the guard. 400 (not 409) matches how
     // a bad coordinate is refused — and a 5xx would wedge the phone's whole drain.
-    const backwards = await site.post("/api/v1/labor/attendance/checkout", {
-      data: { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T06:00:00.000Z` },
-    });
-    expect(backwards.status()).toBe(400);
-    expect((await backwards.json()).message).toMatch(/earlier than checked_in_at/i);
-    // Nothing was written: the day is still open, so the honest close below can happen.
-    const [open] = await rowsFor(workerId, day);
-    expect(open?.checked_out_at).toBeNull();
+      const backwards = await site.post("/api/v1/labor/attendance/checkout", {
+        data: { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T06:00:00.000Z` },
+      });
+      expect(backwards.status()).toBe(400);
+      expect((await backwards.json()).message).toMatch(/earlier than checked_in_at/i);
+      // Nothing was written: the day is still open, so the honest close below can happen.
+      const [open] = await rowsFor(workerId, day);
+      expect(open?.checked_out_at).toBeNull();
 
-    const honest = await site.post("/api/v1/labor/attendance/checkout", {
-      data: { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T17:00:00.000Z` },
+      const honest = await site.post("/api/v1/labor/attendance/checkout", {
+        data: { worker_id: workerId, day, check_in_key: k, checked_out_at: `${day}T17:00:00.000Z` },
+      });
+      expect(honest.status()).toBe(200);
     });
-    expect(honest.status()).toBe(200);
   });
 
   test("a check-out for a key that never checked in is an honest 404 — it does not create the row it failed to find", async () => {
@@ -685,7 +835,12 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
   // -------------------------------------------------------------------------
 
   test("B-307 REGRESSION — a replayed check-in still returns the ORIGINAL row after the new columns and the new gate land", async () => {
-    const day = `${YEAR}-06-01`;
+    // B-337: a real window day on the shared worker. The offsets this file hands the
+    // shared subject are distinct BY CONSTRUCTION — 0 clock-in · 1 OT (roster row) ·
+    // 2 here · 3-5 the duplicate guard · 6 cc (no row) · 7 deactivation (roster row) —
+    // because attendance_self_day_uq refuses a second uncosted row for a worker+day,
+    // so two tests sharing an offset would 409 the second one for the wrong reason.
+    const day = windowDay(2);
     const k = key("b307");
     const payload = {
       worker_id: workerId,
@@ -707,8 +862,9 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
 
   test("CONSTRUCTED RACE — a second writer holding an uncommitted check-out BLOCKS the API on the row lock, and the API then loses honestly", async () => {
     test.skip(!PG_URL, "needs DATABASE_URL to hold a colliding transaction open");
-    const day = `${YEAR}-07-01`;
+    const day = windowDay(0); // B-337: a real window day, on this test's own worker
     const k = key("race");
+    await withOwnLinkedWorker("race", async (workerId) => {
     const created = await okJson(
       await site.post("/api/v1/labor/attendance", {
         data: { worker_id: workerId, day, idempotency_key: k },
@@ -758,6 +914,7 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
     const rows = await rowsFor(workerId, day);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.checked_out_at).toBe(`${day}T09:00:00.000Z`);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -824,5 +981,130 @@ liveDescribe("B-332 field check-in schema bundle (G4, live seeded stack, money=S
     } finally {
       await pg.end();
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // H. A MALFORMED `day` (B-332 gate-4.5 finding 2)
+  // -------------------------------------------------------------------------
+  // The one place this can be proven. `attendance.day` is a Postgres `date` column
+  // and the string went straight to it, so the answer was decided by Postgres' date
+  // parser and NOT by any code a stub can exercise: at 0de5782 a malformed day was a
+  // 500 (22007/22008) on BOTH new doors, and `infinity` / `today` / an MDY date / an
+  // ISO instant were all accepted and coerced. The api suite can see neither half —
+  // it has no date column to raise the error and no parser to do the coercing.
+  //
+  // WHY THE 500 WAS THE SHARP END: the mobile SyncProcessor dead-letters a 4xx
+  // permanently but DEFERS a 5xx and STOPS the drain, so one malformed queued op
+  // wedges every write behind it for that worker, silently.
+
+  test("a malformed `day` is a 400 on BOTH doors, never a 500 — the shape that wedges the phone's offline drain", async () => {
+    for (const day of ["not-a-date", `${YEAR}-13-45`, `${YEAR}-02-30`]) {
+      const create = await md.post("/api/v1/labor/attendance", {
+        data: { worker_id: workerId, day, idempotency_key: key(`bad-${day}`) },
+      });
+      expect(create.status(), `create day=${day}`).toBe(400);
+      expect((await create.json()).message).toMatch(/YYYY-MM-DD calendar date/);
+
+      const checkout = await md.post("/api/v1/labor/attendance/checkout", {
+        data: {
+          worker_id: workerId,
+          day,
+          check_in_key: key(`bad-${day}`),
+          checked_out_at: `${YEAR}-01-04T10:00:00.000Z`,
+        },
+      });
+      expect(checkout.status(), `checkout day=${day}`).toBe(400);
+      expect((await checkout.json()).message).toMatch(/YYYY-MM-DD calendar date/);
+    }
+  });
+
+  test("the values the `date` column silently ACCEPTED are refused too — an ISO instant, an MDY date, a relative keyword, and `infinity`", async () => {
+    // Each of these 201'd at 0de5782 and stored something the caller did not say:
+    // 2121-01-01T00:00:00Z → 2121-01-01 · 01/02/2121 → 2121-01-02 under a DateStyle of
+    // MDY and 1 Feb under DMY · today → the SERVER's current date · infinity → a row
+    // no period query can ever sum. One spelling is the only rule checkable at the edge.
+    for (const day of [`${YEAR}-01-01T00:00:00Z`, "01/02/2121", "today", "infinity"]) {
+      const res = await md.post("/api/v1/labor/attendance", {
+        data: { worker_id: workerId, day, idempotency_key: key(`coerced-${day}`) },
+      });
+      expect(res.status(), `day=${day}`).toBe(400);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // I. B-337 — WHICH DAY (Wei 2026-08-08, option ก)
+  // -------------------------------------------------------------------------
+  // Finding 2 above bounds the SHAPE of `day`. This is the other axis and the money
+  // one: at 0de5782, `2121-01-01..10` were ten 201s FOR THE PAYEE HIMSELF and
+  // POST /labor/payroll {period:"2121-01"} paid 5000 on a 500/day worker. Payroll SUMS
+  // rows, so naming N dates was N days' pay, behind one clean balanced JV.
+  //
+  // Both directions are asserted, because a window that only refuses is not a window:
+  // it must still accept the day a genuine offline queue drains LATE (sync_processor
+  // level (a) has no expiry and drains on app-resume), or the 4xx dead-letters that
+  // day permanently and the man is simply never paid for it.
+
+  test("B-337 — the payee's fabricated days are REFUSED on his own door, and the ten-day reproduction pays nothing", async () => {
+    test.skip(!PG_URL, "needs DATABASE_URL to isolate the period SUM");
+    await withOwnLinkedWorker("b337-repro", async (subject) => {
+      const statuses: number[] = [];
+      for (let d = 1; d <= 10; d += 1) {
+        const res = await site.post("/api/v1/labor/attendance", {
+          data: { worker_id: subject, day: `2121-01-${String(d).padStart(2, "0")}` },
+        });
+        statuses.push(res.status());
+      }
+      expect(statuses).toEqual(Array(10).fill(400));
+      for (const day of ["2199-12-31", "1999-01-01"]) {
+        const res = await site.post("/api/v1/labor/attendance", {
+          data: { worker_id: subject, day },
+        });
+        expect(res.status(), `day=${day}`).toBe(400);
+      }
+      // THE money assertion — the whole point. It was 5000.
+      const payroll = await okJson(
+        await md.post("/api/v1/labor/payroll", { data: { worker_id: subject, period: "2121-01" } }),
+        "POST /labor/payroll (2121-01)",
+      );
+      expect(payroll.amount).toBe(0);
+    });
+  });
+
+  test("B-337 — and the other direction: TODAY posts, the far edge of the window (a week-late drain) posts, one day beyond it and tomorrow do not", async () => {
+    test.skip(!PG_URL, "needs DATABASE_URL to isolate the period SUM");
+    await withOwnLinkedWorker("b337-window", async (subject) => {
+      // The far edge FIRST: a check-in taken 7 days ago on a phone with no signal,
+      // draining only now. If this were refused the window would be wrong — that day
+      // is real work, and a 4xx is a permanent dead-letter.
+      const far = await site.post("/api/v1/labor/attendance", {
+        data: { worker_id: subject, day: windowDay(7), idempotency_key: key("b337-far") },
+      });
+      expect(far.status(), `far edge ${windowDay(7)}`).toBe(201);
+
+      const today = await site.post("/api/v1/labor/attendance", {
+        data: { worker_id: subject, day: windowDay(0), idempotency_key: key("b337-today") },
+      });
+      expect(today.status(), `today ${windowDay(0)}`).toBe(201);
+
+      // One day past the edge, and tomorrow. Distinct messages: one is a stale queue,
+      // the other cannot be anything but fabrication.
+      const stale = await site.post("/api/v1/labor/attendance", {
+        data: { worker_id: subject, day: windowDay(8) },
+      });
+      expect(stale.status(), `beyond the edge ${windowDay(8)}`).toBe(400);
+      expect((await stale.json()).message).toMatch(/more than 7 days old/i);
+
+      const future = await site.post("/api/v1/labor/attendance", {
+        data: { worker_id: subject, day: windowDay(-1) },
+      });
+      expect(future.status(), `tomorrow ${windowDay(-1)}`).toBe(400);
+      expect((await future.json()).message).toMatch(/cannot be in the future/i);
+
+      // Door 1 is NOT bounded: the supervisor still records the days the payee cannot.
+      const roster = await md.post("/api/v1/labor/attendance", {
+        data: { worker_id: subject, day: "2121-01-01", idempotency_key: key("b337-roster") },
+      });
+      expect(roster.status()).toBe(201);
+    });
   });
 });

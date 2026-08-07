@@ -3160,6 +3160,15 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >-
+            B-332: caller holds neither finance.create nor a worker record linked to this
+            user, or that linked worker record is not active. Self-service check-in may
+            record only the caller's OWN worker id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /labor/attendance/checkout:
     post:
       tags: [finance]
