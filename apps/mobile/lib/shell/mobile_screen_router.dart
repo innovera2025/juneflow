@@ -26,6 +26,7 @@ import '../screens/service/srv_track_screen.dart';
 import '../screens/service/tech_close_screen.dart';
 import '../screens/service/tech_jobs_screen.dart';
 import '../screens/st_grlist/st_grlist_screen.dart';
+import '../screens/st_receive/st_receive_screen.dart';
 import 'mobile_routes.dart';
 import 'screen_placeholder.dart';
 
@@ -83,6 +84,13 @@ Widget _buildSalesCrm(BuildContext context) => const SalesCrmScreenHost();
 /// services + the i18n sidecar from [AppScope]).
 Widget _buildStGrList(BuildContext context) => const StGrListScreenHost();
 
+/// Builds the `st-receive` count-and-receive screen (GET /po/{id} -> its PR's
+/// lines; POST /gr through the offline queue). The shell has no route-param
+/// mechanism, so a bare tab route mounts it with poId=null → an honest "no PO
+/// selected" state; the real entry is the st-grlist push seam, which supplies a
+/// REAL po id (plus the PO number + vendor name that row already resolved).
+Widget _buildStReceive(BuildContext context) => const StReceiveScreenHost();
+
 /// Builds the four after-sales SERVICE screens. Each host resolves services + its
 /// i18n sidecar from [AppScope]. `srv-track` follows the register's newest ticket
 /// when the shell mounts it without a selection; `tech-jobs` scopes the register to
@@ -93,11 +101,13 @@ Widget _buildSrvTrack(BuildContext context) => const SrvTrackScreenHost();
 Widget _buildTechJobs(BuildContext context) => const TechJobsScreenHost();
 Widget _buildSrvNew(BuildContext context) => const SrvNewScreenHost();
 Widget _buildTechClose(BuildContext context) => const TechCloseScreenHost();
+
 /// Builds the `exec` executive dashboard (its host resolves services + the i18n
 /// sidecar from [AppScope]). Read-only: the S-curve comes from
 /// GET /boq/reports/evm and the approvals card from GET /dashboard/approvals-inbox
 /// — the same payload the `inbox` screen reads, through the same repository.
 Widget _buildExec(BuildContext context) => const ExecScreenHost();
+
 /// Builds the `fm-accept` foreman acceptance queue (GET /acceptance-center — the
 /// work-period feed plus the goods-receipt feed, the same two the prototype filters
 /// to). Self-contained: the screen IS the queue, so it needs no pushed id.
@@ -128,6 +138,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'reject': _buildReject,
   'sales-crm': _buildSalesCrm,
   'st-grlist': _buildStGrList,
+  'st-receive': _buildStReceive,
   'srv-track': _buildSrvTrack,
   'tech-jobs': _buildTechJobs,
   'srv-new': _buildSrvNew,

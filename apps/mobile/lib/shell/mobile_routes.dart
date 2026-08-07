@@ -104,6 +104,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'reject',
   'sales-crm',
   'st-grlist',
+  'st-receive',
   'pm-jobs',
   'pm-checkin',
   'pm-checklist',
