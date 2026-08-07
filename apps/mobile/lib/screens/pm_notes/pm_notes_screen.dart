@@ -194,14 +194,29 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
 
   /// The stable client idempotency key of the op currently awaiting resolution.
   ///
-  /// Reused on every later attempt — including after an app kill, because
-  /// [_resumeQueued] re-adopts the id of the log write still pending in the DURABLE
-  /// queue for THIS work order (B-330). Without that, a restart while the write was
-  /// queued minted a fresh key and enqueued a second op.
+  /// Reused on every later attempt, so a re-save only ever re-drains that one op.
+  /// Without B-330 a restart while the write was queued minted a fresh key and
+  /// enqueued a second op.
   ///
   /// Cleared once the op resolves, or when the technician edits a field again (a new
-  /// body is a new write). Null means "nothing of mine is queued".
+  /// body is a new write — see [_edited]).
+  ///
+  /// A null does NOT mean "nothing of mine is queued", only "this State is not
+  /// tracking one". State is not durable and the QUEUE is, so the two disagree after
+  /// an app kill AND, on a healthy network, for the whole on-mount drain before
+  /// [_resumeQueued] comes back. [_resumeQueued] makes the outstanding write VISIBLE;
+  /// the pre-mint queue check in [_onSave] is what stops a second key.
   String? _opId;
+
+  /// True once the technician has actually EDITED the form in this State — i.e. the
+  /// body on screen is no longer the body any queued op carries.
+  ///
+  /// It records what dropping [_opId] in [_onEdited] MEANT, because the null alone
+  /// cannot say it: [_opId] is null both after a real edit and when nothing has ever
+  /// been submitted, and the pre-mint queue check in [_onSave] must adopt in the
+  /// second case and MUST NOT in the first — adopting an op whose body the user has
+  /// since rewritten would re-drain the OLD text and silently discard the edit.
+  bool _edited = false;
 
   @override
   void initState() {
@@ -226,8 +241,13 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   /// The drain runs FIRST, so the online case resolves normally and leaves nothing
   /// to adopt. A log write STILL pending for this work order afterwards is one this
   /// device captured and the server has not accepted, so the screen takes its id back
-  /// and shows the honest queued state instead of a clean slate that would mint a
-  /// second key on the next save.
+  /// and shows the honest queued state instead of a clean slate.
+  ///
+  /// WHAT THIS DOES NOT CLOSE: `await drain()` is one real HTTP round trip (Dio is
+  /// built with no `connectTimeout`), and the save CTA is live for all of it with
+  /// [_opId] still null. This is the VISIBLE half; the pre-mint queue check in
+  /// [_onSave] is the half that stops the second key. A field TYPED inside that
+  /// window is a separate, still-open gap — BLOCKERS.md B-330 F1.
   ///
   /// ORDER MATTERS HERE, unlike on the other four screens. `_load` seeds the three
   /// controllers, which fires [_onEdited], which DROPS `_opId` — because a typed
@@ -313,6 +333,9 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     setState(() {
       _state = PmNotesSaveState.idle;
       _opId = null;
+      // Remember WHY the id was dropped, so the pre-mint check in [_onSave] does not
+      // hand it straight back and re-drain the body this edit just replaced.
+      _edited = true;
     });
   }
 
@@ -340,16 +363,40 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     if (woId == null || !_loaded || _loadFailed) return;
     if (_state == PmNotesSaveState.saving) return;
 
-    final String? pending = _opId;
-    if (pending != null) {
-      setState(() => _state = PmNotesSaveState.saving);
+    // Flipped SYNCHRONOUSLY before the first await, so the CTA is already disabled
+    // when a second tap could otherwise arrive during the queue read.
+    setState(() => _state = PmNotesSaveState.saving);
+
+    final String? tracked = _opId;
+    if (tracked != null) {
       final DrainReport report = await widget.repo.drain();
-      await _resolve(pending, report);
+      await _resolve(tracked, report);
       return;
     }
 
+    // About to MINT a key — so ask the QUEUE rather than trust this State's null
+    // (B-330). That null also covers the whole on-mount drain, during which this CTA
+    // is live and a log write of this work order's may already be queued; minting
+    // there enqueues a SECOND op under a SECOND key.
+    //
+    // Skipped after a real edit: [_edited] says the body on screen is no longer the
+    // one the queued op carries, so that op is not this write and adopting it would
+    // send the OLD text and drop what the technician just typed.
+    if (!_edited) {
+      final SyncOperation? already = findAdoptableOp(
+        await widget.repo.due(),
+        pmNotesOpIdentity(woId),
+      );
+      if (!mounted) return;
+      if (already != null) {
+        setState(() => _opId = already.id);
+        final DrainReport report = await widget.repo.drain();
+        await _resolve(already.id, report);
+        return;
+      }
+    }
+
     final String opId = _opId = _newOpId();
-    setState(() => _state = PmNotesSaveState.saving);
     final DrainReport report = await widget.repo.saveNotes(
       workOrderId: woId,
       opId: opId,

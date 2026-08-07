@@ -32,6 +32,8 @@
 //
 // st-receive is POST /gr, which posts a GL journal voucher: its duplicate is a
 // duplicated goods receipt AND a duplicated JV.
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -73,8 +75,23 @@ class _Transport implements SyncApiClient {
   /// their outcome within one drain.
   final Map<String, int> statusByEndpoint = <String, int>{};
 
+  /// When non-null every replay BLOCKS on it before doing anything, which is how the
+  /// window tests hold a drain IN FLIGHT while the user taps. It needs no faking to
+  /// be realistic: `AppServices` builds Dio with no `connectTimeout`, so on a slow or
+  /// half-open link a real replay waits exactly like this, bounded only by the OS.
+  Completer<void>? gate;
+
   final List<({String endpoint, Map<String, Object?> payload})> accepted =
       <({String endpoint, Map<String, Object?> payload})>[];
+
+  /// The idempotency keys the SERVER actually received, in order. Two entries for one
+  /// user action is the duplicate write, whatever the client believes.
+  List<Object?> get acceptedKeys => accepted
+      .map(
+        (({String endpoint, Map<String, Object?> payload}) r) =>
+            r.payload['idempotency_key'],
+      )
+      .toList();
 
   @override
   Future<SyncApiResponse> send({
@@ -82,6 +99,8 @@ class _Transport implements SyncApiClient {
     required String endpoint,
     required Map<String, Object?> payload,
   }) async {
+    final Completer<void>? held = gate;
+    if (held != null) await held.future;
     if (offline) throw Exception('no route to host');
     accepted.add((
       endpoint: endpoint,
@@ -125,6 +144,25 @@ class _NotesRepo extends DioPmNotesRepository {
     <String, Object?>{'id': 'wo-1'},
     <String, Object?>{'id': 'wo-2'},
   ];
+}
+
+/// pm-notes' read, deliberately SLOWER than the drain.
+///
+/// `_resumeQueued` starts the read and the drain together but AWAITS the read before
+/// adopting, because seeding the three controllers fires the edit listener and an
+/// edit legitimately drops `_opId`. Every other test in this file stubs a read that
+/// resolves first anyway, so the ordering is never exercised by them; this repo is
+/// what makes the guard's absence observable.
+class _SlowNotesRepo extends _NotesRepo {
+  _SlowNotesRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<List<PmNotesEnt>> listWorkOrders() async {
+    await Future<void>.delayed(delay);
+    return super.listWorkOrders();
+  }
 }
 
 class _ChecklistRepo extends DioPmChecklistRepository {
@@ -395,10 +433,11 @@ Future<void> _mountNotes(
   InMemorySyncQueue queue,
   _Transport transport, {
   String workOrderId = 'wo-1',
+  PmNotesRepository? repo,
 }) => _mount(
   tester,
   PmNotesScreen(
-    repo: _NotesRepo(_processor(queue, transport)),
+    repo: repo ?? _NotesRepo(_processor(queue, transport)),
     strings: _notesStrings,
     i18n: _i18n,
     workOrderId: workOrderId,
@@ -438,6 +477,7 @@ const String _confirmRecv = 'ยืนยัน';
 const String _checkinBtn = 'Check-in หน้างาน';
 const String _saveNotes = 'บันทึก';
 const String _saveChecklist = 'บันทึกผล + ต่อไป';
+const String _resultNormal = 'ปกติ';
 const String _deliver = 'ส่งมอบงาน';
 
 void main() {
@@ -551,6 +591,324 @@ void main() {
       await _tap(tester, _deliver);
 
       expect(await _queuedIds(queue), <String>[k1]);
+    });
+  });
+
+  // =========================================================================
+  // 1b. THE ADOPTION WINDOW — the same duplicate, with the network HEALTHY.
+  //
+  //     `_resumeQueued` is fired `unawaited` from initState and the adoption
+  //     lands only AFTER `await repo.drain()` — one real HTTP round trip, and
+  //     `AppServices` builds Dio with no `connectTimeout`, so nothing bounds it
+  //     but the OS. Throughout that window the screen is fully rendered, its CTA
+  //     is live, `_opId` is null and no queued card is shown.
+  //
+  //     A tap in there used to take the mint branch and produce a SECOND key.
+  //     The nested drain hits the processor's re-entrancy guard and returns an
+  //     EMPTY report, so the screen even showed a reassuring `queued` — while the
+  //     outer drain walked the FIFO and sent BOTH ops.
+  //
+  //     Each test below must go RED on its own when the pre-mint queue check is
+  //     removed from ITS screen: the assertion is on what the SERVER received,
+  //     not on what the screen believes.
+  // =========================================================================
+  group('a tap while the on-mount drain is still in flight', () {
+    testWidgets(
+      'st-receive (MONEY — a second key is a second GR + a second JV)',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        // The receipt is captured while offline and stays queued.
+        await _mountRecv(tester, queue, transport);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        // Relaunch with the signal BACK — but hold the replay open.
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountRecv(tester, queue, transport);
+
+        // Inside the window: the drain has not come back, so nothing has been
+        // adopted and the confirm bar is live.
+        expect(find.text(_queuedCard), findsNothing);
+        expect(find.text(_confirmRecv), findsOneWidget);
+
+        // The storekeeper, seeing no confirmation, confirms again.
+        await _tap(tester, _confirmRecv);
+
+        // The held replay lands and the drain walks the rest of the FIFO.
+        gate.complete();
+        await _flush(tester, 20);
+
+        expect(
+          transport.acceptedKeys,
+          <String>[k1],
+          reason:
+              'two distinct keys = two goods receipts = two journal vouchers; '
+              'gr_idempotency_uq is a partial unique index on the key ALONE and '
+              'correctly lets them both through',
+        );
+        expect(await queue.length(), 0);
+      },
+    );
+
+    testWidgets('pm-checkin', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+
+      expect(find.text(_queuedCard), findsNothing);
+      await _tap(tester, _checkinBtn);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        transport.accepted.length,
+        1,
+        reason: 'a second op here is a second check-in on the same work order',
+      );
+      expect(transport.accepted.single.endpoint, '/pm/workorders/wo-1/checkin');
+      expect(await queue.length(), 0);
+      expect(k1, isNotEmpty);
+    });
+
+    testWidgets('pm-notes', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+
+      expect(find.text(_queuedCard), findsNothing);
+      await _tap(tester, _saveNotes);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(transport.accepted.length, 1);
+      expect(await _queuedIds(queue), <String>[]);
+      expect(k1, isNotEmpty);
+    });
+
+    testWidgets('pm-checklist', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+
+      expect(find.text(_queuedCard), findsNothing);
+      await _tap(tester, _saveChecklist);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(transport.accepted.length, 1);
+      expect(await _queuedIds(queue), <String>[]);
+      expect(k1, isNotEmpty);
+    });
+
+    testWidgets(
+      'field-progress has no such window to test — its READS are serialized '
+      'behind the drain, so there is nothing tappable until the drain returns',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        await _mountProgress(tester, queue, transport);
+        await _tap(tester, _deliver);
+        await _kill(tester);
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountProgress(tester, queue, transport);
+
+        // `_resumeQueued` there is `await drain(); await _loadThenAdopt();`, so a
+        // held replay also holds the period list. That is a LIVENESS cost, not a
+        // money one — this screen already asks the queue before minting (the
+        // `delivering period B` test below) — but it is why the window above has no
+        // field-progress case. If the reads are ever moved off the drain's critical
+        // path, this expectation flips and that case has to be written.
+        expect(find.text(_deliver), findsNothing);
+
+        gate.complete();
+        await _flush(tester, 20);
+
+        // The replay landed and the screen came back to life.
+        expect(transport.accepted.length, 1);
+        expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
+        expect(find.text(_deliver), findsWidgets);
+      },
+    );
+  });
+
+  // =========================================================================
+  // 1c. ORDERING — pm-notes only.
+  //
+  //     `_resumeQueued` there awaits the READ as well as the drain, because
+  //     seeding the three controllers fires the edit listener and a real edit
+  //     legitimately drops `_opId`. Every other test stubs a read that happens
+  //     to resolve first, so none of them can fail when that `await` is removed.
+  // =========================================================================
+  group('pm-notes: a read that lands after the drain', () {
+    testWidgets('must not undo the adoption (seeding the form is not an edit)', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      // Relaunch with the work-order read 120ms behind the (offline, immediate)
+      // drain. Without `await loading` the adoption lands first, `_seed` then
+      // fires `_onEdited` from a non-idle state, and the adopted id is dropped.
+      await _mountNotes(
+        tester,
+        queue,
+        transport,
+        repo: _SlowNotesRepo(
+          _processor(queue, transport),
+          delay: const Duration(milliseconds: 120),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      await _flush(tester);
+
+      expect(
+        find.text(_queuedCard),
+        findsOneWidget,
+        reason: 'the write is still outstanding after the read landed',
+      );
+
+      await _tap(tester, _saveNotes);
+      expect(
+        await _queuedIds(queue),
+        <String>[k1],
+        reason: 'an id dropped by the seeding mints a second key here',
+      );
+    });
+  });
+
+  // =========================================================================
+  // 1d. AN EDIT IS A NEW WRITE — the boundary the pre-mint check must not cross.
+  //
+  //     `_opId` is null in two situations that mean opposite things: nothing of
+  //     mine has ever been submitted (adopt whatever is queued) and the user has
+  //     just EDITED (the body on screen is no longer the body the queued op
+  //     carries, so that op is not this write). Handing the queued op back in the
+  //     second case would re-drain the OLD content and silently discard the edit —
+  //     input loss, which is worse than the duplicate the check exists to prevent.
+  //     `_edited` is what tells the two apart; each test below goes red when it is
+  //     dropped from ITS screen.
+  // =========================================================================
+  group('an edit after the adoption mints instead of adopting', () {
+    testWidgets('pm-notes: the typed body is not replaced by the queued one', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      final String k1 = (await _queued(queue)).single.id;
+
+      await _kill(tester);
+      await _mountNotes(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget); // k1 adopted
+
+      // A REAL edit — the technician found something else.
+      await tester.enterText(find.byType(TextField).first, 'มอเตอร์ไหม้');
+      await _flush(tester);
+      expect(
+        find.text(_queuedCard),
+        findsNothing,
+        reason: 'the queued write no longer describes what is on screen',
+      );
+
+      await _tap(tester, _saveNotes);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(ops.length, 2, reason: 'the new body is its OWN write');
+      expect(
+        ops.firstWhere((SyncOperation o) => o.id == k1).payload['cause'],
+        'สายพานขาด',
+      );
+      expect(
+        ops.firstWhere((SyncOperation o) => o.id != k1).payload['cause'],
+        'มอเตอร์ไหม้',
+        reason: 'adopting k1 here would re-send the OLD text and lose this one',
+      );
+    });
+
+    testWidgets('pm-checklist: the changed result is not replaced by the '
+        'queued one', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist); // every line still unchecked
+      final String k1 = (await _queued(queue)).single.id;
+
+      await _kill(tester);
+      await _mountChecklist(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget); // k1 adopted
+
+      await _tap(tester, _resultNormal); // a REAL edit
+      expect(find.text(_queuedCard), findsNothing);
+      await _tap(tester, _saveChecklist);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(ops.length, 2, reason: 'the new result set is its OWN write');
+      expect(
+        (ops.firstWhere((SyncOperation o) => o.id == k1).payload['items']!
+                as List<Object?>)
+            .first,
+        isNot(contains('result')),
+      );
+      expect(
+        (ops.firstWhere((SyncOperation o) => o.id != k1).payload['items']!
+                as List<Object?>)
+            .first,
+        containsPair('result', 'normal'),
+        reason: 'adopting k1 here would re-send the UNCHECKED list',
+      );
     });
   });
 

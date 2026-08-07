@@ -28,10 +28,23 @@
 //
 // THE RULE
 // ------------------------------------------------------------------------------
-// On mount, after the (a) on-mount drain has had its chance to clear the queue, a
-// screen ADOPTS the id of the op still queued for the record it is looking at,
-// instead of minting a new one. Two properties make that safe, and both are
-// enforced here rather than restated in five screens:
+// A screen ADOPTS the id of the op still queued for the record it is looking at,
+// instead of minting a new one. That question is asked at TWO points, and both are
+// needed:
+//
+//   1. ON MOUNT, after the (a) on-mount drain has had its chance to clear the queue
+//      — this is what makes the relaunched screen SHOW that a write is outstanding.
+//   2. IMMEDIATELY BEFORE MINTING A KEY — this is what makes it SAFE. The on-mount
+//      drain is one real HTTP round trip (and the app's Dio sets no connectTimeout),
+//      the screen is fully rendered with a live CTA throughout it, and the adoption
+//      lands only after it. A tap inside that window sees a null `_opId` and, with
+//      (1) alone, mints a SECOND key — the exact duplicate this file exists to
+//      prevent, reachable on a healthy network with no app kill involved at all.
+//      Asking the queue at the mint site closes it, because the queue is durable and
+//      already holds the op the in-flight drain is replaying.
+//
+// Two properties make adoption safe, and both are enforced here rather than
+// restated in five screens:
 //
 //   * ONLY `SyncOpStatus.pending` ops are adoptable. A `failed` op is a permanent
 //     4xx dead-letter: `QueueDrainProcessor` skips it on every future drain, so the
@@ -40,6 +53,15 @@
 //     re-made — the mirror-image defect (an id held too long, so a second and
 //     genuinely-new submission is silently swallowed). A dead-letter is therefore
 //     left alone and the next submission correctly mints a new key.
+//
+//   * A future `markInFlight` caller would make an op INVISIBLE here. `SyncQueue`
+//     excludes `inFlight` from `pending()` (sync_queue.dart), and only `pending`
+//     ops are adoptable, so an op parked in that status is seen neither by the
+//     drain nor by this adoption — and the next tap would mint a fresh key against
+//     a write that is already on the wire. `markInFlight` has NO production caller
+//     today (the level-(a) drain uses a plain re-entrancy guard instead, precisely
+//     to stay crash-consistent), so this is unreachable rather than latent; a
+//     processor that starts using it must also surface those ops to this matcher.
 //
 //   * A screen adopts ONLY ITS OWN op. `SyncQueue.pending()` is a single global
 //     FIFO across every screen — it has no notion of ownership — so identity has to
