@@ -171,4 +171,35 @@ void main() {
       expect(mobileScreenBuilders.containsKey(id), isTrue, reason: id);
     }
   });
+
+  test(
+    'st-receive is a built route in lockstep (feature/mobile-st-receive-f2)',
+    () {
+      // The store's count-and-receive (GR) screen: a built tab route (honest-empty
+      // with no selection) that st-grlist also pushes with a REAL po id. Its
+      // builder + built id must stay in lockstep (keys==kBuiltRouteIds, above).
+      expect(kBuiltRouteIds, contains('st-receive'));
+      expect(mobileScreenBuilders.containsKey('st-receive'), isTrue);
+      expect(kMobileRouteIds, contains('st-receive'));
+    },
+  );
+
+  test('the store receive chain st-grlist -> st-receive is built end to end', () {
+    // st-grlist's receive affordance was an honest no-op until st-receive existed.
+    // Dropping either from the router would strand the storekeeper on a placeholder
+    // at the point of counting goods.
+    for (final String id in <String>['st-grlist', 'st-receive']) {
+      expect(kBuiltRouteIds, contains(id), reason: '$id must be built');
+      expect(mobileScreenBuilders.containsKey(id), isTrue, reason: id);
+    }
+  });
+
+  test('route parity: 20 of the 26 known routes are built', () {
+    // The count is asserted explicitly so a port that registers a BUILDER without
+    // its built id (or the reverse) is caught as a number, not only as a set
+    // mismatch. 19 -> 20 with st-receive.
+    expect(kBuiltRouteIds.length, 20);
+    expect(mobileScreenBuilders.length, 20);
+    expect(mobileScreenBuilders.keys.toSet(), kBuiltRouteIds);
+  });
 }
