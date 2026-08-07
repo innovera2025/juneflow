@@ -1,0 +1,22 @@
+  tenant: ebbf8c45-78d3-50ed-864f-12eff7d1dac8
+  rows the probe query returns: 5 (minimum 3)
+
+== the query GET /gr's PO chain emits (no ORDER BY), under two planner configs ==
+
+--- SET enable_hashjoin=on;  SET enable_nestloop=on;  SET enable_mergejoin=on;
+SET SET SET GR-2026-0148 GR-2026-0147 GR-2026-0146 GR-2026-0145 GR-2026-0144 
+
+--- SET enable_hashjoin=off; SET enable_nestloop=on;  SET enable_mergejoin=off;
+SET SET SET GR-2026-0148 GR-2026-0147 GR-2026-0146 GR-2026-0145 GR-2026-0144 
+
+--- SET enable_hashjoin=off; SET enable_nestloop=off; SET enable_mergejoin=on;
+SET SET SET GR-2026-0148 GR-2026-0147 GR-2026-0145 GR-2026-0146 GR-2026-0144 
+Merge Join  (cost=91.04..92.61 rows=1 width=32)
+        ->  Merge Join  (cost=63.34..65.10 rows=1 width=16)
+                    ->  Merge Join  (cost=33.52..35.04 rows=1 width=16)
+
+== and the PO chain (GET /po — a manifest screen with a committed baseline) ==
+--- SET enable_hashjoin=on;  SET enable_nestloop=on;  SET enable_mergejoin=on;
+PO-2026-0291 PO-2026-0290 PO-2026-0289 PO-2026-0288 PO-2026-0287 PO-2026-0286 
+--- SET enable_hashjoin=off; SET enable_nestloop=off; SET enable_mergejoin=on;
+PO-2026-0287 PO-2026-0291 PO-2026-0286 PO-2026-0288 PO-2026-0290 PO-2026-0289 

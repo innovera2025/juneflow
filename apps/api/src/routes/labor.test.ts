@@ -135,6 +135,42 @@ describe("GET /api/v1/labor/attendance", () => {
     expect(body.data[0]).toMatchObject({ worker_id: W1, ot: 1.5 });
   });
 
+  // B-323 (round 4): the sharpest survivor of three review rounds. This list sorted on
+  // `day` alone — a DATE — six lines above the payroll comparator round 3 fixed, in the
+  // adjacent function of the same file. An attendance register exists to record MANY
+  // workers on ONE date, so returning 0 was the normal case, not an edge, and the tied
+  // pair went back to the join plan.
+  //
+  // It survived because the seed emits ZERO attendance rows (seed/index.ts): no baseline
+  // moves, no live order proof reaches it, nothing fails. That is exactly why this is a
+  // stubbed unit test — a defect the seed hides cannot be caught by a seeded run, and a
+  // unit test does not need the seed.
+  it("is TOTAL when two workers clock the same day (id floor decides)", async () => {
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb([[attendances, rows]]) })
+      ).inject({ method: "GET", url: "/api/v1/labor/attendance" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // Two workers on one shift — same `day`, so the day comparison returns 0 for the pair.
+    const a = attendance("aaa", "2026-08-07");
+    const b = attendance("bbb", "2026-08-07");
+    expect(await ids([a, b])).toEqual(["aaa", "bbb"]);
+    expect(await ids([b, a])).toEqual(["aaa", "bbb"]); // reversed input, same output
+  });
+
+  it("keeps day DESC ahead of the id floor (the floor only breaks ties)", async () => {
+    // Guards the ORDER of the clauses: an id-first comparator would also pass the tie
+    // test above while silently destroying the newest-first register.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([[attendances, [attendance("zzz", "2026-05-03"), attendance("aaa", "2026-05-01")]]]),
+      })
+    ).inject({ method: "GET", url: "/api/v1/labor/attendance" });
+    expect(res.json().data.map((r: { id: string }) => r.id)).toEqual(["zzz", "aaa"]);
+  });
+
   it("honest-empty when there is no attendance (no seed)", async () => {
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb([[attendances, []]]) })
@@ -162,6 +198,23 @@ describe("GET /api/v1/labor/payroll", () => {
     const body = res.json();
     expect(body.total).toBe(1);
     expect(body.data[0]).toMatchObject({ worker_id: W1, period: "2026-05", amount: 12000, currency_code: "THB" });
+  });
+
+  // B-323: this list used an inline created_at-only comparator that returned 0 for two
+  // runs sharing an instant, handing the pair back to the join plan. A payroll RUN
+  // writes many rows in one transaction, so the tie is the normal case, not an edge.
+  it("is TOTAL when two payroll runs share an instant (id floor decides)", async () => {
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb([[payrolls, rows]]) })
+      ).inject({ method: "GET", url: "/api/v1/labor/payroll" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // `payroll()` hardcodes the same createdAt for every row — a genuine tie.
+    const a = payroll("aaa", "2026-05");
+    const b = payroll("bbb", "2026-06");
+    expect(await ids([a, b])).toEqual(["aaa", "bbb"]);
+    expect(await ids([b, a])).toEqual(["aaa", "bbb"]);
   });
 });
 

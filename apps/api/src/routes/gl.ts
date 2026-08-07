@@ -54,6 +54,7 @@ import {
   type PostingRule,
 } from "./gl-post.js";
 import { loadCaller, permAllowed } from "./authz.js";
+import { byIdAsc } from "./list-order.js";
 
 type JvRow = typeof jvs.$inferSelect;
 type JvLineRow = typeof jvLines.$inferSelect;
@@ -134,7 +135,9 @@ function coaWire(a: GlAccountRow): Record<string, unknown> {
 async function getCoa(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(glAccounts)) as GlAccountRow[];
   return [...rows]
-    .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))
+    // B-323: code is unique per company (gl_account_company_code_uq) — id floor anyway,
+    // so the order does not depend on a constraint staying put.
+    .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0) || byIdAsc(a, b))
     .map(coaWire);
 }
 
@@ -186,7 +189,12 @@ async function listJv(db: TenantDb): Promise<Record<string, unknown>[]> {
     const at = a.created_at ? new Date(a.created_at as Date).getTime() : 0;
     const bt = b.created_at ? new Date(b.created_at as Date).getTime() : 0;
     if (at !== bt) return bt - at;
-    return a.no < b.no ? 1 : a.no > b.no ? -1 : 0;
+    if (a.no !== b.no) return a.no < b.no ? 1 : -1;
+    // B-323: `no` alone is NOT a safe floor here — B-168 is an open, live defect in
+    // which allocJvNo can mint a DUPLICATE jv.no, so two distinct JVs can tie on both
+    // created_at and no and hand the pair back to the join plan. id is unique by
+    // construction, so it closes the order unconditionally.
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 }
 
@@ -1090,7 +1098,9 @@ async function postGlDocs(
 async function listPeriods(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(accountingPeriods)) as AccountingPeriodRow[];
   return [...rows]
-    .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
+    // B-323: period is unique per company (accounting_period_company_period_uq) — id
+    // floor anyway, same reasoning as the COA read.
+    .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0) || byIdAsc(a, b))
     .map((p) => ({
       id: p.id,
       period: p.period,
@@ -1199,7 +1209,19 @@ async function glProjectPl(
   });
   // Highest revenue first — a stable, defined order (the mock's margin sort needs a
   // nonzero revenue the seed lacks; revenue desc is the honest ordering).
-  projectsOut.sort((a, b) => b.revenue - a.revenue);
+  // B-323: and because the seed lacks that revenue, EVERY project ties at 0 here — the
+  // comparator returned 0 for the entire list. The rows carry no id (project_id is the
+  // Map key, "" for the unallocated bucket), and the Map's insertion order comes from a
+  // joined jv_line read, so it is join-plan order — not a floor. project_id is.
+  projectsOut.sort(
+    (a, b) =>
+      b.revenue - a.revenue ||
+      ((a.project_id ?? "") < (b.project_id ?? "")
+        ? -1
+        : (a.project_id ?? "") > (b.project_id ?? "")
+          ? 1
+          : 0),
+  );
 
   const t = projectsOut.reduce(
     (s, p) => {

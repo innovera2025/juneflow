@@ -66,6 +66,7 @@ import { round2 } from "./money.js";
 import { has, pick, readIdempotencyKey, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byIdAsc, newestFirst } from "./list-order.js";
 import {
   ACCT,
   allocJvNo,
@@ -284,26 +285,30 @@ function payrollWire(p: PayrollRow): Record<string, unknown> {
 async function listWorkers(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(workers)) as WorkerRow[];
   return [...rows]
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    // B-323: worker.name has no unique constraint — two สมชาย tied and the join plan
+    // decided which came first.
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || byIdAsc(a, b))
     .map(workerWire);
 }
 
 async function listAttendance(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(attendances)) as AttendanceRow[];
   return [...rows]
-    .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0))
+    // B-323: `day` is a DATE, and an attendance register's whole purpose is many
+    // workers on one date — so this comparator returned 0 for the NORMAL case, not an
+    // edge, six lines above the payroll sort that round 3 fixed. It survived three
+    // reviews because the seed emits zero attendance rows (seed/index.ts): no baseline
+    // moves, no gate sees it. labor.test.ts pins it without the seed — both the same-day
+    // tie and the day-DESC-ahead-of-the-floor clause order.
+    .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0) || byIdAsc(a, b))
     .map(attendanceWire);
 }
 
 async function listPayroll(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(payrolls)) as PayrollRow[];
-  return [...rows]
-    .sort((a, b) => {
-      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bt - at;
-    })
-    .map(payrollWire);
+  // B-323: was a tie-blind inline created_at comparator — the shared newestFirst is
+  // TOTAL (created_at DESC, then id ASC).
+  return newestFirst(rows).map(payrollWire);
 }
 
 // ---------------------------------------------------------------------------

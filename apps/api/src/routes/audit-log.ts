@@ -19,6 +19,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, type SQL } from "drizzle-orm";
 import { auditLogs, users } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { byNewestThenId } from "./list-order.js";
 
 function unauthenticated(reply: FastifyReply): FastifyReply {
   return reply
@@ -79,7 +80,16 @@ export function registerAuditLogRoute(app: FastifyInstance): void {
 
     const data = rows
       .slice()
-      .sort((a, b) => b.at.getTime() - a.at.getTime()) // newest first (feed order)
+      // B-323: newest first (feed order), but TOTAL. This sorted on `at` alone, which
+      // returns 0 for two entries sharing an instant — and the audit log is the one
+      // table where that is the NORM, not an edge: every mutation of one request is
+      // written under the same statement timestamp. Ties fell back to the join plan,
+      // so a single request's own entries could reorder between two reads of the feed.
+      // audit_log names its timestamp `at`, so adapt onto the shared total order
+      // rather than hand-rolling a second comparator.
+      .sort((a, b) =>
+        byNewestThenId({ createdAt: a.at, id: a.id }, { createdAt: b.at, id: b.id }),
+      )
       .map((r) => ({
         id: r.id,
         user_id: r.userId,

@@ -67,6 +67,7 @@ import { round2 } from "./money.js";
 import { pick, str } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import {
   ACCT,
   allocJvNo,
@@ -152,17 +153,6 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Epoch ms of a stored timestamp/date, else 0 (a malformed value sorts last). */
-function msOf(ts: unknown): number {
-  if (ts == null) return 0;
-  const t = new Date(ts as string | Date).getTime();
-  return Number.isFinite(t) ? t : 0;
-}
-
-/** Sort a set of rows carrying `createdAt` newest-first (mock list order). */
-function newestFirst<T extends { createdAt?: unknown }>(rows: readonly T[]): T[] {
-  return [...rows].sort((a, b) => msOf(b.createdAt) - msOf(a.createdAt));
-}
 
 /**
  * The effective due date as epoch ms (C10 — DERIVED whenever the stored column is

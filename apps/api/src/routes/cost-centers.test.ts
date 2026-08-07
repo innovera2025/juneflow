@@ -161,12 +161,21 @@ const ccRow = (
   createdAt: new Date(),
   updatedAt: new Date(),
 });
-const seedCostCenters = [
+// B-323: stagger the fixture the way seed/stamp.ts staggers the real table (index 0
+// newest, 1 s apart). Without it all four rows share one `new Date()` instant — the
+// same production tie a one-statement INSERT produces — and the list falls through to
+// the uuid tiebreak, which is NOT the transcription order this test is asserting.
+const staggered = <T extends { createdAt: Date; updatedAt: Date }>(rows: T[]): T[] =>
+  rows.map((r, i) => {
+    const at = new Date(Date.UTC(2026, 6, 20, 9, 0, 0) - i * 1000);
+    return { ...r, createdAt: at, updatedAt: at };
+  });
+const seedCostCenters = staggered([
   ccRow("CC-CONS-RJP-01", "โครงการ ราชพฤกษ์ เฟส 1", "Project", "เฟส 1 / Block A", "สมชาย", "84400000.00", "approved"),
   ccRow("CC-CONS-RJP-02", "โครงการ ราชพฤกษ์ เฟส 2", "Project", "เฟส 2 / Block B+C", "สมชาย", "124800000.00", "approved"),
   ccRow("CC-CONS-OH", "Overhead งานก่อสร้าง", "Overhead", "ฝ่ายก่อสร้าง · ทุกโครงการ", "ผอ.สมพร", "8400000.00", "approved"),
   ccRow("CC-PROC", "ฝ่ายจัดซื้อ", "Dept", "—", "ธีรพงษ์", "1200000.00", "approved"),
-];
+]);
 
 describe("GET /api/v1/cost-centers — auth", () => {
   it("401s flat without a session (fail closed)", async () => {

@@ -63,6 +63,7 @@ import {
   apBillings,
 } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { round2 } from "./money.js";
 import {
   callerApprovalLevel,
@@ -172,11 +173,18 @@ export function registerPoRoute(app: FastifyInstance): void {
       list.push(b);
       billsByPo.set(b.poId, list);
     }
+    // B-323: `docs` comes from selectThrough (three INNER JOINs, no ORDER BY), so
+    // its order is the JOIN PLAN's, not the code's. Measured on the seeded stack:
+    // default plan → PO-2026-0291 0290 0289 0288 0287 0286; forcing a merge join →
+    // 0287 0291 0286 0288 0290 0289. po.list is a manifest screen with a committed
+    // baseline, so that flip is the gr.list 253,533 px symptom waiting to recur.
     return reply
       .code(200)
       .send(
         listEnvelope(
-          docs.map((po) => poWire(po, sumBillings(billsByPo.get(po.id) ?? []))),
+          newestFirst(docs).map((po) =>
+            poWire(po, sumBillings(billsByPo.get(po.id) ?? [])),
+          ),
         ),
       );
   });

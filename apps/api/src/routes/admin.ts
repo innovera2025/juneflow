@@ -30,6 +30,7 @@ import {
 } from "../auth-provisioning.js";
 import { ownerOnly } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byNewestThenId } from "./list-order.js";
 import { round2 } from "./money.js";
 import { pick, str, toNum } from "./procurement.js";
 
@@ -134,10 +135,11 @@ function num(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function byCreatedDesc(a: { createdAt: Date | null }, b: { createdAt: Date | null }): number {
-  const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  return bt - at;
+type CreatedRow = { createdAt: Date | null; id?: string };
+function byCreatedDesc(a: CreatedRow, b: CreatedRow): number {
+  // B-323: delegates to the shared TOTAL order — the local version returned 0 for
+  // any two rows sharing an instant, which left their order to the DB.
+  return byNewestThenId(a, b);
 }
 
 // --- Entity-opaque wire mappers (snake_case of the REAL columns) ------------

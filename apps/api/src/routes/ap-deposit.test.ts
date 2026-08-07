@@ -340,6 +340,27 @@ describe("GET /api/v1/ap/deposit", () => {
     expect(paramsOf(read!.where)).toContain(COMPANY);
   });
 
+  // B-323: the local `newestFirst` here was a hand-rolled shadow of list-order.ts's
+  // export, and it was tie-BLIND — `msOf(b) - msOf(a)` returns 0 for two deposits
+  // sharing an instant, handing the pair back to the join plan. The shared helper
+  // breaks the tie on id, so the list cannot reorder between two identical reads.
+  it("is TOTAL when two deposits share an instant — the join plan cannot decide", async () => {
+    const tied = new Date("2024-03-10T00:00:00Z");
+    const a = depRow("aaa", { createdAt: tied });
+    const b = depRow("bbb", { createdAt: tied });
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[apDeposits, rows], [vendors, [vendorRow]], [pos, [poRow]]] }),
+        })
+      ).inject({ url: "/api/v1/ap/deposit" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    expect(await ids([a, b])).toEqual(["aaa", "bbb"]);
+    expect(await ids([b, a])).toEqual(["aaa", "bbb"]);
+  });
+
   it("ships a fully-offset deposit as balance 0 (web renders the หักครบ badge from it)", async () => {
     const res = await (
       await buildTestApp({

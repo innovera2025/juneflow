@@ -1,0 +1,47 @@
+=== ARTIFACT 1 of 2 — VALUES ===============================================
+### stamps.csv (EVERY defaultNow() column, ordered by id — order-independent)
+IDENTICAL
+
+=== ARTIFACT 2 of 2 — ORDER (id sequences, timestamps stripped) ============
+NB the discriminating order experiment is b323-order-proof.sh, which FORCES a
+plan change. Two fresh stacks do not reliably pick different plans, so agreement
+here is a sanity band, not proof.
+
+### order-ap-pv.ids (4 rows — id sequence only)
+IDENTICAL
+
+### order-ar-tax-register.ids (6 rows — id sequence only)
+IDENTICAL
+
+### order-boq.ids (6 rows — id sequence only)
+IDENTICAL
+
+### order-cost-centers.ids (7 rows — id sequence only)
+IDENTICAL
+
+### order-documents.ids (13 rows — id sequence only)
+IDENTICAL
+
+### order-gl-posting-inbox.ids (13 rows — id sequence only)
+IDENTICAL
+
+### order-gr.ids (5 rows — id sequence only)
+IDENTICAL
+
+### order-petty.ids (6 rows — id sequence only)
+IDENTICAL
+
+### order-pm-assets.ids (16 rows — id sequence only)
+IDENTICAL
+
+### order-po.ids (6 rows — id sequence only)
+IDENTICAL
+
+### order-pr.ids (10 rows — id sequence only)
+IDENTICAL
+
+### order-projects.ids (7 rows — id sequence only)
+IDENTICAL
+
+### order-wo.ids (5 rows — id sequence only)
+IDENTICAL

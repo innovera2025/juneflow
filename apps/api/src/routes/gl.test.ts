@@ -340,6 +340,28 @@ describe("GET /api/v1/gl/jv", () => {
     expect(b.status).toBeNull(); // GAP: jv has no status column
   });
 
+  // B-323: created_at DESC then `no` DESC is NOT total. B-168 is an open, live defect
+  // in which allocJvNo can mint a DUPLICATE jv.no, so two distinct JVs can tie on BOTH
+  // keys — and the comparator then returned 0 and handed the pair back to the join
+  // plan. id is unique by construction and closes the order unconditionally.
+  it("is TOTAL even when two JVs tie on created_at AND no (the open B-168 dup-no case)", async () => {
+    const t = 7;
+    const dup = "JV-2026-0500"; // the same voucher number on two distinct rows
+    const nos = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[jvs, rows], [jvLines, []]] }),
+        })
+      ).inject({ url: "/api/v1/gl/jv" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    const a = jvRow("aaa", dup, "Manual", "m", t);
+    const b = jvRow("bbb", dup, "Manual", "m", t);
+    expect(await nos([a, b])).toEqual(["aaa", "bbb"]);
+    expect(await nos([b, a])).toEqual(["aaa", "bbb"]);
+  });
+
   it("binds company_id on the jv read (tenant scope)", async () => {
     const captured: Captured[] = [];
     await (

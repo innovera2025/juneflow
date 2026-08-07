@@ -37,6 +37,7 @@ import {
   vendors,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+import { bySourceThenNewest } from "./list-order.js";
 
 /**
  * jv.source_doc "<table>:<uuid>" polymorphic ref (finance.ts GLPosting model).
@@ -62,6 +63,18 @@ export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn|ret|dep|petty):([0-9a-fA
  * the shared /gl/post path (Dr 5100 / Cr 1010, Wei C-177).
  */
 export type GlSourceKind = "pv" | "rv" | "gr" | "payroll" | "fa" | "cn" | "petty";
+
+/** The order listGlPostingDocs() appends its source blocks in — the shipped screen
+ *  order, pinned here so a determinism sort cannot silently regroup the inbox. */
+const GL_SOURCE_ORDER: readonly GlSourceKind[] = [
+  "pv",
+  "rv",
+  "gr",
+  "payroll",
+  "petty",
+  "fa",
+  "cn",
+];
 
 /**
  * One posting-inbox row: a source money doc + its resolved posting state. The
@@ -207,7 +220,14 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
     });
   }
 
-  return docs;
+  // B-323: the feed is assembled source-block by source-block, and within each block
+  // the rows arrive in whatever order the scoped read produced — five of the six reads
+  // are joined chains, whose row order is a join-plan artefact. Pin the order WITHIN
+  // each block and leave the block sequence exactly as it ships (see bySourceThenNewest:
+  // sorting across sources would interleave them and change the screen, which is a
+  // product decision, not a determinism one).
+  const rank = (d: GlPostingDoc): number => GL_SOURCE_ORDER.indexOf(d.source);
+  return bySourceThenNewest(docs, rank);
 }
 
 /**

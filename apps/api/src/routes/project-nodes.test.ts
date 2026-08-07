@@ -218,6 +218,17 @@ describe("POST /api/v1/projects/:id/nodes — create block + auto-generate units
     expect(units.every((u) => u.parentId === block.id)).toBe(true);
     expect(units.every((u) => u.code === u.name)).toBe(true);
 
+    // B-323: project_node has no `seq`, and dashboard.ts reads the table with
+    // entryOrder (created_at ASC) to build the phase ladder. This block + its 3 units
+    // go in ONE insertThrough = one now(), so without the stamp all four tie and that
+    // ladder falls through to the random uuid. (This file's own bySibling tiebreaks on
+    // name and would survive the tie — the dashboard reader is the one that breaks,
+    // which is exactly why the WRITE side is where the fix belongs.)
+    const times = (written as { createdAt?: Date }[]).map((n) => n.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(4);
+    for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!);
+
     // response echoes the created block: brand-new units → sold/built provably 0.
     expect(res.json()).toMatchObject({
       kind: "block", code: "E", name: "Block E", units: 3, sold: 0, built: 0, parent_id: "n-ph1",

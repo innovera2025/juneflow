@@ -371,6 +371,116 @@ describe("GET /api/v1/gr — auth + list", () => {
     expect(g0.money).toBe(0.3);
   });
 
+  // -------------------------------------------------------------------------
+  // B-323 — deterministic row order.
+  //
+  // GET /gr issues six unordered selectThrough reads (INNER JOINs) and shipped
+  // `[...poGrs, ...woGrs]` straight to the wire. Two freshly seeded stacks gave the
+  // visual gate 0 px on one and 253,533 px (15.8%, the whole table body offset) on
+  // the next, with no code change: the join plan flips and rows come back in a
+  // different order. These pin the ORDER the endpoint emits regardless of the order
+  // the reads produced.
+  // -------------------------------------------------------------------------
+  const grAt = (id: string, iso: string, anchor: "po" | "wo") => ({
+    ...gr(id, anchor === "po" ? { poId: PO } : { woId: WO }),
+    createdAt: new Date(iso),
+  });
+
+  const listIds = async (poArm: unknown[], woArm: unknown[]): Promise<string[]> => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [[grs, pos], poArm],
+            [[grs, wos], woArm],
+            [pos, [poRow("approved")]],
+            [wos, [woRow("approved")]],
+            [vendors, [vendorRow]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gr" });
+    expect(res.statusCode).toBe(200);
+    return res.json().data.map((g: { id: string }) => g.id);
+  };
+
+  it("orders the UNIONed list newest-first ACROSS both anchors, not PO-block then WO-block", async () => {
+    // Interleaved by date on purpose: sorting each arm and concatenating would give
+    // [p1, p3, w2, w4] — a plausible-looking non-fix. The dates say [p1, w2, p3, w4].
+    const po = [grAt("p3", "2026-07-20T08:59:58Z", "po"), grAt("p1", "2026-07-20T09:00:00Z", "po")];
+    const wo = [grAt("w4", "2026-07-20T08:59:57Z", "wo"), grAt("w2", "2026-07-20T08:59:59Z", "wo")];
+    expect(await listIds(po, wo)).toEqual(["p1", "w2", "p3", "w4"]);
+  });
+
+  it("emits the SAME order for every permutation the DB could return", async () => {
+    const po = [
+      grAt("p1", "2026-07-20T09:00:00Z", "po"),
+      grAt("p3", "2026-07-20T08:59:58Z", "po"),
+    ];
+    const wo = [
+      grAt("w2", "2026-07-20T08:59:59Z", "wo"),
+      grAt("w4", "2026-07-20T08:59:57Z", "wo"),
+    ];
+    const expected = ["p1", "w2", "p3", "w4"];
+    expect(await listIds(po, wo)).toEqual(expected);
+    expect(await listIds([...po].reverse(), wo)).toEqual(expected);
+    expect(await listIds(po, [...wo].reverse())).toEqual(expected);
+    expect(await listIds([...po].reverse(), [...wo].reverse())).toEqual(expected);
+  });
+
+  it("breaks a same-instant tie on id, so rows written in one transaction still order", async () => {
+    // Every seeded GR shared the transaction's now() before B-323, and two production
+    // GRs created in the same second tie too. Without a tiebreak the order here is
+    // whatever the reads happened to return.
+    const same = "2026-07-20T09:00:00Z";
+    const po = [grAt("gz", same, "po"), grAt("ga", same, "po")];
+    const wo = [grAt("gm", same, "wo")];
+    expect(await listIds(po, wo)).toEqual(["ga", "gm", "gz"]);
+    expect(await listIds([...po].reverse(), wo)).toEqual(["ga", "gm", "gz"]);
+  });
+
+  it("renders a receipt's LINES in ENTRY order, not newest-first — and pins items[0].currency_code", async () => {
+    // A receipt's lines are its ordered BODY, so they read ASCENDING. Round 1 sorted
+    // them newestFirst, which printed every multi-line receipt upside down; the seed
+    // could not show it because seed/stamp.ts staggers gr_item ASCENDING too, so the
+    // rendered result matched the seed array either way.
+    //
+    // The reads are deliberately handed back in the WRONG order (the join plan's), and
+    // the USD line is the one entered FIRST — so if the handler kept the read order,
+    // or sorted the other way, the receipt would be labelled USD.
+    const lines = [
+      {
+        ...grItem("gi-2nd", "g0", 1, 1, "10.00"),
+        createdAt: new Date("2026-07-20T09:00:00.001Z"),
+        currencyCode: "THB",
+      },
+      {
+        ...grItem("gi-1st", "g0", 1, 1, "10.00"),
+        createdAt: new Date("2026-07-20T09:00:00.000Z"),
+        currencyCode: "USD",
+      },
+    ];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [[grs, pos], [gr("g0", { no: "GR-LINES", poId: PO, received: 3 })]],
+            [[grs, wos], []],
+            [[grItems, pos], lines],
+            [[grItems, wos], []],
+            [pos, [poRow("approved")]],
+            [vendors, [vendorRow]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gr" });
+    const g0 = res.json().data.find((g: { id: string }) => g.id === "g0");
+    expect(g0.items.map((i: { id: string }) => i.id)).toEqual(["gi-1st", "gi-2nd"]);
+    expect(g0.currency_code).toBe("USD"); // items[0] AFTER the sort, not after the read
+  });
+
   it("binds company_id on the project root of both scoped reads (no cross-tenant leak)", async () => {
     const captured: Captured[] = [];
     await (
@@ -480,6 +590,131 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(row.orderedQty).toBe("100");
     expect(row.receivedQty).toBe("90"); // = qty_ok
     expect(row.price).toBe("300.00");
+  });
+
+  // ── B-323 round 2: the PRODUCTION tie the seed can never reproduce ────────────
+  //
+  // The seed hands every gr_item a distinct created_at (seed/stamp.ts), so a
+  // seed-based test proves NOTHING about line order. In production a receipt's lines
+  // are written by ONE insertThrough — one INSERT, one now() — so all N lines take the
+  // same instant and every reader falls through to the defaultRandom() uuid. These two
+  // tests are the pair: the writer must record entry order, and the reader must
+  // recover it from what the writer recorded.
+  it("RECORDS entry order: a 3-line receipt is written with 3 DISTINCT, increasing created_at", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]],
+            [grs, [gr("new-0", { poId: PO, received: 6 })]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        no: "GR-2026-0199",
+        lines: [
+          { qty_ok: 1, qty_rejected: 0, name: "ปูนซีเมนต์", ordered_qty: 1, unit: "ถุง", price: 300 },
+          { qty_ok: 2, qty_rejected: 0, name: "เหล็กเส้น", ordered_qty: 2, unit: "เส้น", price: 300 },
+          { qty_ok: 3, qty_rejected: 0, name: "ทราย", ordered_qty: 3, unit: "คิว", price: 300 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const rows = inserted.find((w) => w.table === grItems)!.rows as {
+      name: string;
+      createdAt: Date;
+    }[];
+    expect(rows.map((r) => r.name)).toEqual(["ปูนซีเมนต์", "เหล็กเส้น", "ทราย"]);
+
+    // Without stampEntryOrder these are all `undefined` and Postgres gives all three
+    // the transaction's single now() — the tie that makes the random uuid decisive.
+    const times = rows.map((r) => r.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(3);
+    for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!);
+  });
+
+  it("RECOVERS entry order: those same 3 lines render top-down even with adversarial uuids", async () => {
+    // The uuids are chosen so that uuid order is the REVERSE of entry order, and the
+    // reads are handed back in a third, scrambled order. Only created_at can produce
+    // the right answer — which is exactly why the write path has to stamp it.
+    const t0 = new Date("2026-07-20T09:00:00.000Z").getTime();
+    const written = [
+      { ...grItem("ffff-cement", "g0", 1, 1, "300.00"), createdAt: new Date(t0) },
+      { ...grItem("7777-steel", "g0", 2, 2, "300.00"), createdAt: new Date(t0 + 1) },
+      { ...grItem("0000-sand", "g0", 3, 3, "300.00"), createdAt: new Date(t0 + 2) },
+    ];
+    const scrambled = [written[2]!, written[0]!, written[1]!];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [[grs, pos], [gr("g0", { no: "GR-2026-0199", poId: PO, received: 6 })]],
+            [[grs, wos], []],
+            [[grItems, pos], scrambled],
+            [[grItems, wos], []],
+            [pos, [poRow("approved")]],
+            [vendors, [vendorRow]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gr" });
+    const g0 = res.json().data.find((g: { id: string }) => g.id === "g0");
+    expect(g0.items.map((i: { id: string }) => i.id)).toEqual([
+      "ffff-cement",
+      "7777-steel",
+      "0000-sand",
+    ]);
+    // The uuid order the pre-fix code would have produced — asserted as a FOIL so this
+    // test cannot pass by accident if entryOrder silently degrades to the id tiebreak.
+    expect([...g0.items].map((i: { id: string }) => i.id).sort()).toEqual([
+      "0000-sand",
+      "7777-steel",
+      "ffff-cement",
+    ]);
+  });
+
+  it("a receipt whose lines DID tie (written before the fix) still renders deterministically", async () => {
+    // Rows already in the database carry the old tied timestamps and cannot be
+    // repaired. entryOrder must still be TOTAL over them — deterministically wrong
+    // beats nondeterministic, because the visual gate can at least hold the line.
+    const tied = new Date("2026-07-20T09:00:00.000Z");
+    const legacy = [
+      { ...grItem("ffff-cement", "g0", 1, 1, "300.00"), createdAt: tied },
+      { ...grItem("0000-sand", "g0", 3, 3, "300.00"), createdAt: tied },
+    ];
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [
+              [[grs, pos], [gr("g0", { no: "GR-LEGACY", poId: PO, received: 4 })]],
+              [[grs, wos], []],
+              [[grItems, pos], rows],
+              [[grItems, wos], []],
+              [pos, [poRow("approved")]],
+              [vendors, [vendorRow]],
+            ],
+          }),
+        })
+      ).inject({ url: "/api/v1/gr" });
+      const g0 = res.json().data.find((g: { id: string }) => g.id === "g0");
+      return g0.items.map((i: { id: string }) => i.id);
+    };
+    expect(await ids(legacy)).toEqual(["0000-sand", "ffff-cement"]);
+    expect(await ids([...legacy].reverse())).toEqual(["0000-sand", "ffff-cement"]);
   });
 
   it("400s when the receipt lines carry more than one currency (B-085 fix 4 — one receipt = one currency)", async () => {

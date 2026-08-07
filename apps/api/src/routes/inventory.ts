@@ -108,6 +108,7 @@ import { round2 } from "./money.js";
 import { pick, readIdempotencyKey, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed, type CallerAuthz } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
+import { entryOrder, newestFirst, stampEntryOrder } from "./list-order.js";
 import {
   ACCT,
   allocJvNo,
@@ -206,17 +207,6 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Epoch ms of a stored timestamp/date, else 0 (a malformed value sorts last). */
-function msOf(ts: unknown): number {
-  if (ts == null) return 0;
-  const t = new Date(ts as string | Date).getTime();
-  return Number.isFinite(t) ? t : 0;
-}
-
-/** Sort a set of rows carrying `createdAt` newest-first (mock list order). */
-function newestFirst<T extends { createdAt?: unknown }>(rows: readonly T[]): T[] {
-  return [...rows].sort((a, b) => msOf(b.createdAt) - msOf(a.createdAt));
-}
 
 /** The on-hand rollup key for a (item, warehouse) pair. */
 function balanceKey(itemId: string, warehouseId: string): string {
@@ -586,7 +576,11 @@ async function getTransfer(
       transfer.fromWarehouseId ? whName.get(transfer.fromWarehouseId) ?? null : null,
       transfer.toWarehouseId ? whName.get(transfer.toWarehouseId) ?? null : null,
     ),
-    lines: lines.map(transferLineWire),
+    // B-323: a transfer's lines are its ordered BODY, not a list — entryOrder
+    // (created_at ASC), matching the stamp POST /inventory/transfers applies.
+    // selectThrough emits INNER JOINs with no ORDER BY, so the raw order is a
+    // join-plan artefact.
+    lines: entryOrder(lines).map(transferLineWire),
   });
 }
 
@@ -625,7 +619,9 @@ async function getIssue(
   const projectName = new Map(projectRows.map((p) => [p.id, p.name]));
   return reply.code(200).send({
     ...issueWire(issue, issue.projectId ? projectName.get(issue.projectId) ?? null : null),
-    lines: lines.map(issueLineWire),
+    // B-323: an issue's lines are its ordered BODY — entryOrder (created_at ASC),
+    // matching the stamp POST /inventory/issues applies.
+    lines: entryOrder(lines).map(issueLineWire),
   });
 }
 
@@ -830,17 +826,20 @@ async function createTransfer(
         status: "pending",
       })
       .returning()) as StockTransferRow[];
+    // B-323: transfer_line is a no-`seq` LINE table read back as the ordered body of
+    // one transfer (GET /inventory/transfers/{id}). One insertThrough = one now() =
+    // every line tied, so stamp the batch apart in body order.
     await tx.insertThrough(
       transferLines,
       stockTransfers,
       transferId,
-      lines.map((l) => ({
+      stampEntryOrder(lines.map((l) => ({
         transferId,
         itemId: l.itemId,
         qty: qtyStr(l.qty),
         fromWh: fromWarehouseId,
         toWh: toWarehouseId,
-      })),
+      }))),
     );
     return header!;
   });
@@ -1264,11 +1263,15 @@ async function createIssue(
             idempotencyKey,
           })
           .returning()) as MaterialIssueRow[];
+        // B-323: issue_line is a no-`seq` LINE table read back as the ordered body of
+        // one issue (GET /inventory/issues/{id}) — stamp the batch apart in body order.
         await tx.insertThrough(
           issueLines,
           materialIssues,
           issueId,
-          lines.map((l) => ({ issueId, itemId: l.itemId, qty: qtyStr(l.qty), ccId: l.ccId })),
+          stampEntryOrder(
+            lines.map((l) => ({ issueId, itemId: l.itemId, qty: qtyStr(l.qty), ccId: l.ccId })),
+          ),
         );
         // stock_ledger carries company_id → scoped insert door, one row at a time.
         for (const row of ledgerRows) {

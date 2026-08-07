@@ -23,6 +23,7 @@ import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { models, projectNodes, projects } from "@juneflow/db/schema";
+import { stampEntryOrder } from "./list-order.js";
 
 type NodeRow = typeof projectNodes.$inferSelect;
 
@@ -195,7 +196,12 @@ export function registerProjectNodesRoute(app: FastifyInstance): void {
 
     // insertThrough re-verifies tenant ownership of the project before writing
     // (fail-closed) — the child rows can never land under a foreign project.
-    await db.insertThrough(projectNodes, projects, id, rows);
+    //
+    // B-323: the block + all its units go in ONE insert, so without the stamp they
+    // share a created_at. bySibling (this file) tiebreaks on name and survives that,
+    // but dashboard.ts reads the same table with entryOrder and would fall through to
+    // the random uuid. project_node has no `seq` — stamp the batch apart.
+    await db.insertThrough(projectNodes, projects, id, stampEntryOrder(rows));
 
     // Echo the created block as a HierarchyNode: brand-new units are all empty →
     // sold/built are provably 0.

@@ -724,6 +724,13 @@ describe("POST /api/v1/inventory/transfers", () => {
     // lines written (via insertThrough into transfer_line).
     const lines = inserted.find((i) => i.table === transferLines)!.values as Record<string, unknown>[];
     expect(lines).toHaveLength(2);
+    // B-323: transfer_line is a no-`seq` LINE table whose detail read orders by
+    // entryOrder (created_at ASC). One insertThrough = one now(), so without the
+    // stamp both lines tie and the transfer's body renders in uuid order.
+    const times = (lines as { createdAt?: Date }[]).map((l) => l.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(2);
+    expect(times[1]!).toBeGreaterThan(times[0]!);
     // NO stock movement on create (deferred to approve).
     expect(inserted.find((i) => i.table === stockLedgers)).toBeUndefined();
   });
@@ -867,6 +874,59 @@ describe("POST /api/v1/inventory/issues", () => {
     });
 
   const issuePayload = { project_id: PROJECT0, from_warehouse_id: WH_FROM, lines: [{ item_id: ITEM0, qty: 10, cc_id: CC0 }] };
+
+  // B-323: issue_line is a no-`seq` LINE table whose detail read (GET
+  // /inventory/issues/{id}) orders by entryOrder (created_at ASC). One insertThrough
+  // is one statement / one now(), so without the stamp every line of a multi-line
+  // issue ties and the document's body renders in `defaultRandom()` uuid order.
+  it("stamps a multi-line issue apart so its ENTRY ORDER is recorded, not inferred", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            ...authzRows({ approve: true }),
+            [projects, [projectRow]],
+            [warehouses, [warehouseRow(WH_FROM)]],
+            [
+              inventoryItems,
+              [itemRow(ITEM0, { price: "50.00" }), itemRow(ITEM1, { price: "30.00" })],
+            ],
+            [
+              stockLedgers,
+              [ledgerRow(ITEM0, WH_FROM, "100.0000"), ledgerRow(ITEM1, WH_FROM, "100.0000")],
+            ],
+            [materialIssues, [issueRow("seed-mi", { no: "OPEN-1" })]],
+            [jvs, [jvSeed]],
+            [glAccounts, COA_ROWS],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/inventory/issues",
+      payload: {
+        project_id: PROJECT0,
+        from_warehouse_id: WH_FROM,
+        lines: [
+          { item_id: ITEM0, qty: 3, cc_id: CC0 },
+          { item_id: ITEM1, qty: 4, cc_id: CC0 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const lines = inserted.find((i) => i.table === issueLines)!.values as {
+      itemId: string;
+      createdAt?: Date;
+    }[];
+    expect(lines.map((l) => l.itemId)).toEqual([ITEM0, ITEM1]);
+    const times = lines.map((l) => l.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(2);
+    expect(times[1]!).toBeGreaterThan(times[0]!);
+  });
 
   it("403s a caller lacking finance.approve (an issue moves stock + posts money)", async () => {
     const inserted: Inserted[] = [];

@@ -66,6 +66,7 @@ import { hashPassword } from "better-auth/crypto";
 import * as schema from "../schema/index.js";
 import { det } from "./ids.js";
 import { PACKAGES } from "./packages.js";
+import { stampingTx } from "./stamp.js";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -833,6 +834,9 @@ const LAND_PLOTS = [
 // B-224: SEED_FROZEN_NOW freezes the seed clock to a fixed instant so clock-relative
 // data (audit `at`, due dates, EVM periods - all off SEED_TODAY) is byte-stable for the
 // G5 visual gate. UNSET (prod/dev) -> new Date(): recent-activity demo realism preserved.
+// B-323: SEED_NOW is ALSO the anchor for every row's explicit created_at/updated_at
+// (see seed/stamp.ts). B-224 froze this script's business clock but NOT the DB's own
+// `defaultNow()`, so date-bearing screens still drifted across freshly seeded stacks.
 const SEED_FROZEN_ = process.env.SEED_FROZEN_NOW ? new Date(process.env.SEED_FROZEN_NOW) : null;
 const SEED_NOW = SEED_FROZEN_ && Number.isFinite(SEED_FROZEN_.getTime()) ? SEED_FROZEN_ : new Date();
 const SEED_TODAY = new Date(SEED_NOW);
@@ -938,7 +942,14 @@ async function seed(): Promise<void> {
   const db = drizzle(pool, { schema });
 
   try {
-    await db.transaction(async (tx) => {
+    await db.transaction(async (rawTx) => {
+      // B-323: every insert below goes through the STAMPING wrapper, which fills
+      // created_at/updated_at from SEED_NOW with a deterministic per-batch stagger
+      // instead of leaving them to Postgres `defaultNow()`. Rows that set their own
+      // createdAt (the org tree's ORG_EPOCH ladder) keep it. Wrapping the tx rather
+      // than each of the 74 call sites is deliberate — the next insert added to this
+      // file is stamped whether or not its author knows this defect existed.
+      const tx = stampingTx(rawTx, SEED_NOW);
       // --- idempotency: wipe every seeded table, one transaction, FK-safe ---
       const res = await tx.execute(
         sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,

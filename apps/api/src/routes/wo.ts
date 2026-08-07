@@ -49,6 +49,7 @@ import {
   workPeriods,
 } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { byIdAsc, newestFirst } from "./list-order.js";
 import { round2 } from "./money.js";
 import {
   callerApprovalLevel,
@@ -130,7 +131,11 @@ function woWire(
   };
   if (!plan) return base;
 
-  const installments = [...plan.installments].sort((a, b) => a.seq - b.seq);
+  // B-323: work_period.seq has no unique constraint, and it is `integer NOT NULL
+  // DEFAULT 0` (packages/db/src/schema/subcon.ts) — so the column cannot be null, and
+  // every period inserted without an explicit seq lands on the SAME 0. Ties are the
+  // ordinary case here, not an edge, and the id floor is the only thing deciding them.
+  const installments = [...plan.installments].sort((a, b) => a.seq - b.seq || byIdAsc(a, b));
   const totalPlan = installments.reduce((s, p) => s + Number(p.amount), 0);
   const donePlan = installments
     .filter((p) => isPeriodDone(p.status))
@@ -173,9 +178,10 @@ export function registerWoRoute(app: FastifyInstance): void {
       periodsByContract.set(p.contractId, list);
     }
     const prTitleById = new Map(prRows.map((p) => [p.id, p.title]));
+    // B-323: `docs` is a selectThrough (INNER JOIN, no ORDER BY) — total-order it.
     return reply.code(200).send(
       listEnvelope(
-        docs.map((wo) =>
+        newestFirst(docs).map((wo) =>
           woWire(wo, {
             scope: wo.prId ? prTitleById.get(wo.prId) ?? null : null,
             installments: wo.contractId

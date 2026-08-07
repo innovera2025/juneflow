@@ -37,6 +37,7 @@ import {
 } from "@juneflow/db/schema";
 import { sendQuotaExceeded, type QuotaGuard } from "../plugins/quota.js";
 import { listEnvelope } from "./list-envelope.js";
+import { entryOrder, stampEntryOrder } from "./list-order.js";
 
 type ProjectNodeRow = typeof projectNodes.$inferSelect;
 
@@ -152,8 +153,14 @@ export function registerProjectsRoute(
       // ({data, page, page_size, total}). The full list is returned as one
       // page (filter/page/page_size are accepted but not interpreted) — see
       // list-envelope.ts.
+      // B-323: ENTRY order (created_at ASC), NOT newestFirst — this is the one master
+      // list where newest-first would be actively wrong. `project` is in the seed's
+      // ASCENDING_STAGGER_TABLES because the app treats the OLDEST project as the
+      // primary one (dashboard.ts resolvePrimaryProject sorts created_at ASC and takes
+      // [0] to find the hero project `project:rjp`, seed index 0). Ordering this list
+      // newest-first would render it upside-down relative to that same anchor.
       listEnvelope(
-        rows.map((p) => {
+        entryOrder(rows).map((p) => {
           const nodes = nodesByProject.get(p.id) ?? [];
           return {
             id: p.id,
@@ -318,7 +325,19 @@ export function registerProjectsRoute(
       // insertThrough re-verifies this tenant owns the just-created project
       // before writing (fail-closed) — the nodes can never land under a foreign
       // project.
-      await db.insertThrough(projectNodes, projects, created!.id, nodeRows);
+      //
+      // B-323: nodeRows is the whole phase→unit ladder of a new project in ONE
+      // insert — one now(), every node tied. project_node has no `seq`, and
+      // dashboard.ts reads it with entryOrder to build the phase ladder top-down, so
+      // an unstamped batch renders that ladder in `defaultRandom()` uuid order.
+      // (project-nodes.ts's own bySibling tiebreaks on name, so it survives a tie;
+      // the dashboard reader does not — stamping fixes the table for both.)
+      await db.insertThrough(
+        projectNodes,
+        projects,
+        created!.id,
+        stampEntryOrder(nodeRows),
+      );
     }
 
     const totalUnits = createdPhases.reduce((n, p) => n + p.units, 0);

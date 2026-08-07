@@ -78,6 +78,7 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byIdAsc, newestFirst } from "./list-order.js";
 // The open-PM work-order query is owned by counts.ts (the pm.wo badge source);
 // the acceptance-center PM feed reuses it so the two can never drift (see the
 // pm slice below).
@@ -588,8 +589,9 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-323: selectThrough = INNER JOIN with no ORDER BY — total-order the list.
     const rows = await db.selectThrough(subconContracts, CONTRACT_HOPS);
-    return reply.code(200).send(listEnvelope(rows.map(contractWire)));
+    return reply.code(200).send(listEnvelope(newestFirst(rows).map(contractWire)));
   });
 
   // POST /subcon-contracts — create a subcon contract (CORE create, NO autosplit
@@ -722,7 +724,9 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .send({ code: "NOT_FOUND", message: `subcon contract ${id} not found` });
     }
     const rows = await db.selectThrough(workPeriods, PERIOD_HOPS, eq(workPeriods.contractId, id));
-    const sorted = [...rows].sort((a, b) => a.seq - b.seq);
+    // B-323: same work_period.seq as wo.ts — no unique constraint, and `NOT NULL
+    // DEFAULT 0`, so periods written without an explicit seq all tie at 0.
+    const sorted = [...rows].sort((a, b) => a.seq - b.seq || byIdAsc(a, b));
     // META-1 enrichment: project_name (this contract → project) + composed title +
     // the rejected-period defect items. The defect reads run only when a period is
     // actually rejected (otherwise there is nothing honest to surface).
@@ -1183,7 +1187,12 @@ export function registerSubconRoute(app: FastifyInstance): void {
         const current = finalByContract.get(p.contractId);
         if (!current || p.seq > current.seq) finalByContract.set(p.contractId, p);
       }
-      const awaiting = [...finalByContract.values()].filter((p) => p.status !== "paid");
+      // B-323: `finalByContract` is a Map whose INSERTION order is the join plan's
+      // (first-seen contract wins the slot), so the values() sequence inherits it.
+      // Total-order the surviving queue instead of trusting that traversal.
+      const awaiting = newestFirst(
+        [...finalByContract.values()].filter((p) => p.status !== "paid"),
+      );
       // META-1 enrichment: project_name (contract → project) + composed title.
       // A handover carries no owner/defect column → owner honest-null, no defect key.
       const [contractById, projName] = await Promise.all([
@@ -1210,7 +1219,9 @@ export function registerSubconRoute(app: FastifyInstance): void {
       ]);
       const byId = new Map<string, GrRow>();
       for (const g of [...poGrs, ...woGrs]) byId.set(g.id, g);
-      const rejects = [...byId.values()].filter((g) => Number(g.rejected) > 0);
+      // B-323: same Map-insertion-order dependency as the house slice, doubled — the
+      // two GR chains are separate INNER-JOIN reads concatenated before de-duping.
+      const rejects = newestFirst([...byId.values()].filter((g) => Number(g.rejected) > 0));
       // META-1 enrichment: project_name via whichever of po/wo resolves to a pr →
       // project, title = the real gr `no`. Every resolve read is tenant-scoped.
       const [poPr, woPr, prProjects, projName] = await Promise.all([
@@ -1249,7 +1260,8 @@ export function registerSubconRoute(app: FastifyInstance): void {
     const defectsByPeriod = rows.some((p) => p.status === "rejected")
       ? await loadDefectsByPeriod(db)
       : new Map<string, string[]>();
-    const enriched = rows.map((p) =>
+    // B-323: `rows` is a selectThrough (INNER JOIN, no ORDER BY) — total-order it.
+    const enriched = newestFirst(rows).map((p) =>
       enrichPeriodRow(p, contractById.get(p.contractId), projName, defectsByPeriod),
     );
     return reply.code(200).send(listEnvelope(enriched));

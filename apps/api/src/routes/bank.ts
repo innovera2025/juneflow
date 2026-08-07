@@ -77,6 +77,7 @@ import { loadBankFileConfig } from "@juneflow/bank-file/config";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byNewestThenId, newestFirst } from "./list-order.js";
 import { pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 
@@ -235,13 +236,10 @@ async function listStatements(db: TenantDb): Promise<Record<string, unknown>[]> 
     else byStatement.set(line.statementId, [line]);
   }
 
-  return [...statements]
-    .sort((a, b) => {
-      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bt - at;
-    })
-    .map((s) => statementWire(s, byStatement.get(s.id) ?? []));
+  // B-323: this hand-rolled comparator returned 0 for two statements sharing an
+  // instant — which is EVERY row of one import batch — handing the pair back to the
+  // heap order. newestFirst breaks the tie on id, so the list is totally ordered.
+  return newestFirst(statements).map((s) => statementWire(s, byStatement.get(s.id) ?? []));
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +383,13 @@ async function listStatementLines(
     .sort((a, b) => {
       const at = toDateMs(a.lineDate) ?? 0;
       const bt = toDateMs(b.lineDate) ?? 0;
-      return bt - at; // newest line first
+      if (at !== bt) return bt - at; // newest line first
+      // B-323: line_date is a business DATE, so ties are the NORM here, not an edge —
+      // a statement routinely carries several lines on one day, and this comparator
+      // returned 0 for every one of them, leaving their order to the join plan. Fall
+      // through to the shared total order: created_at (the seed's stagger, and real
+      // import order) and then id, which is unique by construction.
+      return byNewestThenId(a, b);
     })
     .map((l) => lineWire(l, pools));
   return reply.code(200).send(listEnvelope(rows));
@@ -601,13 +605,8 @@ function chequeWire(c: ChequeRow): Record<string, unknown> {
 
 async function listCheque(db: TenantDb): Promise<Record<string, unknown>[]> {
   const chequeRows = (await db.select(cheques)) as ChequeRow[];
-  return [...chequeRows]
-    .sort((a, b) => {
-      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bt - at;
-    })
-    .map(chequeWire);
+  // B-323: same tie-blind comparator as listStatements — total-order it.
+  return newestFirst(chequeRows).map(chequeWire);
 }
 
 // ---------------------------------------------------------------------------

@@ -476,6 +476,46 @@ describe("GET /api/v1/ap/pv", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  // B-323: both AP lists used an inline created_at-only comparator that returned 0 for
+  // two rows sharing an instant, handing the pair back to the join plan. Billings and
+  // PVs are routinely created together in one transaction, so the tie is not exotic.
+  it("lists are TOTAL when two rows share an instant (id floor decides)", async () => {
+    const billingIds = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [
+              [apBillings, rows],
+              [vendors, [vendorRow]],
+              [pos, [poRow]],
+              [wos, [woRow]],
+              [grs, [grRow]],
+            ],
+          }),
+        })
+      ).inject({ url: "/api/v1/ap/billing" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // `apBilling()` / `pvRow()` hardcode the same createdAt — a genuine tie.
+    expect(await billingIds([apBilling("aaa"), apBilling("bbb")])).toEqual(["aaa", "bbb"]);
+    expect(await billingIds([apBilling("bbb"), apBilling("aaa")])).toEqual(["aaa", "bbb"]);
+
+    const pvIds = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [[pvs, rows], [apBillings, [apBilling(AP0)]], [vendors, [vendorRow]]],
+          }),
+        })
+      ).inject({ url: "/api/v1/ap/pv" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    expect(await pvIds([pvRow("aaa"), pvRow("bbb")])).toEqual(["aaa", "bbb"]);
+    expect(await pvIds([pvRow("bbb"), pvRow("aaa")])).toEqual(["aaa", "bbb"]);
+  });
+
   it("lists PVs with payee, method/cheque fields, WHT via calcWht, net + retention", async () => {
     const res = await (
       await buildTestApp({

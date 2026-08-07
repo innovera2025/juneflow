@@ -71,6 +71,7 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
 
 type PrRow = typeof prs.$inferSelect;
@@ -334,9 +335,10 @@ export function registerPrRoute(app: FastifyInstance): void {
     const vendorNameById = new Map(vendorRows.map((v) => [v.id, v.name]));
     const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
 
+    // B-323: `docs` is a selectThrough (INNER JOIN, no ORDER BY) — total-order it.
     return reply.code(200).send(
       listEnvelope(
-        docs.map((d) => {
+        newestFirst(docs).map((d) => {
           const { amount, currency } = sumLines(linesByPr.get(d.id) ?? [], prices);
           return prWire(d, amount, currency, {
             vendor: d.vendorId ? vendorNameById.get(d.vendorId) ?? null : null,

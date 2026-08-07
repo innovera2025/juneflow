@@ -61,6 +61,7 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { businessNowMs } from "../business-clock.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 
@@ -243,13 +244,10 @@ async function listBilling(db: TenantDb): Promise<Record<string, unknown>[]> {
     gr: new Map([...grsViaPo, ...grsViaWo].map((g) => [g.id, g.no])),
   };
 
-  return [...bills]
-    .sort((a, b) => {
-      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bt - at;
-    })
-    .map((b) => billingWire(b, vendorNames, refs));
+  // B-323: was an inline created_at-only comparator — tie-BLIND (returned 0 for two
+  // bills sharing an instant, leaving the pair to the join plan). The shared
+  // newestFirst is TOTAL (created_at DESC, then id ASC).
+  return newestFirst(bills).map((b) => billingWire(b, vendorNames, refs));
 }
 
 // ---------------------------------------------------------------------------
@@ -404,11 +402,9 @@ async function listPv(db: TenantDb): Promise<Record<string, unknown>[]> {
   ]);
   const payees = resolvePayees(pvRows, bills, vendorRows);
 
-  const sorted = [...pvRows].sort((a, b) => {
-    const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return bt - at;
-  });
+  // B-323: same tie-blind inline comparator as listBillings — use the shared TOTAL
+  // order so two PVs created in one transaction cannot swap between reads.
+  const sorted = newestFirst(pvRows);
   return Promise.all(
     sorted.map((pv) => pvWire(pv, payees.get(pv.id) ?? { vendorId: null, vendorName: null })),
   );

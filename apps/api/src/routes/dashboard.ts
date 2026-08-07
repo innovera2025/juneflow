@@ -59,6 +59,7 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { bySourceThenNewest, entryOrder, newestFirst } from "./list-order.js";
 // group-C Wave-3 (B-101): the shared EVM snapshot loader that backfills this
 // handler's previously honest-empty budget-vs-actual time-series (the one store
 // that closes the S-curve DATA GAP). Read through the projects hop — see below.
@@ -544,13 +545,18 @@ async function approvalsInbox(
     });
   }
 
-  // Newest first; JS's stable sort keeps the PR→PO→WO grouping for equal times.
-  rows.sort((a, b) => {
-    const at = a.created_at ? new Date(a.created_at as string).getTime() : 0;
-    const bt = b.created_at ? new Date(b.created_at as string).getTime() : 0;
-    return bt - at;
-  });
-  return { status: 200, body: listEnvelope(rows) };
+  // B-323: this was a bare newest-first sort carrying the comment "JS's stable sort
+  // keeps the PR→PO→WO grouping for equal times" — true only because EVERY row shared
+  // the seed transaction's now(), so the comparator returned 0 for every pair. The
+  // grouping was a documented property held up by an accident, and it died the moment
+  // created_at started varying. Rank by kind FIRST so it is enforced rather than
+  // inherited, then newest-first with id as a tiebreak inside each block so no pair is
+  // left unordered.
+  const KIND_ORDER: readonly InboxRow["kind"][] = ["PR", "PO", "WO"];
+  return {
+    status: 200,
+    body: listEnvelope(bySourceThenNewest(rows, (r) => KIND_ORDER.indexOf(r.kind))),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -576,8 +582,15 @@ async function phaseProgress(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const stageByUnit = new Map<string, string | null>();
   for (const s of sales) if (s.unitId) stageByUnit.set(s.unitId, s.stage);
 
+  // B-323: the rows this endpoint emits are DERIVED ({name, units, sold, built, …}) —
+  // they carry no id and no created_at, so they cannot be ordered after the fact. The
+  // order has to be imposed on the SOURCE, and it must be imposed once, before both
+  // the parent→children index and the phase list are built off it. project_node is an
+  // ASCENDING_STAGGER table (the phase ladder reads top-down), so entryOrder.
+  const orderedNodes = entryOrder(nodes);
+
   const childrenByParent = new Map<string, NodeRow[]>();
-  for (const n of nodes) {
+  for (const n of orderedNodes) {
     if (!n.parentId) continue;
     const list = childrenByParent.get(n.parentId);
     if (list) list.push(n);
@@ -591,7 +604,7 @@ async function phaseProgress(db: TenantDb, ctx: DashCtx): Promise<Result> {
     return out;
   };
 
-  const rows = nodes
+  const rows = orderedNodes
     .filter((n) => n.kind === "phase")
     .map((phase) => {
       const unitIds = collectUnitIds(phase.id, []);
@@ -651,6 +664,13 @@ async function alerts(db: TenantDb, ctx: DashCtx): Promise<Result> {
   ]);
   const nameByGroup = new Map(groups.map((g) => [g.id, g.name]));
 
+  // B-323: an alert is derived ({tone, code, title, sub, action}) — no id, no
+  // created_at — so the emitted order is exactly the order these two loops walk their
+  // sources. `cbs` is a 3-hop selectThrough (join-plan order) and `bills` a scoped
+  // select (heap order); total-order both before the walk.
+  const cbsRows = newestFirst(cbs);
+  const billRows = newestFirst(bills);
+
   const out: {
     tone: string;
     code: string;
@@ -660,7 +680,7 @@ async function alerts(db: TenantDb, ctx: DashCtx): Promise<Result> {
   }[] = [];
 
   // Rule 1 — over-budget cost category (used + committed exceed the group budget).
-  for (const c of cbs) {
+  for (const c of cbsRows) {
     const budget = num(c.budget);
     const spent = num(c.used) + num(c.committed);
     if (budget > 0 && spent > budget) {
@@ -678,7 +698,7 @@ async function alerts(db: TenantDb, ctx: DashCtx): Promise<Result> {
   // under project scope: ap_billing carries no project_id (GAP).
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  for (const b of bills) {
+  for (const b of billRows) {
     if (!b.dueDate) continue; // GAP: seed ap_billing.due_date is null → no trip.
     const settled = b.status === "paid" || b.status === "settled";
     if (settled) continue;
@@ -732,7 +752,10 @@ async function cashflowForecast(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const rows: { due_date: string; label: string | null; amount: number }[] = [];
 
   // Payables (money out) — ap_billing carries an explicit due_date.
-  for (const b of bills) {
+  // B-323: the `due_date` sort below is STABLE, so two rows sharing a due date keep
+  // the order they were pushed in — i.e. the source read order. Total-order both
+  // sources so that fallback is deterministic rather than heap/plan order.
+  for (const b of newestFirst(bills)) {
     if (!b.dueDate) continue; // GAP: null in seed.
     const due = new Date(b.dueDate as unknown as string);
     if (!inWindow(due)) continue;
@@ -744,7 +767,7 @@ async function cashflowForecast(db: TenantDb, ctx: DashCtx): Promise<Result> {
   }
 
   // Receivables (money in) — due date derived from created_at + credit_term.
-  for (const inv of invoices) {
+  for (const inv of newestFirst(invoices)) {
     const term = inv.creditTerm;
     if (term == null || !inv.createdAt) continue;
     const due = new Date(inv.createdAt as unknown as string);
@@ -757,9 +780,22 @@ async function cashflowForecast(db: TenantDb, ctx: DashCtx): Promise<Result> {
     });
   }
 
-  rows.sort((a, b) => a.due_date.localeCompare(b.due_date));
-  const netTotal = round2(rows.reduce((s, r) => s + r.amount, 0));
-  return { status: 200, body: { net_total: netTotal, currency_code: "THB", rows } };
+  // B-323: `due_date` alone returns 0 for every pair falling on one day, which on a
+  // 7-day cash-flow ladder is most pairs. It was deterministic only via the unstated
+  // reliance the comment above records — sort stability plus two newestFirst sources.
+  // The insertion index says that out loud and makes the comparator TOTAL: it is unique
+  // by construction, and tiebreaking on it reproduces exactly the permutation a stable
+  // sort already produced, so no rendered row moves. These rows are synthesised and
+  // carry no id, so the index is the only floor available.
+  const ordered = rows
+    .map((r, i) => ({ ...r, _seq: i }))
+    .sort((a, b) => a.due_date.localeCompare(b.due_date) || a._seq - b._seq)
+    .map(({ _seq, ...r }) => r);
+  const netTotal = round2(ordered.reduce((s, r) => s + r.amount, 0));
+  return {
+    status: 200,
+    body: { net_total: netTotal, currency_code: "THB", rows: ordered },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -805,7 +841,9 @@ async function contractors(db: TenantDb, ctx: DashCtx): Promise<Result> {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
-  const rows = contracts
+  // B-323: a contractor row is derived ({vendor_name, progress_pct, …}) — no id — so
+  // the order comes from `contracts`, a selectThrough whose order is the join plan's.
+  const rows = newestFirst(contracts)
     .filter((c) => !c.end || new Date(c.end as unknown as string) >= today)
     .map((c) => {
       const value = num(c.value);

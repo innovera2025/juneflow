@@ -61,6 +61,7 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { entryOrder, newestFirst, stampEntryOrder } from "./list-order.js";
 import { round2 } from "./money.js";
 import { isUniqueViolation, violatedConstraint } from "./gl-post.js";
 import {
@@ -217,10 +218,14 @@ async function grVendorName(db: TenantDb, gr: GrRow): Promise<string | null> {
   return vendor?.name ?? null;
 }
 
-/** The gr_item received lines of a single GR (scoped through its PO/WO anchor). */
+/**
+ * The gr_item received lines of a single GR (scoped through its PO/WO anchor), in
+ * ENTRY order — the order they were typed into the receipt form. `selectThrough`
+ * emits INNER JOINs with no ORDER BY, so the raw row order is a join-plan artefact.
+ */
 async function grItemsFor(db: TenantDb, gr: GrRow): Promise<GrItemRow[]> {
   const hops = gr.poId ? GR_ITEM_PO_HOPS : GR_ITEM_WO_HOPS;
-  return db.selectThrough(grItems, hops, eq(grItems.grId, gr.id));
+  return entryOrder(await db.selectThrough(grItems, hops, eq(grItems.grId, gr.id)));
 }
 
 /**
@@ -405,8 +410,19 @@ export function registerGrRoute(app: FastifyInstance): void {
         db.select(vendors),
       ]);
 
+    // B-323: the two item chains are read as separate INNER-JOIN queries whose
+    // relative row order is a join-plan artefact, so a GR's lines could arrive
+    // interleaved differently on two stacks. That is not cosmetic — grWire labels
+    // the whole receipt with `items[0].currency_code`.
+    //
+    // ENTRY order, not newest-first. A receipt's lines are its ordered body, and
+    // round 1's `newestFirst` here was the exact mistake this module's header warns
+    // about: it is a no-op under the seed's stagger, but in production one
+    // `insertThrough` gives every line the same `now()` and the comparator falls
+    // through to the random uuid. POST /gr stamps the lines apart (stampEntryOrder)
+    // so ascending time IS entry order; this read puts them back in it.
     const itemsByGr = new Map<string, GrItemRow[]>();
-    for (const it of [...poItems, ...woItems]) {
+    for (const it of entryOrder([...poItems, ...woItems])) {
       const list = itemsByGr.get(it.grId) ?? [];
       list.push(it);
       itemsByGr.set(it.grId, list);
@@ -423,9 +439,13 @@ export function registerGrRoute(app: FastifyInstance): void {
       return vid ? vendorNameById.get(vid) ?? null : null;
     };
 
+    // B-323: sort AFTER the concat, never per-arm. Ordering each chain and shipping
+    // `[...poGrs, ...woGrs]` still yields "every PO-anchored receipt, then every
+    // WO-anchored one" — deterministic-looking but not a date order, and a
+    // plausible non-fix.
     return reply.code(200).send(
       listEnvelope(
-        [...poGrs, ...woGrs].map((gr) =>
+        newestFirst([...poGrs, ...woGrs]).map((gr) =>
           grWire(gr, { vendor: vendorOf(gr), items: itemsByGr.get(gr.id) ?? [] }),
         ),
       ),
@@ -649,13 +669,19 @@ export function registerGrRoute(app: FastifyInstance): void {
 
     // Persist the per-line detail (B-078 / F1) — anchored on the same tenant-owned
     // project as the gr, so the write is fail-closed by construction.
+    //
+    // B-323: RECORD the entry order. This is one INSERT, so `defaultNow()` would give
+    // all N lines the transaction's single `now()`; every reader then falls through to
+    // the `defaultRandom()` uuid and a 3-line receipt renders in uuid order. gr_item
+    // has no `seq` column, so `created_at` is the only place entry order can live —
+    // stampEntryOrder spaces the lines 1 ms apart in body order.
     let createdItems: GrItemRow[] = [];
     if (itemDrafts.length) {
       createdItems = await db.insertThrough(
         grItems,
         projects,
         projectId,
-        itemDrafts.map((d) => ({ ...d, grId: created!.id })),
+        stampEntryOrder(itemDrafts.map((d) => ({ ...d, grId: created!.id }))),
       );
     }
 

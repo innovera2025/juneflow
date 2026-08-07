@@ -15,6 +15,7 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byNewestThenId } from "./list-order.js";
 
 type PackageRow = typeof packages.$inferSelect;
 type PlatformInvoiceRow = typeof platformInvoices.$inferSelect;
@@ -44,10 +45,11 @@ function num(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function byCreatedDesc(a: { createdAt: Date | null }, b: { createdAt: Date | null }): number {
-  const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  return bt - at;
+type CreatedRow = { createdAt: Date | null; id?: string };
+function byCreatedDesc(a: CreatedRow, b: CreatedRow): number {
+  // B-323: delegates to the shared TOTAL order — the local version returned 0 for
+  // any two rows sharing an instant, which left their order to the DB.
+  return byNewestThenId(a, b);
 }
 
 // The plan catalog is global (no per-tenant fields) — the same S/M/L/Full rows

@@ -231,6 +231,17 @@ describe("POST /api/v1/ai-qto/:job/create-boq — real BOQ from stub result", ()
     expect((itemWrite!.rows[1] as { cat: string }).cat).toBe("M");
     expect((itemWrite!.rows[2] as { cat: string }).cat).toBe("S");
     expect((itemWrite!.rows[0] as { remainQty: string }).remainQty).toBe("10");
+
+    // B-323: this is the SECOND writer of boq_item, and GET /boq/:id/items reads that
+    // table with entryOrder (created_at ASC). boq_item has no `seq`, and one
+    // insertThrough is one statement / one now() — so without the stamp all three
+    // take-off lines tie and the AI's mapping order is replaced by uuid order.
+    const times = (itemWrite!.rows as { createdAt?: Date }[]).map((r) =>
+      r.createdAt?.getTime(),
+    );
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(3);
+    for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!);
   });
 
   it("falls back to the canned take-off when no mappings are provided", async () => {

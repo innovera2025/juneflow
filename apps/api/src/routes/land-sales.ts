@@ -61,6 +61,7 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { pick, str, toNum } from "./procurement.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byNewestThenId } from "./list-order.js";
 import {
   ACCT,
   allocJvNo,
@@ -246,10 +247,11 @@ function isBalanced(
   return sumDr === sumCr;
 }
 
-function byCreatedDesc(a: { createdAt: Date | null }, b: { createdAt: Date | null }): number {
-  const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  return bt - at;
+type CreatedRow = { createdAt: Date | null; id?: string };
+function byCreatedDesc(a: CreatedRow, b: CreatedRow): number {
+  // B-323: delegates to the shared TOTAL order — the local version returned 0 for
+  // any two rows sharing an instant, which left their order to the DB.
+  return byNewestThenId(a, b);
 }
 
 // ---------------------------------------------------------------------------

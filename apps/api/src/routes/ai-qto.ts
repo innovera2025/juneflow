@@ -31,6 +31,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { boqDocs, boqGroups, boqItems, projects } from "@juneflow/db/schema";
 import { QuotaGuard, sendQuotaExceeded } from "../plugins/quota.js";
+import { stampEntryOrder } from "./list-order.js";
 
 // boq_doc is scoped through its project (boq.ts DOC_HOPS).
 const DOC_HOPS = [{ fk: boqDocs.projectId, parent: projects }];
@@ -278,11 +279,16 @@ export function registerAiQtoRoute(
         elementId: uuidOrNull(pick(m, "element_id", "elementId")),
       };
     });
+    // B-323: the SECOND writer of boq_item, and it has the same obligation as the
+    // first (boq.ts POST /boq/:id/items) — GET /boq/:id/items reads these lines with
+    // entryOrder (created_at ASC) and boq_item has no `seq`. One insertThrough is one
+    // statement and one now(), so without the stamp every take-off line ties and the
+    // AI's mapping order is replaced by `defaultRandom()` uuid order on the wire.
     const createdItems = await db.insertThrough(
       boqItems,
       projects,
       projectId,
-      itemRows,
+      stampEntryOrder(itemRows),
     );
 
     // total = Σ qty×price over the created items (C10 — derived, not hardcoded).

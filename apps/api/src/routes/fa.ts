@@ -57,6 +57,7 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import {
@@ -185,13 +186,9 @@ function assetWire(a: FixedAssetRow): Record<string, unknown> {
 
 async function listAssets(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(fixedAssets)) as FixedAssetRow[];
-  return [...rows]
-    .sort((a, b) => {
-      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bt - at;
-    })
-    .map(assetWire);
+  // B-323: was a tie-blind inline created_at comparator — the shared newestFirst is
+  // TOTAL (created_at DESC, then id ASC).
+  return newestFirst(rows).map(assetWire);
 }
 
 // ---------------------------------------------------------------------------
@@ -540,13 +537,9 @@ function adjustmentWire(a: FaAdjustmentRow): Record<string, unknown> {
 
 async function listAdjustments(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(faAdjustments)) as FaAdjustmentRow[];
-  return [...rows]
-    .sort((a, b) => {
-      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bt - at;
-    })
-    .map(adjustmentWire);
+  // B-323: was a tie-blind inline created_at comparator. Adjustments of one asset are
+  // frequently written together, so the tie is not hypothetical here.
+  return newestFirst(rows).map(adjustmentWire);
 }
 
 // ---------------------------------------------------------------------------

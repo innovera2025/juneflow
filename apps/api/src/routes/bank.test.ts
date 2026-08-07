@@ -374,6 +374,39 @@ describe("GET /api/v1/bank/statements/:id/lines", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  // B-323: the line list ordered on line_date alone. That is a business DATE, so ties
+  // are the NORM here — a statement routinely carries several lines on one day — and
+  // the comparator returned 0 for every one of them, leaving their order to the join
+  // plan. It now falls through to created_at (the seed's stagger / real import order)
+  // and then to id, which is unique by construction.
+  it("is TOTAL for lines sharing a line_date — the common case, not an edge", async () => {
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [
+              [bankStatements, [statementRow(STMT0)]],
+              [bankStatementLines, rows],
+              [pvs, []],
+              [cheques, []],
+              [rvs, []],
+            ],
+          }),
+        })
+      ).inject({ url: `/api/v1/bank/statements/${STMT0}/lines` });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // Three lines on ONE day. `lineRow()` hardcodes the same createdAt too, so only
+    // the id floor can order them — exactly the state the old comparator left open.
+    const a = lineRow("aaa", { lineDate: "2026-05-22" });
+    const b = lineRow("bbb", { lineDate: "2026-05-22" });
+    const c = lineRow("ccc", { lineDate: "2026-05-22" });
+    expect(await ids([a, b, c])).toEqual(["aaa", "bbb", "ccc"]);
+    expect(await ids([c, a, b])).toEqual(["aaa", "bbb", "ccc"]);
+    expect(await ids([c, b, a])).toEqual(["aaa", "bbb", "ccc"]);
+  });
+
   it("resolves matched_doc + suggests only exact-amount docs within the date window", async () => {
     const res = await (
       await buildTestApp({

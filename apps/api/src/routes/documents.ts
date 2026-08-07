@@ -34,17 +34,11 @@ import type { FastifyInstance } from "fastify";
 import { documents, projects, users } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 
 type DocumentRow = typeof documents.$inferSelect;
 type ProjectRow = typeof projects.$inferSelect;
 type UserRow = typeof users.$inferSelect;
-
-/** Newest-first (created_at desc); a missing timestamp sorts last (mirror solar.ts). */
-function byCreatedDesc(a: DocumentRow, b: DocumentRow): number {
-  const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  return bt - at;
-}
 
 /**
  * Resolve an FK id to its display name via a tenant-scoped id→name map (never
@@ -72,7 +66,7 @@ async function listDocuments(
 
   const filtered = cat ? docRows.filter((d) => d.cat === cat) : docRows;
 
-  return [...filtered].sort(byCreatedDesc).map((d) => ({
+  return newestFirst(filtered).map((d) => ({
     id: d.id,
     name: d.name,
     cat: d.cat,
