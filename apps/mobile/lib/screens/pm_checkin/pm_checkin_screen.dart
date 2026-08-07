@@ -34,6 +34,8 @@ import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../app/gps_source.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -133,9 +135,18 @@ class PmCheckinScreen extends StatefulWidget {
 class _PmCheckinScreenState extends State<PmCheckinScreen> {
   PmCheckinState _state = PmCheckinState.idle;
 
-  /// The stable client idempotency key for this screen's check-in. Generated on the
-  /// first submit and REUSED on every manual retry, so a re-tap never duplicates the
-  /// write (the queue's enqueue is idempotent on this id).
+  /// The stable client idempotency key for this screen's check-in.
+  ///
+  /// Minted on the first submit and REUSED on every later attempt, so a re-tap only
+  /// ever re-drains that one op. Without B-330 a restart while the write was queued
+  /// minted a fresh key and enqueued a second op, so the server saw two check-ins.
+  ///
+  /// A null does NOT mean "nothing of mine is queued" — only "this State is not
+  /// tracking one". State is not durable and the QUEUE is, so the two disagree after
+  /// an app kill AND, on a perfectly healthy network, for the whole duration of the
+  /// on-mount drain, before [_resumeQueued] has come back to adopt. [_resumeQueued]
+  /// makes the outstanding write VISIBLE; what keeps a tap from minting a second key
+  /// is that [_onPrimary] asks the queue itself before minting.
   String? _opId;
 
   /// The honest client submit time, shown in the confirmed state (the server's
@@ -149,11 +160,39 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   @override
   void initState() {
     super.initState();
-    // (a) on-mount trigger: flush any writes a prior session left queued. It does
-    // not change this fresh screen's idle state; it just keeps the queue moving.
     if (widget.workOrderId != null) {
-      unawaited(widget.repo.drain());
+      unawaited(_resumeQueued());
     }
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
+  /// app kill (B-330).
+  ///
+  /// The drain runs FIRST and is awaited, so the online case resolves normally and
+  /// leaves nothing to adopt. A check-in STILL pending for this work order afterwards
+  /// is one this device captured and the server has not accepted, so the screen takes
+  /// its id back and shows the honest queued state instead of a clean slate.
+  ///
+  /// WHAT THIS DOES NOT CLOSE: `await drain()` is one real HTTP round trip (Dio is
+  /// built with no `connectTimeout`), and the check-in CTA is live for all of it with
+  /// [_opId] still null. This is the VISIBLE half of the rehydration; the half that
+  /// prevents the second key is the pre-mint queue check in [_onPrimary].
+  Future<void> _resumeQueued() async {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    await widget.repo.drain();
+    if (!mounted) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      pmCheckinOpIdentity(woId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = PmCheckinState.queued;
+    });
   }
 
   String _t(String field) => widget.i18n.t(widget.strings[field]);
@@ -178,11 +217,37 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
       return;
     }
 
-    if (_opId == null) {
-      await _acquireAndSubmit(woId);
-    } else {
-      await _retryDrain(_opId!);
+    final String? tracked = _opId;
+    if (tracked != null) {
+      await _retryDrain(tracked);
+      return;
     }
+
+    // Flipped SYNCHRONOUSLY before the queue read below, so the CTA is already
+    // disabled when a second tap could otherwise arrive during it. `submitting` and
+    // `acquiringGps` are the same `busy` to every reader of this state.
+    setState(() => _state = PmCheckinState.submitting);
+
+    // About to MINT a key — so ask the QUEUE rather than trust this State's null
+    // (B-330). That null also covers the whole on-mount drain, during which this CTA
+    // is live and a check-in of this work order's may already be queued; minting
+    // there enqueues a SECOND op under a SECOND key and the server records two
+    // check-ins. Re-draining the adopted op is a no-op while the outer drain is still
+    // running (re-entrancy guard) — which is right: it is already replaying it.
+    final SyncOperation? already = findAdoptableOp(
+      await widget.repo.due(),
+      pmCheckinOpIdentity(woId),
+    );
+    if (!mounted) return;
+    if (already != null) {
+      // No coordinate is acquired or shown for an adopted op: the op carries the fix
+      // it was captured with, and a freshly-acquired one would not be what was sent.
+      setState(() => _opId = already.id);
+      await _retryDrain(already.id);
+      return;
+    }
+
+    await _acquireAndSubmit(woId);
   }
 
   /// Acquire a real fix, then enqueue + drain. No fix → honest gpsUnavailable (no

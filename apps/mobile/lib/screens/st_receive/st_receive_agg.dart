@@ -252,6 +252,12 @@ bool anyShort(List<StRecvLine> lines, List<double> counts) {
   return false;
 }
 
+/// The body key that carries the receipt's subject PO. Named rather than inlined
+/// because it is the ONLY thing that pins a queued `/gr` op to one PO — the endpoint
+/// is `/gr` for every receipt — so the screen's post-restart adoption matcher
+/// (`stReceiveOpIdentity`, B-330) has to read the same key this builder writes.
+const String grPoIdField = 'po_id';
+
 /// Build the POST /gr body for this receipt.
 ///
 /// Deliberately minimal, and every omission is load-bearing — see the header:
@@ -276,7 +282,7 @@ Map<String, Object?> buildReceiptPayload({
   required String idempotencyKey,
 }) {
   return <String, Object?>{
-    'po_id': poId,
+    grPoIdField: poId,
     'idempotency_key': idempotencyKey,
     'lines': <Map<String, Object?>>[
       for (final double c in counts)

@@ -38,9 +38,20 @@
 //   guards money writes) is not required here.
 import 'package:dio/dio.dart';
 
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import 'pm_checklist_agg.dart';
+
+/// What one work order's queued checklist write looks like in the shared queue.
+///
+/// The ONE definition of this write's entity type + endpoint: the enqueue below
+/// builds its [SyncOperation] from it, and the screen matches its own still-pending
+/// op with it after a restart (B-330), so the matcher cannot drift from the builder.
+SyncOpIdentity pmChecklistOpIdentity(String workOrderId) => SyncOpIdentity(
+  entityType: 'pm_checklist',
+  endpoint: '/pm/workorders/$workOrderId/checklist',
+);
 
 /// Read the work orders and queue the checklist write.
 abstract class PmChecklistRepository {
@@ -106,11 +117,12 @@ class DioPmChecklistRepository implements PmChecklistRepository {
     required List<Map<String, Object?>> items,
     required DateTime now,
   }) async {
+    final SyncOpIdentity identity = pmChecklistOpIdentity(workOrderId);
     final SyncOperation op = SyncOperation(
       id: opId,
-      entityType: 'pm_checklist',
+      entityType: identity.entityType,
       kind: SyncOpKind.update,
-      endpoint: '/pm/workorders/$workOrderId/checklist',
+      endpoint: identity.endpoint,
       method: 'PUT',
       payload: <String, Object?>{'items': items},
       createdAt: now,

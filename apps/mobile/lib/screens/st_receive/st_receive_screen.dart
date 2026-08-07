@@ -84,6 +84,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -188,19 +190,65 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
 
   StRecvState _state = StRecvState.idle;
 
-  /// The stable client idempotency key for this receipt. Generated on the first
-  /// submit and REUSED on every manual retry, so a re-tap can never create a
-  /// second GR (the queue's enqueue is idempotent on this id, and the server
-  /// resolves the replay by this key — B-261/B-264).
+  /// The stable client idempotency key for this receipt.
+  ///
+  /// Minted on the first submit and REUSED on every later attempt, so a re-tap only
+  /// ever re-drains that one op and can never post a second GR.
+  ///
+  /// Before B-330 this field was session-only: a restart while the receipt was still
+  /// queued left it null, the next tap minted a FRESH key, and two queued ops
+  /// carrying two DIFFERENT keys each wrote their own GR (and their own JV).
+  /// `gr_idempotency_uq` cannot catch that — two distinct keys are legitimately two
+  /// distinct receipts — so the duplicate has to be prevented here, by not minting
+  /// the second key.
+  ///
+  /// A null does NOT mean "nothing of mine is queued". It means only "this State is
+  /// not tracking one", and State is not durable while the QUEUE is, so the two
+  /// disagree in two places: after an app kill, and — on a perfectly healthy network
+  /// — for the whole duration of the on-mount drain, before [_resumeQueued] has come
+  /// back to adopt. [_resumeQueued] narrows the gap and makes it VISIBLE; what makes
+  /// it SAFE is that [_onConfirm] asks the queue itself before it mints.
   String? _opId;
 
   @override
   void initState() {
     super.initState();
     _future = _load();
-    // (a) on-mount trigger: flush anything a prior session left queued. It does
-    // not change this screen's idle state; it just keeps the queue moving.
-    if (widget.poId != null) unawaited(widget.repo.drain());
+    if (widget.poId != null) unawaited(_resumeQueued());
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
+  /// app kill (B-330).
+  ///
+  /// The drain runs FIRST and is awaited, so the online case resolves normally and
+  /// leaves nothing to adopt. Whatever is STILL pending for this PO afterwards is a
+  /// receipt this device captured and the server has not accepted yet, so the screen
+  /// takes its id back and shows the honest queued state rather than presenting a
+  /// clean slate.
+  ///
+  /// WHAT THIS DOES NOT CLOSE: `await drain()` is one real HTTP round trip, bounded
+  /// only by the OS default (app_services.dart builds Dio with no `connectTimeout`),
+  /// and the screen is fully rendered with a LIVE confirm CTA for all of it. Inside
+  /// that window [_opId] is still null and no queued card is up, so this alone would
+  /// still let a tap mint a second key — on a healthy network, with no app kill
+  /// anywhere in the story. This is the VISIBLE half of the rehydration; the money
+  /// half is the pre-mint queue check in [_onConfirm].
+  Future<void> _resumeQueued() async {
+    final String? poId = widget.poId;
+    if (poId == null) return;
+    await widget.repo.drain();
+    if (!mounted) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      stReceiveOpIdentity(poId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = StRecvState.queued;
+    });
   }
 
   /// The real read chain: PO -> its `pr_id` -> that PR's priced lines.
@@ -243,29 +291,53 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
     });
   }
 
-  /// The primary tap. With no write yet it enqueues + drains; once a write
+  /// The primary tap. With no receipt outstanding it enqueues + drains; once one
   /// exists (queued / failed) it re-drains the SAME op — a manual retry, never a
   /// second enqueue.
   Future<void> _onConfirm() async {
     final String? poId = widget.poId;
     if (poId == null || _lines.isEmpty) return;
     if (_state == StRecvState.submitting) return;
-
-    // A null [_opId] is exactly "nothing enqueued yet": the first tap enqueues +
-    // drains, every later tap only re-drains the SAME op. That is what keeps a
-    // retry from becoming a second receipt on the client side, before the
-    // server's idempotency key is ever consulted.
-    final bool firstAttempt = _opId == null;
-    final String opId = _opId ??= _newOpId();
+    // Flipped SYNCHRONOUSLY, before the first await below, so the CTA is already
+    // disabled when a second tap could otherwise arrive during the queue read.
     setState(() => _state = StRecvState.submitting);
-    final DrainReport report = firstAttempt
-        ? await widget.repo.submitReceipt(
-            poId: poId,
-            counts: _counts,
-            opId: opId,
-            now: DateTime.now(),
-          )
-        : await widget.repo.drain();
+
+    final String? tracked = _opId;
+    if (tracked != null) {
+      await _resolve(tracked, await widget.repo.drain());
+      return;
+    }
+
+    // About to MINT a key — so ask the QUEUE, which is the only thing that actually
+    // knows, instead of trusting this State's null (B-330, the field-progress
+    // pattern). Two ways that null lies: the State is fresh after an app kill, or
+    // the on-mount drain has simply not come back yet — one whole HTTP round trip
+    // during which this CTA is live. Minting in either case produces a SECOND key,
+    // and `gr_idempotency_uq` correctly lets two distinct keys through as two
+    // distinct receipts: two goods receipts and two journal vouchers. So the
+    // duplicate has to die here, at the mint site.
+    //
+    // The re-drain below is a no-op while an outer drain is still running (the
+    // processor's re-entrancy guard returns an empty report), which is exactly
+    // right: that outer drain is already replaying this very op.
+    final SyncOperation? already = findAdoptableOp(
+      await widget.repo.due(),
+      stReceiveOpIdentity(poId),
+    );
+    if (!mounted) return;
+    if (already != null) {
+      setState(() => _opId = already.id);
+      await _resolve(already.id, await widget.repo.drain());
+      return;
+    }
+
+    final String opId = _opId = _newOpId();
+    final DrainReport report = await widget.repo.submitReceipt(
+      poId: poId,
+      counts: _counts,
+      opId: opId,
+      now: DateTime.now(),
+    );
     await _resolve(opId, report);
   }
 

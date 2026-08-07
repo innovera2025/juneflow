@@ -47,6 +47,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -153,22 +155,71 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
   PmChecklistSaveState _state = PmChecklistSaveState.idle;
 
   /// The stable client idempotency key of the op currently awaiting resolution.
-  /// Reused on a manual retry so a re-tap never enqueues a second op; cleared once
-  /// the op resolves or the technician edits a result again (a new payload is a
-  /// new write).
+  ///
+  /// Reused on every later attempt, so a re-tap only ever re-drains that one op.
+  /// Without B-330 a restart while the write was queued minted a fresh key and
+  /// enqueued a second op.
+  ///
+  /// Cleared once the op resolves, or when the technician edits a result again (a
+  /// new payload is a new write — see [_edited]).
+  ///
+  /// A null does NOT mean "nothing of mine is queued", only "this State is not
+  /// tracking one". State is not durable and the QUEUE is, so the two disagree after
+  /// an app kill AND, on a healthy network, for the whole on-mount drain before
+  /// [_resumeQueued] comes back. [_resumeQueued] makes the outstanding write VISIBLE;
+  /// the pre-mint queue check in [_onSave] is what stops a second key.
   String? _opId;
+
+  /// True once the technician has actually CHANGED a result in this State — i.e. the
+  /// checklist on screen is no longer the checklist any queued op carries.
+  ///
+  /// It records what dropping [_opId] in [_setResult] MEANT, because the null alone
+  /// cannot say it: [_opId] is null both after a real edit and when nothing has ever
+  /// been submitted, and the pre-mint queue check in [_onSave] must adopt in the
+  /// second case and MUST NOT in the first — adopting an op whose payload the user
+  /// has since replaced would re-drain the OLD results and silently discard the edit.
+  bool _edited = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.workOrderId != null) {
-      // (a) on-mount trigger: flush anything a prior session left queued. It does
-      // not change this screen's state; it just keeps the queue moving.
-      unawaited(widget.repo.drain());
+      unawaited(_resumeQueued());
       unawaited(_load());
     } else {
       _loaded = true;
     }
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
+  /// app kill (B-330).
+  ///
+  /// The drain runs FIRST and is awaited, so the online case resolves normally and
+  /// leaves nothing to adopt. A checklist write STILL pending for this work order
+  /// afterwards is one this device captured and the server has not accepted, so the
+  /// screen takes its id back and shows the honest queued state instead of a clean
+  /// slate.
+  ///
+  /// WHAT THIS DOES NOT CLOSE: `await drain()` is one real HTTP round trip (Dio is
+  /// built with no `connectTimeout`), and the save CTA is live for all of it with
+  /// [_opId] still null. This is the VISIBLE half; the pre-mint queue check in
+  /// [_onSave] is the half that stops the second key.
+  Future<void> _resumeQueued() async {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    await widget.repo.drain();
+    if (!mounted) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      pmChecklistOpIdentity(woId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = PmChecklistSaveState.queued;
+    });
   }
 
   Future<void> _load() async {
@@ -217,6 +268,9 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
       ];
       _state = PmChecklistSaveState.idle;
       _opId = null;
+      // Remember WHY the id was dropped, so the pre-mint check in [_onSave] does not
+      // hand it straight back and re-drain the results this edit just replaced.
+      _edited = true;
     });
   }
 
@@ -229,16 +283,40 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
     if (woId == null || items == null || items.isEmpty) return;
     if (_state == PmChecklistSaveState.saving) return;
 
-    final String? pending = _opId;
-    if (pending != null) {
-      setState(() => _state = PmChecklistSaveState.saving);
+    // Flipped SYNCHRONOUSLY before the first await, so the CTA is already disabled
+    // when a second tap could otherwise arrive during the queue read.
+    setState(() => _state = PmChecklistSaveState.saving);
+
+    final String? tracked = _opId;
+    if (tracked != null) {
       final DrainReport report = await widget.repo.drain();
-      await _resolve(pending, report);
+      await _resolve(tracked, report);
       return;
     }
 
+    // About to MINT a key — so ask the QUEUE rather than trust this State's null
+    // (B-330). That null also covers the whole on-mount drain, during which this CTA
+    // is live and a checklist write of this work order's may already be queued;
+    // minting there enqueues a SECOND op under a SECOND key.
+    //
+    // Skipped after a real edit: [_edited] says the results on screen are no longer
+    // the ones the queued op carries, so that op is not this write and adopting it
+    // would send the OLD results and drop what the technician just changed.
+    if (!_edited) {
+      final SyncOperation? already = findAdoptableOp(
+        await widget.repo.due(),
+        pmChecklistOpIdentity(woId),
+      );
+      if (!mounted) return;
+      if (already != null) {
+        setState(() => _opId = already.id);
+        final DrainReport report = await widget.repo.drain();
+        await _resolve(already.id, report);
+        return;
+      }
+    }
+
     final String opId = _opId = _newOpId();
-    setState(() => _state = PmChecklistSaveState.saving);
     final DrainReport report = await widget.repo.saveChecklist(
       workOrderId: woId,
       opId: opId,
