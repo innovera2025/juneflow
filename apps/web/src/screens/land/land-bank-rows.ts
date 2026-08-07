@@ -57,6 +57,18 @@ export interface PlotRow {
    * number land.dd shows is the number the ledger books. null when unpriced (em-dash).
    */
   dealDeposit: number | null;
+  /**
+   * SERVER-computed land-transfer fee in FULL units (plotWire.transfer_fee = 2% of the
+   * plot total, the rate held in @juneflow/tax-engine/thailand THAILAND_RATES). Before
+   * B-319 the browser computed this off a `TRANSFER_FEE_RATE = 0.02` literal that lived
+   * in a screen file and nowhere else in the system. null when unpriced (em-dash).
+   */
+  transferFee: number | null;
+  /**
+   * SERVER-computed specific business tax in FULL units (plotWire.sbt = 3.3% of the plot
+   * total, rate from THAILAND_RATES). See transferFee. null when unpriced (em-dash).
+   */
+  sbt: number | null;
 }
 
 /** Read a string field off an opaque row ({ [k]: unknown }); "" when absent. */
@@ -106,9 +118,11 @@ export function toPlotRow(e: Record<string, unknown>): PlotRow {
     currencyCode: str(e.currency_code ?? e.currencyCode),
     stage: str(e.stage),
     tenure: str(e.tenure),
-    // money=SERVER (B-316/A2) — read, never derived.
+    // money=SERVER (B-316/A2, B-319) — read, never derived.
     totalValue: moneyOrNull(e.total_value ?? e.totalValue),
     dealDeposit: moneyOrNull(e.deal_deposit ?? e.dealDeposit),
+    transferFee: moneyOrNull(e.transfer_fee ?? e.transferFee),
+    sbt: moneyOrNull(e.sbt),
   };
 }
 

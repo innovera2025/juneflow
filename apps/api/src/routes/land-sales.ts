@@ -56,6 +56,7 @@ import {
   projects,
   salesUnits,
 } from "@juneflow/db/schema";
+import { THAILAND_RATES } from "@juneflow/tax-engine/thailand";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { pick, str, toNum } from "./procurement.js";
@@ -121,6 +122,41 @@ function plotTotalValue(areaSqm: number, pricePerRai: number): number {
  */
 function plotDealDeposit(areaSqm: number, pricePerRai: number): number {
   return round2(plotTotalValue(areaSqm, pricePerRai) * DEAL_DEPOSIT_RATE);
+}
+
+/**
+ * The Land-Department transfer fee on a plot, in FULL units — THAILAND_RATES
+ * .landTransferFeePercent of the plot total, 2 dp.
+ *
+ * B-319 (Wei = ก) — money=SERVER. This and plotSbt() used to be float literals in a
+ * REACT SCREEN FILE (land-dd-rows.ts `TRANSFER_FEE_RATE = 0.02` / `SBT_RATE = 0.033`):
+ * two statutory rates with no server counterpart, no spec entry and nothing that would
+ * notice if the law changed. The rate now lives in @juneflow/tax-engine/thailand beside
+ * the compliance interface; the browser reads plotWire.transfer_fee and computes nothing.
+ *
+ * The rate is UNCONDITIONAL and prototype-traceable, not statute-sourced — read the
+ * rates.ts docstring before trusting the figure. Nothing posts this number today (the
+ * buy JV books only the deposit); it is a displayed ESTIMATE. It is computed here so the
+ * future contract-confirm / transfer write inherits it instead of re-deriving it.
+ */
+function plotTransferFee(areaSqm: number, pricePerRai: number): number {
+  return round2(
+    (plotTotalValue(areaSqm, pricePerRai) * THAILAND_RATES.landTransferFeePercent) / 100,
+  );
+}
+
+/**
+ * The specific business tax (ภาษีธุรกิจเฉพาะ) on a plot, in FULL units —
+ * THAILAND_RATES.specificBusinessTaxPercent of the plot total, 2 dp. See plotTransferFee.
+ *
+ * Estimate, not a liability: whether SBT applies at all can turn on a holding period,
+ * and where it does not a stamp duty does instead — none of which the spec states and
+ * land_plot has no acquisition date to evaluate. Flat rate, per B-319.
+ */
+function plotSbt(areaSqm: number, pricePerRai: number): number {
+  return round2(
+    (plotTotalValue(areaSqm, pricePerRai) * THAILAND_RATES.specificBusinessTaxPercent) / 100,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +276,10 @@ function leadWire(l: LeadRow): Record<string, unknown> {
 // with, so the browser has nothing left to compute. Both are null when area_sqm or
 // price_per_rai is absent — the screen renders an em-dash for a null and NEVER falls
 // back to a local formula (a fallback formula is the same defect with a nicer name).
+//
+// B-319: transfer_fee + sbt complete that set — the last two figures on land.dd the
+// browser still computed, off statutory rates that lived only in the screen file. The
+// rates now come from @juneflow/tax-engine/thailand; all four buy terms are server money.
 function plotWire(p: LandPlotRow): Record<string, unknown> {
   const areaSqm = num(p.areaSqm);
   const pricePerRai = num(p.pricePerRai);
@@ -252,9 +292,11 @@ function plotWire(p: LandPlotRow): Record<string, unknown> {
     gps: p.gps,
     price_per_rai: pricePerRai,
     currency_code: p.currencyCode,
-    // money=SERVER (B-316/A2) — null when the plot carries no area/price.
+    // money=SERVER (B-316/A2, B-319) — null when the plot carries no area/price.
     total_value: priced ? plotTotalValue(areaSqm, pricePerRai) : null,
     deal_deposit: priced ? plotDealDeposit(areaSqm, pricePerRai) : null,
+    transfer_fee: priced ? plotTransferFee(areaSqm, pricePerRai) : null,
+    sbt: priced ? plotSbt(areaSqm, pricePerRai) : null,
     stage: p.stage,
     tenure: p.tenure,
     // LA-2 (0042): Land Bank registry columns (null → em-dash in the UI).

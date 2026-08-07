@@ -1,14 +1,15 @@
 /*
  * land-dd-rows unit tests (P3-WEB, gate G3) — the pure LandDueDiligence deal logic
- * narrowed from land2.jsx LandDueDiligence. Guards the buy terms (SERVER total +
- * 10% deposit read off the wire; 2% transfer fee / 3.3% SBT still client-derived), the
- * real deal-plot selection (replacing the prototype's fixed 'L-071'), and the cost-center
+ * narrowed from land2.jsx LandDueDiligence. Guards the buy terms (ALL FOUR are now read
+ * off the plot wire: SERVER total + 10% deposit + 2% transfer fee + 3.3% SBT), the real
+ * deal-plot selection (replacing the prototype's fixed 'L-071'), and the cost-center
  * option narrowing + active-project scoping. The mock contract-type / appointment /
  * lease figures carry no logic here (they are literal em-dash in the screen).
  *
- * B-316/A2: the deposit assertions below are deliberately built on plots whose wire money
- * DISAGREES with area x price. A test that fed self-consistent numbers would pass against
- * a browser-side formula too, and would not die when the bug is reintroduced.
+ * B-316/A2 + B-319: the money assertions below are deliberately built on plots whose wire
+ * money DISAGREES with area x price x rate. A test fed self-consistent numbers would pass
+ * against a browser-side formula too, and would not die when the bug is reintroduced —
+ * which is the only question worth asking of a guard like this.
  */
 import { describe, it, expect } from "vitest";
 import { formatMoney, type PlotRow } from "./land-bank-rows";
@@ -29,6 +30,9 @@ function plot(over: Partial<PlotRow> = {}): PlotRow {
     // SERVER money (plotWire.total_value / deal_deposit): 24 rai x 6.8M = 163,200,000.
     totalValue: 163200000,
     dealDeposit: 16320000,
+    // SERVER money (plotWire.transfer_fee / sbt, B-319): 2% and 3.3% of that total.
+    transferFee: 3264000,
+    sbt: 5385600,
     ...over,
   };
 }
@@ -38,8 +42,8 @@ describe("dealTerms", () => {
     expect(dealTerms(plot())).toEqual({
       total: 163200000, // SERVER (plotWire.total_value)
       deposit: 16320000, // SERVER (plotWire.deal_deposit) — the figure the JV books
-      transferFee: 3264000, // client: round(total x 0.02)
-      sbt: 5385600, // client: round(total x 0.033)
+      transferFee: 3264000, // SERVER (plotWire.transfer_fee, 2% via THAILAND_RATES)
+      sbt: 5385600, // SERVER (plotWire.sbt, 3.3% via THAILAND_RATES)
     });
   });
 
@@ -65,13 +69,59 @@ describe("dealTerms", () => {
   it("keeps the server deposit even when it contradicts the plot's own area x price", () => {
     // area x price = 100,000 -> a client formula would say 10,000. The wire says 33.3.
     const terms = dealTerms(
-      plot({ areaSqm: 1600, pricePerRai: 100000, totalValue: 333, dealDeposit: 33.3 }),
+      plot({
+        areaSqm: 1600,
+        pricePerRai: 100000,
+        totalValue: 333,
+        dealDeposit: 33.3,
+        transferFee: 6.66,
+        sbt: 10.99,
+      }),
     );
     expect(terms?.deposit).toBe(33.3);
     expect(terms?.total).toBe(333);
-    // fee/SBT still derive from the SERVER total (not from area x price)
-    expect(terms?.transferFee).toBe(7); // round(333 x 0.02)
-    expect(terms?.sbt).toBe(11); // round(333 x 0.033)
+    // fee/SBT come off the wire too — not from area x price, and not from the total
+    expect(terms?.transferFee).toBe(6.66);
+    expect(terms?.sbt).toBe(10.99);
+  });
+
+  /*
+   * THE B-319 REGRESSION GUARD — the test that dies if a rate comes back into the browser.
+   *
+   * The 2% land-transfer fee and 3.3% SBT used to be float literals in the module under
+   * test (TRANSFER_FEE_RATE / SBT_RATE), applied as Math.round(total * rate). They are
+   * now THAILAND_RATES in @juneflow/tax-engine/thailand and the server ships the result.
+   *
+   * The wire below carries fees that are NOT `total * rate`, so ANY re-derivation in this
+   * module — the old literals, an import of the rate table, a "helpful" fallback — yields
+   * a different number and this goes red. Nothing else in the file would notice.
+   */
+  it("READS the server fee + SBT and never recomputes them from a browser-held rate", () => {
+    const terms = dealTerms(
+      plot({ totalValue: 604708125, transferFee: 12094162.5, sbt: 19955368.13 }),
+    );
+    expect(terms?.transferFee).toBe(12094162.5);
+    expect(terms?.sbt).toBe(19955368.13);
+    // the whole-baht figures the browser used to invent — must NOT be what we render
+    expect(terms?.transferFee).not.toBe(Math.round(604708125 * 0.02));
+    expect(terms?.sbt).not.toBe(Math.round(604708125 * 0.033));
+    // ...nor the raw unrounded product (the server rounds to 2 dp; a browser copy would not)
+    expect(terms?.sbt).not.toBe(604708125 * 0.033);
+  });
+
+  /*
+   * A rate is not a fallback. A wire that carries the total but no fee is the shape that
+   * tempts `plot.transferFee ?? Math.round(total * 0.02)` — the same defect the deposit
+   * had (B-316/A2), and the reason those literals could sit in a screen file for months.
+   * The fee must stay null (em-dash), never a locally-derived stand-in.
+   */
+  it("never derives the fee or SBT when the server omits them, even with a total present", () => {
+    const terms = dealTerms(plot({ totalValue: 604708125, transferFee: null, sbt: null }));
+    expect(terms?.transferFee).toBeNull();
+    expect(terms?.sbt).toBeNull();
+    expect(terms?.transferFee).not.toBe(Math.round(604708125 * 0.02));
+    expect(terms?.sbt).not.toBe(Math.round(604708125 * 0.033));
+    expect(terms?.total).toBe(604708125); // the total it DID send is still shown
   });
 
   it("returns null for an absent plot (honest-empty deal)", () => {
@@ -85,7 +135,16 @@ describe("dealTerms", () => {
    * stand-in. This is the assertion that fails if anyone adds `?? computeLocally()`.
    */
   it("yields null terms for an unpriced plot — never 0, never NaN", () => {
-    const terms = dealTerms(plot({ areaSqm: 0, pricePerRai: 0, totalValue: null, dealDeposit: null }));
+    const terms = dealTerms(
+      plot({
+        areaSqm: 0,
+        pricePerRai: 0,
+        totalValue: null,
+        dealDeposit: null,
+        transferFee: null,
+        sbt: null,
+      }),
+    );
     expect(terms).toEqual({ total: null, deposit: null, transferFee: null, sbt: null });
     for (const v of Object.values(terms ?? {})) {
       expect(v).toBeNull();
@@ -96,14 +155,15 @@ describe("dealTerms", () => {
   /*
    * G5 PIXEL GUARD. tests/visual/reference/app-baseline/land-dd.png was captured against
    * the seeded dd-stage plot (โฉนด 11902, 24 rai @ 6,800,000/rai) while the browser still
-   * computed these figures. Moving the total + deposit to the server must not move a
-   * pixel: formatMoney rounds to whole baht, and the seeded price divides evenly, so the
-   * server's 2-dp values format to the exact same strings. If a future change to either
-   * side alters what this screen displays for the baseline plot, this fails HERE rather
-   * than as an unexplained G5 diff (re-baselining is blocked under B-305/B-306).
+   * computed these figures. Moving all four to the server must not move a pixel:
+   * formatMoney rounds to whole baht, and the seeded price divides evenly, so the server's
+   * 2-dp values format to the exact same strings. Verified across all 8 seeded plots for
+   * B-319 — one (นส.3ก 442) differs by 0.50 baht in VALUE and by nothing in its rendered
+   * string. If a future change to either side alters what this screen displays for the
+   * baseline plot, it fails HERE rather than as an unexplained G5 diff.
    */
   it("renders the G5 baseline plot byte-identically (no pixel movement)", () => {
-    const terms = dealTerms(plot()); // seeded โฉนด 11902: total_value/deal_deposit from the wire
+    const terms = dealTerms(plot()); // seeded โฉนด 11902: all four terms from the wire
     expect(terms?.total).not.toBeNull();
     expect([
       formatMoney(terms!.total!),
@@ -129,13 +189,21 @@ describe("dealTerms", () => {
     expect(terms?.total).toBe(604708125); // the total it DID send is still shown
   });
 
-  it("nulls the derived fees when the server total is absent but a deposit is present", () => {
-    const terms = dealTerms(plot({ totalValue: null, dealDeposit: 16320000 }));
+  /*
+   * Each term stands alone (B-319). The fee used to be a FUNCTION of the total, so a null
+   * total forced null fees; now all four are independent wire fields and a partial answer
+   * from the server must surface exactly what it sent — the real figures shown, the
+   * missing ones em-dashed. Nothing is inferred from a sibling field.
+   */
+  it("surfaces a partial server answer verbatim — no term is derived from another", () => {
+    const terms = dealTerms(
+      plot({ totalValue: null, dealDeposit: 16320000, transferFee: null, sbt: 5385600 }),
+    );
     expect(terms).toEqual({
-      total: null,
+      total: null, // em-dash
       deposit: 16320000, // still shown — it is a real server figure
-      transferFee: null, // no base to derive from -> em-dash, not 0
-      sbt: null,
+      transferFee: null, // em-dash, not 0, and not re-derived from the sbt/deposit
+      sbt: 5385600, // still shown even though the total it came from is absent
     });
   });
 });

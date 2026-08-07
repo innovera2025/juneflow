@@ -10,6 +10,16 @@
  * Never hardcode, never commit — secrets are sacred (PLAN.md §10).
  * `.env.example` conventions land in P0-INT-04.
  */
+
+/**
+ * Thailand statutory rate table (B-319) — the land-transfer fee and specific business
+ * tax the server applies. Re-exported here so `@juneflow/tax-engine/thailand` stays the
+ * one import for anything jurisdiction-specific. READ ./rates.ts before changing a
+ * value: the rates are prototype-traceable, not statute-sourced, and the sacred i18n
+ * labels repeat them as text.
+ */
+export { THAILAND_RATES } from './rates.js';
+
 import type {
   ETaxSubmission,
   ETaxSubmitRequest,
