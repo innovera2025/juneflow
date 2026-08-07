@@ -202,7 +202,11 @@ echo ""
 # 20/30/25/25 to 20/50/75/100 — so promoting the new shot would decide the ruling
 # inside the artefact that is supposed to be the arbiter, and implementing Wei's
 # other option would then read as a G5 regression.
-HOLD_SCREENS="${HOLD_SCREENS:-wo-list}"
+# B-306 LIFTED 2026-08-07: Wei ruled B-277 Ruling 2 = CUMULATIVE, which is what the
+# merged cumulativeContractPct already renders — so wo-list shows the ruled figure
+# and is no longer held out. Nothing is held by default now; set HOLD_SCREENS to a
+# space-separated list if a future ruling puts a screen back behind a decision.
+HOLD_SCREENS="${HOLD_SCREENS:-}"
 echo "== 5. PROMOTE staged shots -> tests/visual/reference/app-baseline/ (guarded rows keep the old file) =="
 echo "  HELD OUT (pending a Wei ruling): ${HOLD_SCREENS:-none}"
 python3 - "$ROOT" "$STAGE" "$OUT" <<'PY' || { echo "PROMOTE-FAIL"; exit 1; }
