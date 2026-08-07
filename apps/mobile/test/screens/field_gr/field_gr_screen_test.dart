@@ -282,6 +282,48 @@ void main() {
       expect(_richText(tester), contains('280 / 320 เส้น'));
     });
 
+    testWidgets('a line with no unit em-dashes it at BOTH sites, never blank', (
+      WidgetTester tester,
+    ) async {
+      // `gr_item.unit` is a nullable TEXT column (packages/db boq.ts), so a
+      // receipt line recorded without one is a real wire state. Both places the
+      // unit is composed must render the dash the sibling screen renders
+      // (st_receive_screen.dart L412/L457, `line.unit ?? _dash`) — the quantity
+      // tail AND the shortfall caption. A blank slot would print "280 / 320" and
+      // "-40" here where st-receive prints "—", which is the one thing the
+      // never-an-empty-string rule names.
+      await _pump(
+        tester,
+        _FakeRepo(
+          grs: <FieldGrEnt>[
+            _gr(
+              items: <FieldGrEnt>[
+                _item(
+                  name: 'เหล็ก SD40 16mm',
+                  orderedQty: 320,
+                  receivedQty: 280,
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+
+      final String text = _richText(tester);
+      // Site 1 — the quantity pair's "/ ordered unit" tail (_quantities).
+      expect(text, contains('280 / 320 —'));
+      expect(
+        text,
+        isNot(contains('280 / 320\n')),
+        reason: 'the unit slot must not collapse to an empty string',
+      );
+      // Site 2 — the signed shortfall caption (_shortfallCaption).
+      expect(find.text('-40 —'), findsOneWidget);
+      expect(find.text('-40'), findsNothing);
+      // The quantities themselves are real and stay real.
+      expect(find.text('เหล็ก SD40 16mm'), findsOneWidget);
+    });
+
     testWidgets('a receipt with no line detail renders honest-empty lines', (
       WidgetTester tester,
     ) async {

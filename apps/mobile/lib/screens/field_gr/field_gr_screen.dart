@@ -387,7 +387,11 @@ class _FieldGrScreenState extends State<FieldGrScreen> {
   /// number in red under a short row carries the meaning with no invented word,
   /// and both words go on the B-324 mint list.
   Widget _shortfallCaption(FieldGrLine line) {
-    final String unit = line.unit == null ? '' : ' ${line.unit}';
+    // The unit slot is ALWAYS occupied — em-dash when the wire omits it, the
+    // st-receive convention (st_receive_screen.dart L412/L457, `line.unit ??
+    // _dash` in its own always-present widget). A blank there would print a bare
+    // "-40" where the sibling prints "—".
+    final String unit = ' ${line.unit ?? _dash}';
     return Padding(
       padding: const EdgeInsets.only(top: 1),
       child: Text(
@@ -422,7 +426,9 @@ class _FieldGrScreenState extends State<FieldGrScreen> {
     final String ordered = line.orderedQty == null
         ? _dash
         : formatQty(line.orderedQty!);
-    final String unit = line.unit == null ? '' : ' ${line.unit}';
+    // Third independent slot, same rule as the two quantities (st-receive
+    // L412/L457) — never a blank.
+    final String unit = ' ${line.unit ?? _dash}';
     return Text.rich(
       TextSpan(
         children: <InlineSpan>[
