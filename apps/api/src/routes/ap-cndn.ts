@@ -67,7 +67,15 @@ import { round2 } from "./money.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  withDocNoRetry,
+} from "./gl-post.js";
 
 type ApCreditNoteRow = typeof apCreditNotes.$inferSelect;
 type ApDebitNoteRow = typeof apDebitNotes.$inferSelect;
@@ -343,14 +351,17 @@ async function postModelAJv(
     return null;
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenPost below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const lineRows: (typeof jvLines.$inferInsert)[] = [
     { jvId, accountId: drId, dr: moneyStr(opts.amount), cr: moneyStr(0), currencyCode: opts.currencyCode },
     { jvId, accountId: crId, dr: moneyStr(0), cr: moneyStr(opts.amount), currencyCode: opts.currencyCode },
   ];
 
-  try {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry).
+  const allocThenPost = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(jvs, {
@@ -362,7 +373,16 @@ async function postModelAJv(
         .returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
+  };
+  try {
+    await withDocNoRetry(allocThenPost);
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — a 409 here would falsely claim the note was already approved.
+    if (err instanceof DocNoExhaustedError) {
+      docNoExhausted(reply);
+      return null;
+    }
     if (isUniqueViolation(err)) {
       conflict(reply, `${opts.label} ${opts.docId} already approved`);
       return null;

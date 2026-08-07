@@ -64,7 +64,15 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { pick, toNum } from "./procurement.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  withDocNoRetry,
+} from "./gl-post.js";
 
 type RevRecRow = typeof revRecs.$inferSelect;
 type WipRow = typeof wips.$inferSelect;
@@ -227,7 +235,8 @@ async function postGlRevRec(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenPost below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const txnId = randomUUID();
   const currencyCode = rev.currencyCode ?? "THB";
@@ -245,7 +254,11 @@ async function postGlRevRec(
     { jvId, accountId: revenueId, dr: moneyStr(0), cr: moneyStr(due), currencyCode },
   ];
 
-  try {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry). The CAS
+  // guard below re-reads nothing across attempts — the rolled-back attempt left
+  // `recognized` untouched, so the same pre-read guard still holds.
+  const allocThenPost = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(jvs, {
@@ -276,7 +289,13 @@ async function postGlRevRec(
         .returning()) as RevRecRow[];
       if (updated.length === 0) throw new ConcurrentPostError();
     });
+  };
+  try {
+    await withDocNoRetry(allocThenPost);
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — distinct from the CAS loss below, which IS a real conflict.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     // A concurrent post won the CAS (0 rows) → the whole tx rolled back → 409.
     if (err instanceof ConcurrentPostError) {
       return conflict(reply, `revenue-recognition ${id} was concurrently posted — retry`);
@@ -347,7 +366,8 @@ async function transferGlWip(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenTransfer below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const txnId = randomUUID();
   const currencyCode = wip.currencyCode ?? "THB";
@@ -362,7 +382,9 @@ async function transferGlWip(
     { jvId, accountId: wipAcctId, dr: moneyStr(0), cr: moneyStr(amount), currencyCode },
   ];
 
-  try {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry).
+  const allocThenTransfer = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(jvs, {
@@ -392,7 +414,13 @@ async function transferGlWip(
         .returning()) as WipRow[];
       if (updated.length === 0) throw new ConcurrentPostError();
     });
+  };
+  try {
+    await withDocNoRetry(allocThenTransfer);
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion (nothing
+    // committed) — distinct from the CAS loss below, which IS a real conflict.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (err instanceof ConcurrentPostError) {
       return conflict(reply, `WIP ${id} was concurrently transferred — retry`);
     }

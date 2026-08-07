@@ -44,8 +44,13 @@ import { listGlPostingDocs } from "./gl-posting.js";
 import {
   POSTING_MAP,
   allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
   isUniqueViolation,
+  JV_COMPANY_NO_CONSTRAINT,
   resolveAccountIds,
+  violatedConstraint,
+  withDocNoRetry,
   type PostingRule,
 } from "./gl-post.js";
 import { loadCaller, permAllowed } from "./authz.js";
@@ -352,19 +357,34 @@ async function createJv(
   // header too, never leaving an orphaned jv (previously mitigated only by
   // header-first ordering). insertThrough re-proves this tenant owns the parent
   // jv INSIDE the same transaction; the tx wrapper carries the same company_id.
-  const { createdJv, createdLines } = await db.transaction(async (tx) => {
-    const [createdJv] = (await tx
-      .insert(jvs, {
-        id: jvId,
-        no: parsed.no,
-        sourceDoc: parsed.sourceDoc,
-        periodId: parsed.periodId,
-        memo: parsed.memo,
-      })
-      .returning()) as JvRow[];
-    const createdLines = await tx.insertThrough(jvLines, jvs, jvId, lineRows);
-    return { createdJv, createdLines };
-  });
+  //
+  // B-318: this is the ONE jv-insert site that must NOT retry. `no` is CLIENT-
+  // supplied (parseJvBody) — re-running would insert the caller's same number
+  // again and collide forever, and silently renumbering someone's manual JV would
+  // be worse. It is also the only site with no catch at all, so before 0061 a
+  // duplicate manual number was an unhandled 500. Map it BY NAME to the honest 409.
+  let created: { createdJv: JvRow | undefined; createdLines: unknown[] };
+  try {
+    created = await db.transaction(async (tx) => {
+      const [createdJv] = (await tx
+        .insert(jvs, {
+          id: jvId,
+          no: parsed.no,
+          sourceDoc: parsed.sourceDoc,
+          periodId: parsed.periodId,
+          memo: parsed.memo,
+        })
+        .returning()) as JvRow[];
+      const createdLines = await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+      return { createdJv, createdLines };
+    });
+  } catch (err) {
+    if (isUniqueViolation(err) && violatedConstraint(err) === JV_COMPANY_NO_CONSTRAINT) {
+      return conflict(reply, `JV number ${parsed.no} is already used in this company`);
+    }
+    throw err;
+  }
+  const { createdJv, createdLines } = created;
 
   return reply.code(201).send({
     id: createdJv?.id ?? jvId,
@@ -933,6 +953,20 @@ async function postGlDocs(
   let nextSeq = noMatch ? Number(noMatch[2]) : 1;
   const allocNextNo = (): string =>
     `${noPrefix}${String(nextSeq++).padStart(seqWidth, "0")}`;
+  /**
+   * B-318 retry allocator. This batch is the WORST case of the defect: it reads the
+   * base ONCE and then increments in JS, so a concurrent batch does not collide on
+   * one number — it collides across the whole RANGE. Bumping nextSeq on a collision
+   * would inherit that drifted range and keep losing, so a retry must RE-BASE from
+   * the committed max. (Each doc is its own committed transaction executed
+   * sequentially, so the re-read always sees the winner and returns a higher number.)
+   */
+  const rebaseNextNo = async (): Promise<string> => {
+    const fresh = await allocJvNo(db);
+    const m = /^(.*-)(\d+)$/.exec(fresh);
+    if (m) nextSeq = Number(m[2]);
+    return allocNextNo();
+  };
 
   const posted: { doc_id: string; source: string; jv_no: string; amount: number }[] = [];
   const skipped: { doc_id: string; reason: string }[] = [];
@@ -973,7 +1007,10 @@ async function postGlDocs(
     const cur = doc.currency_code ?? "THB";
     if (currency == null) currency = cur;
     const jvId = randomUUID();
-    const jvNo = allocNextNo();
+    // B-318: assigned INSIDE allocThenPost — the first attempt takes the in-batch
+    // counter, a retry re-bases from the committed max.
+    let jvNo = "";
+    let attempt = 0;
     // A balanced 2-leg JV: Dr rule.dr = amount, Cr rule.cr = amount.
     const lineRows: (typeof jvLines.$inferInsert)[] = [
       { jvId, accountId: drId, dr: moneyStr(amount), cr: "0.00", currencyCode: cur },
@@ -981,7 +1018,8 @@ async function postGlDocs(
     ];
     // ONE transaction per posted doc: header + both legs together. insertThrough
     // re-proves this tenant owns the parent jv INSIDE the same tx (fail closed).
-    try {
+    const allocThenPost = async (): Promise<void> => {
+      jvNo = attempt++ === 0 ? allocNextNo() : await rebaseNextNo();
       await db.transaction(async (tx) => {
         await tx
           .insert(jvs, {
@@ -1008,8 +1046,23 @@ async function postGlDocs(
             .returning();
         }
       });
+    };
+    try {
+      await withDocNoRetry(allocThenPost);
       posted.push({ doc_id: doc.id, source: doc.source, jv_no: jvNo, amount });
     } catch (err) {
+      // B-318 FIRST, and it must NOT reuse "already posted": this doc is NOT posted.
+      // That existing reason is the nastiest possible lie here — the caller reads it
+      // as "someone else did it" and stops trying. The batch answers 200 (other docs
+      // in it really did commit), so an honest per-doc skip is the truthful analogue
+      // of the 503 the single-doc handlers return.
+      if (err instanceof DocNoExhaustedError) {
+        skipped.push({
+          doc_id: doc.id,
+          reason: "document-number allocation contended — nothing posted, retry",
+        });
+        continue;
+      }
       // P2-BE-52: a concurrent /gl/post posted this doc first — the 0037
       // source_doc UNIQUE index tripped. Map to the same idempotent skip as the
       // doc.posted pre-check (never a 500, never a duplicate JV).

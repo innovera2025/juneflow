@@ -111,9 +111,12 @@ import { listEnvelope } from "./list-envelope.js";
 import {
   ACCT,
   allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
   isUniqueViolation,
   resolveAccountIds,
   violatedConstraint,
+  withDocNoRetry,
 } from "./gl-post.js";
 
 type InventoryItemRow = typeof inventoryItems.$inferSelect;
@@ -1199,81 +1202,95 @@ async function createIssue(
 
   const issueId = randomUUID();
   const no = await allocIssueNo(db);
-  const jvNo = await allocJvNo(db);
+  // B-318: the JV number is assigned INSIDE allocThenIssue below (a retry must
+  // re-read the advanced max). material_issue.no is NOT covered by 0061 this round
+  // (Wei ruled jv + ap_deposit only) — it carries the same allocator defect and is
+  // reported, not fixed here, so it stays allocated out here.
+  let jvNo = "";
   const jvId = randomUUID();
   const jvLineRows: (typeof jvLines.$inferInsert)[] = [
     { jvId, accountId: wipId, dr: moneyStr(value), cr: moneyStr(0), currencyCode: "THB", ccId: jvCcId, projectId },
     { jvId, accountId: materialsId, dr: moneyStr(0), cr: moneyStr(value), currencyCode: "THB", ccId: jvCcId, projectId },
   ];
 
+  // B-318: allocate + write is ONE retryable unit. Only jv_company_no_uq is
+  // retried — the B-312 material_issue_idempotency_uq 23505 names a DIFFERENT
+  // constraint, so it still propagates on the FIRST throw to its replay branch,
+  // and NegativeStockError is not a unique violation at all.
   let created: MaterialIssueRow;
   try {
-    created = await db.transaction(async (tx) => {
-      // NEGATIVE-STOCK GUARD (B6): read the ledger inside the tx for consistency.
-      const ledgers = (await tx.select(stockLedgers)) as StockLedgerRow[];
-      const running = onHandByItemWarehouse(ledgers);
-      const ledgerRows: Omit<typeof stockLedgers.$inferInsert, "companyId">[] = [];
-      for (const line of lines) {
-        const key = balanceKey(line.itemId, fromWarehouseId);
-        const available = num(running.get(key));
-        const remaining = round2(available - line.qty);
-        if (remaining < 0) {
-          throw new NegativeStockError(
-            `insufficient stock for item ${line.itemId} in warehouse ${fromWarehouseId}: ` +
-              `on-hand ${available}, issue ${line.qty}`,
-          );
+    created = await withDocNoRetry(async () => {
+      jvNo = await allocJvNo(db);
+      return db.transaction(async (tx) => {
+        // NEGATIVE-STOCK GUARD (B6): read the ledger inside the tx for consistency.
+        const ledgers = (await tx.select(stockLedgers)) as StockLedgerRow[];
+        const running = onHandByItemWarehouse(ledgers);
+        const ledgerRows: Omit<typeof stockLedgers.$inferInsert, "companyId">[] = [];
+        for (const line of lines) {
+          const key = balanceKey(line.itemId, fromWarehouseId);
+          const available = num(running.get(key));
+          const remaining = round2(available - line.qty);
+          if (remaining < 0) {
+            throw new NegativeStockError(
+              `insufficient stock for item ${line.itemId} in warehouse ${fromWarehouseId}: ` +
+                `on-hand ${available}, issue ${line.qty}`,
+            );
+          }
+          running.set(key, remaining);
+          ledgerRows.push({
+            itemId: line.itemId,
+            warehouseId: fromWarehouseId,
+            qty: qtyStr(-line.qty),
+            refDoc: `issue:${issueId}`,
+          });
         }
-        running.set(key, remaining);
-        ledgerRows.push({
-          itemId: line.itemId,
-          warehouseId: fromWarehouseId,
-          qty: qtyStr(-line.qty),
-          refDoc: `issue:${issueId}`,
-        });
-      }
-      const [header] = (await tx
-        .insert(materialIssues, {
-          id: issueId,
-          no,
-          projectId,
-          fromWarehouseId,
-          value: moneyStr(value),
-          currencyCode: "THB",
-          issueDate,
-          byUserId: caller.userId,
-          status: "approved",
-          // B-312: the header carries the client key. A REPLAY that raced past the
-          // pre-check trips material_issue_idempotency_uq → 23505 → the catch below
-          // returns the ORIGINAL. The header is the FIRST write in this tx (the guard
-          // above only READS), so that 23505 rolls the whole block back BEFORE any
-          // stock_ledger row or JV leg exists — the replay-safety of the stock
-          // movement is structural, not a compensating action.
-          idempotencyKey,
-        })
-        .returning()) as MaterialIssueRow[];
-      await tx.insertThrough(
-        issueLines,
-        materialIssues,
-        issueId,
-        lines.map((l) => ({ issueId, itemId: l.itemId, qty: qtyStr(l.qty), ccId: l.ccId })),
-      );
-      // stock_ledger carries company_id → scoped insert door, one row at a time.
-      for (const row of ledgerRows) {
-        await tx.insert(stockLedgers, row).returning();
-      }
-      // Cost-to-WIP JV (B5): Dr 1140 WIP / Cr 5020 materials-cost = value.
-      await tx
-        .insert(jvs, {
-          id: jvId,
-          no: jvNo,
-          sourceDoc: `issue:${issueId}`,
-          memo: `material-issue ${no}`,
-        })
-        .returning();
-      await tx.insertThrough(jvLines, jvs, jvId, jvLineRows);
-      return header!;
+        const [header] = (await tx
+          .insert(materialIssues, {
+            id: issueId,
+            no,
+            projectId,
+            fromWarehouseId,
+            value: moneyStr(value),
+            currencyCode: "THB",
+            issueDate,
+            byUserId: caller.userId,
+            status: "approved",
+            // B-312: the header carries the client key. A REPLAY that raced past the
+            // pre-check trips material_issue_idempotency_uq → 23505 → the catch below
+            // returns the ORIGINAL. The header is the FIRST write in this tx (the guard
+            // above only READS), so that 23505 rolls the whole block back BEFORE any
+            // stock_ledger row or JV leg exists — the replay-safety of the stock
+            // movement is structural, not a compensating action.
+            idempotencyKey,
+          })
+          .returning()) as MaterialIssueRow[];
+        await tx.insertThrough(
+          issueLines,
+          materialIssues,
+          issueId,
+          lines.map((l) => ({ issueId, itemId: l.itemId, qty: qtyStr(l.qty), ccId: l.ccId })),
+        );
+        // stock_ledger carries company_id → scoped insert door, one row at a time.
+        for (const row of ledgerRows) {
+          await tx.insert(stockLedgers, row).returning();
+        }
+        // Cost-to-WIP JV (B5): Dr 1140 WIP / Cr 5020 materials-cost = value.
+        await tx
+          .insert(jvs, {
+            id: jvId,
+            no: jvNo,
+            sourceDoc: `issue:${issueId}`,
+            memo: `material-issue ${no}`,
+          })
+          .returning();
+        await tx.insertThrough(jvLines, jvs, jvId, jvLineRows);
+        return header!;
+      });
     });
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — no stock moved, no JV — so a retry of the whole request is safe.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     // B-312 CONCURRENCY BACKSTOP. Two distinct races land here, and BOTH are the same
     // logical event — "the original committed between our pre-check and our write":
     //

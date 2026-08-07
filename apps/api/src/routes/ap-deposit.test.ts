@@ -1137,3 +1137,172 @@ describe("POST /api/v1/ap/deposit — B-313 idempotency (client key + replay)", 
     expect(inserted.filter((i) => i.table === apDeposits)).toHaveLength(1);
   });
 });
+
+// ===========================================================================
+// B-318 / B-168 — DOC-NUMBER ALLOCATION UNDER CONCURRENCY (migration 0061)
+// ===========================================================================
+// THE DEFECT, observed live on a real PG 16 before 0061: six concurrent, genuinely
+// DISTINCT POST /ap/deposit minted DP-2026-0001 ×3 · DP-2026-0002 ×2 and shared JV
+// numbers too (JV-2026-0419 ×2). allocDepositNo / allocJvNo are `max(suffix)+1`
+// reads with no index behind them, so concurrent readers all see the same max. This
+// SURVIVES the B-313 idempotency key: a key dedupes REPLAYS of one request, while
+// this is two different payments colliding on a voucher number.
+//
+// AND THE INDEX ALONE IS A REGRESSION, also measured: with 0061 applied and no
+// retry, four of six legitimate deposits came back 409 "already posted" — false,
+// nothing was posted — and sync_processor.dart dead-letters every 4xx PERMANENTLY.
+// So these tests are about the RETRY, not the index.
+//
+// WHAT THESE TESTS CAN PROVE. The stub has no unique index and no rollback, so it
+// cannot prove uniqueness or atomicity; those are proven against a live PG 16 with
+// a negative control. What it CAN prove — and what would otherwise ship untested —
+// is the handler's branch wiring: that the collision is retried with a FRESH
+// number, that exhaustion answers 503 rather than the bare 409 sitting right below
+// it in the same catch, and that the B-313 replay is still NOT retried.
+const DEPOSIT_COMPANY_NO_UQ = "ap_deposit_company_no_uq";
+const JV_COMPANY_NO_UQ = "jv_company_no_uq";
+
+describe("POST /api/v1/ap/deposit — B-318 doc-number collision", () => {
+  it("a colliding deposit number is RETRIED with a freshly allocated one, not refused", async () => {
+    const inserted: Inserted[] = [];
+    // The racer that beat us COMMITTED DP-<yr>-0001 between our read and our write.
+    // Modelled honestly: the row is visible to the next allocDepositNo read (that is
+    // what makes the retry pick a different number) and our insert trips 0061.
+    const storedDeposits: unknown[] = [];
+    const year = new Date().getFullYear();
+    const world = idempWorld({
+      inserted,
+      storedDeposits,
+      insertThrows: (table, nth) => {
+        if (table === apDeposits && nth === 0) {
+          storedDeposits.push({
+            id: "racer",
+            companyId: COMPANY,
+            no: `DP-${year}-0001`,
+            vendorId: VENDOR0,
+            idempotencyKey: null,
+          });
+          return uniqueViolation(DEPOSIT_COMPANY_NO_UQ);
+        }
+        return null;
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res = await app1.inject(depositPost());
+
+    // The payment goes through — this is the whole point. Before the retry existed,
+    // the index turned this into a 409 for a deposit that was never posted.
+    expect(res.statusCode).toBe(201);
+    // …under a DIFFERENT number: 0001 is the racer's, we must not re-offer it.
+    expect(res.json().no).toBe(`DP-${year}-0002`);
+    // The money still posts exactly once and still balances.
+    expect(sumAdvanceDebits(inserted)).toBe(AMOUNT);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+  });
+
+  it("a colliding JV number is retried too — the deposit tx writes TWO numbered rows", async () => {
+    const inserted: Inserted[] = [];
+    const storedDeposits: unknown[] = [];
+    const world = idempWorld({
+      inserted,
+      storedDeposits,
+      insertThrows: (table, nth) => {
+        if (table === jvs && nth === 0) {
+          // The racer committed our JV number. Its deposit row is NOT ours, so it
+          // does not advance our deposit sequence — only the JV sequence moves.
+          world.storedJvs.push({ id: "racer-jv", companyId: COMPANY, no: `JV-${year2()}-0002` });
+          // Model the ROLLBACK the fake transaction does not do: our own ap_deposit
+          // insert, which ran first inside this tx, never survives a failed tx. Left
+          // in place it would fake-advance the deposit sequence and the assertion
+          // below would pass for the wrong reason.
+          storedDeposits.pop();
+          return uniqueViolation(JV_COMPANY_NO_UQ);
+        }
+        return null;
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res = await app1.inject(depositPost());
+
+    expect(res.statusCode).toBe(201);
+    // The deposit number is unchanged (nothing took it); the JV number moved past
+    // the racer's. Both are re-allocated on the retry — the deposit just re-reads
+    // the same free number, which is the correct outcome, not a stale carry-over.
+    expect(res.json().no).toBe(`DP-${year2()}-0001`);
+    const jvIns = inserted.filter((i) => i.table === jvs);
+    expect(jvIns).toHaveLength(1); // only the winning attempt wrote
+    expect((jvIns[0]!.values as Record<string, unknown>).no).toBe(`JV-${year2()}-0003`);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT); // cash still leaves exactly once
+  });
+
+  it("exhaustion answers 503 RETRY — NOT the bare 409 'already posted' in the same catch", async () => {
+    // The regression this guards is precise: the catch arm below the new one reads
+    // `if (isUniqueViolation(err)) return conflict(..., 'already posted')`. If
+    // exhaustion re-threw the raw 23505, a real vendor payment would be refused with
+    // a message claiming it was already made, and mobile would dead-letter it.
+    const inserted: Inserted[] = [];
+    const storedDeposits: unknown[] = [];
+    const world = idempWorld({
+      inserted,
+      storedDeposits,
+      insertThrows: (table) =>
+        table === apDeposits ? uniqueViolation(DEPOSIT_COMPANY_NO_UQ) : null,
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res = await app1.inject(depositPost());
+
+    expect(res.statusCode).toBe(503);
+    expect(res.statusCode).toBeGreaterThanOrEqual(500); // 5xx = mobile defers, 4xx = dead-letters
+    const body = res.json();
+    expect(body.code).toBe("RETRY");
+    expect(body.message).not.toMatch(/already/i);
+    // Nothing was posted: no JV, no cash movement.
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(0);
+    expect(sumCashCredits(inserted)).toBe(0);
+  });
+
+  it("a B-313 idempotency 23505 is still NOT retried — ONE attempt, then the replay resolves", async () => {
+    // The name gate is load-bearing in BOTH directions. Retrying a replay would
+    // re-attempt a write that has already succeeded, ten times, before answering —
+    // and each attempt would burn a deposit number. This is the same real-race setup
+    // as the B-313 backstop test above, with the attempt COUNT asserted.
+    const inserted: Inserted[] = [];
+    let keyedReadNo = 0;
+    let depositAttempts = 0;
+    const stored: unknown[] = [];
+    const faithful = keyedDeposits(() => stored);
+    const world = idempWorld({
+      inserted,
+      storedDeposits: stored,
+      keyedResolve: (where) => {
+        const isKeyed = paramsOf(where).some(
+          (p) => typeof p === "string" && CLIENT_KEYS.includes(p),
+        );
+        if (!isKeyed) return faithful(where);
+        return keyedReadNo++ < 2 ? [] : faithful(where);
+      },
+      insertThrows: (table, nth) => {
+        if (table !== apDeposits) return null;
+        depositAttempts += 1;
+        return nth >= 1 ? uniqueViolation(DEPOSIT_IDEMP_UQ) : null;
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json()); // the ORIGINAL, not a re-attempt
+    // 2 = the original write + the ONE racing attempt. A retried replay would be 11.
+    expect(depositAttempts).toBe(2);
+    expect(stored).toHaveLength(1);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT); // cash left exactly once
+  });
+});
+
+/** The CE year allocDepositNo / allocJvNo stamp (they read the wall clock). */
+function year2(): number {
+  return new Date().getFullYear();
+}
