@@ -129,6 +129,56 @@ function qtyStr(n: number): string {
 }
 
 /**
+ * THE REPO-WIDE LOCK ORDER on `inventory_item`: ASCENDING id. Both stock_ledger writers
+ * in this file sort through here before they start inserting.
+ *
+ * WHY A LEDGER INSERT IS A LOCK-TAKER AT ALL — invisible at the call site, and what this
+ * round shipped without. `stock_ledger.item_id` is an FK, so every INSERT takes an
+ * implicit `SELECT 1 FROM inventory_item … FOR KEY SHARE` on the referenced row. FOR KEY
+ * SHARE CONFLICTS with the FOR UPDATE that TenantDb.selectForUpdate takes on the same
+ * rows (inventory.ts transfer-approve + createIssue, B-342, this same round).
+ * selectForUpdate sorts (ORDER BY id); this file inserted in BODY-LINE order, so a
+ * receipt whose lines ran opposite to an issue's grabbed the same rows in the opposite
+ * order.
+ *
+ * MEASURED at 87e10c2, API-vs-API, 2 SEPARATE OS PROCESSES on one epoch-ms barrier, 14
+ * rounds, 8 overlapping items, GR lines DESCENDING vs issue lines ASCENDING: 8 rounds
+ * ended in a 500 and the api log carried 8 PG "deadlock detected" (40P01) — the two
+ * failing statements being exactly the two this round added, and EITHER side able to be
+ * the victim (7 issue, 1 gr). `grep -rn "40P01\|deadlock" apps/api/src` finds no handler,
+ * so 40P01 rethrows to the 500 handler, and sync_processor.dart DEFERS a 5xx: one
+ * receipt that deadlocks stops the phone's ENTIRE offline drain and deadlocks again on
+ * every retry. That is the exact wedge labor.ts's ATTENDANCE_COSTED_DAY_CONSTRAINT
+ * comment was written to avoid ("WITHOUT this name the pair would answer 500 … and
+ * sync_processor.dart DEFERS a 5xx and stops the whole offline drain"), reintroduced one
+ * file over by a different mechanism.
+ *
+ * WHY SORTING AND NOT `selectForUpdate` HERE — both close the cycle; this is the reason
+ * for the choice:
+ *   - a receipt needs no consistent read. It only ever RAISES a balance, so there is no
+ *     read-then-write invariant to protect. FOR UPDATE would take a STRONGER lock than
+ *     the FK requires and queue a storekeeper's receipt behind a site issue of the same
+ *     material for zero correctness gain;
+ *   - it would add a failure mode (the `locked.length !== itemIds.length` throw) to a
+ *     path that already resolved ownership above, plus a round trip per receipt;
+ *   - and it would NOT cover reverseGrMovements, whose reversal has nothing to guard and
+ *     no honest place to take a guard lock — so the return/cancel path would still need
+ *     a sort. One mechanism for both writers beats two.
+ * Sorting restores the invariant selectForUpdate's own comment already depends on,
+ * instead of adding a second, competing one.
+ *
+ * WHY ASCENDING *STRING* ORDER IS THE ORDER POSTGRES USES: `uuid` compares as its 16 raw
+ * bytes, and the canonical LOWERCASE hex text form sorts identically byte for byte (hex
+ * digits 0-9 then a-f are ASCII-ordered). uuidOrNull therefore lower-cases — a client
+ * sending `A0…` would otherwise sort before `b0…` in ASCII while Postgres puts it after,
+ * which is exactly the mismatch this ordering exists to remove. Verified live:
+ * `array_agg(id ORDER BY id)` = `array_agg(id ORDER BY id::text)` over the catalogue.
+ */
+function inLockOrder<T extends { itemId: string }>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => (a.itemId < b.itemId ? -1 : a.itemId > b.itemId ? 1 : 0));
+}
+
+/**
  * REVERSE every movement a receipt made (B-340) — used by return AND cancel.
  *
  * Shipping the inbound leg ALONE would create a defect that does not exist today:
@@ -147,6 +197,11 @@ function qtyStr(n: number): string {
  * REFUSE a legitimate return because of a downstream issue the storekeeper cannot
  * undo — rejecting real work at the door. Allowing it records the truth: the goods
  * left twice, and the books say so loudly instead of quietly.
+ *
+ * THE INSERTS ARE SORTED (inLockOrder — see its comment). The read above has no ORDER BY
+ * at all, so without the sort this loop takes its FK row locks on `inventory_item` in
+ * whatever order the plan returned the rows — the same deadlock the create path was
+ * measured deadlocking with, on a path where a 40P01 would 500 a RETURN.
  */
 async function reverseGrMovements(
   tx: TenantDb,
@@ -154,7 +209,7 @@ async function reverseGrMovements(
   refPrefix: "gr-return" | "gr-cancel",
 ): Promise<void> {
   const originals = await tx.select(stockLedgers, eq(stockLedgers.refDoc, `gr:${grId}`));
-  for (const row of originals) {
+  for (const row of inLockOrder(originals)) {
     await tx.insert(stockLedgers, {
       itemId: row.itemId,
       warehouseId: row.warehouseId,
@@ -168,10 +223,16 @@ async function reverseGrMovements(
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** A valid uuid → itself, else null (a non-uuid textual line ref is not an FK). */
+/**
+ * A valid uuid → its CANONICAL LOWERCASE form, else null (a non-uuid textual line ref is
+ * not an FK). The regex is case-insensitive and Postgres accepts either case on input,
+ * so the case was previously carried through verbatim; it is normalised here because
+ * inLockOrder sorts these strings and only the lowercase form sorts the way `uuid` does.
+ * Nothing else observes the difference — both call sites feed `uuid` columns.
+ */
 function uuidOrNull(value: unknown): string | null {
   const s = str(value).trim();
-  return UUID_RE.test(s) ? s : null;
+  return UUID_RE.test(s) ? s.toLowerCase() : null;
 }
 
 // GR anchors: po_id → po → pr → project, and wo_id → wo → pr → project. Each is
@@ -844,13 +905,21 @@ export function registerGrRoute(app: FastifyInstance): void {
         // B-340: THE INBOUND MOVEMENT. One +qty row per line that identified stock,
         // ref_doc `gr:<id>` — mirroring `transfer:<id>` / `issue:<id>` exactly. qty is
         // SIGNED and this is the only writer that emits a POSITIVE one. NO negative-
-        // stock guard and NO lock: a receipt only ever RAISES a balance, so it can
-        // neither drive Σ below zero nor race an issue into doing so (an issue that
-        // commits either before or after this one simply sees less or more stock, and
-        // is honest either way). stock_ledger carries company_id → the scoped insert
-        // door force-sets it; there is no bulk door, so this is a loop, exactly as at
-        // inventory.ts transfer-approve / issue-post.
-        for (const d of stockDrafts) {
+        // stock guard: a receipt only ever RAISES a balance, so it can neither drive Σ
+        // below zero nor race an issue into doing so (an issue that commits either
+        // before or after this one simply sees less or more stock, and is honest either
+        // way). stock_ledger carries company_id → the scoped insert door force-sets it;
+        // there is no bulk door, so this is a loop, exactly as at inventory.ts
+        // transfer-approve / issue-post.
+        //
+        // IN LOCK ORDER, and the earlier claim of "NO lock" here was FALSE — see
+        // inLockOrder. This loop takes an FK `FOR KEY SHARE` on each referenced
+        // inventory_item, which conflicts with selectForUpdate's FOR UPDATE, so it must
+        // acquire ASCENDING by item id like every other lock taker. Body-line order
+        // deadlocked 8 of 14 measured rounds against a concurrent issue (40P01 → 500 →
+        // the phone's whole offline drain wedged, because sync_processor.dart defers a
+        // 5xx and the retry deadlocks again).
+        for (const d of inLockOrder(stockDrafts)) {
           await tx.insert(stockLedgers, {
             itemId: d.itemId,
             warehouseId,

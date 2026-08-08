@@ -1097,10 +1097,36 @@ export const attendances = pgTable("attendance", {
     .on(t.workerId, t.day)
     .where(sql`${t.ccId} IS NULL`),
   // B-338 / B-342 (migration 0063): the COMPLEMENT of the index above — at most ONE
-  // attendance row per (worker, day, COST CENTRE). Together the two predicates now
-  // cover EVERY row on this table: `cc_id IS NULL` → one uncosted day per worker;
-  // `cc_id IS NOT NULL` → one day per (worker, cost centre). Nothing falls between
-  // them, which is the gap B-336 left open and this closes.
+  // attendance row per (worker, day, COST CENTRE). The two predicates partition the
+  // table: `cc_id IS NULL` → one uncosted day per worker; `cc_id IS NOT NULL` → one day
+  // per (worker, cost centre). Every row is covered by exactly one of them.
+  //
+  // WHAT THAT DOES AND DOES NOT GUARANTEE — stated exactly, because an earlier version
+  // of this comment said "Nothing falls between them, which is the gap B-336 left open
+  // and this closes", and that sentence is true of ROW COVERAGE and false of the money.
+  //   - GUARANTEED: at most one row per (worker, day, cc_id) tuple, NULL cc included.
+  //     A duplicate — the same day filed twice against the same allocation — is refused.
+  //   - NOT GUARANTEED, and NOT EXPRESSIBLE HERE: that Σ(day_fraction) over a
+  //     (worker, day) is ≤ 1.0. That is an INEQUALITY OVER AN AGGREGATE of many rows.
+  //     A unique index constrains tuple EQUALITY and a CHECK constrains a SINGLE ROW;
+  //     neither can state it — the same shape, and the same answer, as the Σ(qty) ≥ 0
+  //     stock invariant this round refused to fake an index for.
+  // MEASURED at 87e10c2 with BOTH indexes present, roster door, one worker, one day, a
+  // 500/day worker:
+  //     cc-A full ×2                  → [201, 409] → 1 row, Σ 1.00 → payroll  500  ✓
+  //     uncosted full + cc-A full     → [201, 201] → 2 rows, Σ 2.00 → payroll 1000  ✗
+  //     cc-A + cc-B + uncosted, full  → [201×3]    → 3 rows, Σ 3.00 → payroll 1500  ✗
+  // Semantically rows 2 and 3 are the same day recorded twice — once unallocated, once
+  // allocated — which is what both index NAMES mean, and payroll SUMS rows. So B-338's
+  // headline number (a day paid twice) is still reachable through the door this round
+  // blesses: the ESCAPE has moved from "same cc twice" to "uncosted plus costed", and
+  // the bound is now the number of cost centres plus one rather than unbounded.
+  //   PRE-EXISTING, not a regression — the mixed pair was already [201,201] before
+  //   migration 0063, and the cross-cc split is legitimate work that must stay 201.
+  //   OPEN, and tracked as B-343 (the ≤ 1.0 day_fraction invariant), which needs a
+  //   per-(worker, day) SUM check inside the write, not another index.
+  // tests/e2e/b342-money-races.spec.ts measures all three lines above and asserts the
+  // 2× as the MEASURED CURRENT STATE labelled B-343-open, not as intended behaviour.
   //
   // THE CASE, re-proven live at 2f42244 BEFORE this index existed: the roster door
   // (finance.create), two `full` rows, one worker, one day, the SAME cc_id →
@@ -1141,7 +1167,12 @@ export const attendances = pgTable("attendance", {
   // WHAT IT LEAVES ALONE, each proven live in tests/e2e/b342-money-races.spec.ts:
   // the cost-centre split (cc A + cc B → [201,201]), the MIXED split (one costed, one
   // uncosted → [201,201], one row under each index), the night shift, and every other
-  // (worker, day, cc) tuple.
+  // (worker, day, cc) tuple. "LEAVES ALONE" IS THE HONEST WORD FOR IT and not an
+  // endorsement: the mixed shape is legitimate at half+half (Σ 1.00, one day allocated
+  // in two places) and is the B-343 money gap at full+full (Σ 2.00, one day paid twice).
+  // This index cannot tell those apart — day_fraction is not in its key and could not be
+  // (the constraint is on the SUM). Both are measured in that spec, the second labelled
+  // as the open gap.
   //
   // IT NEEDS THE CATCH — the same B-263 requirement as both indexes above, and the
   // reason this is not merely a migration. An UNNAMED 23505 rethrows to the 500

@@ -4,11 +4,16 @@
 // reads and never locks". They are NOT one fix, and the round had to decide per case
 // whether an index is even expressible. It answered:
 //
-//   CASE 1 (B-338, attendance) — an index IS expressible. `attendance_costed_day_uq`,
-//     UNIQUE (worker_id, day, cc_id) WHERE cc_id IS NOT NULL: the complement of
-//     B-336's `WHERE cc_id IS NULL`, so the two together cover every row. Within its
-//     coverage all three key columns are NOT NULL, so there is nothing to escape
-//     through — the B-336 inversion, not the B-307 trap.
+//   CASE 1 (B-338, attendance) — an index IS expressible for the DUPLICATE.
+//     `attendance_costed_day_uq`, UNIQUE (worker_id, day, cc_id) WHERE cc_id IS NOT NULL:
+//     the complement of B-336's `WHERE cc_id IS NULL`, so the two together cover every
+//     ROW. Within its coverage all three key columns are NOT NULL, so there is nothing to
+//     escape through — the B-336 inversion, not the B-307 trap.
+//     WHAT THEY DO NOT COVER, measured and asserted below rather than left implied: the
+//     MONEY invariant Σ(day_fraction) ≤ 1.0 per (worker, day). One uncosted row plus one
+//     costed row is one row under EACH index, no collision, and a day paid twice. Row
+//     coverage complete, money invariant open — B-343, and it needs a SUM check in the
+//     write, because an inequality over an aggregate is case 2's problem, not case 1's.
 //
 //   CASE 2 (B-339 item 2, stock) — an index is NOT expressible, and this file says so
 //     rather than shipping something that looks like one. The invariant is Σ(qty) ≥ 0
@@ -44,6 +49,9 @@
 //     naming the constraint (the 5xx that wedges the phone's whole offline drain)
 //   - "the cost-centre split still passes" / "the mixed split"  → guard tests: they must
 //     pass BEFORE and AFTER, and they are what proves the index did not close real work
+//   - "OPEN GAP B-343"                                          → a CHARACTERISATION of a
+//     defect that is still open, so it goes RED when B-343 is fixed — on purpose. Nothing
+//     in this round makes it pass or fail; it exists so the gap cannot close silently
 //   - "a concurrent replay still wins its 201"                  → dies if the
 //     replay-first ordering in resolveAttendanceConflict is removed
 //   - "concurrent transfers cannot drive stock negative"        → dies if
@@ -236,11 +244,17 @@ liveDescribe("B-342 case 1 (B-338) — the costed duplicate on the roster door",
     expect(Number(rows[0]!.df), "0.5 + 0.5 — one day's pay, correctly allocated").toBe(1);
   });
 
-  test("LEGITIMATE — the MIXED split (one costed, one uncosted) still passes: one row under EACH index", async () => {
+  test("the MIXED split passes — one row under EACH index, and at HALF+HALF the money is honest", async () => {
     test.skip(!PG_URL, "needs DATABASE_URL to count the rows");
     // The case that proves the two predicates are complements rather than overlapping:
     // the uncosted row is covered only by attendance_self_day_uq, the costed one only
     // by attendance_costed_day_uq, and neither collides.
+    //
+    // THIS IS THE LEGITIMATE END OF THE SHAPE, and the assertion now says so in the only
+    // way that can be checked: 0.5 + 0.5 — one day worked, ONE day paid. The
+    // day_fraction and payroll assertions are what separate it from the sibling test
+    // below. An earlier version asserted only `n = 2`, which blessed the SHAPE without
+    // ever measuring the money — and the same shape at full+full pays the day twice.
     const worker = await newWorker("mixed");
     const day = `${YEAR}-08-11`;
     const codes = await burst("/api/v1/labor/attendance", token, [
@@ -248,11 +262,61 @@ liveDescribe("B-342 case 1 (B-338) — the costed duplicate on the roster door",
       { worker_id: worker, day, status: "half" },
     ]);
     expect(codes).toEqual([201, 201]);
-    const rows = await sql<{ n: string }>(
-      `SELECT count(*) n FROM attendance WHERE worker_id=$1 AND day=$2`,
+    const rows = await sql<{ n: string; df: string }>(
+      `SELECT count(*) n, sum(day_fraction) df FROM attendance WHERE worker_id=$1 AND day=$2`,
       [worker, day],
     );
     expect(Number(rows[0]!.n)).toBe(2);
+    expect(Number(rows[0]!.df), "half allocated + half unallocated is still ONE day").toBe(1);
+    const pay = await okJson(
+      await md.post("/api/v1/labor/payroll", { data: { period: `${YEAR}-08`, worker_id: worker } }),
+      "POST /labor/payroll",
+    );
+    expect(Number(pay.amount)).toBe(DAY_RATE);
+  });
+
+  test("OPEN GAP B-343 — the SAME shape at FULL+FULL pays the day TWICE: this asserts the defect, not the intent", async () => {
+    test.skip(!PG_URL, "needs DATABASE_URL to count the rows");
+    // WHAT THIS TEST IS. A CHARACTERISATION of a gap that is still OPEN — not a statement
+    // that the behaviour is wanted. It exists because the alternative was worse: the
+    // mixed shape was asserted as a plain pass with no money assertion at all, which read
+    // as "intended" and let a 2× payout hide behind a green run.
+    //
+    // WHY THE TWO INDEXES DO NOT CATCH IT. attendance_self_day_uq covers the UNCOSTED row,
+    // attendance_costed_day_uq the COSTED one — one row under each, no tuple collision,
+    // both 201. ROW COVERAGE is complete; the MONEY INVARIANT is not, because that
+    // invariant is Σ(day_fraction) per (worker, day) ≤ 1.0 — an INEQUALITY OVER AN
+    // AGGREGATE, which no unique index and no single-row CHECK can state (the same shape,
+    // and the same answer, as the Σ(qty) ≥ 0 stock invariant this file already refuses to
+    // fake an index for). It needs a SUM check inside the write. Tracked as B-343.
+    //
+    // PRE-EXISTING, not a regression: the mixed pair answered [201,201] before migration
+    // 0063 too. What changed is that the round's disclosure claimed the gap was closed.
+    //
+    // WHEN B-343 LANDS, THIS EXPECTATION FLIPS — deliberately. The second post becomes a
+    // 409 and the payroll becomes DAY_RATE, and this test goes RED until someone updates
+    // it. That is the point: the gap cannot be closed silently, and cannot be forgotten.
+    const worker = await newWorker("b343-gap");
+    const day = `${YEAR}-10-11`;
+    const codes = await burst("/api/v1/labor/attendance", token, [
+      { worker_id: worker, day, status: "full", cc_id: ccA },
+      { worker_id: worker, day, status: "full" },
+    ]);
+    expect(codes, "MEASURED: both are accepted today").toEqual([201, 201]);
+    const rows = await sql<{ n: string; df: string }>(
+      `SELECT count(*) n, sum(day_fraction) df FROM attendance WHERE worker_id=$1 AND day=$2`,
+      [worker, day],
+    );
+    expect(Number(rows[0]!.n)).toBe(2);
+    expect(Number(rows[0]!.df), "TWO full days recorded against ONE calendar day").toBe(2);
+    const pay = await okJson(
+      await md.post("/api/v1/labor/payroll", { data: { period: `${YEAR}-10`, worker_id: worker } }),
+      "POST /labor/payroll",
+    );
+    expect(
+      Number(pay.amount),
+      `B-343 OPEN: one day worked pays ${2 * DAY_RATE}, where honest is ${DAY_RATE}`,
+    ).toBe(2 * DAY_RATE);
   });
 
   test("a concurrent REPLAY still wins its 201 — the phone dead-letters a 4xx permanently", async () => {

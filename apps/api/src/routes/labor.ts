@@ -67,7 +67,16 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, isNull } from "drizzle-orm";
-import { attendances, jvLines, jvs, payrolls, users, workers } from "@juneflow/db/schema";
+import {
+  attendances,
+  costCenters,
+  jvLines,
+  jvs,
+  payrolls,
+  projects,
+  users,
+  workers,
+} from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { has, pick, readIdempotencyKey, str, toNum } from "./procurement.js";
@@ -98,6 +107,17 @@ type JvRow = typeof jvs.$inferSelect;
 
 /** The perms-matrix module (seed MODULE_IDS) that governs finance mutations. */
 const FINANCE_MODULE = "finance";
+
+/**
+ * uuid matcher — the per-file idiom already in gr.ts / ai-qto.ts / audit-log.ts.
+ *
+ * B-340 gate-4.5 finding 4: a MALFORMED cc_id is refused BEFORE it reaches a query, for
+ * the same reason requireCalendarDay shape-checks `day` (B-332 finding 2) instead of
+ * letting the date column decide — `WHERE id = 'not-a-uuid'` is 22P02, and a 22P02 is a
+ * 500 exactly like the 23503 this round is closing. Fixing only the well-formed-but-
+ * unknown case would leave the same 5xx one keystroke away.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The WIP/CIP account labor capitalises into — 1140 งานระหว่างก่อสร้าง (a real
@@ -1107,6 +1127,37 @@ async function createLaborAttendance(
     eq(workers.id, workerId),
   )) as WorkerRow[];
   if (!worker) return badRequest(reply, "worker not found in this tenant");
+
+  // B-340 gate-4.5 finding 4: AND SO MUST THE COST CENTRE. cc_id was read above and
+  // never resolved, so an id with no cost_center row went straight to the INSERT and
+  // hit the FK — 23503, which is not a unique violation, so the catch below rethrows it:
+  // measured `{"code":"INTERNAL_ERROR"}` 500 on the ONE door this round reworked
+  // precisely so that its refusals are never 5xx (a 5xx makes sync_processor.dart DEFER,
+  // and the phone's whole offline drain stops behind the deferred op).
+  //
+  // 400, not 409, and the distinction is deliberate: 409 on this door means "the day is
+  // already recorded" — a state conflict about rows that exist. An unresolvable cc_id is
+  // a bad REFERENCE, exactly like `worker not found in this tenant` immediately above,
+  // and it is answered the same way for the same reason. Both are 4xx, which is what the
+  // phone needs (it dead-letters rather than retrying an op that can never succeed).
+  //
+  // AND IT IS A TENANT DOOR, not just a shape check. cost_center carries NO company_id —
+  // it is scoped through project (CC_HOPS is the fa.ts / gl.ts / petty.ts idiom), so a
+  // plain scoped select cannot express it and the FK could not either: another tenant's
+  // cost centre satisfies the FK perfectly and would have been STORED on our attendance
+  // row, carrying into the payroll JV's cc allocation. selectThrough joins
+  // cost_center → project and applies company_id there, so a foreign id resolves to
+  // nothing and is refused as not found — the same fail-closed shape as every other
+  // cross-tenant reference in this repo.
+  if (ccId) {
+    if (!UUID_RE.test(ccId)) return badRequest(reply, "cc_id must be a uuid");
+    const [cc] = await db.selectThrough(
+      costCenters,
+      [{ fk: costCenters.projectId, parent: projects }],
+      eq(costCenters.id, ccId),
+    );
+    if (!cc) return badRequest(reply, "cc_id not found in this tenant");
+  }
 
   // B-307 PRE-CHECK: resolve the client's OWN row before writing. It sits BELOW all
   // validation on purpose — unlike POST /gr there is no state gate above the insert

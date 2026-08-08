@@ -20,6 +20,10 @@
 //   - "a RETURN reverses …"               → DIES if reverseGrMovements is deleted, and
 //                                           also if the write is misplaced (the ref_doc
 //                                           stops matching the receipt)
+//   - "cannot DEADLOCK"                   → DIES if gr.ts stops sorting its ledger inserts
+//                                           into inLockOrder: 8 of 14 measured rounds
+//                                           answered 500 on a PG 40P01, which nothing
+//                                           catches and which wedges the phone's drain
 //
 // ONE CORRECTION, kept visible because the first version of this header was WRONG and a
 // probe caught it. It claimed the SEQUENTIAL replay test dies if the ledger write leaves
@@ -73,6 +77,49 @@ for i in $(seq 0 ${bodies.length - 1}); do cat "${dir}/code.$i"; echo; done
 `;
     const { stdout } = await execFileAsync("bash", ["-c", script], { timeout: 60_000 });
     return stdout.trim().split("\n").map(Number);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Fire TWO DIFFERENT posts — different paths, different bodies — from two SEPARATE OS
+ * PROCESSES on one wall-clock deadline, and return [codeA, codeB].
+ *
+ * burst() above races N copies of ONE op; a lock-order deadlock needs two DIFFERENT ops
+ * whose lock sets overlap, so it needs its own helper. Separate processes for the same
+ * reason as burst: undici's shared scheduler in this process staggers a Promise.all into
+ * a clean pass, and the whole point is that both transactions are open at once.
+ */
+async function raceTwo(
+  token: string,
+  a: { path: string; body: Record<string, unknown> },
+  b: { path: string; body: Record<string, unknown> },
+): Promise<[number, number]> {
+  const dir = mkdtempSync(join(tmpdir(), "b340lo-"));
+  try {
+    writeFileSync(join(dir, "body.0"), JSON.stringify(a.body));
+    writeFileSync(join(dir, "body.1"), JSON.stringify(b.body));
+    const paths = [a.path, b.path];
+    const script = `
+set -u
+START=$(( $(python3 -c 'import time; print(int(time.time()*1000))') + 900 ))
+${[0, 1]
+  .map(
+    (i) => `(
+  while [ "$(python3 -c 'import time; print(int(time.time()*1000))')" -lt "$START" ]; do :; done
+  curl -s -o /dev/null -w "%{http_code}" -X POST "${API_URL}${paths[i]}" \
+    -H "authorization: Bearer ${token}" -H 'content-type: application/json' \
+    --data-binary "@${dir}/body.${i}" > "${dir}/code.${i}"
+) &`,
+  )
+  .join("\n")}
+wait
+for i in 0 1; do cat "${dir}/code.$i"; echo; done
+`;
+    const { stdout } = await execFileAsync("bash", ["-c", script], { timeout: 60_000 });
+    const [x, y] = stdout.trim().split("\n").map(Number);
+    return [x!, y!];
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -321,6 +368,95 @@ liveDescribe("B-340 — the goods receipt writes stock_ledger", () => {
     });
     expect(res.status()).toBe(400);
     expect(String((await res.json()).message)).toMatch(/warehouse_id is required/i);
+  });
+
+  test("a receipt and a concurrent ISSUE of the same materials cannot DEADLOCK — 8 of 14 rounds were 500 before the sort", async () => {
+    test.skip(!PG_URL, "needs DATABASE_URL to stock the items and reopen the PO");
+    test.setTimeout(180_000);
+
+    // B-340 gate-4.5 finding 1. THE SHAPE, and every part of it is load-bearing:
+    //   - TWO DIFFERENT ops, not two copies of one. POST /gr inserts stock_ledger rows
+    //     (each taking an FK `FOR KEY SHARE` on inventory_item); POST /inventory/issues
+    //     takes `FOR UPDATE` on the same rows through TenantDb.selectForUpdate. The two
+    //     lock modes CONFLICT;
+    //   - the GR's lines run DESCENDING by item id and the issue's ASCENDING. Before the
+    //     fix the receipt inserted in BODY-LINE order, so the two walked the same rows in
+    //     opposite directions — the textbook cycle;
+    //   - EIGHT overlapping items, to widen the window between the first lock and the
+    //     last;
+    //   - SEPARATE OS PROCESSES on one barrier (see raceTwo), because a Promise.all in
+    //     this process serialises through undici and never overlaps the transactions.
+    // MEASURED at 87e10c2 (pre-fix): 14 rounds → 8 ended in a 500 and the api log carried
+    // 8 PG "deadlock detected" (40P01), naming exactly the two statements this round
+    // added. EITHER side can be the victim (7 issue, 1 gr). Nothing catches 40P01
+    // (`grep -rn "40P01\|deadlock" apps/api/src` → comments only), and sync_processor.dart
+    // DEFERS a 5xx: one deadlocked receipt stops the phone's entire offline drain and
+    // deadlocks again on every retry.
+    // THIS TEST DIES if inLockOrder() is removed from gr.ts — verified by reverting it.
+    const items = rowsOf(
+      await okJson(await md.get("/api/v1/inventory/items"), "GET /inventory/items"),
+    )
+      .map((i) => String(i.id))
+      .sort();
+    expect(items.length, "the race needs several overlapping items to open a window")
+      .toBeGreaterThanOrEqual(4);
+
+    const pg = new Client({ connectionString: PG_URL });
+    await pg.connect();
+    try {
+      // FIXTURE, not the path under test: enough stock that the issue passes its
+      // negative-stock guard and runs its whole transaction (a guard refusal rolls back
+      // early and releases the locks, which would hide the very race being measured).
+      await pg.query(`DELETE FROM stock_ledger WHERE ref_doc = 'b340-lockorder-fixture'`);
+      for (const id of items) {
+        await pg.query(
+          `INSERT INTO stock_ledger (company_id,item_id,warehouse_id,qty,ref_doc)
+           SELECT company_id,$1,$2,100000,'b340-lockorder-fixture' FROM warehouse WHERE id=$2`,
+          [id, warehouseId],
+        );
+      }
+      const poId = await openPo();
+
+      const codes: Array<[number, number]> = [];
+      for (let round = 0; round < 8; round++) {
+        // Also fixture: a full receipt AUTO-CLOSES its PO, and a closed PO answers 409 —
+        // which would look like a pass. Reopening keeps every round's refusal honest.
+        await pg.query(`UPDATE po SET status='approved' WHERE id=$1`, [poId]);
+        codes.push(
+          await raceTwo(
+            token,
+            {
+              path: "/api/v1/gr",
+              body: {
+                po_id: poId,
+                warehouse_id: warehouseId,
+                // DESCENDING — the opposite of the lock order the issue path uses.
+                lines: [...items].reverse().map((id) => ({ item_id: id, qty_ok: 1 })),
+              },
+            },
+            {
+              path: "/api/v1/inventory/issues",
+              body: {
+                project_id: projectId,
+                from_warehouse_id: warehouseId,
+                lines: items.map((id) => ({ item_id: id, qty: 1 })),
+              },
+            },
+          ),
+        );
+      }
+
+      const server5xx = codes.flat().filter((c) => c >= 500);
+      expect(
+        server5xx,
+        `a receipt and an issue of the same materials deadlocked: ${JSON.stringify(codes)}`,
+      ).toEqual([]);
+      // And the receipt is not merely "not a 500" — it is accepted every round.
+      expect(codes.map((c) => c[0]).filter((c) => c !== 201), JSON.stringify(codes)).toEqual([]);
+    } finally {
+      await pg.query(`DELETE FROM stock_ledger WHERE ref_doc = 'b340-lockorder-fixture'`);
+      await pg.end();
+    }
   });
 
   test("a FOREIGN warehouse is 400 — tenant ownership is re-checked at the door", async () => {

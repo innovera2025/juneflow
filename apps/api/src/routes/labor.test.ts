@@ -9,6 +9,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
   attendances,
+  costCenters,
   glAccounts,
   jvLines,
   jvs,
@@ -2421,6 +2422,127 @@ describe("B-332 gate-4.5 POST /api/v1/labor/attendance — the self-service dupl
     expect(params).toContain(COMPANY); // still tenant-scoped by the door
     expect(params).toContain(W1);
     expect(params).toContain(DAY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-340 gate-4.5 finding 4 — the ROSTER door's cost centre
+// ---------------------------------------------------------------------------
+// cc_id was read from the body and handed straight to the INSERT, so an id with no
+// cost_center row reached the FK: 23503, which `isUniqueViolation` does not match, so
+// the catch rethrew it — measured `{"code":"INTERNAL_ERROR"}` 500 on the ONE door this
+// round reworked precisely so its refusals are never 5xx (sync_processor.dart DEFERS a
+// 5xx and the phone's whole offline drain stops behind it).
+//
+// AND IT IS A TENANT DOOR. cost_center carries NO company_id — it is scoped through
+// project — so another tenant's cost centre satisfies the FK perfectly and would have
+// been STORED on our attendance row, carrying into the payroll JV's cc allocation.
+describe("B-340 gate-4.5 POST /api/v1/labor/attendance — cc_id is RESOLVED, never handed to the FK", () => {
+  const DAY = "2026-08-07";
+  const CC = "cc111111-2222-4333-8444-555555555555";
+  const ccRow = {
+    id: CC,
+    projectId: "p-1",
+    code: "CC-01",
+    name: "Block A",
+    type: null,
+    link: null,
+    owner: null,
+    budget: null,
+    currencyCode: "THB",
+    status: "active",
+    createdAt: D,
+    updatedAt: D,
+  };
+  const rosterDb = (opts: { ccRows?: unknown[]; inserted?: Inserted[]; captured?: Captured[] }) =>
+    writeStub({
+      rows: [
+        [users, userSource()],
+        [roles, [roleRow(true)]],
+        [workers, [linkedWorker(W1, null)]],
+        [attendances, []],
+        [costCenters, opts.ccRows ?? []],
+      ],
+      inserted: opts.inserted,
+      captured: opts.captured,
+    });
+
+  it("400s an UNKNOWN cc_id and writes nothing — the FK would have answered 23503, i.e. a 500", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rosterDb({ ccRows: [], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, status: "full", cc_id: CC },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/cc_id not found in this tenant/);
+    // Refused BEFORE the write, so there is no row and no rollback to reason about.
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+  });
+
+  it("400s a MALFORMED cc_id BEFORE any query — `WHERE id = 'not-a-uuid'` is 22P02, the same 500 one keystroke away", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rosterDb({ ccRows: [ccRow], captured, inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, status: "full", cc_id: "not-a-uuid" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/cc_id must be a uuid/);
+    // The shape gate is what keeps 22P02 off the wire: no cost_center read happened.
+    expect(captured.filter((c) => c.table === costCenters)).toHaveLength(0);
+    expect(inserted.filter((i) => i.table === attendances)).toHaveLength(0);
+  });
+
+  it("ACCEPTS a cc_id that resolves and stores it — the roster's cost-centre split is narrowed by nothing", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rosterDb({ ccRows: [ccRow], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, status: "half", cc_id: CC },
+    });
+    expect(res.statusCode).toBe(201);
+    const row = inserted.find((i) => i.table === attendances)!.values as Record<string, unknown>;
+    expect(row.ccId).toBe(CC);
+    expect(row.dayFraction).toBe("0.5");
+  });
+
+  it("resolves the cost centre THROUGH project — cost_center has no company_id, so a plain scoped read could not express the tenant", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rosterDb({ ccRows: [ccRow], captured }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/labor/attendance",
+      payload: { worker_id: W1, day: DAY, status: "full", cc_id: CC },
+    });
+    const ccRead = captured.filter((c) => c.table === costCenters).at(-1);
+    expect(ccRead, "the door must READ the cost centre, not trust the body").toBeDefined();
+    const sql = new PgDialect().sqlToQuery(ccRead!.where!).sql;
+    // The tenant predicate lands on PROJECT, one hop up — that is the whole point.
+    expect(sql).toMatch(/"project"\."company_id"/i);
+    const params = paramsOf(ccRead!.where);
+    expect(params).toContain(COMPANY);
+    expect(params).toContain(CC);
   });
 });
 
