@@ -64,7 +64,8 @@
 //     no response body at all, so the same successful tap would show a total when
 //     online and nothing when not. A money figure that appears only sometimes
 //     teaches the storekeeper to distrust the one time it matters.
-// Disclosing it is a clean additive follow-up once a label key is ruled (B-328).
+// Disclosing it is a clean additive follow-up once a label key is ruled
+// (B-339 item 3 — the id this file used to cite, `B-328`, was never allocated).
 //
 // ---------------------------------------------------------------------------
 // THE MOCK (§0 rule 3 — stripped, never reproduced)

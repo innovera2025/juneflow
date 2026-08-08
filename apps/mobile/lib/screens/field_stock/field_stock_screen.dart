@@ -34,7 +34,9 @@
 // DROPPED — the wire does not perform it, so the claim is not made at all
 // ---------------------------------------------------------------------------
 // Each verified by grep against the route file and the contract this round, not
-// assumed. Reported for a ruling in BLOCKERS.md B-328.
+// assumed. Reported for a ruling in BLOCKERS.md B-339 (which REPLACES the id `B-328`
+// this file used to cite — `B-328` was never allocated and no such row exists, so
+// every claim below was filed nowhere at all until this round).
 //   1. THE CTA's TOTAL (L523 "- 18,000 baht") — see the agg header. The button states
 //      the act with no figure.
 //   2. THE QR / BARCODE SCAN trigger (L493), the whole dashed bar. `grep -i
@@ -84,7 +86,7 @@
 //     FRESH key — which is safe precisely because nothing was posted under the old
 //     one. This matters more here than on st-receive: the negative-stock 409 is a
 //     4xx, and today it is the response EVERY issue gets (see the empty-ledger note
-//     in the agg / B-328), so this is the common path, not the rare one.
+//     in the agg / B-339 item 1), so this is the common path, not the rare one.
 //
 // A CONFIRMED issue EMPTIES THE BASKET and re-arms the CTA. It does NOT pop, and
 // the difference from st_receive is structural, not stylistic: st-receive is PUSHED
@@ -359,14 +361,23 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
       // defaulted to. The anchor deliberately excludes `project_id` (see
       // fieldStockOpIdentity), so the adopted op may legitimately carry a project the
       // storekeeper picked in the previous mount; displaying the default instead
-      // would be an affirmative false statement about an outstanding write. Left
-      // alone when the id does not resolve against the loaded projects — the
-      // em-dash/default is honest, an invented name is not.
+      // would be an affirmative false statement about an outstanding write.
+      //
+      // THE MISS BRANCH IS THE SAME RULE, NOT AN EXCEPTION TO IT. When the charged id
+      // does not resolve against the loaded projects — it was archived, or it fell off
+      // GET /projects' first page (the read sends no pagination params) — the id is
+      // still adopted and only the NAME is left null, so the slot renders the em-dash
+      // that `MInput(value: _projectName ?? _dash)` already provides. Leaving the
+      // default in place instead would put a DIFFERENT real project's name on an
+      // outstanding write the user cannot edit, which is the affirmative false
+      // statement this block exists to prevent — an em-dash is honest, the default is
+      // not, and the two are not alike merely because neither is invented.
       final Object? charged = mine.payload['project_id'];
       if (charged is String) {
+        _projectId = charged;
+        _projectName = null;
         for (final FieldStockEnt p in _projects) {
           if (fieldStockStr(p, const <String>['id']) == charged) {
-            _projectId = charged;
             _projectName = fieldStockStr(p, const <String>['name']);
             break;
           }
@@ -380,11 +391,27 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   ///
   /// A warehouse that does not resolve yields NO lines and NO stock read at all —
   /// the honest-empty state, never another warehouse's shelf.
+  ///
+  /// THE SUBJECT IS PINNED ONCE RESOLVED (`_warehouseId ?? widget.warehouseId`),
+  /// and that is not a micro-optimisation — it is what makes `from_warehouse_id` a
+  /// usable anchor at all. This method has TWO call sites: `initState` and the
+  /// post-`confirmed` refresh in [_resolve]. On the bare tab route
+  /// `widget.warehouseId` is null (mobile_screen_router.dart pushes
+  /// `const FieldStockScreenHost()`, so this is 100% of production mounts), and
+  /// re-resolving from null re-runs "follow the register's NEWEST warehouse" against
+  /// a register that may have gained a row in the meantime. The screen would then
+  /// silently RE-SUBJECT itself between two issues in one mount: the eyebrow, the
+  /// shelf and `_warehouseId` all flip, and the storekeeper's next confirm posts
+  /// `from_warehouse_id` = a warehouse he never stood in — a `stock_ledger` row at
+  /// −qty against the wrong shelf plus a Dr 1140 / Cr 5020 JV, with no return or
+  /// reverse op among the nine /inventory paths to undo it (DROPPED §4). Feeding the
+  /// already-resolved id back in makes the re-read re-select the SAME warehouse (or
+  /// honest-empty, if it has since left the tenant's page) instead of a new one.
   Future<_Loaded> _load() async {
     final List<FieldStockEnt> warehouses = await widget.repo.listWarehouses();
     final FieldStockEnt? warehouse = selectWarehouse(
       warehouses,
-      warehouseId: widget.warehouseId,
+      warehouseId: _warehouseId ?? widget.warehouseId,
     );
     final String? whId = warehouse == null
         ? null
@@ -472,8 +499,28 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// starts a fresh op: after a 4xx because nothing was written under the old key
   /// and the dead-letter is never replayed, and after a confirmed issue because the
   /// storekeeper is staging the NEXT issue in the same mount.
+  ///
+  /// THE LIVE-OP BRANCH IS CHECKED FIRST, AND IT DELIBERATELY SKIPS THE BASKET GUARD.
+  /// A re-drain sends the op's OWN stored payload and reads nothing off the screen,
+  /// so it needs no staged quantity — and requiring one made the retry above a claim
+  /// this method did not honour. The case is the ordinary one, not a corner: an op
+  /// ADOPTED after a tab swap (B-330) arrives into a State whose basket is empty, so
+  /// `_canSubmit` was false, the CTA was dead, and the storekeeper sat looking at
+  /// `queued` over a zeroed frozen basket with no way to act. The CTA is enabled by
+  /// [_locked] for exactly this branch ([_actionBar]).
   Future<void> _onConfirm() async {
     if (_state == FieldStockState.submitting) return;
+
+    final String? tracked = _opId;
+    if (tracked != null) {
+      // A live op already owns the basket: re-drain THAT op, never enqueue a second.
+      // The flip is still SYNCHRONOUS (before the first await), so a double tap
+      // cannot open two drains.
+      setState(() => _state = FieldStockState.submitting);
+      await _resolve(tracked, await widget.repo.drain());
+      return;
+    }
+
     final String? projectId = _projectId;
     final String? warehouseId = _warehouseId;
     final List<FieldStockPick> picks = _picks;
@@ -486,13 +533,6 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     // yet, and both mint — which is the window the pre-mint check was added to close,
     // reopened.
     setState(() => _state = FieldStockState.submitting);
-
-    final String? tracked = _opId;
-    if (tracked != null) {
-      // A live op already owns the basket: re-drain THAT op, never enqueue a second.
-      await _resolve(tracked, await widget.repo.drain());
-      return;
-    }
 
     // About to MINT a key — so ask the QUEUE, which is the only thing that actually
     // knows, instead of trusting this State's null (B-330). Two ways that null lies:
@@ -774,7 +814,15 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// CTA carries NO total (DROPPED §1).
   Widget _actionBar() {
     final _StatusTone? tone = _statusTone();
-    final bool enabled = _canSubmit && _state != FieldStockState.submitting;
+    // [_locked] enables the MANUAL RETRY of a live op, which posts nothing new and
+    // reads nothing off the basket — it re-drains the op's own stored payload
+    // ([_onConfirm]). Without that term the CTA is dead precisely when an op was
+    // ADOPTED on mount (B-330): the fresh State has an empty basket, so `_canSubmit`
+    // is false, and the screen shows `queued` over a zeroed frozen basket with no
+    // affordance at all. It cannot enqueue a second issue — the live-op branch of
+    // [_onConfirm] returns before any mint.
+    final bool enabled =
+        (_canSubmit || _locked) && _state != FieldStockState.submitting;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
       decoration: const BoxDecoration(
@@ -888,7 +936,9 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// Honest-empty — an em-dash, no borrowed copy (the pm_close / st_receive
   /// precedent). This is the state the screen is in on any real database TODAY:
   /// `stock_ledger` has no inbound writer anywhere in the system, so every balance
-  /// is empty. That is a backend gap, reported as B-328, not something this screen
+  /// is empty. That is a backend gap, reported as B-339 item 1 (two writers only —
+  /// transfer-approve, which is net zero, and this screen's own issue at −qty; `gr.ts`
+  /// references the ledger zero times), not something this screen
   /// may paper over with a fabricated row.
   Widget _empty() {
     return const Center(

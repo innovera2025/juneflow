@@ -85,12 +85,23 @@ import 'field_stock_agg.dart';
 /// come out of the body. The body offers two candidates, and they are not
 /// interchangeable:
 ///
-///   * `from_warehouse_id` IS THE SCREEN'S SUBJECT. It comes from the route
-///     (`FieldStockScreenHost.warehouseId`, or the register's newest warehouse when
-///     the tab is entered bare), it is the header eyebrow, it decides which shelf's
-///     balances are listed, and NOTHING in the mount can change it. It is therefore
-///     the same value on the mount that queued the op and on the mount that comes
-///     back to adopt it — which is the whole requirement of an anchor.
+///   * `from_warehouse_id` IS THE SCREEN'S SUBJECT. It is resolved ONCE per mount —
+///     from the route (`FieldStockScreenHost.warehouseId`) or, when the tab is
+///     entered bare, from the register's newest warehouse — and it is the header
+///     eyebrow and the shelf whose balances are listed.
+///
+///     WHAT MAKES IT AN ANCHOR IS THAT IT IS PINNED AFTER THAT FIRST RESOLUTION, and
+///     that is an explicit line of code rather than a property of the screen's shape:
+///     `_load()` re-selects through `_warehouseId ?? widget.warehouseId`
+///     (field_stock_screen.dart), so the post-`confirmed` refresh — the method's
+///     SECOND call site — re-reads the SAME warehouse. Re-resolving from
+///     `widget.warehouseId` instead would follow "the register's newest" again on
+///     every refresh, and a warehouse created between two issues in one mount would
+///     silently move the subject: a wrong `from_warehouse_id` on the next write, and
+///     an identity that no longer matches this screen's own queued op. The anchor is
+///     therefore stable across the mount that queued the op and the mount that comes
+///     back to adopt it — which is the whole requirement of an anchor — because that
+///     pin holds, not because nothing could reach the field.
 ///
 ///   * `project_id` IS AN ATTRIBUTION, and it is NOT STABLE ACROSS A REMOUNT. The
 ///     screen defaults it to the tenant's PRIMARY project on every load

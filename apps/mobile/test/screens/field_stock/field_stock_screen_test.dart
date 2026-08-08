@@ -80,12 +80,20 @@ FieldStockEnt _stock({
 
 /// A warehouse wire row. [name] null = the wire resolved the warehouse but carried
 /// no name — the eyebrow's own em-dash site.
-FieldStockEnt _wh(String id, {String? name = 'คลัง Block B'}) =>
-    <String, Object?>{
-      'id': id,
-      if (name != null) 'name': name,
-      'created_at': '2026-01-01T00:00:00Z',
-    };
+///
+/// [createdAt] is what `selectWarehouse` sorts the bare tab route's "newest" by, so a
+/// fixture that adds a warehouse mid-mount has to be able to make it NEWER than the
+/// one already on screen — otherwise "the register grew" and "the subject moved" are
+/// indistinguishable and the growth proves nothing.
+FieldStockEnt _wh(
+  String id, {
+  String? name = 'คลัง Block B',
+  String createdAt = '2026-01-01T00:00:00Z',
+}) => <String, Object?>{
+  'id': id,
+  if (name != null) 'name': name,
+  'created_at': createdAt,
+};
 
 /// A project wire row. [name] null = a real project with no name on the wire — the
 /// used-with slot's and the picker sheet's own em-dash sites.
@@ -153,16 +161,40 @@ class _FakeRepo implements FieldStockRepository {
     return const DrainReport(<SyncAttempt>[]);
   }
 
+  /// The ops the queue still holds.
+  ///
+  /// NOTHING IS DUE BEFORE A SUBMIT. The earlier version answered with an op keyed
+  /// `'x'` even when this repo had never been asked to enqueue anything, which is not
+  /// a queue any device has: it made the ON-MOUNT adoption read see a phantom op. It
+  /// stayed inert only because that op ALSO carried an empty payload, so the anchor
+  /// could not match it — one accident cancelling another. Both halves are fixed here
+  /// rather than one, because the payload fix alone would have made every
+  /// `deferred` test adopt a phantom on mount and freeze its basket before it began.
+  ///
+  /// AND THE PAYLOAD NOW CARRIES THE ANCHOR. `fieldStockOpIdentity` matches on
+  /// `from_warehouse_id`, so an anchorless op is unadoptable no matter WHAT its
+  /// status is — which meant "a 4xx dead-letter is not adopted" was proven by the
+  /// empty payload rather than by the status check it is named for. With a real
+  /// anchor the status check is the only thing left holding it, and deleting that
+  /// check now turns the test red.
+  ///
+  /// `outcome == null` means the drain touched nothing AND the queue no longer holds
+  /// it — an earlier pass already synced it — which is what `resolveIssueState` reads
+  /// an absence as.
   @override
   Future<List<SyncOperation>> due() async {
+    if (opIds.isEmpty) return const <SyncOperation>[];
     if (outcome == SyncOutcome.deferred) {
       return <SyncOperation>[
-        _op(opIds.isEmpty ? 'x' : opIds.last, SyncOpStatus.pending),
+        // `lastWarehouseId` is non-null whenever `opIds` is non-empty (both are set
+        // by `submitIssue`), so this asserts an invariant rather than defaulting
+        // around a null and anchoring the op to the wrong shelf in silence.
+        _op(opIds.last, SyncOpStatus.pending, warehouseId: lastWarehouseId!),
       ];
     }
     if (outcome == SyncOutcome.permanentlyFailed) {
       return <SyncOperation>[
-        _op(opIds.isEmpty ? 'x' : opIds.last, SyncOpStatus.failed),
+        _op(opIds.last, SyncOpStatus.failed, warehouseId: lastWarehouseId!),
       ];
     }
     return const <SyncOperation>[];
@@ -231,6 +263,92 @@ class _RefreshingRepo extends _FakeRepo {
   }
 }
 
+/// A [_FakeRepo] whose REGISTER GAINS A WAREHOUSE between reads — an admin creating
+/// one while the storekeeper is working, which is the only thing needed to move a
+/// subject that is re-derived as "the newest".
+///
+/// The new row is NEWER than the one on screen, because `selectWarehouse` sorts the
+/// bare tab route's choice by `created_at`: a register that merely grew by an OLDER
+/// row could not tell a pinned subject from a re-derived one.
+///
+/// It grows ONCE and then stays put — a warehouse that has been created does not
+/// un-create itself — so read 3 and read 30 answer the same thing as read 2. A
+/// fixture that toggled would make any later assertion depend on the read count.
+///
+/// The SHELF is inherited unchanged, so both warehouses hand back the identical stock
+/// row. That is deliberate: it means the test cannot detect a moved subject by reading
+/// the rows, and has to prove it where it matters — `stockReadFor` (which warehouse's
+/// balances were actually requested) and `lastWarehouseId` (which warehouse the WRITE
+/// named). A fixture that gave the two shelves different contents would let the test
+/// pass on the display while the payload moved underneath it.
+class _GrowingRegisterRepo extends _FakeRepo {
+  _GrowingRegisterRepo({super.outcome, super.projects});
+
+  /// How many times the screen asked for the register. The post-confirm refresh is
+  /// the second, and it is the whole point of this fixture.
+  int warehouseReads = 0;
+
+  @override
+  Future<List<FieldStockEnt>> listWarehouses() async {
+    warehouseReads++;
+    return <FieldStockEnt>[
+      _wh('w-B', name: 'คลัง Block B'),
+      if (warehouseReads > 1)
+        _wh(
+          'w-C',
+          name: 'คลัง Block C',
+          createdAt: '2026-06-01T00:00:00Z', // NEWER than w-B
+        ),
+    ];
+  }
+}
+
+/// A [_FakeRepo] whose queue ALREADY HOLDS a pending issue when the screen mounts —
+/// the tab swap that destroys this screen's State while the queue survives (B-330).
+///
+/// [queue] IS the queue: `due()` hands back exactly what is in it, so a test that
+/// wants the op to sync removes it rather than asking the fixture to guess. Nothing
+/// here clears it on drain, and that is faithful rather than convenient — the device
+/// is offline, which is why the op is still there.
+class _QueuedOnMountRepo extends _FakeRepo {
+  _QueuedOnMountRepo({
+    String opId = 'op-from-the-last-mount',
+    String projectId = 'p1',
+    String warehouseId = 'w1',
+    super.projects,
+  }) : queue = <SyncOperation>[
+         _op(
+           opId,
+           SyncOpStatus.pending,
+           warehouseId: warehouseId,
+           projectId: projectId,
+           qty: 3,
+         ),
+       ];
+
+  final List<SyncOperation> queue;
+
+  @override
+  Future<List<SyncOperation>> due() async => List<SyncOperation>.of(queue);
+}
+
+/// A [_FakeRepo] whose POST-CONFIRM REFRESH fails — the site connection that dropped
+/// between the issue committing and the shelf being re-read.
+///
+/// The first read succeeds (there has to be a shelf to issue from) and EVERY read
+/// after it throws, so it cannot quietly come back to life in a later assertion.
+class _RefreshThrowsRepo extends _FakeRepo {
+  _RefreshThrowsRepo({super.outcome, super.projects});
+
+  @override
+  Future<List<FieldStockEnt>> listStock(String warehouseId) async {
+    final bool first = stockReadFor.isEmpty;
+    stockReadFor.add(warehouseId);
+    if (!first) throw Exception('no route to host');
+    return <FieldStockEnt>[_stock()];
+  }
+}
+
 /// The confirm CTA's tap handler, or null when the button is dead. Read off the
 /// GestureDetector rather than inferred from a colour, because "dead" is a property
 /// of the callback and the colour merely reports it.
@@ -245,13 +363,38 @@ VoidCallback? _ctaOnTap(WidgetTester tester) => tester
     )
     .onTap;
 
-SyncOperation _op(String id, SyncOpStatus status) => SyncOperation(
+/// One queued issue as the REAL repository would have built it — same entityType,
+/// same endpoint and, decisively, the same `from_warehouse_id` anchor
+/// `fieldStockOpIdentity` matches on. [projectId] is the attribution the op CHARGES,
+/// which the anchor deliberately excludes.
+///
+/// The payload is built by `buildIssuePayload` itself rather than hand-written, so a
+/// change to the real body shape cannot leave this fixture describing a body no
+/// repository would produce. Its line is `i1`, which is `_stock()`'s default item —
+/// the two are tied on purpose, so an op in the queue refers to a row that is really
+/// on the shelf the screen loads.
+///
+/// [warehouseId] is REQUIRED-with-a-default rather than nullable: every caller knows
+/// its warehouse, and a `?? 'w1'` fallback would let a null slip through as a
+/// silently-anchored op that matches the wrong screen.
+SyncOperation _op(
+  String id,
+  SyncOpStatus status, {
+  String warehouseId = 'w1',
+  String projectId = 'p1',
+  double qty = 1,
+}) => SyncOperation(
   id: id,
   entityType: 'inventory_issue',
   kind: SyncOpKind.create,
   endpoint: '/inventory/issues',
   method: 'POST',
-  payload: const <String, Object?>{},
+  payload: buildIssuePayload(
+    projectId: projectId,
+    fromWarehouseId: warehouseId,
+    picks: <FieldStockPick>[FieldStockPick(itemId: 'i1', qty: qty)],
+    idempotencyKey: id,
+  ),
   createdAt: DateTime.utc(2026),
   status: status,
 );
@@ -840,6 +983,100 @@ void main() {
       expect(find.text('MAT-CEM-001 · สต็อก 1,240 ถุง'), findsOneWidget);
     });
 
+    testWidgets(
+      'the refresh does NOT re-subject the screen when the register gains a '
+      'NEWER warehouse — the shelf that was issued from is the shelf that stays',
+      (WidgetTester tester) async {
+        // THE ANCHOR'S OWN INVARIANT, and it is the one the whole B-330 design rests
+        // on: `from_warehouse_id` is what recognises this screen's queued op, so it
+        // has to be the same value for the life of the mount.
+        //
+        // `_load()` has TWO call sites — `initState` and the post-`confirmed`
+        // refresh — and the bare TAB route carries no `warehouseId`
+        // (mobile_screen_router.dart pushes `const FieldStockScreenHost()`, so this
+        // is 100% of production mounts). Re-resolving the subject from
+        // `widget.warehouseId` therefore re-runs "follow the register's NEWEST"
+        // against a register that may have grown since. The storekeeper standing at
+        // Block B would then find the eyebrow, the shelf and the write's warehouse
+        // silently moved to a warehouse created a minute ago by an admin — and his
+        // next confirm posts a `stock_ledger` row at −qty against the WRONG shelf
+        // plus a Dr 1140 / Cr 5020 JV, with no return or reverse op anywhere in the
+        // nine /inventory paths to undo it.
+        final _GrowingRegisterRepo repo = _GrowingRegisterRepo(
+          outcome: SyncOutcome.synced,
+          projects: <FieldStockEnt>[_project('p1')],
+        );
+        await _pump(tester, repo); // the bare tab route: NO warehouseId
+        expect(repo.stockReadFor, <String>['w-B']);
+        expect(find.text('คลัง Block B'), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+        expect(repo.lastWarehouseId, 'w-B');
+
+        // The refresh really did re-read a register that really did grow — without
+        // both halves this proves nothing.
+        expect(
+          repo.warehouseReads,
+          2,
+          reason: 'the confirmation re-runs the whole read chain',
+        );
+        expect(repo.stockReadFor, <String>[
+          'w-B',
+          'w-B',
+        ], reason: 'the re-read must be of the SAME shelf');
+        expect(find.text('คลัง Block B'), findsOneWidget);
+        expect(find.text('คลัง Block C'), findsNothing);
+
+        // And the NEXT issue in the same mount still draws down w-B. This is the
+        // assertion with the money behind it: the eyebrow is a display, the
+        // warehouse on the write is a stock movement.
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+        expect(repo.submits, 2);
+        expect(repo.lastWarehouseId, 'w-B');
+      },
+    );
+
+    testWidgets('a refresh that FAILS is not painted as a failed ISSUE, and the shelf keeps '
+        'its last known balance', (WidgetTester tester) async {
+      // The refresh is fired unawaited and its errors are swallowed on purpose:
+      // the issue COMMITTED, and a dropped connection on the follow-up read must
+      // not turn a successful write into a failure chip. Until now that swallow
+      // was unpinned — deleting the `onError` handler left the suite green while
+      // the error escaped as an unhandled async exception.
+      final _RefreshThrowsRepo repo = _RefreshThrowsRepo(
+        outcome: SyncOutcome.synced,
+        projects: <FieldStockEnt>[_project('p1')],
+      );
+      await _pump(tester, repo);
+      expect(find.text('MAT-CEM-001 · สต็อก 1,240 ถุง'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+
+      expect(
+        repo.stockReadFor.length,
+        2,
+        reason: 'the refresh was attempted, and it threw',
+      );
+      expect(repo.submits, 1);
+      // Neither chip: the ISSUE succeeded.
+      expect(find.text('ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง'), findsNothing);
+      expect(find.text('รอส่ง'), findsNothing);
+      // The confirmation still landed — the emptied basket IS the confirmation.
+      expect(find.text('0'), findsOneWidget);
+      // And the row keeps its LAST KNOWN balance rather than blanking to an
+      // em-dash: `_apply` simply never ran.
+      expect(find.text('MAT-CEM-001 · สต็อก 1,240 ถุง'), findsOneWidget);
+    });
+
     testWidgets('the refresh does NOT reset a picked project back to the primary', (
       WidgetTester tester,
     ) async {
@@ -1021,6 +1258,117 @@ void main() {
           1,
           reason: 'the retry sends the reduced quantity, not the rejected 3',
         );
+      },
+    );
+  });
+
+  // The tab swap (B-330) destroys this State and leaves the QUEUE alone, so the
+  // screen comes back and ADOPTS its own outstanding op. What the returning screen
+  // then SAYS about that op, and what it lets the storekeeper DO about it, are two
+  // separate claims and both were unpinned.
+  group('an ADOPTED op — what the returning screen states, and what it allows', () {
+    testWidgets(
+      'the frozen picker shows the project the op CHARGES, not the primary the '
+      'fresh load defaulted to',
+      (WidgetTester tester) async {
+        // The CONTRAST for the em-dash test below: without it, "the slot shows an
+        // em-dash" would also pass on a screen that never adopted anything at all.
+        final _QueuedOnMountRepo repo = _QueuedOnMountRepo(
+          projectId: 'p2',
+          projects: <FieldStockEnt>[
+            _project('p1', name: 'โครงการ A'),
+            _project('p2', name: 'โครงการ B'),
+          ],
+        );
+        await _pump(tester, repo);
+
+        expect(
+          find.text('รอส่ง'),
+          findsOneWidget,
+          reason: 'the op was adopted',
+        );
+        expect(find.text('โครงการ B'), findsOneWidget);
+        expect(
+          find.text('โครงการ A'),
+          findsNothing,
+          reason:
+              'the default must not be shown as the outstanding write\'s '
+              'attribution',
+        );
+      },
+    );
+
+    testWidgets('a charged project that no longer resolves em-dashes — it does NOT fall '
+        'back to a DIFFERENT real project\'s name', (WidgetTester tester) async {
+      // The archived / paged-out project (GET /projects sends no pagination
+      // params, so page 1 is all this screen ever sees). The op charges p-GONE and
+      // the picker is FROZEN behind it, so whatever the slot says is presented as
+      // the attribution of a write the storekeeper cannot edit. An em-dash is
+      // honest; the primary project's name is an affirmative false statement, and
+      // it is not made honest by being a real name rather than an invented one.
+      final _QueuedOnMountRepo repo = _QueuedOnMountRepo(
+        projectId: 'p-GONE',
+        projects: <FieldStockEnt>[_project('p1', name: 'โครงการ A')],
+      );
+      await _pump(tester, repo);
+
+      expect(find.text('รอส่ง'), findsOneWidget, reason: 'the op was adopted');
+      expect(
+        find.text('โครงการ A'),
+        findsNothing,
+        reason: 'the op does not charge โครงการ A',
+      );
+      // The eyebrow, the material row and the title are all fully populated, so
+      // the used-with slot is the ONLY site that can produce this glyph — the
+      // em-dash dies alone here.
+      expect(find.text('—'), findsOneWidget);
+    });
+
+    testWidgets(
+      'the CTA is a LIVE manual retry over the adopted op — it re-drains that op '
+      'and never enqueues a second',
+      (WidgetTester tester) async {
+        // The adopted basket is EMPTY (the quantities died with the old State), so
+        // `_canSubmit` is false and the CTA used to be dead: the storekeeper was
+        // shown `รอส่ง` over a zeroed frozen basket with no way to act at all,
+        // recoverable only by switching tabs again. `_onConfirm`'s own doc claimed
+        // the opposite — "while an outcome is UNKNOWN (queued) it re-drains the SAME
+        // op, a manual retry" — so this pins the doc, not just the button.
+        final _QueuedOnMountRepo repo = _QueuedOnMountRepo(
+          projects: <FieldStockEnt>[_project('p1')],
+        );
+        await _pump(tester, repo);
+        expect(find.text('รอส่ง'), findsOneWidget);
+        expect(
+          find.text('0'),
+          findsOneWidget,
+          reason: 'the adopted basket really is empty, or this proves nothing',
+        );
+
+        expect(
+          _ctaOnTap(tester),
+          isNotNull,
+          reason: 'a queued op with no basket must still be retryable',
+        );
+
+        final int drainsBefore = repo.drains;
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+
+        expect(
+          repo.drains,
+          greaterThan(drainsBefore),
+          reason: 'the tap re-drained the adopted op',
+        );
+        expect(
+          repo.submits,
+          0,
+          reason:
+              'a retry of a live op must never enqueue a second issue — that '
+              'is a second stock cut and a second Dr 1140 / Cr 5020 JV',
+        );
+        // Still queued, still frozen: nothing about the op changed.
+        expect(find.text('รอส่ง'), findsOneWidget);
       },
     );
   });
