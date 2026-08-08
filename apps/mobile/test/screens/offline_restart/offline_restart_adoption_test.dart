@@ -45,6 +45,9 @@ import 'package:juneflow_mobile/offline/sync_processor.dart';
 import 'package:juneflow_mobile/screens/field_progress/field_progress_agg.dart';
 import 'package:juneflow_mobile/screens/field_progress/field_progress_repository.dart';
 import 'package:juneflow_mobile/screens/field_progress/field_progress_screen.dart';
+import 'package:juneflow_mobile/screens/field_stock/field_stock_agg.dart';
+import 'package:juneflow_mobile/screens/field_stock/field_stock_repository.dart';
+import 'package:juneflow_mobile/screens/field_stock/field_stock_screen.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_repository.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_screen.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_agg.dart';
@@ -229,6 +232,56 @@ class _ProgressRepo extends DioFieldProgressRepository {
       ];
 }
 
+/// field-stock's reads, stubbed. The write half — the real `SyncOperation`, the real
+/// `fieldStockOpIdentity`, the real payload — is inherited untouched.
+///
+/// TWO warehouses, because this screen's ownership anchor is a PAYLOAD field
+/// (`from_warehouse_id`) rather than a path segment: `POST /inventory/issues` is one
+/// endpoint for every shelf in the tenant, exactly as `POST /gr` is one endpoint for
+/// every PO. A fixture with a single warehouse could not tell a working anchor from
+/// no anchor at all.
+///
+/// TWO projects, because the anchor deliberately EXCLUDES `project_id` — the screen
+/// re-defaults that to the primary on every load, so a basket issued against the
+/// SECOND project must still be recognised by the mount that comes back. One project
+/// would make that test vacuous.
+class _StockRepo extends DioFieldStockRepository {
+  _StockRepo(QueueDrainProcessor p) : super(_unusedDio, p);
+
+  @override
+  Future<List<FieldStockEnt>> listWarehouses() async => <FieldStockEnt>[
+    <String, Object?>{
+      'id': 'w-A',
+      'name': 'คลัง Block A',
+      'created_at': '2026-01-01T00:00:00Z',
+    },
+    <String, Object?>{
+      'id': 'w-B',
+      'name': 'คลัง Block B',
+      'created_at': '2026-01-02T00:00:00Z',
+    },
+  ];
+
+  @override
+  Future<List<FieldStockEnt>> listStock(String warehouseId) async =>
+      <FieldStockEnt>[
+        <String, Object?>{
+          'item_id': 'i1',
+          'warehouse_id': warehouseId,
+          'item_code': 'MAT-CEM-001',
+          'item_name': 'ปูนซีเมนต์ตราเสือ',
+          'unit': 'ถุง',
+          'on_hand': 1240,
+        },
+      ];
+
+  @override
+  Future<List<FieldStockEnt>> listProjects() async => <FieldStockEnt>[
+    <String, Object?>{'id': 'p1', 'name': 'juneflow พาร์ค ราชพฤกษ์'},
+    <String, Object?>{'id': 'p2', 'name': 'juneflow เพลส บางนา'},
+  ];
+}
+
 /// [_ProgressRepo] whose QUEUE READ takes real time.
 ///
 /// `due()` is `SyncQueue.pending()`, and in the app that is drift/SQLite — disk I/O,
@@ -327,6 +380,15 @@ class _SlowDueNotesRepo extends _StoredNotesRepo {
   Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
 }
 
+class _SlowDueStockRepo extends _StockRepo {
+  _SlowDueStockRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  @override
+  Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
+}
+
 // ---------------------------------------------------------------------------
 // i18n + sidecars (the real field names; dict values from docs/extract/i18n-full.json)
 // ---------------------------------------------------------------------------
@@ -369,7 +431,11 @@ final JuneflowI18n _i18n = JuneflowI18n.fromJsonString('''
     "subcon.kpiAccepted": {"th":"ตรวจรับแล้ว"},
     "subcon.rejectBtn": {"th":"ตีกลับแก้ไข"},
     "wo.form.deliverWork": {"th":"ส่งมอบงาน"},
-    "boq.edEmptyRowsFilter": {"th":"ไม่พบรายการที่ตรงกับตัวกรอง"}
+    "boq.edEmptyRowsFilter": {"th":"ไม่พบรายการที่ตรงกับตัวกรอง"},
+    "inv.issueAdd.title": {"th":"เบิกวัสดุออก (Material Issue)"},
+    "inv.issueAdd.itemsTitle": {"th":"รายการที่เบิก"},
+    "inv.issueAdd.colStock": {"th":"สต็อก"},
+    "inv.issue.colUsedFor": {"th":"ใช้กับ"}
   },
   "nav_i18n": {}, "phrases": {}, "phrase_patterns": []
 }
@@ -460,6 +526,18 @@ final ScreenStrings _progressStrings = ScreenStrings.fromJsonString('''
   "queued": "tax.etax.statusPending",
   "failed": "admin.common.actionFailedToast",
   "empty": "boq.edEmptyRowsFilter"
+}
+''');
+
+final ScreenStrings _stockStrings = ScreenStrings.fromJsonString('''
+{
+  "title": "inv.issueAdd.title",
+  "itemsTitle": "inv.issueAdd.itemsTitle",
+  "stockLabel": "inv.issueAdd.colStock",
+  "usedFor": "inv.issue.colUsedFor",
+  "confirm": "common.confirm",
+  "queued": "tax.etax.statusPending",
+  "failed": "admin.common.actionFailedToast"
 }
 ''');
 
@@ -593,6 +671,54 @@ Future<void> _mountProgress(
   ),
 );
 
+/// field-stock's mount. [warehouseId] null is the REAL router path — the tab route
+/// carries no parameter, so the screen follows the register's newest warehouse (w-B
+/// here, by `created_at`). An explicit id is the push seam, and is what lets one test
+/// put two DIFFERENT warehouses over ONE queue.
+Future<void> _mountStock(
+  WidgetTester tester,
+  InMemorySyncQueue queue,
+  _Transport transport, {
+  String? warehouseId,
+  FieldStockRepository? repo,
+}) => _mount(
+  tester,
+  FieldStockScreen(
+    repo: repo ?? _StockRepo(_processor(queue, transport)),
+    strings: _stockStrings,
+    i18n: _i18n,
+    warehouseId: warehouseId,
+  ),
+);
+
+/// Stage one bag of cement, so the CTA has a basket to submit. An empty basket makes
+/// `canSubmitIssue` false and the confirm button inert, which would make every
+/// assertion below pass for the wrong reason.
+Future<void> _stageOne(WidgetTester tester) async {
+  await tester.tap(find.byIcon(Icons.add).first);
+  await _flush(tester);
+}
+
+const String _projectPrimary = 'juneflow พาร์ค ราชพฤกษ์';
+const String _projectSecond = 'juneflow เพลส บางนา';
+
+/// Re-attribute the basket to the SECOND project via the real picker sheet.
+///
+/// `_flush` is useless around a modal route: it pumps zero-duration frames, so the
+/// clock never advances and the sheet neither finishes opening nor finishes
+/// dismissing — the still-live barrier then swallows the confirm tap that follows,
+/// and the test fails with an empty queue for a reason that has nothing to do with
+/// what it is testing. Real durations are required on both transitions.
+Future<void> _pickSecondProject(WidgetTester tester) async {
+  await tester.tap(find.text(_projectPrimary));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.tap(find.text(_projectSecond).last);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await _flush(tester);
+}
+
 const String _confirmRecv = 'ยืนยัน';
 const String _checkinBtn = 'Check-in หน้างาน';
 const String _saveNotes = 'บันทึก';
@@ -711,6 +837,63 @@ void main() {
       await _tap(tester, _deliver);
 
       expect(await _queuedIds(queue), <String>[k1]);
+    });
+
+    testWidgets('field-stock (MONEY — a second key is a second stock cut + a second JV), '
+        'and the "restart" here is only switching tabs', (WidgetTester tester) async {
+      // THE DIFFERENCE FROM THE FIVE ABOVE: this screen does not need an app kill
+      // to lose its State. mobile_shell.dart renders `MobileScreenRouter(route:
+      // _route)` as the TAB BODY — swapped, not an IndexedStack — so leaving the
+      // tab and coming back destroys this State outright. `_kill` models the tab
+      // swap exactly (the tree goes, the queue stays), and that is an ordinary
+      // gesture rather than a rare crash.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountStock(tester, queue, transport);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      final String k1 = (await _queued(queue)).single.id;
+      expect((await _queued(queue)).single.endpoint, '/inventory/issues');
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      await _kill(tester);
+      await _mountStock(tester, queue, transport);
+
+      // The returning screen already knows an issue is outstanding — it did not
+      // present a clean, editable basket.
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      // The storekeeper, still seeing no confirmation, stages and confirms again.
+      // The stepper REFUSES the tap, because the adopted op owns the basket: the
+      // queue replays its stored payload verbatim, so a quantity accepted here
+      // would be shown and never sent.
+      await _stageOne(tester);
+      expect(
+        find.text('1'),
+        findsNothing,
+        reason: 'the + stepper must be frozen behind the adopted op',
+      );
+      await _tap(tester, _confirmRecv);
+
+      expect(
+        await _queuedIds(queue),
+        <String>[k1],
+        reason:
+            'a second key here is a second POST /inventory/issues: one '
+            'transaction that inserts a second material_issue, a second '
+            'stock_ledger row at -qty AND a second Dr 1140 / Cr 5020 JV. '
+            'material_issue_idempotency_uq cannot stop it — the two keys '
+            'differ, so they are legitimately two issues',
+      );
+
+      // And when the signal returns, the server is hit exactly ONCE.
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/inventory/issues');
+      expect(transport.accepted.single.payload['idempotency_key'], k1);
+      expect(await queue.length(), 0);
     });
   });
 
@@ -888,6 +1071,53 @@ void main() {
         expect(transport.accepted.length, 1);
         expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
         expect(find.text(_deliver), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      'field-stock (MONEY — a second key is a second stock cut + a second JV)',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        await _mountStock(tester, queue, transport);
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        // Back on the tab with the signal RESTORED — but hold the replay open.
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountStock(tester, queue, transport);
+
+        // Unlike field-progress, this screen's READS do not sit behind the drain
+        // (the warehouse/stock/project chain runs in parallel with it, so a queue
+        // left over from a prior session starts flushing immediately). The price of
+        // that is a REAL window: the shelf is rendered, the basket is editable and
+        // the CTA is live while `_opId` is still null.
+        expect(find.text(_queuedCard), findsNothing);
+        expect(find.text(_confirmRecv), findsOneWidget);
+
+        // The storekeeper, seeing no confirmation, stages and confirms again.
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+
+        // The held replay lands and the drain walks the rest of the FIFO.
+        gate.complete();
+        await _flush(tester, 20);
+
+        expect(
+          transport.acceptedKeys,
+          <String>[k1],
+          reason:
+              'two distinct keys = two material issues = two stock_ledger '
+              'decrements and two JVs; material_issue_idempotency_uq is a '
+              'partial unique index on the key ALONE and correctly lets them '
+              'both through',
+        );
+        expect(await queue.length(), 0);
       },
     );
   });
@@ -1438,6 +1668,55 @@ void main() {
       expect(transport.accepted.length, 1);
       expect(await queue.length(), 0);
     });
+
+    testWidgets('field-stock (MONEY — two ops are two stock cuts + two JV): two taps on '
+        'confirm enqueue ONE issue', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountStock(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueStockRepo(
+          _processor(queue, transport),
+          delay: const Duration(milliseconds: 120),
+        ),
+      );
+      // Let the on-mount adoption finish first (it reads the queue too), so the
+      // only read in flight below is the one the tap opens.
+      await tester.pump(const Duration(milliseconds: 200));
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsNothing); // nothing was queued yet
+
+      await _stageOne(tester);
+
+      // The storekeeper taps confirm twice — the first tap has not repainted yet,
+      // which is exactly why he taps again. Both land on the tree built while the
+      // screen was idle, so both reach `_onConfirm`; only the SYNCHRONOUS busy
+      // flip stops the second one before the queue read.
+      await tester.tap(find.text(_confirmRecv).first);
+      await tester.tap(find.text(_confirmRecv).first);
+      await tester.pump(const Duration(milliseconds: 300));
+      await _flush(tester, 20);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(
+        ops.length,
+        1,
+        reason:
+            'without the flip both taps read the queue BEFORE either enqueues, '
+            'both find nothing of their own, and both mint — a second POST '
+            '/inventory/issues under a second key, which is a second stock '
+            'decrement and a second Dr 1140 / Cr 5020 JV',
+      );
+      expect(ops.single.endpoint, '/inventory/issues');
+
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+    });
   });
 
   // =========================================================================
@@ -1573,6 +1852,95 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'field-stock: warehouse A and warehouse B share entityType AND endpoint '
+      '(/inventory/issues) — B must NOT adopt A\'s key',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        // An issue is captured against warehouse A and left queued.
+        await _mountStock(tester, queue, transport, warehouseId: 'w-A');
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+        final String kA = (await _queued(queue)).single.id;
+
+        // The storekeeper moves to a DIFFERENT warehouse.
+        await _kill(tester);
+        await _mountStock(tester, queue, transport, warehouseId: 'w-B');
+
+        // Nothing of warehouse B's is queued, so no status card is claimed for it
+        // and the basket is editable.
+        expect(find.text(_queuedCard), findsNothing);
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+
+        final List<SyncOperation> ops = await _queued(queue);
+        expect(
+          ops.length,
+          2,
+          reason: 'warehouse B\'s issue must be its OWN write',
+        );
+        final SyncOperation opB = ops.firstWhere(
+          (SyncOperation o) => o.id != kA,
+        );
+        expect(opB.payload[kIssueFromWarehouseField], 'w-B');
+        expect(opB.payload['idempotency_key'], opB.id);
+        // Had B adopted A's key, B's basket would simply never have been issued —
+        // and the screen would have shown A's outstanding write as B's. That is a
+        // WRONG write, which is worse than the duplicate the anchor exists to stop.
+        expect(opB.id, isNot(kA));
+      },
+    );
+
+    testWidgets(
+      'field-stock: a basket issued against the NON-default project is still '
+      'adopted after a remount — the anchor must not include project_id',
+      (WidgetTester tester) async {
+        // THE ANCHOR-WIDTH TEST. `project_id` is in the payload and looks like a
+        // second, free precision win. It is not: the screen re-defaults the project
+        // to the tenant's PRIMARY on every load, so an anchor carrying it would fail
+        // to match the screen's own queued op the moment the storekeeper had picked
+        // anything else — and mint a second key. That is the whole defect, wearing a
+        // narrower anchor. This test is the thing that goes red if anyone widens it.
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        await _mountStock(tester, queue, transport);
+        await _stageOne(tester);
+
+        // Pick the SECOND project — not the primary the load defaulted to.
+        await _pickSecondProject(tester);
+
+        await _tap(tester, _confirmRecv);
+        final SyncOperation queued = (await _queued(queue)).single;
+        expect(
+          queued.payload['project_id'],
+          'p2',
+          reason:
+              'the pick must have reached the payload, or this proves nothing',
+        );
+
+        await _kill(tester);
+        await _mountStock(tester, queue, transport);
+
+        expect(
+          find.text(_queuedCard),
+          findsOneWidget,
+          reason:
+              'the fresh mount defaulted the picker back to p1; if p2 were part '
+              'of the identity it would not recognise its own op',
+        );
+        // And the frozen picker shows what the op actually CHARGES, not the
+        // default the load just applied — the screen is about to refuse edits on
+        // the strength of that op, so it must not misstate it.
+        expect(find.text(_projectSecond), findsOneWidget);
+
+        await _tap(tester, _confirmRecv);
+        expect(await _queuedIds(queue), <String>[queued.id]);
+      },
+    );
   });
 
   // =========================================================================
@@ -1664,6 +2032,54 @@ void main() {
         final List<SyncOperation> left = await _queued(queue);
         expect(left.single.id, dead.id);
         expect(left.single.status, SyncOpStatus.failed);
+      },
+    );
+
+    testWidgets(
+      'field-stock: once the issue SYNCS the key is released, so the NEXT basket '
+      'from the SAME warehouse gets its OWN key',
+      (WidgetTester tester) async {
+        // The mirror-image defect matters more here than anywhere else in this
+        // file, because the anchor is a WAREHOUSE rather than a document: a
+        // storekeeper works the same shelf all day, and every issue after the first
+        // would be swallowed into the first one if the key were held.
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(offline: false);
+
+        await _mountStock(tester, queue, transport);
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+        expect(await queue.length(), 0); // 2xx removed it
+        final String k1 =
+            transport.accepted.single.payload['idempotency_key']! as String;
+
+        // The SAME mount, staging the next issue — the ordinary case this screen
+        // is built around (it does not pop, it re-arms).
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+
+        expect(transport.accepted.length, 2);
+        final String k2 =
+            transport.accepted.last.payload['idempotency_key']! as String;
+        expect(
+          k2,
+          isNot(k1),
+          reason:
+              'reusing k1 would make the server resolve a genuinely new issue '
+              'back to the first one: material leaves the warehouse and no '
+              'ledger row records it',
+        );
+        // Both issues came off the SAME shelf — which is exactly why an anchor
+        // that is only a warehouse must be released the instant the op is gone.
+        expect(
+          transport.accepted
+              .map(
+                (({String endpoint, Map<String, Object?> payload}) r) =>
+                    r.payload[kIssueFromWarehouseField],
+              )
+              .toList(),
+          <String>['w-B', 'w-B'],
+        );
       },
     );
   });

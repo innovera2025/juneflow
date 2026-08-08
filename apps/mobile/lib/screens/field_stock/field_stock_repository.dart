@@ -65,9 +65,53 @@
 // lands the other way here, because the index is real.
 import 'package:dio/dio.dart';
 
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import 'field_stock_agg.dart';
+
+/// What ONE WAREHOUSE's queued material issue looks like in the shared queue.
+///
+/// The ONE definition of this write's identity: [DioFieldStockRepository.submitIssue]
+/// builds its [SyncOperation] from it, and the screen matches its own still-pending
+/// issue with it after a remount (B-330), so the matcher cannot drift from the
+/// builder.
+///
+/// ---------------------------------------------------------------------------
+/// WHY THE ANCHOR IS `from_warehouse_id` AND NOT `project_id`, AND NOT BOTH
+/// ---------------------------------------------------------------------------
+/// Like `POST /gr`, `POST /inventory/issues` is RECORD-AGNOSTIC — one path for every
+/// warehouse and every project — so the endpoint pins nothing and the anchor has to
+/// come out of the body. The body offers two candidates, and they are not
+/// interchangeable:
+///
+///   * `from_warehouse_id` IS THE SCREEN'S SUBJECT. It comes from the route
+///     (`FieldStockScreenHost.warehouseId`, or the register's newest warehouse when
+///     the tab is entered bare), it is the header eyebrow, it decides which shelf's
+///     balances are listed, and NOTHING in the mount can change it. It is therefore
+///     the same value on the mount that queued the op and on the mount that comes
+///     back to adopt it — which is the whole requirement of an anchor.
+///
+///   * `project_id` IS AN ATTRIBUTION, and it is NOT STABLE ACROSS A REMOUNT. The
+///     screen defaults it to the tenant's PRIMARY project on every load
+///     (`_apply` -> `selectProject`) and the storekeeper may re-pick it before
+///     submitting. So a basket issued against a NON-default project would come back
+///     from a remount carrying the primary project's id, the identity would not
+///     match its own queued op, and the screen would mint a SECOND key — reopening
+///     the exact double-post (double stock cut + double JV) this file exists to
+///     close, on the very path that most looks fixed. Including it "for precision"
+///     is not a tightening; it is the defect wearing a narrower anchor.
+///
+/// Matching on `entityType` + `endpoint` ALONE would be the mirror-image bug, and it
+/// is the worse of the two: an op queued against warehouse A would be adopted by a
+/// mount showing warehouse B, so B's basket is never sent and the user is shown A's
+/// outstanding write as if it were their own. A duplicate is a duplicate; issuing
+/// the wrong shelf's material is a wrong write. Hence exactly ONE anchor entry.
+SyncOpIdentity fieldStockOpIdentity(String fromWarehouseId) => SyncOpIdentity(
+  entityType: 'inventory_issue',
+  endpoint: '/inventory/issues',
+  payloadAnchor: <String, Object?>{kIssueFromWarehouseField: fromWarehouseId},
+);
 
 /// Read the warehouse / stock / project subjects, and enqueue + drain the issue.
 abstract class FieldStockRepository {
@@ -160,11 +204,14 @@ class DioFieldStockRepository implements FieldStockRepository {
     required String opId,
     required DateTime now,
   }) async {
+    // Built from the SAME identity the screen matches with, so the enqueue and the
+    // adoption cannot drift apart (the st-receive / pm-* precedent).
+    final SyncOpIdentity identity = fieldStockOpIdentity(warehouseId);
     final SyncOperation op = SyncOperation(
       id: opId,
-      entityType: 'inventory_issue',
+      entityType: identity.entityType,
       kind: SyncOpKind.create,
-      endpoint: '/inventory/issues',
+      endpoint: identity.endpoint,
       method: 'POST',
       // The B-261 contract: the body's `idempotency_key` IS the op id, so a replay
       // of this exact payload resolves to the ORIGINAL issue instead of posting a

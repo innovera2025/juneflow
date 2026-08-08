@@ -98,12 +98,52 @@
 // out. That costs no key, and it re-arms the screen for the NEXT issue in the same
 // mount, which is the normal case for a storekeeper working a tab.
 //
+// And because it re-arms in the same mount, the SHELF must re-arm with it: the
+// `on_hand` figures on screen are the PRE-ISSUE balances the moment the issue
+// commits, and they are the numbers that decide how much may be taken next. Leaving
+// them is worse than the emptied basket, because an emptied basket reads as "done"
+// while a stale balance reads as a FACT that is now false. [_resolve] re-runs
+// [_load] on `confirmed`. That costs no key either.
+//
 // THE INVARIANT that makes all of the above safe: `_opId != null` means a live op
 // owns the basket, and the basket is FROZEN while it does — because a queued op is
 // replayed VERBATIM from its stored payload, so an edit made after the enqueue would
 // be displayed but never sent. Both TERMINAL outcomes clear it: `confirmed` (the op
 // is done) and `failed` (nothing was written and the next tap mints a fresh key), so
 // after either the basket is editable again and the CTA works.
+//
+// ---------------------------------------------------------------------------
+// WHY THAT INVARIANT NEEDED THE QUEUE, NOT JUST STATE (B-330)
+// ---------------------------------------------------------------------------
+// `_opId` lives in per-mount State, and State is NOT durable while the QUEUE is. On
+// this screen the gap is not the rare app-kill it is elsewhere: mobile_shell.dart
+// renders `MobileScreenRouter(route: _route)` as the tab body — SWAPPED, not an
+// IndexedStack — so leaving the tab and coming back DESTROYS this State. The
+// invariant above was therefore false across a remount in the ordinary way a
+// storekeeper uses a tab bar:
+//
+//   submit -> deferred -> the queued chip shows -> switch tabs and back -> the chip
+//   is gone, the basket is editable and `_opId` is null while op #1 is STILL pending
+//   -> re-stage -> a SECOND op under a DIFFERENT key -> both post -> a double stock
+//   cut and a double JV.
+//
+// B-312's partial unique index cannot catch that: the two keys differ, so they are
+// legitimately two issues. The duplicate has to die on the client, by not minting
+// the second key. So a null `_opId` is never trusted on its own — the QUEUE is
+// asked, at the two points that matter:
+//
+//   1. ON MOUNT ([_resumeQueued]) — this is what makes the returning screen SHOW
+//      that an issue is outstanding, and re-freeze the basket behind it.
+//   2. IMMEDIATELY BEFORE MINTING A KEY ([_onConfirm]) — this is what makes it SAFE.
+//      The on-mount drain is one real HTTP round trip (Dio sets no connectTimeout)
+//      and the CTA is live throughout it, so (1) alone still leaves a window in
+//      which a tap mints a second key on a perfectly healthy network. The pre-mint
+//      check closes it, and it is paired with a SYNCHRONOUS busy flip taken BEFORE
+//      the queue read — without that flip two taps in one frame both read the queue
+//      before either enqueues, both find nothing, and both mint.
+//
+// Ownership is `from_warehouse_id` — see fieldStockOpIdentity for why the project id
+// must NOT join it, and why the endpoint alone must not be it either.
 import 'dart:async';
 import 'dart:math';
 
@@ -112,6 +152,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
@@ -240,6 +281,12 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// so the retry must be a FRESH op with a FRESH key). Leaving it set after
   /// `confirmed` is what made every later tap in the same mount a no-op drain of an
   /// empty queue — a button that silently did nothing for the rest of the mount.
+  ///
+  /// A NULL DOES NOT MEAN "nothing of mine is queued" (B-330). It means only "this
+  /// State is not tracking one", and this State dies every time the storekeeper
+  /// leaves the tab (the shell SWAPS the tab body) while the queue does not. So the
+  /// queue is asked directly in [_resumeQueued] and again in [_onConfirm] — see the
+  /// file header.
   String? _opId;
 
   /// True while a live op owns the basket ([submitting] / [queued]).
@@ -257,9 +304,75 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   void initState() {
     super.initState();
     _future = _load();
-    // Flush anything a prior session left queued. It does not change this screen's
-    // idle state; it just keeps the queue moving.
-    unawaited(widget.repo.drain());
+    unawaited(_resumeQueued());
+  }
+
+  /// The (a) on-mount drain, plus the rehydration that makes [_opId] survive the tab
+  /// swap that destroys this State (B-330).
+  ///
+  /// THE ORDERING IS THE POINT, and it is not st-receive's:
+  ///
+  ///   * the DRAIN is started IMMEDIATELY, exactly as before, so a queue left over
+  ///     from a prior session begins flushing without waiting on this screen's read
+  ///     chain;
+  ///   * the LOAD is awaited before adopting, because unlike every other adopting
+  ///     screen this one's identity is NOT a widget parameter: the warehouse is
+  ///     resolved BY the load (a bare tab route follows the register's newest), so
+  ///     there is nothing to match against until it lands;
+  ///   * the DRAIN is awaited too, so the online case has already resolved and left
+  ///     nothing to adopt. Whatever is STILL pending for this warehouse afterwards is
+  ///     an issue this device captured and the server has not accepted.
+  ///
+  /// WHAT THIS DOES NOT CLOSE: the screen is fully rendered with a LIVE CTA for the
+  /// whole of that drain, and [_opId] is null throughout it, so this alone would
+  /// still let a tap mint a second key. This is the VISIBLE half; the money half is
+  /// the pre-mint queue check in [_onConfirm].
+  Future<void> _resumeQueued() async {
+    // Handled at construction, so a drain that throws can never surface as an
+    // unhandled async error from this unawaited future — and cannot abandon the
+    // adoption below either.
+    final Future<void> drained = widget.repo.drain().then<void>(
+      (DrainReport _) {},
+      onError: (Object _) {},
+    );
+    try {
+      await _future;
+    } catch (_) {
+      return; // the read chain failed: there is no warehouse to match against
+    }
+    await drained;
+    if (!mounted) return;
+    final String? warehouseId = _warehouseId;
+    if (warehouseId == null) return;
+    final SyncOperation? mine = findAdoptableOp(
+      await widget.repo.due(),
+      fieldStockOpIdentity(warehouseId),
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.id;
+      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = FieldStockState.queued;
+      // The picker is about to be FROZEN behind this op, so it must show what the op
+      // actually charges rather than the primary project the fresh load just
+      // defaulted to. The anchor deliberately excludes `project_id` (see
+      // fieldStockOpIdentity), so the adopted op may legitimately carry a project the
+      // storekeeper picked in the previous mount; displaying the default instead
+      // would be an affirmative false statement about an outstanding write. Left
+      // alone when the id does not resolve against the loaded projects — the
+      // em-dash/default is honest, an invented name is not.
+      final Object? charged = mine.payload['project_id'];
+      if (charged is String) {
+        for (final FieldStockEnt p in _projects) {
+          if (fieldStockStr(p, const <String>['id']) == charged) {
+            _projectId = charged;
+            _projectName = fieldStockStr(p, const <String>['name']);
+            break;
+          }
+        }
+      }
+    });
   }
 
   /// The real read chain: warehouses → the chosen warehouse → its stock balances,
@@ -304,6 +417,12 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// `project_id` is pre-filled with the tenant's primary project rather than
   /// leaving the CTA inert until the storekeeper discovers the picker. It stays
   /// re-pickable; nothing else is pre-selected.
+  ///
+  /// The default is applied ONLY when nothing is selected yet. [_load] is re-run
+  /// after a confirmed issue to refresh `on_hand`, and re-defaulting there would
+  /// silently move the NEXT issue's attribution back to the primary project after
+  /// the storekeeper had deliberately picked another one — a wrong project on a
+  /// money write, made invisibly by a refresh.
   void _apply(_Loaded loaded) {
     if (!mounted) return;
     final FieldStockEnt? primary = selectProject(loaded.projects);
@@ -312,12 +431,14 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
       _projects = loaded.projects;
       _warehouseId = loaded.warehouseId;
       _warehouseName = loaded.warehouseName;
-      _projectId = primary == null
-          ? null
-          : fieldStockStr(primary, const <String>['id']);
-      _projectName = primary == null
-          ? null
-          : fieldStockStr(primary, const <String>['name']);
+      if (_projectId == null) {
+        _projectId = primary == null
+            ? null
+            : fieldStockStr(primary, const <String>['id']);
+        _projectName = primary == null
+            ? null
+            : fieldStockStr(primary, const <String>['name']);
+      }
     });
   }
 
@@ -358,18 +479,51 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     final List<FieldStockPick> picks = _picks;
     if (projectId == null || warehouseId == null || picks.isEmpty) return;
 
-    final bool firstAttempt = _opId == null;
-    final String opId = _opId ??= _newOpId();
+    // Flipped SYNCHRONOUSLY, before the first await below, so the CTA is already
+    // disabled when a second tap could otherwise arrive DURING the queue read. The
+    // guard above and this flip are one mechanism: without the flip, two taps in the
+    // same frame both reach the read, both see a queue that neither has written to
+    // yet, and both mint — which is the window the pre-mint check was added to close,
+    // reopened.
     setState(() => _state = FieldStockState.submitting);
-    final DrainReport report = firstAttempt
-        ? await widget.repo.submitIssue(
-            projectId: projectId,
-            warehouseId: warehouseId,
-            picks: picks,
-            opId: opId,
-            now: DateTime.now(),
-          )
-        : await widget.repo.drain();
+
+    final String? tracked = _opId;
+    if (tracked != null) {
+      // A live op already owns the basket: re-drain THAT op, never enqueue a second.
+      await _resolve(tracked, await widget.repo.drain());
+      return;
+    }
+
+    // About to MINT a key — so ask the QUEUE, which is the only thing that actually
+    // knows, instead of trusting this State's null (B-330). Two ways that null lies:
+    // the State is fresh because the shell swapped this tab out and back, or the
+    // on-mount drain has simply not come back yet — one whole HTTP round trip during
+    // which this CTA is live. Minting in either case produces a SECOND key, and
+    // `material_issue_idempotency_uq` correctly admits two distinct keys as two
+    // distinct issues: a second stock cut and a second JV.
+    //
+    // The re-drain below is a no-op while an outer drain is still running (the
+    // processor's re-entrancy guard returns an empty report), which is exactly right:
+    // that outer drain is already replaying this very op.
+    final SyncOperation? already = findAdoptableOp(
+      await widget.repo.due(),
+      fieldStockOpIdentity(warehouseId),
+    );
+    if (!mounted) return;
+    if (already != null) {
+      setState(() => _opId = already.id);
+      await _resolve(already.id, await widget.repo.drain());
+      return;
+    }
+
+    final String opId = _opId = _newOpId();
+    final DrainReport report = await widget.repo.submitIssue(
+      projectId: projectId,
+      warehouseId: warehouseId,
+      picks: picks,
+      opId: opId,
+      now: DateTime.now(),
+    );
     await _resolve(opId, report);
   }
 
@@ -395,6 +549,17 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
         _opId = null;
       }
     });
+    // CONFIRMED means the ledger really was cut, so every `on_hand` on screen is now
+    // the PRE-ISSUE balance — a figure that actively contradicts the withdrawal the
+    // storekeeper just made, and the one that decides how much may be taken next.
+    // Stale stock is the real lever on a re-issue, more than the emptied basket is.
+    // Re-read it. Unawaited because the confirmation above must not wait on a refresh,
+    // and error-swallowed because a failed refresh is not a failed ISSUE: `_apply`
+    // simply never runs and the rows keep their last known values rather than the
+    // screen painting the issue itself as broken. Costs no i18n key.
+    if (next == FieldStockState.confirmed) {
+      unawaited(_load().then<void>((_Loaded _) {}, onError: (Object _) {}));
+    }
   }
 
   /// Choose the project this material is issued against. Real tenant projects, by

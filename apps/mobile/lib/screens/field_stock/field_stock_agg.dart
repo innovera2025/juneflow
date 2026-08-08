@@ -332,6 +332,15 @@ bool canSubmitIssue({
   required List<FieldStockPick> picks,
 }) => projectId != null && warehouseId != null && picks.isNotEmpty;
 
+/// The payload key naming the warehouse the issue draws down.
+///
+/// Named rather than inlined because it is read back OUT of a queued payload by
+/// `fieldStockOpIdentity` (field_stock_repository.dart) to recognise this screen's
+/// own outstanding write after a remount — `POST /inventory/issues` is the same path
+/// for every warehouse, so the body is the only thing that says which shelf an op
+/// belongs to. One constant, so the matcher and the builder below cannot drift.
+const String kIssueFromWarehouseField = 'from_warehouse_id';
+
 /// Build the POST /inventory/issues body.
 ///
 /// THIS IS THE MONEY SURFACE OF THE SCREEN, and it is four keys wide:
@@ -364,7 +373,7 @@ Map<String, Object?> buildIssuePayload({
 }) {
   return <String, Object?>{
     'project_id': projectId,
-    'from_warehouse_id': fromWarehouseId,
+    kIssueFromWarehouseField: fromWarehouseId,
     'idempotency_key': idempotencyKey,
     'lines': <Map<String, Object?>>[
       for (final FieldStockPick p in picks)
