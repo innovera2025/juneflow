@@ -1096,6 +1096,68 @@ export const attendances = pgTable("attendance", {
   uniqueIndex("attendance_self_day_uq")
     .on(t.workerId, t.day)
     .where(sql`${t.ccId} IS NULL`),
+  // B-338 / B-342 (migration 0063): the COMPLEMENT of the index above — at most ONE
+  // attendance row per (worker, day, COST CENTRE). Together the two predicates now
+  // cover EVERY row on this table: `cc_id IS NULL` → one uncosted day per worker;
+  // `cc_id IS NOT NULL` → one day per (worker, cost centre). Nothing falls between
+  // them, which is the gap B-336 left open and this closes.
+  //
+  // THE CASE, re-proven live at 2f42244 BEFORE this index existed: the roster door
+  // (finance.create), two `full` rows, one worker, one day, the SAME cc_id →
+  // [201,201], two rows at day_fraction 1 each, and POST /labor/payroll → 1000 for
+  // one day on a 500/day worker. attendance_self_day_uq is PARTIAL and cannot see a
+  // COSTED pair BY CONSTRUCTION — that predicate is exactly what keeps the legitimate
+  // cost-centre split legal, so the pair escapes it by design, not by oversight.
+  //
+  // NULL-DISTINCTNESS — the SAME test B-307/B-308/B-336 answered, answered the same
+  // way and for the same reason. Within this index's coverage all THREE columns are
+  // NOT NULL: worker_id and day by declaration, cc_id by the predicate itself. There
+  // is nothing to escape through. A row leaves this index's coverage only by having
+  // NO cost centre — at which point the index above catches it instead. This is the
+  // B-336 inversion (a predicate that TARGETS the NULL case, so the rows it covers
+  // carry no NULLs), not the B-307 trap (a nullable column INSIDE the key, whose
+  // NULLs are distinct from one another and slip out from under it).
+  //
+  // WHY TWO PARTIAL INDEXES rather than one `unique(worker_id, day, cc_id) NULLS NOT
+  // DISTINCT` (B-338 option ก): logically equivalent on PG 15+, but the single form
+  // has to DROP a shipped 0062 object, replaces a constraint name the labor.ts catch
+  // already handles, and depends on a drizzle `.nullsNotDistinct()` surface. The
+  // additive partial form is one CREATE INDEX, byte-identical in idiom to the
+  // statement directly above it, and leaves each constraint name meaning exactly one
+  // thing — which is what the B-263 name-gated catch dispatches on.
+  //
+  // WHAT IT REFUSES THAT USED TO PASS — two rows, judged rather than glossed:
+  //   - the "correction" (same worker+day+cc, filed again). B-336 already PROVED live
+  //     that this corrects nothing: createLaborPayroll SUMS rows, so a `full` day paid
+  //     500 plus a `half` "correction" pays 750, where a day genuinely corrected to
+  //     half owes 250. It removes no correction path (B-335: there is no UPDATE/PUT/
+  //     PATCH/DELETE on attendance anywhere in registerLaborRoute) and forecloses none
+  //     (B-335 will be an UPDATE or a supersede marker, not a second INSERT). It does
+  //     make B-335 MORE urgent — now on the costed door too;
+  //   - two half-day stints in the SAME cost centre on one day. This one carries ZERO
+  //     information a single row cannot: two `half` rows at cc A sum to day_fraction
+  //     1.0 and allocate 100% to cc A — identical to one `full` row at cc A. A CROSS-cc
+  //     split carries real information (the allocation); a same-cc split carries none.
+  // WHAT IT LEAVES ALONE, each proven live in tests/e2e/b342-money-races.spec.ts:
+  // the cost-centre split (cc A + cc B → [201,201]), the MIXED split (one costed, one
+  // uncosted → [201,201], one row under each index), the night shift, and every other
+  // (worker, day, cc) tuple.
+  //
+  // IT NEEDS THE CATCH — the same B-263 requirement as both indexes above, and the
+  // reason this is not merely a migration. An UNNAMED 23505 rethrows to the 500
+  // handler, and sync_processor.dart DEFERS a 5xx and stops the whole offline drain,
+  // so one duplicate would wedge a worker's entire queue. labor.ts names this
+  // constraint, and — because two of the three names now mean "this day is already
+  // recorded" — its message dispatch was INVERTED to fail safe on an unknown name.
+  //
+  // OPERATOR NOTE (the B-318 lesson, and UNLIKE 0062): this is a SEPARATE migration
+  // 0063, because 0062 is MERGED — appending to it would be silently skipped by any
+  // stack that already applied it. CREATE UNIQUE INDEX also ABORTS if duplicates
+  // already exist; the detector query is in 0063's header comment, and a non-empty
+  // result is a money defect to be resolved by hand, never auto-deleted.
+  uniqueIndex("attendance_costed_day_uq")
+    .on(t.workerId, t.day, t.ccId)
+    .where(sql`${t.ccId} IS NOT NULL`),
 ]);
 
 /**

@@ -48,7 +48,7 @@
 //   received --return--> returned      received --cancel--> cancelled
 // A GR that is already returned/cancelled cannot be re-actioned → 409.
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   grs,
   grItems,
@@ -58,6 +58,9 @@ import {
   prs,
   projects,
   vendors,
+  inventoryItems,
+  stockLedgers,
+  warehouses,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
@@ -82,6 +85,87 @@ type GrItemRow = typeof grItems.$inferSelect;
  * SQLSTATE 23505 alone — see the catch below.
  */
 const GR_IDEMPOTENCY_CONSTRAINT = "gr_idempotency_uq";
+
+// ---------------------------------------------------------------------------
+// B-340 — the goods receipt is the stock_ledger's INBOUND writer
+// ---------------------------------------------------------------------------
+// Until this round `insert(stockLedgers` existed at exactly TWO sites, both in
+// inventory.ts: transfer-approve (two legs, NET ZERO) and material-issue (−qty
+// only). Nothing ever added stock. Proven live on a freshly seeded stack at
+// 2f42244: GET /inventory/stock returned an EMPTY list, and an issue of 10 against
+// a seeded item answered `409 insufficient stock … on-hand 0`. Σ(qty) was 0 for
+// every (item, warehouse), so stock could only ever go DOWN, a transfer could not
+// manufacture stock (its own source is 0 too), and the merged `field-stock` mobile
+// screen was correct against the wire and honest-empty forever.
+//
+// WHERE THE STOCK LANDS, and why it is NOT a column on `gr`.
+// stock_ledger needs (item_id, warehouse_id, qty) with BOTH FKs NOT NULL. A receipt
+// knew NEITHER: `gr` has no warehouse column (grep for "warehouse" across every
+// schema file but extensions.ts → 0 hits — not on project, po/wo/pr, or vendor), and
+// `gr_item` carries boq_item_id + free-text name, with no column linking a line to an
+// inventory_item. So BOTH axes arrive as REQUEST fields, and the movement is
+// addressed by ref_doc (`gr:<id>`) exactly as transfers and issues already are.
+//
+// The column was considered and deliberately refused: `extensions.ts` already imports
+// `boq.ts`, so declaring gr.warehouseId.references(() => warehouses.id) would create
+// the schema layer's FIRST import cycle. stock_ledger already stores both axes as
+// NOT NULL FKs, so the ledger row is a strictly better home than a nullable column
+// that would duplicate it. TRADE-OFF, stated rather than hidden: attribution is
+// PER-RECEIPT, not per gr_item row, and a receipt that names a warehouse but
+// identifies no stocked line stores its destination nowhere (nothing moved, so there
+// is no movement to attribute).
+//
+// WHY THE ITEM IS NEVER INFERRED. Matching a received line to an inventory_item by
+// code or name was refused on evidence, not taste: the seed's BOQ and inventory
+// catalogues genuinely diverge — BOQ has MAT-WIRE-22, inventory has MAT-WIRE-25 with
+// the SAME name and a different code, and BOQ's MAT-CEM-002 / MAT-PLB-018 / every
+// SUB-*/LAB-*/SITE-* have no inventory counterpart at all. A fuzzy match on a
+// stock-and-money path would silently credit the wrong material. A line without an
+// explicit item_id therefore moves NO stock, and says so.
+
+/** A quantity as the stock_ledger numeric(18,4) column string (inventory.ts idiom). */
+function qtyStr(n: number): string {
+  return n.toFixed(4);
+}
+
+/** One inbound movement per receipt line that identifies real stock. */
+type LedgerDraft = Omit<typeof stockLedgers.$inferInsert, "companyId">;
+
+/**
+ * REVERSE every movement a receipt made (B-340) — used by return AND cancel.
+ *
+ * Shipping the inbound leg ALONE would create a defect that does not exist today:
+ * goods returned to the vendor would stay on the shelf forever, removable only by
+ * issuing them to a project, i.e. by lying twice. The round that adds the increment
+ * owns the decrement.
+ *
+ * TWO details are load-bearing:
+ *   - the reversal rows carry a DIFFERENT ref_doc (`gr-return:` / `gr-cancel:`), so a
+ *     later read of `gr:<id>` cannot pick up its own negations and re-negate them;
+ *   - the caller must have ALREADY won the guarded status UPDATE before calling this,
+ *     so the loser of a concurrent return/cancel writes nothing.
+ *
+ * NO NEGATIVE-STOCK GUARD, deliberately. If the received 100 were already issued
+ * (Σ = 0) and the receipt is then returned, this drives Σ to −100. Guarding it would
+ * REFUSE a legitimate return because of a downstream issue the storekeeper cannot
+ * undo — rejecting real work at the door. Allowing it records the truth: the goods
+ * left twice, and the books say so loudly instead of quietly.
+ */
+async function reverseGrMovements(
+  tx: TenantDb,
+  grId: string,
+  refPrefix: "gr-return" | "gr-cancel",
+): Promise<void> {
+  const originals = await tx.select(stockLedgers, eq(stockLedgers.refDoc, `gr:${grId}`));
+  for (const row of originals) {
+    await tx.insert(stockLedgers, {
+      itemId: row.itemId,
+      warehouseId: row.warehouseId,
+      qty: qtyStr(-Number(row.qty)),
+      refDoc: `${refPrefix}:${grId}`,
+    });
+  }
+}
 
 /** uuid matcher — a widened gr line's boq_item_id must be a real uuid, else null. */
 const UUID_RE =
@@ -483,6 +567,11 @@ export function registerGrRoute(app: FastifyInstance): void {
       return reply.code(400).send({ code: "VALIDATION", message: idem.message });
     }
     const idempotencyKey = idem.key;
+    // B-340: the destination warehouse for the received goods. Optional at the wire —
+    // a receipt that identifies no stocked line is recorded exactly as it was before
+    // this round — but REQUIRED the moment any line carries an item_id (checked below,
+    // after the lines are parsed).
+    const warehouseId = str(pick(body, "warehouse_id", "warehouseId")).trim();
     const rawLines = pick(body, "lines");
 
     // Exactly one anchor.
@@ -512,6 +601,9 @@ export function registerGrRoute(app: FastifyInstance): void {
     let rejected = 0;
     const photos: string[] = [];
     const itemDrafts: Omit<typeof grItems.$inferInsert, "grId">[] = [];
+    // B-340: the stock movements this receipt will make, accumulated as the lines are
+    // parsed and written INSIDE the create transaction below.
+    const stockDrafts: { itemId: string; qty: number }[] = [];
     for (const raw of rawLines) {
       const line = (raw ?? {}) as Record<string, unknown>;
       const qtyOk = toNum(pick(line, "qty_ok", "qtyOk")) ?? 0;
@@ -524,6 +616,13 @@ export function registerGrRoute(app: FastifyInstance): void {
       }
       received += qtyOk;
       rejected += qtyRejected;
+
+      // B-340: a line that names an inventory_item MOVES STOCK. qty_ok only —
+      // REJECTED QUANTITY IS NOT RECEIVED INTO STOCK (it generates the defect report
+      // below and goes back to the vendor), so a receipt of 100 with 10 rejected adds
+      // 90, not 100. A zero-qty_ok line is skipped rather than writing a no-op 0 row.
+      const itemId = uuidOrNull(pick(line, "item_id", "itemId"));
+      if (itemId && qtyOk > 0) stockDrafts.push({ itemId, qty: qtyOk });
       const linePhotos = pick(line, "photos");
       if (Array.isArray(linePhotos)) {
         for (const p of linePhotos) if (typeof p === "string") photos.push(p);
@@ -586,6 +685,46 @@ export function registerGrRoute(app: FastifyInstance): void {
       anchorStatus = wo.status;
     }
 
+    // B-340: resolve the STOCK axes, and do it HERE — after the anchor, before the
+    // idempotency pre-check — for the same reason createIssue does: a foreign
+    // warehouse or item is a 400 REGARDLESS of any key, because a replay against
+    // something that is not ours must never be answered from our data.
+    //
+    // The warehouse is REQUIRED as soon as any line identifies stock: stock_ledger's
+    // warehouse_id is NOT NULL and there is nothing honest to default it to.
+    // DELIBERATELY NOT FABRICATED — inventory_item.warehouse_id (a nullable "home"
+    // warehouse on master data) would silently route a Block-B delivery into the
+    // central store, and the anchor chain carries no warehouse at any hop.
+    if (stockDrafts.length > 0 && !warehouseId) {
+      return reply.code(400).send({
+        code: "VALIDATION",
+        message:
+          "warehouse_id is required when a line carries item_id (received stock must land somewhere)",
+      });
+    }
+    if (warehouseId) {
+      const [wh] = await db.select(warehouses, eq(warehouses.id, warehouseId));
+      if (!wh) {
+        return reply.code(400).send({
+          code: "VALIDATION",
+          message: "warehouse_id not found in this tenant",
+        });
+      }
+    }
+    if (stockDrafts.length > 0) {
+      const itemIds = [...new Set(stockDrafts.map((d) => d.itemId))];
+      const owned = await db.select(inventoryItems, inArray(inventoryItems.id, itemIds));
+      const ownedIds = new Set(owned.map((it) => it.id));
+      for (const id of itemIds) {
+        if (!ownedIds.has(id)) {
+          return reply.code(400).send({
+            code: "VALIDATION",
+            message: `item ${id} not found in this tenant`,
+          });
+        }
+      }
+    }
+
     // B-264: the idempotency PRE-CHECK, deliberately placed BEFORE the anchor
     // status gate below. A FULL (order-closing) receipt — st-receive's default,
     // since mobile-field.jsx defaults recv = ordered — sets the PO/WO to `closed`
@@ -642,20 +781,98 @@ export function registerGrRoute(app: FastifyInstance): void {
     // Anything else — including a 23505 that names another constraint — rethrows to
     // the 500 handler, which is the safe failure for a money write (no row written,
     // client retries) rather than a confidently wrong answer.
+    //
+    // B-340 MADE THIS TRANSACTIONAL, and the ORDER inside it is the whole guarantee.
+    // Before this round the receipt path was FOUR independent statements (header,
+    // gr_item, defect, PO/WO auto-close). That was tolerable while nothing moved
+    // stock; the moment a +qty row exists it is not.
+    //
+    // The header insert is the FIRST statement in the block — the same construction
+    // and the same reason as createIssue (inventory.ts): the 23505 on
+    // gr_idempotency_uq then rolls the WHOLE block back BEFORE any stock_ledger row
+    // exists, so replay-safety of the stock movement is STRUCTURAL rather than a
+    // compensating action. The ledger write sits INSIDE the guard that makes the
+    // receipt idempotent, not beside it (the B-340 ruling's explicit requirement).
+    //
+    // THE REPLAY, all four interleavings:
+    //  1. SEQUENTIAL replay — the B-264 pre-check above resolves the original and
+    //     returns it. This transaction is NEVER ENTERED, so no second ledger row.
+    //  2. CONCURRENT replay — both pass the pre-check and enter; one commits, the
+    //     other's HEADER insert trips gr_idempotency_uq → 23505 → its whole tx rolls
+    //     back INCLUDING its ledger rows → the catch replays the original. Σ unchanged.
+    //  3. Same key, DIFFERENT anchor — the pre-check filters on the anchor and
+    //     resolves null; the insert trips the GLOBAL partial index; replayExistingGr
+    //     re-resolves with the new anchor, finds nothing → 409, tx rolled back, no
+    //     ledger row.
+    //  4. KEYLESS duplicate — two receipts, two movements. This is the pre-existing
+    //     B-261 contract (the index is PARTIAL), and it is NOT a replay: two genuine
+    //     deliveries against one PO on one day are legitimate, which is why no index
+    //     can close it. But it now inflates STOCK as well as receipt count, and the
+    //     web GR form sends no key — reported, and fixable only client-side.
     let created: GrRow | undefined;
+    let createdItems: GrItemRow[] = [];
+    let defect: Record<string, unknown> | undefined;
     try {
-      [created] = await db.insertThrough(grs, projects, projectId, [
-        {
-          poId: poId || null,
-          woId: woId || null,
-          no,
-          received: String(received),
-          rejected: String(rejected),
-          photos,
-          status: "received",
-          idempotencyKey,
-        },
-      ]);
+      await db.transaction(async (tx) => {
+        [created] = await tx.insertThrough(grs, projects, projectId, [
+          {
+            poId: poId || null,
+            woId: woId || null,
+            no,
+            received: String(received),
+            rejected: String(rejected),
+            photos,
+            status: "received",
+            idempotencyKey,
+          },
+        ]);
+
+        // Persist the per-line detail (B-078 / F1) — anchored on the same tenant-owned
+        // project as the gr, so the write is fail-closed by construction.
+        //
+        // B-323: RECORD the entry order. This is one INSERT, so `defaultNow()` would give
+        // all N lines the transaction's single `now()`; every reader then falls through to
+        // the `defaultRandom()` uuid and a 3-line receipt renders in uuid order. gr_item
+        // has no `seq` column, so `created_at` is the only place entry order can live —
+        // stampEntryOrder spaces the lines 1 ms apart in body order.
+        if (itemDrafts.length) {
+          createdItems = await tx.insertThrough(
+            grItems,
+            projects,
+            projectId,
+            stampEntryOrder(itemDrafts.map((d) => ({ ...d, grId: created!.id }))),
+          );
+        }
+
+        // B-340: THE INBOUND MOVEMENT. One +qty row per line that identified stock,
+        // ref_doc `gr:<id>` — mirroring `transfer:<id>` / `issue:<id>` exactly. qty is
+        // SIGNED and this is the only writer that emits a POSITIVE one. NO negative-
+        // stock guard and NO lock: a receipt only ever RAISES a balance, so it can
+        // neither drive Σ below zero nor race an issue into doing so (an issue that
+        // commits either before or after this one simply sees less or more stock, and
+        // is honest either way). stock_ledger carries company_id → the scoped insert
+        // door force-sets it; there is no bulk door, so this is a loop, exactly as at
+        // inventory.ts transfer-approve / issue-post.
+        for (const d of stockDrafts) {
+          await tx.insert(stockLedgers, {
+            itemId: d.itemId,
+            warehouseId,
+            qty: qtyStr(d.qty),
+            refDoc: `gr:${created!.id}`,
+          });
+        }
+
+        // Rejected qty → a defect_report (data-dictionary "ตีกลับ -> DefectReport").
+        if (rejected > 0) {
+          const [dr] = await tx.insertThrough(defectReports, projects, projectId, [
+            {
+              grId: created!.id,
+              note: `GR ${created!.no ?? created!.id}: ${rejected} rejected (ตีกลับ)`,
+            },
+          ]);
+          defect = { id: dr!.id, gr_id: dr!.grId, note: dr!.note };
+        }
+      });
     } catch (err) {
       if (
         idempotencyKey &&
@@ -667,38 +884,8 @@ export function registerGrRoute(app: FastifyInstance): void {
       throw err;
     }
 
-    // Persist the per-line detail (B-078 / F1) — anchored on the same tenant-owned
-    // project as the gr, so the write is fail-closed by construction.
-    //
-    // B-323: RECORD the entry order. This is one INSERT, so `defaultNow()` would give
-    // all N lines the transaction's single `now()`; every reader then falls through to
-    // the `defaultRandom()` uuid and a 3-line receipt renders in uuid order. gr_item
-    // has no `seq` column, so `created_at` is the only place entry order can live —
-    // stampEntryOrder spaces the lines 1 ms apart in body order.
-    let createdItems: GrItemRow[] = [];
-    if (itemDrafts.length) {
-      createdItems = await db.insertThrough(
-        grItems,
-        projects,
-        projectId,
-        stampEntryOrder(itemDrafts.map((d) => ({ ...d, grId: created!.id }))),
-      );
-    }
-
     // Resolve the receipt's vendor name through the anchor doc (scoped).
     const vendorName = await grVendorName(db, created!);
-
-    // Rejected qty → a defect_report (data-dictionary "ตีกลับ -> DefectReport").
-    let defect: Record<string, unknown> | undefined;
-    if (rejected > 0) {
-      const [dr] = await db.insertThrough(defectReports, projects, projectId, [
-        {
-          grId: created!.id,
-          note: `GR ${created!.no ?? created!.id}: ${rejected} rejected (ตีกลับ)`,
-        },
-      ]);
-      defect = { id: dr!.id, gr_id: dr!.grId, note: dr!.note };
-    }
 
     // Partial vs full: compare cumulative received (active GRs only) against the
     // source PR's ordered qty. Full receipt closes the PO/WO; partial leaves it
@@ -773,13 +960,25 @@ export function registerGrRoute(app: FastifyInstance): void {
     // B-156: fold the 'received' pre-state into the FINAL update (5th guard arg) so a
     // concurrent return/cancel of the same GR re-matches 0 rows → 409 (atomic; the
     // updateThroughChain resolve-then-update is otherwise a TOCTOU).
-    const [updated] = await db.updateThroughChain(
-      grs,
-      hops,
-      { status: "returned" },
-      eq(grs.id, id),
-      eq(grs.status, "received"),
-    );
+    //
+    // B-340: the status flip and the STOCK REVERSAL are now ONE transaction, and the
+    // guarded UPDATE goes FIRST. Exactly-once was already solved here — only one
+    // concurrent caller can ever match the 'received' pre-state — so the loser writes
+    // no reversal rows at all, and a returned receipt's goods leave the shelf exactly
+    // once. Without this a returned delivery would stay on the shelf forever,
+    // removable only by issuing it to a project.
+    let updated: GrRow | undefined;
+    await db.transaction(async (tx) => {
+      [updated] = await tx.updateThroughChain(
+        grs,
+        hops,
+        { status: "returned" },
+        eq(grs.id, id),
+        eq(grs.status, "received"),
+      );
+      if (!updated) return;
+      await reverseGrMovements(tx, id, "gr-return");
+    });
     if (!updated) {
       return reply.code(409).send({
         code: "INVALID_STATE",
@@ -817,13 +1016,21 @@ export function registerGrRoute(app: FastifyInstance): void {
     }
     const hops = found.poId ? GR_PO_HOPS : GR_WO_HOPS;
     // B-156: 'received' pre-state folded into the FINAL update (atomic guard).
-    const [updated] = await db.updateThroughChain(
-      grs,
-      hops,
-      { status: "cancelled" },
-      eq(grs.id, id),
-      eq(grs.status, "received"),
-    );
+    // B-340: same shape as return — guarded UPDATE first, then the stock reversal,
+    // both in one transaction. A cancelled receipt's goods leave the shelf too;
+    // the only difference is the ref_doc that records why.
+    let updated: GrRow | undefined;
+    await db.transaction(async (tx) => {
+      [updated] = await tx.updateThroughChain(
+        grs,
+        hops,
+        { status: "cancelled" },
+        eq(grs.id, id),
+        eq(grs.status, "received"),
+      );
+      if (!updated) return;
+      await reverseGrMovements(tx, id, "gr-cancel");
+    });
     if (!updated) {
       return reply.code(409).send({
         code: "INVALID_STATE",

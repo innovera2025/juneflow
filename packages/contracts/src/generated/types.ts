@@ -5551,9 +5551,19 @@ export interface operations {
                      * @description Client-generated idempotency key (B-261). A create whose key was already seen returns the ORIGINAL receipt (2xx, no duplicate row) — makes the mobile offline-queue at-least-once replay safe. Omit → no dedup.
                      */
                     idempotency_key?: string;
+                    /**
+                     * Format: uuid
+                     * @description B-340: destination warehouse for the received goods. REQUIRED when any line carries item_id — that pair is what writes the +qty stock_ledger movement (ref_doc `gr:<id>`). A receipt with neither is recorded exactly as before and moves no stock. Must resolve inside this tenant, else 400.
+                     */
+                    warehouse_id?: string;
                     lines: {
                         qty_ok?: number;
                         qty_rejected?: number;
+                        /**
+                         * Format: uuid
+                         * @description B-340: the inventory_item this line receives. Present (with a body-level warehouse_id) → a +qty_ok stock_ledger movement is written; absent → the line is recorded but moves no stock. DISTINCT from boq_item_id, which links the BOQ line and does NOT identify stock — the two catalogues genuinely diverge (BOQ MAT-WIRE-22 vs inventory MAT-WIRE-25, same name, different code), so one is never inferred from the other. Rejected qty is not received into stock; only qty_ok moves.
+                         */
+                        item_id?: string;
                         /**
                          * Format: uuid
                          * @description BOQ item this line receives (F1 gr_item per-line)
@@ -5572,6 +5582,8 @@ export interface operations {
             201: components["responses"]["EntityCreated"];
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listSubconContracts: {
@@ -7183,6 +7195,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description B-332: caller holds neither finance.create nor a worker record linked to this user, or that linked worker record is not active. Self-service check-in may record only the caller's OWN worker id. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The day is already recorded for this worker — either UNCOSTED (attendance_self_day_uq, B-336) or in this same cost centre (attendance_costed_day_uq, B-338/B-342); or the supplied idempotency_key was already used against a DIFFERENT worker/day. A legitimate REPLAY of the caller's own key is never a 409 — it returns the original row's 201, because the phone dead-letters a 4xx permanently. The cost-centre SPLIT (two rows, one day, different cc_id) is not a conflict and stays 201. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

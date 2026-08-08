@@ -543,9 +543,21 @@ describe("B-323 · list comparators are enforced TOTAL, not counted", () => {
     // list-order.ts explains why the order is applied to resolved rows and not pushed
     // into the read doors. A SQL clause would be a second ordering surface that this
     // scan cannot model, so it must break the build rather than pass unseen.
+    //
+    // ONE NARROW CARVE-OUT (B-342): an `.orderBy(...)` that is part of a
+    // `… .orderBy(x).for("update")` chain is a LOCK ORDER, not a presentation order.
+    // TenantDb.selectForUpdate sorts so two callers locking overlapping row sets
+    // acquire them in the same sequence and cannot deadlock; its result is used only
+    // for a `.length` check and is NEVER rendered, so this scan stays blind to nothing.
+    // The carve-out requires `.for("update")` IN THE SAME STATEMENT: a bare
+    // `.orderBy(` anywhere — including elsewhere in tenant-db.ts — still breaks the build.
     const offenders: string[] = [];
     for (const file of sourceFiles()) {
-      if (readFileSync(join(REPO_ROOT, file), "utf8").includes(".orderBy(")) offenders.push(file);
+      const src = readFileSync(join(REPO_ROOT, file), "utf8");
+      const ordersWithoutLocking = src
+        .split(";")
+        .some((stmt) => stmt.includes(".orderBy(") && !stmt.includes('.for("update")'));
+      if (ordersWithoutLocking) offenders.push(file);
     }
     expect(offenders, "SQL ordering appeared; this scan only models TypeScript sorts").toEqual([]);
   });

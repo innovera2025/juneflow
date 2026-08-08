@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "attendance_costed_day_uq" ON "attendance" USING btree ("worker_id","day","cc_id") WHERE "attendance"."cc_id" IS NOT NULL;

@@ -122,7 +122,7 @@ function stubDb(opts: StubOpts): Db {
   };
   let seq = 0;
   const insertCalls = new Map<unknown, number>();
-  return {
+  const handle: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
       values: (values: unknown) => ({
@@ -149,7 +149,20 @@ function stubDb(opts: StubOpts): Db {
         }),
       }),
     }),
-  } as unknown as Db;
+  };
+  // B-340: POST /gr and the return/cancel actions now run their writes inside ONE
+  // db.transaction (header insert FIRST, so a replay's 23505 rolls the stock movement
+  // back with it). The stub runs the callback against ITSELF — the inventory.test.ts
+  // precedent (`raw.transaction = (cb) => cb(raw)`) — so every write still lands in
+  // the same capture arrays and no assertion below had to change.
+  //
+  // BE CLEAR ABOUT WHAT THIS MODELS. It gives the handler a transaction SHAPE. It
+  // does NOT roll anything back, so NO test in this file can prove the rollback that
+  // makes the replayed receipt safe, and none claims to. That is the live spec's job
+  // (tests/e2e/b340-gr-stock.spec.ts, "a REPLAY does not raise on-hand twice"), and
+  // the revert probe is reported there rather than implied here.
+  handle.transaction = (cb: (tx: unknown) => unknown) => cb(handle);
+  return handle as unknown as Db;
 }
 
 function paramsOf(where: SQL | undefined): unknown[] {

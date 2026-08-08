@@ -99,16 +99,30 @@ function stubDb(opts: StubOpts): Db {
     return [];
   };
   const builderFor = (table: unknown) => {
+    let pendingWhere: SQL | undefined;
+    let awaited = false;
     const builder = {
       $dynamic: () => builder,
       innerJoin: () => builder,
       where: (where: SQL) => {
         captured.push({ table, where });
-        return Promise.resolve(rowsFor(table, where));
+        pendingWhere = where;
+        awaited = true;
+        // The chain may END here (plain select) or CONTINUE — B-342's selectForUpdate
+        // appends `.orderBy(id).for("update")`. Returning a builder that is ALSO a
+        // thenable serves both without the call sites having to know which.
+        return builder;
       },
+      // B-342: the selectForUpdate() shape. The stub models the SHAPE so the handler
+      // runs; it cannot model a row lock, and NO test in this file claims it does. The
+      // lock is proven live in tests/e2e/b342-money-races.spec.ts by holding a
+      // colliding transaction open in a second psql session and asserting the API
+      // BLOCKS on it (an elapsed-time assertion, which cannot pass by accident).
+      orderBy: () => builder,
+      for: () => builder,
       then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
-        captured.push({ table, where: undefined });
-        return Promise.resolve(rowsFor(table, undefined)).then(onOk, onErr);
+        if (!awaited) captured.push({ table, where: undefined });
+        return Promise.resolve(rowsFor(table, pendingWhere)).then(onOk, onErr);
       },
     };
     return builder;
@@ -777,6 +791,12 @@ describe("POST /api/v1/inventory/transfers/:id/approve", () => {
         [stockTransfers, opts.transfer ?? [transferRow(TRANSFER0, { status: "pending" })]],
         [transferLines, [transferLineRow(TRANSFER0, ITEM0, "10.0000")]],
         [stockLedgers, opts.ledger ?? [ledgerRow(ITEM0, WH_FROM, "100.0000")]],
+        // B-342: approveTransfer now takes a row lock on the line items BEFORE reading
+        // the ledger (selectForUpdate). The stub must resolve that read or the handler
+        // sees zero locked rows and refuses. This models the item EXISTING; it cannot
+        // model the LOCK — that is proven live, by holding a colliding transaction open
+        // in a second psql session (tests/e2e/b342-money-races.spec.ts).
+        [inventoryItems, [itemRow(ITEM0)]],
       ],
       inserted: opts.inserted,
       updated: opts.updated,
