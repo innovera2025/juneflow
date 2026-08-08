@@ -319,6 +319,24 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// offline/pending_op_adoption.dart.
   bool _settling = true;
 
+  /// True while this mount's ADOPTION is still un-acted-upon — the single fact
+  /// [_reconcile] is allowed to run on.
+  ///
+  /// It exists because no combination of state VALUES can carry it. The obvious
+  /// substitute, `_opId == adopted && _state == queued`, is exactly where the
+  /// documented manual retry lands when the issue is still due ([_onConfirm]'s
+  /// `tracked != null` branch → [_resolve] → `resolveIssueState`, still-due ⇒
+  /// `queued`), so that tuple is reachable BOTH from an untouched mount adoption AND
+  /// from a storekeeper who re-tapped. `_state` is cyclic; this is monotonic — raised
+  /// once at adoption, lowered at the first tap and never raised again — which is the
+  /// only shape that can distinguish "nobody has touched this" from "touched, and it
+  /// came back to the same value".
+  ///
+  /// Once it is down the storekeeper's own flow owns `_state`, `_opId`, the emptied
+  /// basket and the `on_hand` re-read; a second unprompted writer racing it would fire
+  /// them twice. See offline/pending_op_adoption.dart.
+  bool _reconcileArmed = false;
+
   @override
   void initState() {
     super.initState();
@@ -349,14 +367,19 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   Future<void> _resumeQueued() async {
     // Handled at construction, so a drain that throws can never surface as an
     // unhandled async error from this unawaited future — and cannot abandon the
-    // adoption below either.
-    final Future<void> drained = widget.repo.drain().then<void>(
-      (DrainReport _) {},
-      onError: (Object _) {},
+    // adoption below either. The REPORT is carried through rather than discarded: it
+    // is what tells a synced op from a dead-lettered one. A drain that threw yields
+    // null, and [_reconcile] then falls back to the queue, which is the same source
+    // `_resolve` uses when a report does not cover an op.
+    final Future<DrainReport?> drained = widget.repo.drain().then<DrainReport?>(
+      (DrainReport r) => r,
+      onError: (Object _) => null,
     );
     final String? adopted = await _settleQueue();
-    await drained;
-    if (adopted != null) await _reconcile(adopted);
+    final DrainReport? report = await drained;
+    if (adopted != null) {
+      await _reconcile(adopted, report ?? const DrainReport(<SyncAttempt>[]));
+    }
   }
 
   /// The queue read the CTA waits on. Returns the adopted op id, or null.
@@ -389,6 +412,11 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
         // Only a still-replayable op is adoptable (findAdoptableOp), and that is
         // precisely what `queued` means: captured, not confirmed.
         _state = FieldStockState.queued;
+        // Raised in the SAME setState as the adoption, and there is no await between
+        // it and the `finally` below that opens the CTA — so the latch is up before
+        // any tap can be accepted, and every accepted tap is therefore able to lower
+        // it.
+        _reconcileArmed = true;
         // The picker is about to be FROZEN behind this op, so it must show what the op
         // actually charges rather than the primary project the fresh load just
         // defaulted to. The anchor deliberately excludes `project_id` (see
@@ -429,38 +457,56 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     }
   }
 
-  /// Unfreeze the basket once the drain has resolved the issue that owned it — the
-  /// display cost of adopting before the drain, paid back one round trip later on
-  /// exactly the state the old drain-first ordering reached. Skipped once the
-  /// storekeeper has acted: their flow owns `_state` from that point.
+  /// Say what the drain actually did to the issue that owns the basket.
   ///
-  /// The charged project goes back to the load's default with it. While the op was
-  /// live the picker HAD to show what that op charges (see [_settleQueue]); once it is
-  /// resolved there is no outstanding write to describe, and leaving the previous
-  /// issue's attribution in a now-editable slot would silently pre-address the NEXT
-  /// basket to it.
-  Future<void> _reconcile(String adopted) async {
-    if (!_stillShowing(adopted)) return;
-    final String? warehouseId = _warehouseId;
-    if (warehouseId == null) return;
-    final SyncOperation? still = findAdoptableOp(
-      await widget.repo.due(),
-      fieldStockOpIdentity(warehouseId),
-    );
-    // At most one op per identity is adoptable at a time (the B-330 invariant), so a
-    // non-null answer is the same issue, still outstanding.
-    if (still != null || !_stillShowing(adopted)) return;
-    setState(() {
-      _opId = null;
-      _state = FieldStockState.idle;
-      _projectId = _defaultProjectId;
-      _projectName = _defaultProjectName;
-    });
+  /// Adopting before the drain is what bounds the quiet window; the cost is that the
+  /// frozen basket can outlive its subject by one round trip. This pays it back by
+  /// running the SCREEN'S OWN [_resolve] over the drain's own [report] — the identical
+  /// path a manual retry takes — so the reconciliation cannot drift from it and cannot
+  /// invent an outcome of its own:
+  ///
+  ///   * synced        → `confirmed`: the op is released, the basket empties (which is
+  ///                     the confirmation on this screen — B-266) and `on_hand` is
+  ///                     re-read, because the ledger really was cut and every balance
+  ///                     on screen is now the PRE-issue figure.
+  ///   * dead-lettered → `failed`, the danger card, and the op is released so the next
+  ///                     tap is a FRESH key — a permanent 4xx wrote nothing and is
+  ///                     never replayed. It is the OPPOSITE of a success and must never
+  ///                     be reported as one.
+  ///   * still due     → `queued`, unchanged: the card stands and the basket stays
+  ///                     frozen behind the live op.
+  ///
+  /// It never returns the screen to `idle`. `idle` over an unfrozen basket is
+  /// indistinguishable from a screen on which nothing was ever submitted, so on an
+  /// issue the server ACCEPTED it invites the storekeeper to stage and confirm the
+  /// SAME withdrawal again — a second `stock_ledger` cut at −qty and a second JV, under
+  /// a second key that `material_issue_idempotency_uq` correctly admits.
+  ///
+  /// Runs at most once, and only while [_reconcileArmed]: after a tap the storekeeper's
+  /// flow owns the outcome, the emptied basket and the re-read.
+  Future<void> _reconcile(String adopted, DrainReport report) async {
+    if (!mounted || !_reconcileArmed || _opId != adopted) return;
+    _reconcileArmed = false;
+    // Flipped SYNCHRONOUSLY, before [_resolve]'s first await, exactly as every tap
+    // path here does: it is what stops a tap arriving DURING the resolve from opening
+    // a second one over the same op (`_onConfirm` refuses while `submitting`, and
+    // `_locked` keeps the basket frozen across it). The window is one local queue
+    // read — no new state, no new copy.
+    setState(() => _state = FieldStockState.submitting);
+    await _resolve(adopted, report);
+    // EITHER terminal outcome releases the op ([_resolve] nulls `_opId` on both), which
+    // unfreezes the picker — so the charged project must go back to the load's default
+    // with it. While the op was live the picker HAD to show what that op charges (see
+    // [_settleQueue]); once it is resolved there is no outstanding write to describe,
+    // and leaving the previous issue's attribution in a now-EDITABLE slot would
+    // silently pre-address the next basket to it.
+    if (mounted && _opId == null) {
+      setState(() {
+        _projectId = _defaultProjectId;
+        _projectName = _defaultProjectName;
+      });
+    }
   }
-
-  /// True while the screen is still showing exactly what [_settleQueue] adopted.
-  bool _stillShowing(String adopted) =>
-      mounted && _opId == adopted && _state == FieldStockState.queued;
 
   /// The real read chain: warehouses → the chosen warehouse → its stock balances,
   /// plus the tenant's projects for the attribution slot.
@@ -590,6 +636,13 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     // same refusal at the handler, so a tap delivered against a stale frame cannot
     // slip past it either (B-341).
     if (_settling) return;
+    // The storekeeper has acted, so the mount's reconciliation retires here — before
+    // any await, and whatever this tap goes on to do. From now on THIS flow owns
+    // `_state`, `_opId`, the basket and the re-read. Lowered at the accepted tap rather
+    // than at the refused one: the latch is raised inside the settle that the
+    // `_settling` guard above is still refusing for, so anything earlier would lower a
+    // latch that is not up yet.
+    _reconcileArmed = false;
 
     final String? tracked = _opId;
     if (tracked != null) {

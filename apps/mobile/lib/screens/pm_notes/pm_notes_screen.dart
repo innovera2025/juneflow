@@ -218,6 +218,21 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   /// offline/pending_op_adoption.dart.
   bool _settling = false;
 
+  /// True while this mount's ADOPTION is still un-acted-upon — the single fact
+  /// [_reconcile] is allowed to run on.
+  ///
+  /// It exists because no combination of state VALUES can carry it. The obvious
+  /// substitute, `_opId == adopted && _state == queued`, is exactly where the
+  /// documented manual retry lands when the save is still due ([_onSave]'s
+  /// `tracked != null` branch → [_resolve] → `resolveNotesSaveState`, still-due ⇒
+  /// `queued`), so that tuple is reachable BOTH from an untouched mount adoption AND
+  /// from a technician who re-tapped. `_state` is cyclic; this is monotonic — raised
+  /// once at adoption, lowered at the first save or the first typed character, and
+  /// never raised again — which is the only shape that can distinguish "nobody has
+  /// touched this" from "touched, and it came back to the same value".
+  /// See offline/pending_op_adoption.dart.
+  bool _reconcileArmed = false;
+
   /// True once the technician has actually EDITED the form in this State — i.e. the
   /// body on screen is no longer the body any queued op carries.
   ///
@@ -276,8 +291,9 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   /// only thing that changes is that the button is now visibly quiet rather than
   /// silently inert.
   ///
-  /// The drain then runs, and [_reconcile] takes the card back down if it resolved the
-  /// very write the card was about.
+  /// The drain then runs, and [_reconcile] reports what it did to the very save the
+  /// card is about — using the drain's OWN report, so a success and a dead-letter are
+  /// told apart rather than both reading as "no longer adoptable".
   Future<void> _resumeQueued() async {
     final String? woId = widget.workOrderId;
     if (woId == null) return;
@@ -285,15 +301,20 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     // Started NOW — a queue left over from a prior session must not wait on this
     // screen's read chain — but awaited only after the settle. Its handlers are
     // attached at construction so a drain that throws can never surface as an
-    // unhandled async error while it sits unawaited.
-    final Future<void> drained = widget.repo.drain().then<void>(
-      (DrainReport _) {},
-      onError: (Object _) {},
+    // unhandled async error while it sits unawaited. The REPORT is carried through
+    // rather than discarded: it is what tells a synced op from a dead-lettered one.
+    // A drain that threw yields null, and [_reconcile] then falls back to the queue,
+    // which is the same source `_resolve` uses when a report does not cover an op.
+    final Future<DrainReport?> drained = widget.repo.drain().then<DrainReport?>(
+      (DrainReport r) => r,
+      onError: (Object _) => null,
     );
     await loading;
     final String? adopted = await _settleQueue(woId);
-    await drained;
-    if (adopted != null) await _reconcile(woId, adopted);
+    final DrainReport? report = await drained;
+    if (adopted != null) {
+      await _reconcile(adopted, report ?? const DrainReport(<SyncAttempt>[]));
+    }
   }
 
   /// The queue read the CTA waits on. Returns the adopted op id, or null.
@@ -318,6 +339,11 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
         // Only a still-replayable op is adoptable (findAdoptableOp), and that is
         // precisely what `queued` means: captured, not confirmed.
         _state = PmNotesSaveState.queued;
+        // Raised in the SAME setState as the adoption, and there is no await between
+        // it and the `finally` below that opens the CTA — so the latch is up before
+        // any tap can be accepted, and every accepted tap is therefore able to lower
+        // it.
+        _reconcileArmed = true;
       });
       return mine.id;
     } catch (_) {
@@ -330,29 +356,38 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     }
   }
 
-  /// Take the queued state down once the drain has resolved the write it described —
-  /// the display cost of adopting before the drain, paid back one round trip later on
-  /// exactly the state the old drain-first ordering reached. Skipped once the
-  /// technician has acted (a save, or a typed character that drops the id): their flow
-  /// owns `_state` and `_opId` from that point.
-  Future<void> _reconcile(String woId, String adopted) async {
-    if (!_stillShowing(adopted)) return;
-    final SyncOperation? still = findAdoptableOp(
-      await widget.repo.due(),
-      pmNotesOpIdentity(woId),
-    );
-    // At most one op per identity is adoptable at a time (the B-330 invariant), so a
-    // non-null answer is the same log write, still outstanding.
-    if (still != null || !_stillShowing(adopted)) return;
-    setState(() {
-      _opId = null;
-      _state = PmNotesSaveState.idle;
-    });
+  /// Say what the drain actually did to the save the card is about.
+  ///
+  /// Adopting before the drain is what bounds the quiet window; the cost is that the
+  /// card can outlive its subject by one round trip. This pays it back by running the
+  /// SCREEN'S OWN [_resolve] over the drain's own [report] — the identical path a
+  /// manual retry takes — so the reconciliation cannot drift from it and cannot invent
+  /// an outcome of its own:
+  ///
+  ///   * synced        → `saved`, the green card, and [_resolve] closes the op out
+  ///                     exactly as it does for a tapped save.
+  ///   * dead-lettered → `failed`, the danger card. A permanent 4xx is the OPPOSITE of
+  ///                     a success and must never be reported as one.
+  ///   * still due     → `queued`, unchanged: the card stands.
+  ///
+  /// It never returns the screen to `idle`. `idle` is the state with nothing
+  /// outstanding, so on a close-out the server ACCEPTED it says the save never
+  /// happened — and it clears `_opId` with `_edited` still false, so the next tap goes
+  /// through the pre-mint check against an empty queue and MINTS a second key.
+  ///
+  /// Runs at most once, and only while [_reconcileArmed]: after a save or a typed
+  /// character the technician's flow owns the outcome.
+  Future<void> _reconcile(String adopted, DrainReport report) async {
+    if (!mounted || !_reconcileArmed || _opId != adopted) return;
+    _reconcileArmed = false;
+    // Flipped SYNCHRONOUSLY, before [_resolve]'s first await, exactly as every tap
+    // path here does: it is what stops a tap arriving DURING the resolve from opening
+    // a second one over the same op (`_onSave` refuses while `saving`). The window is
+    // one local queue read, and the CTA already renders `saving` as the same spinner —
+    // no new state, no new copy.
+    setState(() => _state = PmNotesSaveState.saving);
+    await _resolve(adopted, report);
   }
-
-  /// True while the screen is still showing exactly what [_settleQueue] adopted.
-  bool _stillShowing(String adopted) =>
-      mounted && _opId == adopted && _state == PmNotesSaveState.queued;
 
   @override
   void dispose() {
@@ -422,7 +457,15 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     // is exactly where a real edit hides. Missing it there would let the pre-mint
     // check in [_onSave] adopt the queued op and re-drain the OLD body over what was
     // just typed — one write, and the technician's text gone.
-    if (!_seeding) _edited = true;
+    //
+    // A real keystroke also retires the mount's reconciliation: the technician has
+    // acted, so nothing unprompted may write `_state` or `_opId` again. Gated on
+    // `_seeding` for the same reason [_edited] is — [_seed] fires this listener too,
+    // and filling the form from the stored columns is not the technician touching it.
+    if (!_seeding) {
+      _edited = true;
+      _reconcileArmed = false;
+    }
     if (_state == PmNotesSaveState.idle && _opId == null) return;
     if (_state == PmNotesSaveState.saving) return;
     setState(() {
@@ -461,6 +504,12 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
     // same refusal at the handler, so a tap delivered against a stale frame cannot
     // slip past it either (B-341).
     if (_settling) return;
+    // The technician has acted, so the mount's reconciliation retires here — before
+    // any await, and whatever this tap goes on to do. From now on THIS flow owns
+    // `_state` and `_opId`. Lowered at the accepted tap rather than at the refused
+    // one: the latch is raised inside the settle that the `_settling` guard above is
+    // still refusing for, so anything earlier would lower a latch that is not up yet.
+    _reconcileArmed = false;
 
     // Flipped SYNCHRONOUSLY before the first await, so the CTA is already disabled
     // when a second tap could otherwise arrive during the queue read.

@@ -196,6 +196,21 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   /// offline/pending_op_adoption.dart.
   bool _settling = true;
 
+  /// True while this mount's ADOPTION is still un-acted-upon — the single fact
+  /// [_reconcile] is allowed to run on.
+  ///
+  /// It exists because no combination of state VALUES can carry it. The obvious
+  /// substitute, `_opId == adopted && _state == queued`, is exactly where the
+  /// documented manual retry lands when the delivery is still due ([_deliver]'s
+  /// `retryThisPeriod` branch → [_resolve] → `resolveDeliverState`, still-due ⇒
+  /// `queued`), so that tuple is reachable BOTH from an untouched mount adoption AND
+  /// from a foreman who re-tapped. `_state` is cyclic; this is monotonic — raised at
+  /// adoption, lowered at the first deliver or the first contract change, and not
+  /// raised again except by a NEW adoption — which is the only shape that can
+  /// distinguish "nobody has touched this" from "touched, and it came back to the same
+  /// value". See offline/pending_op_adoption.dart.
+  bool _reconcileArmed = false;
+
   @override
   void initState() {
     super.initState();
@@ -215,14 +230,19 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   /// missed by reading before it (offline/pending_op_adoption.dart).
   Future<void> _resumeQueued() async {
     // Handled at construction, so a drain that throws cannot surface as an unhandled
-    // async error while it sits unawaited below.
-    final Future<void> drained = widget.repo.drain().then<void>(
-      (DrainReport _) {},
-      onError: (Object _) {},
+    // async error while it sits unawaited below. The REPORT is carried through rather
+    // than discarded: it is what tells a synced op from a dead-lettered one. A drain
+    // that threw yields null, and [_reconcile] then falls back to the queue, which is
+    // the same source `_resolve` uses when a report does not cover an op.
+    final Future<DrainReport?> drained = widget.repo.drain().then<DrainReport?>(
+      (DrainReport r) => r,
+      onError: (Object _) => null,
     );
     final String? adopted = await _loadThenAdopt();
-    await drained;
-    if (adopted != null) await _reconcile(adopted);
+    final DrainReport? report = await drained;
+    if (adopted != null) {
+      await _reconcile(adopted, report ?? const DrainReport(<SyncAttempt>[]));
+    }
   }
 
   /// Read this contract's periods, then adopt whichever of them already has a write
@@ -262,6 +282,11 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
         // Only a still-replayable op is adoptable (findAdoptableOpAmong), and that is
         // precisely what `queued` means: captured, not confirmed.
         _state = FieldDeliverState.queued;
+        // Raised in the SAME setState as the adoption, and there is no await between
+        // it and the `finally` below that opens the buttons — so the latch is up
+        // before any tap can be accepted, and every accepted tap is therefore able to
+        // lower it.
+        _reconcileArmed = true;
       });
       return mine.op.id;
     } catch (_) {
@@ -274,31 +299,46 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
     }
   }
 
-  /// Take the status bar down once the drain has resolved the delivery it described —
-  /// the display cost of adopting before the drain, paid back one round trip later on
-  /// exactly the state the old drain-first ordering reached. Skipped once the foreman
-  /// has acted, or has switched contracts: their flow owns `_state` from that point.
-  Future<void> _reconcile(String adopted) async {
-    if (!_stillShowing(adopted)) return;
-    final String? periodId = _pendingPeriodId;
-    if (periodId == null) return;
-    final SyncOperation? still = findAdoptableOp(
-      await widget.repo.due(),
-      fieldDeliverOpIdentity(periodId),
-    );
-    // At most one op per identity is adoptable at a time (the B-330 invariant), so a
-    // non-null answer is the same delivery, still outstanding.
-    if (still != null || !_stillShowing(adopted)) return;
-    setState(() {
-      _opId = null;
-      _pendingPeriodId = null;
-      _state = FieldDeliverState.idle;
-    });
+  /// Say what the drain actually did to the delivery the status bar is about.
+  ///
+  /// Adopting before the drain is what bounds the quiet window; the cost is that the
+  /// bar can outlive its subject by one round trip. This pays it back by running the
+  /// SCREEN'S OWN [_resolve] over the drain's own [report] — the identical path a
+  /// manual retry takes — so the reconciliation cannot drift from it and cannot invent
+  /// an outcome of its own:
+  ///
+  ///   * synced        → `sent`, and [_resolve] re-reads the periods, so the row moves
+  ///                     to its real server status instead of being mutated locally.
+  ///   * dead-lettered → `failed`, the danger bar. A permanent 4xx is the OPPOSITE of
+  ///                     a success and must never be reported as one.
+  ///   * still due     → `queued`, unchanged: the bar stands.
+  ///
+  /// It never returns the screen to `idle`. `idle` is the state with nothing
+  /// outstanding, so on a delivery the server ACCEPTED it says the write never
+  /// happened — and it clears the slot, so the next tap on that row mints a SECOND key
+  /// for a period that has already been delivered.
+  ///
+  /// Runs at most once, and only while [_reconcileArmed]: after a deliver, or a
+  /// contract change, the foreman's flow owns the outcome.
+  Future<void> _reconcile(String adopted, DrainReport report) async {
+    if (!mounted || !_reconcileArmed || _opId != adopted) return;
+    _reconcileArmed = false;
+    // Flipped SYNCHRONOUSLY, before [_resolve]'s first await, exactly as [_deliver]
+    // does: it is what stops a tap arriving DURING the resolve from opening a second
+    // one over the same op (`_deliver` refuses while `sending`). The window is one
+    // local queue read, and `_pendingPeriodId` already names the row the spinner
+    // belongs on — no new state, no new copy.
+    setState(() => _state = FieldDeliverState.sending);
+    await _resolve(adopted, report);
+    // A durable success releases the op ([_resolve] nulls `_opId` on `sent` only — a
+    // 4xx dead-letter deliberately keeps it, the documented F2 behaviour), and the
+    // period it named is no longer outstanding. [_resolve] owns `_opId`; this owns the
+    // companion field it was set beside in [_adoptQueued], so the two are released
+    // together rather than leaving a row named by nothing.
+    if (mounted && _opId == null) {
+      setState(() => _pendingPeriodId = null);
+    }
   }
-
-  /// True while the screen is still showing exactly what [_adoptQueued] adopted.
-  bool _stillShowing(String adopted) =>
-      mounted && _opId == adopted && _state == FieldDeliverState.queued;
 
   Future<void> _load() async {
     try {
@@ -372,6 +412,10 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
       _state = FieldDeliverState.idle;
       _opId = null;
       _pendingPeriodId = null;
+      // The foreman has acted, and the delivery the mount adopted may not even be on
+      // view any more — so the mount's reconciliation retires. [_adoptQueued] raises
+      // the latch again if the new contract has its own outstanding delivery.
+      _reconcileArmed = false;
       // A whole new set of anchors is on its way in, and nothing is yet known about
       // any of them — so the window re-opens exactly as it did on mount (B-341).
       // Without this, the first frame of the new contract's period list would carry
@@ -393,6 +437,13 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
     // is the same refusal at the handler, so a tap delivered against a stale frame
     // cannot slip past it either (B-341).
     if (_settling) return;
+    // The foreman has acted, so the mount's reconciliation retires here — before any
+    // await, and whatever this tap goes on to do. From now on THIS flow owns `_state`,
+    // `_opId` and `_pendingPeriodId`. Lowered at the accepted tap rather than at the
+    // refused one: the latch is raised inside the settle that the `_settling` guard
+    // above is still refusing for, so anything earlier would lower a latch that is not
+    // up yet.
+    _reconcileArmed = false;
 
     // Read the slot BEFORE the flip below overwrites `_pendingPeriodId`: this is the
     // question "is the op I am already tracking THIS period's?", and the answer has to
@@ -509,6 +560,10 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
             _state = FieldDeliverState.idle;
             _opId = null;
             _pendingPeriodId = null;
+            // Stepping back to the contract list is the foreman acting: the period the
+            // mount adopted is off view, so the mount's reconciliation retires with it
+            // rather than raising a bar about a row that is no longer there.
+            _reconcileArmed = false;
           });
           unawaited(_load());
         } else {

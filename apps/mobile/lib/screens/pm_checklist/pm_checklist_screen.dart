@@ -181,6 +181,21 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
   /// offline/pending_op_adoption.dart.
   bool _settling = false;
 
+  /// True while this mount's ADOPTION is still un-acted-upon — the single fact
+  /// [_reconcile] is allowed to run on.
+  ///
+  /// It exists because no combination of state VALUES can carry it. The obvious
+  /// substitute, `_opId == adopted && _state == queued`, is exactly where the
+  /// documented manual retry lands when the save is still due ([_onSave]'s
+  /// `tracked != null` branch → [_resolve] → `resolveChecklistSaveState`, still-due ⇒
+  /// `queued`), so that tuple is reachable BOTH from an untouched mount adoption AND
+  /// from a technician who re-tapped. `_state` is cyclic; this is monotonic — raised
+  /// once at adoption, lowered at the first save or the first changed result, and
+  /// never raised again — which is the only shape that can distinguish "nobody has
+  /// touched this" from "touched, and it came back to the same value".
+  /// See offline/pending_op_adoption.dart.
+  bool _reconcileArmed = false;
+
   /// True once the technician has actually CHANGED a result in this State — i.e. the
   /// checklist on screen is no longer the checklist any queued op carries.
   ///
@@ -213,14 +228,15 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
   /// in parallel: this screen's anchor is a widget parameter, and unlike pm-notes
   /// seeding its results fires no listener that could clear a just-adopted id.
   ///
-  /// The drain then runs, and [_reconcile] takes the card back down if it resolved the
-  /// very write the card was about.
+  /// The drain then runs, and [_reconcile] reports what it did to the very save the
+  /// card is about — using the drain's OWN report, so a success and a dead-letter are
+  /// told apart rather than both reading as "no longer adoptable".
   Future<void> _resumeQueued() async {
     final String? woId = widget.workOrderId;
     if (woId == null) return;
     final String? adopted = await _settleQueue(woId);
-    await widget.repo.drain();
-    if (adopted != null) await _reconcile(woId, adopted);
+    final DrainReport report = await widget.repo.drain();
+    if (adopted != null) await _reconcile(adopted, report);
   }
 
   /// The queue read the CTA waits on. Returns the adopted op id, or null.
@@ -245,6 +261,11 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
         // Only a still-replayable op is adoptable (findAdoptableOp), and that is
         // precisely what `queued` means: captured, not confirmed.
         _state = PmChecklistSaveState.queued;
+        // Raised in the SAME setState as the adoption, and there is no await between
+        // it and the `finally` below that opens the CTA — so the latch is up before
+        // any tap can be accepted, and every accepted tap is therefore able to lower
+        // it.
+        _reconcileArmed = true;
       });
       return mine.id;
     } catch (_) {
@@ -257,29 +278,38 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
     }
   }
 
-  /// Take the queued state down once the drain has resolved the write it described —
-  /// the display cost of adopting before the drain, paid back one round trip later on
-  /// exactly the state the old drain-first ordering reached. Skipped once the
-  /// technician has acted (a save, or an edit that drops the id): their flow owns
-  /// `_state` and `_opId` from that point.
-  Future<void> _reconcile(String woId, String adopted) async {
-    if (!_stillShowing(adopted)) return;
-    final SyncOperation? still = findAdoptableOp(
-      await widget.repo.due(),
-      pmChecklistOpIdentity(woId),
-    );
-    // At most one op per identity is adoptable at a time (the B-330 invariant), so a
-    // non-null answer is the same checklist write, still outstanding.
-    if (still != null || !_stillShowing(adopted)) return;
-    setState(() {
-      _opId = null;
-      _state = PmChecklistSaveState.idle;
-    });
+  /// Say what the drain actually did to the save the card is about.
+  ///
+  /// Adopting before the drain is what bounds the quiet window; the cost is that the
+  /// card can outlive its subject by one round trip. This pays it back by running the
+  /// SCREEN'S OWN [_resolve] over the drain's own [report] — the identical path a
+  /// manual retry takes — so the reconciliation cannot drift from it and cannot invent
+  /// an outcome of its own:
+  ///
+  ///   * synced        → `saved`, the green card, and [_resolve] closes the op out
+  ///                     exactly as it does for a tapped save.
+  ///   * dead-lettered → `failed`, the danger card. A permanent 4xx is the OPPOSITE of
+  ///                     a success and must never be reported as one.
+  ///   * still due     → `queued`, unchanged: the card stands.
+  ///
+  /// It never returns the screen to `idle`. `idle` is the state with nothing
+  /// outstanding, so on a checklist the server ACCEPTED it says the save never
+  /// happened — and it clears `_opId` with `_edited` still false, so the next tap goes
+  /// through the pre-mint check against an empty queue and MINTS a second key.
+  ///
+  /// Runs at most once, and only while [_reconcileArmed]: after a save or a changed
+  /// result the technician's flow owns the outcome.
+  Future<void> _reconcile(String adopted, DrainReport report) async {
+    if (!mounted || !_reconcileArmed || _opId != adopted) return;
+    _reconcileArmed = false;
+    // Flipped SYNCHRONOUSLY, before [_resolve]'s first await, exactly as every tap
+    // path here does: it is what stops a tap arriving DURING the resolve from opening
+    // a second one over the same op (`_onSave` refuses while `saving`). The window is
+    // one local queue read, and the CTA already renders `saving` as the same spinner —
+    // no new state, no new copy.
+    setState(() => _state = PmChecklistSaveState.saving);
+    await _resolve(adopted, report);
   }
-
-  /// True while the screen is still showing exactly what [_settleQueue] adopted.
-  bool _stillShowing(String adopted) =>
-      mounted && _opId == adopted && _state == PmChecklistSaveState.queued;
 
   Future<void> _load() async {
     final String id = widget.workOrderId!;
@@ -330,6 +360,9 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
       // Remember WHY the id was dropped, so the pre-mint check in [_onSave] does not
       // hand it straight back and re-drain the results this edit just replaced.
       _edited = true;
+      // A changed result also retires the mount's reconciliation: the technician has
+      // acted, so nothing unprompted may write `_state` or `_opId` again.
+      _reconcileArmed = false;
     });
   }
 
@@ -345,6 +378,12 @@ class _PmChecklistScreenState extends State<PmChecklistScreen> {
     // same refusal at the handler, so a tap delivered against a stale frame cannot
     // slip past it either (B-341).
     if (_settling) return;
+    // The technician has acted, so the mount's reconciliation retires here — before
+    // any await, and whatever this tap goes on to do. From now on THIS flow owns
+    // `_state` and `_opId`. Lowered at the accepted tap rather than at the refused
+    // one: the latch is raised inside the settle that the `_settling` guard above is
+    // still refusing for, so anything earlier would lower a latch that is not up yet.
+    _reconcileArmed = false;
 
     // Flipped SYNCHRONOUSLY before the first await, so the CTA is already disabled
     // when a second tap could otherwise arrive during the queue read.

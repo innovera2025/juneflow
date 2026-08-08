@@ -520,6 +520,12 @@ final JuneflowI18n _i18n = JuneflowI18n.fromJsonString('''
 /// rehydration: the relaunched screen says a write is still outstanding.
 const String _queuedCard = 'รอส่ง';
 
+/// The shared honest copy for a PERMANENT (4xx) rejection — the dead-letter every
+/// future drain skips. It is the OPPOSITE outcome to a success, and the whole point of
+/// resolving through each screen's own resolver is that the two stop collapsing into
+/// one another (`findAdoptableOp` returns null for both).
+const String _failedCard = 'ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง';
+
 final ScreenStrings _recvStrings = ScreenStrings.fromJsonString('''
 {
   "title": "ตรวจนับ-รับของ",
@@ -653,6 +659,22 @@ Future<void> _tap(WidgetTester tester, String label) async {
   await _flush(tester);
 }
 
+/// Tap [label] only if the screen is still offering it — "the user tries again,
+/// if there is still something to try".
+///
+/// A plain [_tap] would THROW here rather than fail an assertion, and it would throw
+/// on precisely the outcome that is CORRECT: pm-checkin replaces its check-in CTA with
+/// the onward checklist affordance once the write is confirmed, so the control that
+/// could mint a second key is GONE. The tests using this assert on what reached the
+/// server, so the tap is the user's attempt and not the property — a screen that has
+/// removed the control has already satisfied it.
+Future<void> _tapIfPresent(WidgetTester tester, String label) async {
+  final Finder target = find.text(label);
+  if (target.evaluate().isEmpty) return;
+  await tester.tap(target.first);
+  await _flush(tester);
+}
+
 /// How long a slow queue read is held open. Any real duration works — the point is
 /// that it is not a microtask, so `_flush`'s zero-duration pumps leave the test INSIDE
 /// the window until it deliberately advances the clock.
@@ -719,9 +741,10 @@ Future<List<String>> _queuedIds(InMemorySyncQueue queue) async =>
 
 /// How many permanent 4xx dead-letters the queue is holding — ops the drain will
 /// skip forever, so they have written nothing and never will.
-Future<int> _deadLetters(InMemorySyncQueue queue) async => (await queue.pending())
-    .where((SyncOperation o) => o.status == SyncOpStatus.failed)
-    .length;
+Future<int> _deadLetters(InMemorySyncQueue queue) async =>
+    (await queue.pending())
+        .where((SyncOperation o) => o.status == SyncOpStatus.failed)
+        .length;
 
 // Per-screen mounts, each over a freshly-built production repository.
 
@@ -1372,6 +1395,462 @@ void main() {
         expect(find.text(_projectSecond), findsNothing);
       },
     );
+  });
+
+  // =========================================================================
+  // 1b-c. WHAT THE RECONCILIATION IS ALLOWED TO SAY — BLOCKERS.md B-341.
+  //
+  //       Adopting BEFORE the drain is what bounds the quiet window, and the
+  //       price is that the card can outlive its subject by one round trip.
+  //       `_reconcile` pays that back — and it is the ONE writer on these screens
+  //       that runs with nobody's finger on the screen, so what it is allowed to
+  //       say, and when it is allowed to say anything, are both load-bearing.
+  //
+  //       THE FAILURE THESE PIN DOWN. Asking `findAdoptableOp` again cannot tell a
+  //       SYNCED op from a DEAD-LETTERED one — it returns null for both, because
+  //       only `pending` is adoptable — so a reconciliation built on it reports
+  //       the two OPPOSITE outcomes identically, as `idle`. And `idle` is not a
+  //       neutral shrug: it is the state with NOTHING enqueued, so on a write the
+  //       server ACCEPTED the screen states that nothing happened, drops `_opId`,
+  //       and hands the next tap a clean slate over an empty queue — which mints a
+  //       SECOND key. On st-receive that is a second GR and a second JV.
+  //
+  //       Every test below therefore drives the ordinary sequence: a write captured
+  //       offline, a relaunch while the signal is back, and a replay HELD in flight
+  //       (which needs no faking — `AppServices` builds Dio with NO `connectTimeout`)
+  //       across the user's own documented manual retry.
+  // =========================================================================
+  group('the on-mount replay SUCCEEDS the adopted write', () {
+    testWidgets(
+      'st-receive (MONEY — a second key is a second GR + a second JV): the '
+      'next tap does not mint one',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        // Session 1 — captured offline, deferred, still `pending` in the queue.
+        await _mountRecv(tester, queue, transport);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        // Session 2 — the signal is back, so the on-mount drain is a REAL replay,
+        // and it is held in flight for the whole of what follows.
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountRecv(tester, queue, transport);
+
+        // The storekeeper takes the documented manual retry. The inner drain is a
+        // re-entrancy no-op, the receipt is still due, and the retry therefore
+        // resolves back to `queued` ON THE SAME ID — the exact tuple that a
+        // `_opId == adopted && _state == queued` guard cannot tell apart from an
+        // untouched mount adoption.
+        await _tap(tester, _confirmRecv);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        // The held replay lands: 201, and the op is synced and gone.
+        gate.complete();
+        await _flush(tester, 20);
+        expect(await queue.length(), 0);
+
+        // The receipt is POSTED. The storekeeper, who has still seen no success
+        // takeover (B-266 dropped it), taps the CTA again if the screen still
+        // offers one.
+        await _tapIfPresent(tester, _confirmRecv);
+        await _flush(tester, 20);
+
+        expect(
+          transport.acceptedKeys,
+          <Object?>[k1],
+          reason:
+              'the server must hold ONE goods receipt. A second key here is a '
+              'second GR and a second JV, and `gr_idempotency_uq` cannot stop '
+              'it — two distinct keys are legitimately two distinct receipts',
+        );
+      },
+    );
+
+    testWidgets('pm-checkin: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _checkinBtn);
+      await _flush(tester, 20);
+
+      // This endpoint carries no `idempotency_key` in its BODY — the client key is
+      // the op id and never leaves the device — so what the server received is
+      // counted, not read off the payload. Two requests are two check-ins recorded
+      // against one work order.
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/pm/workorders/wo-1/checkin');
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('pm-notes: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      await _tap(tester, _saveNotes);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _saveNotes);
+      await _flush(tester, 20);
+
+      // Counted, not read off the payload: this endpoint carries no
+      // `idempotency_key` in its body — the client key is the op id and never
+      // leaves the device.
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/pm/workorders/wo-1/close');
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('pm-checklist: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _saveChecklist);
+      await _flush(tester, 20);
+
+      // Counted, not read off the payload: this endpoint carries no
+      // `idempotency_key` in its body — the client key is the op id and never
+      // leaves the device.
+      expect(transport.accepted.length, 1);
+      expect(
+        transport.accepted.single.endpoint,
+        '/pm/workorders/wo-1/checklist',
+      );
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('field-progress: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver); // period p1
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _deliver);
+      await _flush(tester, 20);
+
+      // Counted, not read off the payload: this endpoint carries no
+      // `idempotency_key` in its body — the client key is the op id and never
+      // leaves the device.
+      expect(
+        transport.accepted.length,
+        1,
+        reason:
+            'a second op is a second POST against a period the server has '
+            'already moved out of `pending`, which its C3 guard 4xxs into a '
+            'permanent dead-letter (B-330 F2)',
+      );
+      expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('field-stock (MONEY): a 4xx DEAD-LETTER is not reported as the same '
+        'thing as a success', (WidgetTester tester) async {
+      // WHY THIS SCREEN'S MEMBER IS THE DEAD-LETTER HALF, AND NOT THE KEY COUNT.
+      //
+      // The other five hand the reconciliation a control that can mint on the
+      // spot: their CTA submits what is already on screen. This one cannot —
+      // `_onConfirm` returns early on an empty basket, and the basket after a
+      // tab swap IS empty. So the second key here needs a deliberate re-stage,
+      // which over a CONFIRMED issue is a legitimate second withdrawal and must
+      // NOT be blocked. The key count therefore cannot separate the defect from
+      // correct behaviour on this screen; what separates them is what the screen
+      // SAYS, and the sharpest case is the one where the two answers are exact
+      // opposites.
+      //
+      // `findAdoptableOp` returns null for a SYNCED op and for a 4xx
+      // DEAD-LETTER alike, so a reconciliation built on it reports a permanent
+      // server REJECTION as `idle` — no card, clean basket, nothing to retry and
+      // nothing said. The queue still holds the dead op forever.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountStock(tester, queue, transport);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      expect((await _queued(queue)).single.endpoint, '/inventory/issues');
+      await _kill(tester);
+
+      // Session 2: the signal is back, and the server will REJECT this issue
+      // permanently (400 — e.g. the shelf no longer holds the quantity).
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountStock(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        await _deadLetters(queue),
+        1,
+        reason: 'the fixture must really produce a permanent dead-letter',
+      );
+      expect(
+        find.text(_failedCard),
+        findsOneWidget,
+        reason:
+            'a 4xx is the OPPOSITE of a success. Reporting it as `idle` — no '
+            'card at all — tells the storekeeper the withdrawal simply is not '
+            'there, when the server has refused it and the op will never be '
+            'replayed again',
+      );
+      expect(
+        find.text(_queuedCard),
+        findsNothing,
+        reason: '"saved, will retry" is false of an op no drain will retry',
+      );
+    });
+  });
+
+  // =========================================================================
+  // 1b-d. THE LATCH — when the reconciliation is allowed to say anything.
+  //
+  //       `_reconcile` is armed at the mount adoption and disarmed at the first
+  //       user action. It CANNOT infer that from state values: the user's own
+  //       manual retry lands on `_opId == adopted && _state == queued` whenever
+  //       the write is still due, which is bit-for-bit the tuple an untouched
+  //       mount adoption leaves behind. So a guard written over those values
+  //       fires on a screen the user is actively driving, and the reconciliation
+  //       becomes a SECOND writer racing the first — one that owns the same
+  //       terminal side effects (st-receive's pop back to st-grlist, field-stock's
+  //       emptied basket and `on_hand` re-read, pm-checkin's success caption).
+  //
+  //       Each test below drives the user to a retry FIRST, then lands the held
+  //       replay, and asserts the reconciliation stayed out of it. Each goes RED
+  //       on its own when ITS screen's `_reconcileArmed` check is swapped back for
+  //       a `_state == queued` inference: six screens, six independent reds.
+  //
+  //       The screen keeping the user's own `queued` answer is not a stale lie
+  //       adopted as policy: NONE of these screens subscribes to the queue, on any
+  //       branch — every drain outcome that arrives outside a tap is picked up by
+  //       the next tap, through the same `_resolve`. The reconciliation is a
+  //       one-shot compensation for a display decision made at MOUNT, and once the
+  //       user's own flow owns the screen it retires rather than promoting itself
+  //       into a background subscription.
+  // =========================================================================
+  group('once the user has acted, the reconciliation retires', () {
+    testWidgets('st-receive: and does not pop st-grlist off the stack', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountRecv(tester, queue, transport);
+
+      // The storekeeper acts. The retry resolves back to `queued` on the same id,
+      // so every state VALUE now reads exactly as an untouched adoption does.
+      await _tap(tester, _confirmRecv);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        find.text(_queuedCard),
+        findsOneWidget,
+        reason:
+            'the storekeeper owns this screen from their tap onwards. A '
+            'reconciliation that writes here writes over a flow already in '
+            'progress — and on this screen a confirmed outcome POPS, so an '
+            'unprompted second one takes st-grlist off the stack with it',
+      );
+    });
+
+    testWidgets('pm-checkin', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('pm-notes', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      await _tap(tester, _saveNotes);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('pm-checklist', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('field-progress', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('field-stock (MONEY): and does not empty the basket twice', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountStock(tester, queue, transport);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountStock(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        find.text(_queuedCard),
+        findsOneWidget,
+        reason:
+            'the storekeeper owns this screen from their tap onwards, and a '
+            'confirmed outcome here empties the basket and re-reads `on_hand` '
+            '— side effects an unprompted second writer would fire on top of '
+            'the flow already running',
+      );
+    });
   });
 
   // =========================================================================
