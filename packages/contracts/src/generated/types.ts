@@ -2312,6 +2312,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/labor/attendance/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a worker's day by stamping check-out onto the existing attendance row (B-332)
+         * @description Addresses the row by the CHECK-IN's client idempotency key (check_in_key), not by a server-assigned id: the mobile queue mints the key offline before the row exists and cannot substitute a server id into a queued op's path. Updates the SAME row - a check-out is never a second row, which would carry its own day_fraction and pay the day twice. Replaying the identical checked_out_at returns 200 with the original row; a different instant on an already-closed day is 409. `day` is the CHECK-IN's day, not the check-out's calendar day - it is part of the row's address. On a night shift the two differ: a worker who clocks in on the 10th and out at 06:00 on the 11th is closed by sending day = the 10th, and sending the 11th resolves nothing and returns 404. checked_out_at must not be earlier than the stored checked_in_at (400).
+         */
+        post: operations["checkoutLaborAttendance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/labor/payroll": {
         parameters: {
             query?: never;
@@ -3809,6 +3829,15 @@ export interface components {
     responses: {
         /** @description Missing/invalid bearer token. */
         Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Request body failed validation — always code VALIDATION with a message naming the offending field. B-311 (Wei = ก, 2026-08-06): declared on the two ops that gate a client-supplied idempotency_key, so a generated client has a typed branch for a key of the wrong TYPE (B-309: a present-but-non-string key is refused rather than silently disabling dedup on a money write). NOTE: other ops in this spec also return 400 without declaring it — this response is reusable so that gap can be closed op-by-op without inventing a second shape. */
+        ValidationError: {
             headers: {
                 [name: string]: unknown;
             };
@@ -5517,6 +5546,11 @@ export interface operations {
                      * @description Alternative to po_id — GR against a work order (B-070 GR-from-WO)
                      */
                     wo_id?: string;
+                    /**
+                     * Format: uuid
+                     * @description Client-generated idempotency key (B-261). A create whose key was already seen returns the ORIGINAL receipt (2xx, no duplicate row) — makes the mobile offline-queue at-least-once replay safe. Omit → no dedup.
+                     */
+                    idempotency_key?: string;
                     lines: {
                         qty_ok?: number;
                         qty_rejected?: number;
@@ -5536,6 +5570,7 @@ export interface operations {
         };
         responses: {
             201: components["responses"]["EntityCreated"];
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -7144,7 +7179,46 @@ export interface operations {
         };
         responses: {
             201: components["responses"]["EntityCreated"];
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            /** @description B-332: caller holds neither finance.create nor a worker record linked to this user, or that linked worker record is not active. Self-service check-in may record only the caller's OWN worker id. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    checkoutLaborAttendance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Entity"];
+            };
+        };
+        responses: {
+            200: components["responses"]["EntityOk"];
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller holds neither finance.create nor a worker record linked to this user, or that linked worker record is not active. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listLaborPayroll: {
