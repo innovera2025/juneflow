@@ -128,9 +128,6 @@ function qtyStr(n: number): string {
   return n.toFixed(4);
 }
 
-/** One inbound movement per receipt line that identifies real stock. */
-type LedgerDraft = Omit<typeof stockLedgers.$inferInsert, "companyId">;
-
 /**
  * REVERSE every movement a receipt made (B-340) — used by return AND cancel.
  *

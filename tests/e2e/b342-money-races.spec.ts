@@ -49,12 +49,13 @@
 //   - "concurrent transfers cannot drive stock negative"        → dies if
 //     selectForUpdate is removed from approveTransfer
 //   - "the API BLOCKS on a held inventory_item lock"            → dies if selectForUpdate
-//     is removed from createIssue. This is the discriminator: it asserts ELAPSED TIME
-//     against a lock held by another session and cannot pass by accident.
+//     is removed from createIssue (measured: 201 + a final balance of −100 instead of a
+//     409). NOTE the discriminator is the STATUS, not the elapsed time — an FK key-share
+//     lock makes the request wait either way. See the comment on that test.
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { Client } from "pg";
 import { execFile } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -389,11 +390,25 @@ for i in 0 1; do cat "${dir}/c.$i"; echo; done
     test.setTimeout(120_000);
     await resetStock();
 
-    // THE DISCRIMINATOR. Session 2 takes the row lock and holds it, then consumes the
-    // whole balance and commits. If selectForUpdate is real the API must WAIT on it;
-    // without the lock the request sails past and returns immediately. The assertion is
-    // ELAPSED TIME against another session's uncommitted work, which is deterministic
-    // and cannot pass by accident.
+    // THE DISCRIMINATOR — and it is the 409, NOT the elapsed time. That distinction was
+    // MEASURED, not assumed, and the first version of this comment had it wrong.
+    //
+    // Session 2 takes the row lock and holds it, then consumes the whole balance and
+    // commits. The obvious claim is "with the lock the API waits, without it the request
+    // sails past" — and it is FALSE. Removing selectForUpdate from createIssue and
+    // re-running this probe still blocked for ~2.8s, three times out of three, because
+    // INSERTing a stock_ledger row takes a FOR KEY SHARE lock on its FK target
+    // (inventory_item) and that already conflicts with the holder's FOR UPDATE. The
+    // request blocks EITHER WAY.
+    //
+    // What actually separates them is WHERE THE BALANCE IS READ relative to that wait.
+    // With the lock, the wait happens FIRST and the ledger is read afterwards in a fresh
+    // READ COMMITTED statement snapshot — so the guard sees the other session's −QTY and
+    // refuses. Without it, the guard has ALREADY read (100, stale) before the insert
+    // blocks, so when the block clears it commits anyway: measured 201, and a final
+    // balance of −100. Hence the assertions below are the STATUS and the BALANCE; the
+    // elapsed check is kept only to prove the two transactions genuinely overlapped,
+    // which is what makes this a constructed race rather than an incidental one.
     const holder = new Client({ connectionString: PG_URL });
     await holder.connect();
     await holder.query("BEGIN");

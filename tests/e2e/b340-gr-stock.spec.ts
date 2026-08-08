@@ -9,27 +9,85 @@
 // list and an issue of 10 against a seeded item answered
 // `409 insufficient stock … on-hand 0`. Stock could only ever go DOWN.
 //
-// WHAT DIES WHEN THE GUARD IS REMOVED — stated per test rather than claimed in
-// aggregate, because a suite that cannot fail is not evidence (the B-332 lesson: four
-// api tests carried an index's name and NOT ONE died when the index was deleted):
-//   - "a receipt RAISES on-hand"            → dies if the ledger insert is deleted
-//   - "a replay does NOT raise it twice"    → dies if the ledger write is moved OUTSIDE
-//                                             the transaction, or above the header
-//                                             insert. Does NOT die if the write is
-//                                             deleted entirely (0 == 0), which is why
-//                                             the test above it is the one that
-//                                             detects deletion. The pair is the guard.
-//   - "a return REVERSES it"                → dies if reverseGrMovements is deleted, or
-//                                             moved above the guarded status UPDATE
-//   - "a second return is 409 and moves no stock" → dies if the reversal is moved above
-//                                             the guarded UPDATE
+// WHAT DIES WHEN THE GUARD IS REMOVED — measured by actually reverting each guard and
+// counting, not asserted, because a suite that cannot fail is not evidence (the B-332
+// lesson: four api tests carried an index's name and NOT ONE died when the index was
+// deleted). Every line below is a probe that was RUN:
+//   - "a receipt RAISES on-hand"          → DIES (with "a RETURN reverses") if the
+//                                           ledger insert is deleted: 2 failed / 14 passed
+//   - "a CONCURRENT replay"               → DIES if the ledger write is moved outside the
+//                                           transaction AND above the header insert
+//   - "a RETURN reverses …"               → DIES if reverseGrMovements is deleted, and
+//                                           also if the write is misplaced (the ref_doc
+//                                           stops matching the receipt)
+//
+// ONE CORRECTION, kept visible because the first version of this header was WRONG and a
+// probe caught it. It claimed the SEQUENTIAL replay test dies if the ledger write leaves
+// the transaction. It does not, and cannot: on a sequential replay the B-264 pre-check
+// resolves the original and RETURNS — the transaction is never entered, so no write of
+// any kind runs and its placement is unobservable. Moving the write after the try/catch
+// scored 16/16 GREEN. Only a CONCURRENT replay, where both callers pass the pre-check
+// and one loses on the 23505, can see where the write sits. That test was added as a
+// result, and the sequential one is honestly labelled as covering the pre-check instead.
 //
 // E2E_LIVE-gated + F4-safe (login 429 → graceful skip). DATABASE_URL is needed only to
 // read balances back independently of the API's own read path; without it those
 // assertions skip rather than pass vacuously.
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { Client } from "pg";
-import { clientFor, isRateLimited, okJson, USER_MD_L4 } from "./_api-client.js";
+import { execFile } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { clientFor, isRateLimited, okJson, USER_MD_L4, API_URL } from "./_api-client.js";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Fire N POSTs from N SEPARATE OS PROCESSES on one wall-clock deadline. A Promise.all
+ * in this process would share undici's connection scheduler and stagger into a clean
+ * pass — that is measurably how B-336's first measurement under-reported.
+ */
+async function burst(
+  path: string,
+  token: string,
+  bodies: Record<string, unknown>[],
+): Promise<number[]> {
+  const dir = mkdtempSync(join(tmpdir(), "b340-"));
+  try {
+    bodies.forEach((b, i) => writeFileSync(join(dir, `body.${i}`), JSON.stringify(b)));
+    const script = `
+set -u
+START=$(( $(python3 -c 'import time; print(int(time.time()*1000))') + 900 ))
+for i in $(seq 0 ${bodies.length - 1}); do
+  (
+    while [ "$(python3 -c 'import time; print(int(time.time()*1000))')" -lt "$START" ]; do :; done
+    curl -s -o /dev/null -w "%{http_code}" -X POST "${API_URL}${path}" \
+      -H "authorization: Bearer ${token}" -H 'content-type: application/json' \
+      --data-binary "@${dir}/body.$i" > "${dir}/code.$i"
+  ) &
+done
+wait
+for i in $(seq 0 ${bodies.length - 1}); do cat "${dir}/code.$i"; echo; done
+`;
+    const { stdout } = await execFileAsync("bash", ["-c", script], { timeout: 60_000 });
+    return stdout.trim().split("\n").map(Number);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** A raw bearer token — the burst runs outside Playwright's request context. */
+async function bearerFor(email: string): Promise<string> {
+  const res = await fetch(`${API_URL}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password: "juneflow-dev" }),
+  });
+  const body = (await res.json()) as Record<string, unknown>;
+  return String(body.token ?? body.access_token);
+}
 
 const LIVE = Boolean(process.env.E2E_LIVE);
 const liveDescribe = LIVE ? test.describe : test.describe.skip;
@@ -45,6 +103,7 @@ const key = (suffix: string): string => `b340-${RUN}-${suffix}`;
 
 liveDescribe("B-340 — the goods receipt writes stock_ledger", () => {
   let md: APIRequestContext;
+  let token = "";
   let rateLimited = false;
   let warehouseId = "";
   let itemId = "";
@@ -84,6 +143,7 @@ liveDescribe("B-340 — the goods receipt writes stock_ledger", () => {
   test.beforeAll(async () => {
     try {
       md = await clientFor(USER_MD_L4);
+      token = await bearerFor(USER_MD_L4);
     } catch (e) {
       if (isRateLimited(e)) {
         rateLimited = true;
@@ -153,7 +213,7 @@ liveDescribe("B-340 — the goods receipt writes stock_ledger", () => {
     expect(Number(mine!.on_hand)).toBeGreaterThan(0);
   });
 
-  test("a REPLAY does not raise on-hand twice — the ledger write is inside the idempotency guard", async () => {
+  test("a SEQUENTIAL replay does not raise on-hand twice (this covers the B-264 PRE-CHECK, not the write's placement)", async () => {
     test.skip(!PG_URL, "needs DATABASE_URL to read Σ(qty) independently of the API");
     const k = key("replay");
     const { res: first, poId } = await receive(25, { idempotencyKey: k });
@@ -170,6 +230,28 @@ liveDescribe("B-340 — the goods receipt writes stock_ledger", () => {
     );
     // THE ASSERTION THAT MATTERS: the balance is byte-identical, not merely "close".
     expect(await balance()).toBe(afterFirst);
+  });
+
+  test("a CONCURRENT replay does not raise on-hand twice — the ledger write is INSIDE the idempotency guard", async () => {
+    test.skip(!PG_URL, "needs DATABASE_URL to read Σ(qty) independently of the API");
+    test.setTimeout(120_000);
+    // THE TEST THAT ACTUALLY CONSTRAINS WHERE THE WRITE SITS. On a sequential replay the
+    // pre-check returns before the transaction is entered, so the write never runs and
+    // its placement is unobservable — proven by probe, 16/16 green with the write moved
+    // out. Here all four callers pass the pre-check together; three lose on
+    // gr_idempotency_uq, and ONLY a write inside the same transaction as the header
+    // insert is rolled back with them. Outside it, three extra movements commit.
+    const before = await balance();
+    const body = {
+      po_id: await openPo(),
+      warehouse_id: warehouseId,
+      idempotency_key: key("concurrent"),
+      lines: [{ item_id: itemId, qty_ok: 7, name: "B-340 concurrent", price: 10 }],
+    };
+    const codes = await burst("/api/v1/gr", token, [body, body, body, body]);
+    expect(codes, `every copy of one replayed op must be answered 201`).toEqual([201, 201, 201, 201]);
+    // +7 exactly, not +28.
+    expect(await balance()).toBe(before + 7);
   });
 
   test("a RETURN reverses the movement, and a SECOND return is 409 that moves nothing", async () => {
