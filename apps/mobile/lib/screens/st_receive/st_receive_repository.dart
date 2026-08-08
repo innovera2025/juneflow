@@ -41,9 +41,27 @@
 //   way here.
 import 'package:dio/dio.dart';
 
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import 'st_receive_agg.dart';
+
+/// What ONE PO's queued receipt looks like in the shared queue.
+///
+/// The ONE definition of this write's identity: the enqueue below builds its
+/// [SyncOperation] from it, and the screen matches its own still-pending receipt
+/// with it after a restart (B-330), so the matcher cannot drift from the builder.
+///
+/// This is the only one of the five offline writes whose ENDPOINT does not pin the
+/// record — `POST /gr` is the same path for every PO — so the anchor is the body's
+/// [grPoIdField], read back from the queued payload. Matching on the endpoint alone
+/// here would let a receipt queued for one PO be adopted by the screen of another,
+/// which on a money path means the second PO's receipt is silently never sent.
+SyncOpIdentity stReceiveOpIdentity(String poId) => SyncOpIdentity(
+  entityType: 'gr',
+  endpoint: '/gr',
+  payloadAnchor: <String, Object?>{grPoIdField: poId},
+);
 
 /// Read the receipt's subject + lines, and enqueue/drain the receipt write.
 abstract class StReceiveRepository {
@@ -109,11 +127,12 @@ class DioStReceiveRepository implements StReceiveRepository {
     required String opId,
     required DateTime now,
   }) async {
+    final SyncOpIdentity identity = stReceiveOpIdentity(poId);
     final SyncOperation op = SyncOperation(
       id: opId,
-      entityType: 'gr',
+      entityType: identity.entityType,
       kind: SyncOpKind.create,
-      endpoint: '/gr',
+      endpoint: identity.endpoint,
       method: 'POST',
       // The B-261 contract: the body's `idempotency_key` IS the op id, so a
       // replay of this exact payload resolves to the original receipt instead of

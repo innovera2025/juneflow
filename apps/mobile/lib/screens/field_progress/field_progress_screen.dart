@@ -64,6 +64,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
+import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/m_primitives.dart';
@@ -168,18 +170,69 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   /// row and a retry addresses exactly that period).
   String? _pendingPeriodId;
 
-  /// The stable client key of the op awaiting resolution. Reused on a manual retry so
-  /// a re-tap never enqueues a second op.
+  /// The stable client key of the op awaiting resolution.
+  ///
+  /// Reused on every later attempt — including after an app kill, because
+  /// [_resumeQueued] re-adopts the id of a delivery still pending in the DURABLE
+  /// queue for a period this screen is showing (B-330).
+  ///
+  /// It is ONE slot, and unlike the pm-* screens this screen has MANY anchors on view
+  /// at once, so the slot is not by itself a trustworthy answer to "is this period's
+  /// write already queued?" — see [_deliver], which asks the queue before minting.
+  /// Null means "no op of mine is currently being tracked here".
   String? _opId;
 
   @override
   void initState() {
     super.initState();
     _contractId = widget.contractId;
-    // (a) on-mount trigger: flush anything a prior session left queued. It does not
-    // change this screen's state; it just keeps the queue moving.
-    unawaited(widget.repo.drain());
-    unawaited(_load());
+    unawaited(_resumeQueued());
+  }
+
+  /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an app
+  /// kill (B-330). The drain runs first, so the online case resolves normally and
+  /// leaves nothing to adopt.
+  Future<void> _resumeQueued() async {
+    await widget.repo.drain();
+    await _loadThenAdopt();
+  }
+
+  /// Read this contract's periods, then adopt whichever of them already has a write
+  /// waiting in the queue.
+  Future<void> _loadThenAdopt() async {
+    await _load();
+    await _adoptQueued();
+  }
+
+  /// Take back the id of a delivery still pending for one of the periods ON VIEW.
+  ///
+  /// This screen's shape differs from the other four offline-write screens: their
+  /// anchor is fixed for the whole mount (one work order, one PO), so they can adopt
+  /// straight after the drain. Here the anchor is one of N periods that a READ has to
+  /// resolve first — and the foreman can switch contracts without leaving the screen —
+  /// so adoption is deliberately tied to a completed load, and an op belonging to a
+  /// period of some OTHER contract is left alone rather than raising a status bar
+  /// about a row that is not on screen.
+  Future<void> _adoptQueued() async {
+    if (!mounted || _opId != null) return;
+    final List<FieldProgressPeriod> periods =
+        _periods ?? const <FieldProgressPeriod>[];
+    if (periods.isEmpty) return;
+    final ({SyncOperation op, int identityIndex})? mine = findAdoptableOpAmong(
+      await widget.repo.due(),
+      <SyncOpIdentity>[
+        for (final FieldProgressPeriod p in periods)
+          fieldDeliverOpIdentity(p.id),
+      ],
+    );
+    if (mine == null || !mounted) return;
+    setState(() {
+      _opId = mine.op.id;
+      _pendingPeriodId = periods[mine.identityIndex].id;
+      // Only a still-replayable op is adoptable (findAdoptableOpAmong), and that is
+      // precisely what `queued` means: captured, not confirmed.
+      _state = FieldDeliverState.queued;
+    });
   }
 
   Future<void> _load() async {
@@ -255,7 +308,9 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
       _opId = null;
       _pendingPeriodId = null;
     });
-    unawaited(_load());
+    // Adopt again after the read: the chosen contract may be the one whose period
+    // still has a write waiting in the queue (B-330).
+    unawaited(_loadThenAdopt());
   }
 
   /// Deliver [period]. With no unresolved op it enqueues and drains; with one already
@@ -265,17 +320,62 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
     if (_state == FieldDeliverState.sending) return;
     if (!period.deliverable) return;
 
+    // Read the slot BEFORE the flip below overwrites `_pendingPeriodId`: this is the
+    // question "is the op I am already tracking THIS period's?", and the answer has to
+    // be taken while `_pendingPeriodId` still names the period the op belongs to.
     final String? pending = _opId;
-    if (pending != null && _pendingPeriodId == period.id) {
-      setState(() => _state = FieldDeliverState.sending);
+    final bool retryThisPeriod =
+        pending != null && _pendingPeriodId == period.id;
+
+    // Flip busy SYNCHRONOUSLY, before ANY await — both fields, so the spinner lands on
+    // the tapped row exactly as the branches below leave it.
+    //
+    // The `sending` guard at the top of this method is the ONLY thing standing between
+    // two taps, and until this line nothing set `_state` before an await. That was safe
+    // on dev because the mint path held no await at all: guard → mint → setState. The
+    // pre-mint queue read (B-330) put a real await in FRONT of the guard's own
+    // precondition — a drift/SQLite `pending()` is disk I/O — so a second tap during
+    // that read would sail straight past into a SECOND enqueue of a delivery that is
+    // already waiting. Offline that is two ops under two keys; online the server takes
+    // the first and 409s the replay (the C3 guard at `subcon.ts:758` admits only a
+    // `pending` period), which parks a permanent 4xx dead-letter every future drain
+    // skips (B-330 F2) and paints the failed bar over a delivery that SUCCEEDED.
+    //
+    // The other four offline-write screens already flip synchronously; this one is
+    // where the pre-mint pattern was copied FROM and was the last without the companion
+    // guard.
+    _pendingPeriodId = period.id;
+    setState(() => _state = FieldDeliverState.sending);
+
+    if (retryThisPeriod) {
       final DrainReport report = await widget.repo.drain();
       await _resolve(pending, report);
       return;
     }
 
+    // About to mint a key. The slot above says nothing is outstanding for THIS
+    // period — but the slot holds ONE op and is thrown away with the State, while
+    // the queue is durable and holds ALL of them. So ask the queue, which is the
+    // only thing that actually knows (B-330). Two ways the slot lies here: it was
+    // never populated (fresh State after an app kill), or it is busy tracking a
+    // DIFFERENT period of the same contract — delivering B after A leaves A's op
+    // in the queue but not in the slot, so a second tap on A would otherwise mint
+    // a second key for a write that is already waiting to be sent.
+    final SyncOperation? already = findAdoptableOp(
+      await widget.repo.due(),
+      fieldDeliverOpIdentity(period.id),
+    );
+    if (already != null) {
+      if (!mounted) return;
+      // `_state` and `_pendingPeriodId` were already set by the synchronous flip
+      // above — that is the point of it — so only the adopted id is new here.
+      setState(() => _opId = already.id);
+      final DrainReport report = await widget.repo.drain();
+      await _resolve(already.id, report);
+      return;
+    }
+
     final String opId = _opId = _newOpId();
-    _pendingPeriodId = period.id;
-    setState(() => _state = FieldDeliverState.sending);
     final DrainReport report = await widget.repo.deliver(
       periodId: period.id,
       opId: opId,

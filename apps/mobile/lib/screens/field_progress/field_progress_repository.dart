@@ -36,9 +36,24 @@
 //   to gate on, so it withholds the action and renders the list as UNKNOWN.
 import 'package:dio/dio.dart';
 
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import 'field_progress_agg.dart';
+
+/// What ONE work period's queued delivery looks like in the shared queue.
+///
+/// The ONE definition of this write's entity type + endpoint: the enqueue below
+/// builds its [SyncOperation] from it, and the screen matches its own still-pending
+/// op with it after a restart (B-330), so the matcher cannot drift from the builder.
+///
+/// Unlike the pm-* screens, this one has MANY candidate anchors on view at once (a
+/// contract's periods), so the screen builds one identity per listed period — see
+/// `findAdoptableOpAmong`.
+SyncOpIdentity fieldDeliverOpIdentity(String periodId) => SyncOpIdentity(
+  entityType: 'work_period_deliver',
+  endpoint: '/periods/$periodId/deliver',
+);
 
 /// Read the contracts + their periods, and queue the delivery write.
 abstract class FieldProgressRepository {
@@ -95,11 +110,12 @@ class DioFieldProgressRepository implements FieldProgressRepository {
     required String opId,
     required DateTime now,
   }) async {
+    final SyncOpIdentity identity = fieldDeliverOpIdentity(periodId);
     final SyncOperation op = SyncOperation(
       id: opId,
-      entityType: 'work_period_deliver',
+      entityType: identity.entityType,
       kind: SyncOpKind.update,
-      endpoint: '/periods/$periodId/deliver',
+      endpoint: identity.endpoint,
       method: 'POST',
       payload: deliverPayload(),
       createdAt: now,
