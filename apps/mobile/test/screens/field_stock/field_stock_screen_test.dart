@@ -11,6 +11,7 @@
 // CTA, no price/value/currency anywhere in the rendered tree OR the posted body, an
 // em-dash where the wire carries nothing, and a queued write never rendered as a
 // success.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -171,6 +172,78 @@ class _FakeRepo implements FieldStockRepository {
       ? const DrainReport(<SyncAttempt>[])
       : DrainReport(<SyncAttempt>[SyncAttempt(id: opId, outcome: outcome!)]);
 }
+
+/// A [_FakeRepo] whose WRITE blocks until [gate] is completed.
+///
+/// EVERY other fake in this file resolves synchronously, so `pumpAndSettle` walks
+/// straight past `submitting` and NOTHING in the suite ever observes the screen in
+/// it. That is how both of the guards keyed to that state — the re-entrancy return in
+/// `_onConfirm` and the `_state != FieldStockState.submitting` term that greys the
+/// CTA — could be deleted with the suite still green. A held write is the only thing
+/// that makes the state last long enough to look at.
+class _GatedRepo extends _FakeRepo {
+  _GatedRepo({super.outcome, super.projects});
+
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<DrainReport> submitIssue({
+    required String projectId,
+    required String warehouseId,
+    required List<FieldStockPick> picks,
+    required String opId,
+    required DateTime now,
+  }) async {
+    await gate.future;
+    return super.submitIssue(
+      projectId: projectId,
+      warehouseId: warehouseId,
+      picks: picks,
+      opId: opId,
+      now: now,
+    );
+  }
+}
+
+/// A [_FakeRepo] whose shelf CHANGES between reads, which is what a real
+/// GET /inventory/stock does the moment an issue commits.
+///
+/// A fixture that returns the same balance forever cannot tell a screen that re-reads
+/// from one that does not — both render 1,240 — so the refresh has to be measured
+/// against a server whose answer actually moved.
+/// 1,240 before the first issue, then −100 per read as each issue's ledger row
+/// lands. A CLAMPED two-entry list was the first version of this, and it made the
+/// third read hand back 1,140 again — a physically impossible balance sitting in the
+/// tree of the two-issue test, inert only because nothing looks at it yet. A
+/// fixture that goes quietly wrong past the case it was written for is a trap for
+/// the next assertion added to it, so it decrements without end instead.
+class _RefreshingRepo extends _FakeRepo {
+  _RefreshingRepo({super.outcome, super.projects});
+
+  static const int openingBalance = 1240;
+  static const int cutPerIssue = 100;
+
+  @override
+  Future<List<FieldStockEnt>> listStock(String warehouseId) async {
+    final int call = stockReadFor.length;
+    stockReadFor.add(warehouseId);
+    return <FieldStockEnt>[_stock(onHand: openingBalance - cutPerIssue * call)];
+  }
+}
+
+/// The confirm CTA's tap handler, or null when the button is dead. Read off the
+/// GestureDetector rather than inferred from a colour, because "dead" is a property
+/// of the callback and the colour merely reports it.
+VoidCallback? _ctaOnTap(WidgetTester tester) => tester
+    .widget<GestureDetector>(
+      find
+          .ancestor(
+            of: find.text('ยืนยัน'),
+            matching: find.byType(GestureDetector),
+          )
+          .first,
+    )
+    .onTap;
 
 SyncOperation _op(String id, SyncOpStatus status) => SyncOperation(
   id: id,
@@ -664,6 +737,147 @@ void main() {
 
       expect(repo.submits, 2);
       expect(repo.opIds.toSet(), hasLength(2), reason: 'a fresh key each time');
+    });
+  });
+
+  // `submitting` was, until this group, a state no test had ever seen: every fake
+  // resolves in a microtask, so `pumpAndSettle` steps over it and the two guards keyed
+  // to it were unfalsifiable. A Completer-held write makes it last.
+  group('submitting is a state something can be IN', () {
+    testWidgets('the CTA is DEAD while the write is in flight', (
+      WidgetTester tester,
+    ) async {
+      final _GatedRepo repo = _GatedRepo(
+        outcome: SyncOutcome.deferred,
+        projects: <FieldStockEnt>[_project('p1')],
+      );
+      await _pump(tester, repo);
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      expect(
+        _ctaOnTap(tester),
+        isNotNull,
+        reason:
+            'staged and idle — the button is live, or the test proves nothing',
+      );
+
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pump(); // repaint with the submit in flight
+
+      expect(
+        _ctaOnTap(tester),
+        isNull,
+        reason:
+            'a live-looking button over an in-flight material issue invites the '
+            'second tap this whole round exists to make impossible; the basket '
+            'is still staged, so `_canSubmit` alone keeps it enabled and only '
+            'the `_state != submitting` term takes it down',
+      );
+
+      repo.gate.complete();
+      await tester.pumpAndSettle();
+      expect(repo.submits, 1);
+      expect(
+        _ctaOnTap(tester),
+        isNotNull,
+        reason: 'and it comes back once the write lands — dead, not disabled',
+      );
+    });
+  });
+
+  // A confirmed issue really did cut the ledger, so every `on_hand` on screen is now
+  // the PRE-ISSUE balance. The emptied basket says "done"; a stale balance states a
+  // FACT that is no longer true, and it is the number the next issue is sized against.
+  group('a confirmed issue re-reads the shelf', () {
+    testWidgets(
+      'the row shows the POST-issue balance, not the one it was sized '
+      'against',
+      (WidgetTester tester) async {
+        final _RefreshingRepo repo = _RefreshingRepo(
+          outcome: SyncOutcome.synced,
+          projects: <FieldStockEnt>[_project('p1')],
+        );
+        await _pump(tester, repo);
+        expect(find.text('MAT-CEM-001 · สต็อก 1,240 ถุง'), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.add).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('ยืนยัน'));
+        await tester.pumpAndSettle();
+
+        expect(
+          repo.stockReadFor.length,
+          2,
+          reason: 'the confirmation must re-run GET /inventory/stock',
+        );
+        expect(find.text('MAT-CEM-001 · สต็อก 1,140 ถุง'), findsOneWidget);
+        expect(
+          find.text('MAT-CEM-001 · สต็อก 1,240 ถุง'),
+          findsNothing,
+          reason: 'the pre-issue figure must be GONE, not merely joined',
+        );
+      },
+    );
+
+    testWidgets('a QUEUED issue does NOT re-read — nothing has been cut yet', (
+      WidgetTester tester,
+    ) async {
+      // Pins the refresh to `confirmed` specifically. A deferred write has touched
+      // no ledger, so re-reading would either change nothing or — worse, on a
+      // half-open link — spend a round trip to redraw the same number while the
+      // real write is still waiting.
+      final _RefreshingRepo repo = _RefreshingRepo(
+        outcome: SyncOutcome.deferred,
+        projects: <FieldStockEnt>[_project('p1')],
+      );
+      await _pump(tester, repo);
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+
+      expect(repo.stockReadFor.length, 1);
+      expect(find.text('MAT-CEM-001 · สต็อก 1,240 ถุง'), findsOneWidget);
+    });
+
+    testWidgets('the refresh does NOT reset a picked project back to the primary', (
+      WidgetTester tester,
+    ) async {
+      // The reload runs the same `_apply` as the first load, and `_apply` is where
+      // the primary-project default lives. Re-defaulting there would move the NEXT
+      // issue's attribution off the project the storekeeper deliberately chose —
+      // a wrong `project_id` on a money write, made invisibly by a refresh.
+      final _RefreshingRepo repo = _RefreshingRepo(
+        outcome: SyncOutcome.synced,
+        projects: <FieldStockEnt>[
+          _project('p1', name: 'A'),
+          _project('p2', name: 'B'),
+        ],
+      );
+      await _pump(tester, repo);
+      await tester.tap(find.text('A')); // the used-with slot
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('B').last); // the sheet row
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+      expect(repo.lastProjectId, 'p2');
+
+      // The shelf was re-read, and the attribution survived it.
+      expect(repo.stockReadFor.length, 2);
+      expect(find.text('B'), findsOneWidget);
+      expect(find.text('A'), findsNothing);
+
+      // And the NEXT issue still charges p2.
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ยืนยัน'));
+      await tester.pumpAndSettle();
+      expect(repo.lastProjectId, 'p2');
+      expect(repo.submits, 2);
     });
   });
 
