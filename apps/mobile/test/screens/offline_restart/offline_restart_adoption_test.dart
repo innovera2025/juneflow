@@ -48,6 +48,7 @@ import 'package:juneflow_mobile/screens/field_progress/field_progress_screen.dar
 import 'package:juneflow_mobile/screens/field_stock/field_stock_agg.dart';
 import 'package:juneflow_mobile/screens/field_stock/field_stock_repository.dart';
 import 'package:juneflow_mobile/screens/field_stock/field_stock_screen.dart';
+import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_agg.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_repository.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_screen.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_agg.dart';
@@ -281,6 +282,37 @@ class _StockRepo extends DioFieldStockRepository {
     <String, Object?>{'id': 'p1', 'name': 'juneflow พาร์ค ราชพฤกษ์'},
     <String, Object?>{'id': 'p2', 'name': 'juneflow เพลส บางนา'},
   ];
+}
+
+/// [_StockRepo] whose shelf CHANGES between reads — a server that has since applied
+/// the withdrawal, which is what a real one does the moment the issue posts.
+///
+/// It exists because the pre-fix reconciliation and the fixed one are hard to tell
+/// apart on this screen by state alone: BOTH end with the op released and the basket
+/// editable. What only the fixed one does is re-read `on_hand`, and that is not
+/// cosmetic — it is the figure the storekeeper decides the NEXT withdrawal against,
+/// and after a posted issue every balance still on screen is the PRE-issue one.
+class _RefreshingStockRepo extends _StockRepo {
+  _RefreshingStockRepo(super.p);
+
+  /// How many times the shelf has been read. The FIRST read is the mount's; any
+  /// later one is a refresh, and only a refresh can see the post-issue figure.
+  int reads = 0;
+
+  @override
+  Future<List<FieldStockEnt>> listStock(String warehouseId) async {
+    reads++;
+    return <FieldStockEnt>[
+      <String, Object?>{
+        'item_id': 'i1',
+        'warehouse_id': warehouseId,
+        'item_code': 'MAT-CEM-001',
+        'item_name': 'ปูนซีเมนต์ตราเสือ',
+        'unit': 'ถุง',
+        'on_hand': reads <= 1 ? 1240 : 1239,
+      },
+    ];
+  }
 }
 
 /// [_ProgressRepo] whose QUEUE READ takes real time.
@@ -526,6 +558,19 @@ const String _queuedCard = 'รอส่ง';
 /// one another (`findAdoptableOp` returns null for both).
 const String _failedCard = 'ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง';
 
+/// The durable-success copy pm-notes, pm-checklist and field-progress render — the
+/// answer a reconciliation owes a write the server ACCEPTED, and the one `idle`
+/// replaced with a screen claiming nothing had been sent.
+const String _savedCard = 'บันทึกแล้ว';
+
+/// pm-checkin's success card is `"Check-in หน้างานสำเร็จ · {time}"`, so it is matched
+/// on its stem — the caption is asserted separately, and on purpose.
+const String _checkinSuccess = 'Check-in หน้างานสำเร็จ';
+
+/// Stands in for st-grlist, the route st-receive is pushed FROM and pops back to.
+/// A pop is only observable when there is something underneath to be revealed.
+const String _grlistSentinel = 'ST-GRLIST';
+
 final ScreenStrings _recvStrings = ScreenStrings.fromJsonString('''
 {
   "title": "ตรวจนับ-รับของ",
@@ -701,6 +746,21 @@ Future<void> _tapCtaSpinner(WidgetTester tester) async {
   await _flush(tester);
 }
 
+/// Let a route transition that an ASYNC callback started actually run.
+///
+/// Both kinds of pump are needed, in this order. The zero-duration frames come first
+/// because the pop is not INITIATED until `_resolve`'s own awaits have flushed; the
+/// real durations come after because a transition moves no distance on frames that
+/// take no time — a pop begun and then frozen leaves the route in the tree, and an
+/// assertion on its absence fails while the code under test is perfectly correct.
+Future<void> _settleRoutes(WidgetTester tester) async {
+  await _flush(tester, 20);
+  for (int i = 0; i < 6; i++) {
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+  await _flush(tester, 5);
+}
+
 /// Let every outstanding `_slow` queue read finish.
 ///
 /// A `_SlowDue*Repo` turns each `due()` into a real timer, and the screens call
@@ -763,6 +823,50 @@ Future<void> _mountRecv(
     poId: poId,
   ),
 );
+
+/// st-receive mounted the way the app really reaches it: PUSHED over st-grlist.
+///
+/// [_mountRecv] puts the screen at the root, where `Navigator.maybePop` is a no-op —
+/// which silently hides the whole confirmed outcome, since B-266 made the POP the
+/// confirmation. Here there is a route underneath, so the pop is observable and a pop
+/// that should NOT have happened is too.
+Future<void> _mountRecvPushed(
+  WidgetTester tester,
+  InMemorySyncQueue queue,
+  _Transport transport, {
+  String poId = 'po-A',
+}) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Builder(
+        builder: (BuildContext context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (BuildContext _) => Scaffold(
+                    body: StReceiveScreen(
+                      repo: _RecvRepo(_processor(queue, transport)),
+                      strings: _recvStrings,
+                      i18n: _i18n,
+                      poId: poId,
+                    ),
+                  ),
+                ),
+              ),
+              child: const Text(_grlistSentinel),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await _flush(tester, 3);
+  await tester.tap(find.text(_grlistSentinel));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400)); // the push transition
+  await _flush(tester);
+}
 
 Future<void> _mountCheckin(
   WidgetTester tester,
@@ -1612,35 +1716,448 @@ void main() {
       expect(await queue.length(), 0);
     });
 
-    testWidgets('field-stock (MONEY): a 4xx DEAD-LETTER is not reported as the same '
-        'thing as a success', (WidgetTester tester) async {
-      // WHY THIS SCREEN'S MEMBER IS THE DEAD-LETTER HALF, AND NOT THE KEY COUNT.
+    testWidgets(
+      'field-stock (MONEY — a second key is a second stock cut + a second JV): '
+      'the basket stays frozen behind the op being retried',
+      (WidgetTester tester) async {
+        // THIS SCREEN NEEDS THE RE-STAGE TO EXPRESS THE DEFECT, and that is the
+        // defect: `_onConfirm` returns early on an empty basket, and the basket
+        // after a tab swap IS empty, so the second key cannot be minted by a bare
+        // tap the way it can on the other five. It is minted by a storekeeper who
+        // sees an unfrozen, empty basket, concludes nothing was sent, and stages
+        // the same withdrawal again. `_locked` is what stands in the way, and it
+        // is `_opId` — released by a reconciliation that had no business writing.
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        await _mountStock(tester, queue, transport);
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        expect((await _queued(queue)).single.endpoint, '/inventory/issues');
+        await _kill(tester);
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountStock(tester, queue, transport);
+        await _tap(tester, _confirmRecv);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        gate.complete();
+        await _flush(tester, 20);
+
+        // The storekeeper, who has been shown no confirmation, stages the same
+        // bag again and confirms.
+        await _stageOne(tester);
+        await _tapIfPresent(tester, _confirmRecv);
+        await _flush(tester, 20);
+
+        expect(
+          transport.acceptedKeys,
+          <Object?>[k1],
+          reason:
+              'a second key here is a second POST /inventory/issues: a second '
+              'material_issue, a second stock_ledger row at -qty AND a second '
+              'Dr 1140 / Cr 5020 JV. `material_issue_idempotency_uq` cannot '
+              'stop it — the two keys differ, so they are legitimately two '
+              'issues',
+        );
+      },
+    );
+  });
+
+  // =========================================================================
+  // 1b-c-2. WHAT AN UNTOUCHED SCREEN IS TOLD — the other half of B-341.
+  //
+  //         Nobody taps in these. The screen adopts on mount, the held replay
+  //         lands, and the reconciliation is the only thing that runs — so this
+  //         is where its ANSWER is pinned down, as opposed to 1b-d, which pins
+  //         down when it is allowed to answer at all.
+  //
+  //         `findAdoptableOp` returns null for a SYNCED op (removed by
+  //         `markSynced`) and for a 4xx DEAD-LETTER (made unadoptable by
+  //         `markFailed`) alike, so a reconciliation built on it collapses two
+  //         OPPOSITE outcomes into one — and into `idle`, the state that means
+  //         nothing was ever enqueued. Resolving through each screen's own
+  //         resolver, fed the drain's own report, is what separates them.
+  // =========================================================================
+  group('an untouched screen is told what the drain did', () {
+    testWidgets('st-receive (MONEY): a synced receipt CONFIRMS, and confirmed pops back '
+        'to st-grlist', (WidgetTester tester) async {
+      // THE OPEN QUESTION, ANSWERED IN THE ONE PLACE IT IS VISIBLE. `confirmed`
+      // on this screen IS the pop — B-266 dropped the success takeover because
+      // all four of its claims are unbacked, and left the return to st-grlist as
+      // the confirmation. So the storekeeper lands exactly where their own tap
+      // one beat later would have put them, which is also where both of the
+      // prototype's back paths go (L54/L61).
       //
-      // The other five hand the reconciliation a control that can mint on the
-      // spot: their CTA submits what is already on screen. This one cannot —
-      // `_onConfirm` returns early on an empty basket, and the basket after a
-      // tab swap IS empty. So the second key here needs a deliberate re-stage,
-      // which over a CONFIRMED issue is a legitimate second withdrawal and must
-      // NOT be blocked. The key count therefore cannot separate the defect from
-      // correct behaviour on this screen; what separates them is what the screen
-      // SAYS, and the sharpest case is the one where the two answers are exact
-      // opposites.
-      //
-      // `findAdoptableOp` returns null for a SYNCED op and for a 4xx
-      // DEAD-LETTER alike, so a reconciliation built on it reports a permanent
-      // server REJECTION as `idle` — no card, clean basket, nothing to retry and
-      // nothing said. The queue still holds the dead op forever.
+      // Mounted as a PUSHED route over a sentinel, because a pop is only
+      // observable when there is something to pop to.
       final InMemorySyncQueue queue = InMemorySyncQueue();
       final _Transport transport = _Transport(); // offline
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountRecvPushed(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+      expect(find.byType(StReceiveScreen), findsOneWidget);
+
+      gate.complete();
+      await _settleRoutes(tester);
+
+      expect(transport.acceptedKeys, <Object?>[k1]);
+      // The pop is witnessed by the PUSHED route's absence, not by the sentinel
+      // appearing: `maintainState` is the MaterialPageRoute default, so the route
+      // underneath is in the tree the whole time and findable throughout.
+      expect(
+        find.byType(StReceiveScreen),
+        findsNothing,
+        reason:
+            'the receipt is POSTED, and on this screen `confirmed` IS the pop '
+            '(B-266 dropped the takeover, leaving the return to st-grlist as '
+            'the confirmation). `idle` would instead leave a live green CTA '
+            'over the same counts with `_opId` null and an empty queue — a '
+            'screen stating the write never happened, one tap from a second '
+            'GR and a second JV',
+      );
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-checkin: a synced check-in CONFIRMS', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        find.textContaining(_checkinSuccess),
+        findsOneWidget,
+        reason: 'the check-in is recorded; the green card says so',
+      );
+      expect(find.text(_queuedCard), findsNothing);
+      expect(
+        find.text(_checkinBtn),
+        findsNothing,
+        reason:
+            'confirmed swaps the CTA for the onward checklist affordance, so '
+            'the control that could mint a second key is gone entirely',
+      );
+    });
+
+    testWidgets('pm-notes: a synced close-out SAVES', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_savedCard), findsOneWidget);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-checklist: a synced checklist SAVES', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_savedCard), findsOneWidget);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('field-progress: a synced delivery is SENT', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_savedCard), findsOneWidget);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('field-stock (MONEY): a synced issue re-reads the shelf the next '
+        'withdrawal is decided on', (WidgetTester tester) async {
+      // THIS SCREEN RENDERS NO SUCCESS CARD AT ALL — B-266: the copy has no key,
+      // and the server's `value`/`jv_no` are deliberately not disclosed. So
+      // `confirmed` and the old `idle` look almost alike here: both release the
+      // op and unfreeze the basket, and asserting only that would pass on the
+      // defect as readily as on the fix.
+      //
+      // What only a real terminal outcome does is re-read `on_hand`. That is the
+      // one thing on this screen that a posted issue actually changes, and it is
+      // the figure the storekeeper decides the NEXT withdrawal against: after a
+      // cut, every balance still on screen is the PRE-issue one.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+      final _RefreshingStockRepo repo1 = _RefreshingStockRepo(
+        _processor(queue, transport),
+      );
+
+      await _mountStock(tester, queue, transport, repo: repo1);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      final _RefreshingStockRepo repo2 = _RefreshingStockRepo(
+        _processor(queue, transport),
+      );
+      await _mountStock(tester, queue, transport, repo: repo2);
+      expect(find.text(_queuedCard), findsOneWidget);
+      // `code · stock N unit` is ONE Text, so the balance is matched inside it.
+      expect(
+        find.textContaining('1,240'),
+        findsOneWidget,
+        reason: 'the mount read must really show the PRE-issue balance',
+      );
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsNothing);
+      expect(
+        repo2.reads,
+        greaterThan(1),
+        reason: 'a resolved issue must send the screen back for the shelf',
+      );
+      expect(
+        find.textContaining('1,239'),
+        findsOneWidget,
+        reason:
+            'the ledger really was cut, so the balance on screen has to be '
+            'the post-issue one — `idle` leaves the pre-issue figure up, and '
+            'that figure is what decides how much may be taken next',
+      );
+      expect(find.textContaining('1,240'), findsNothing);
+      // And the op is released with it, so the basket is editable again.
+      await _stageOne(tester);
+      expect(
+        find.text('1'),
+        findsOneWidget,
+        reason: 'the op is resolved, so the stepper must accept a new basket',
+      );
+    });
+
+    // ---- the same six, when the server said NO ----
+
+    testWidgets('st-receive (MONEY): a 4xx DEAD-LETTER is not the same answer as a '
+        'success', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountRecvPushed(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      // Settled EXACTLY as the synced case above, so a pop this outcome must not
+      // make would have had every chance to run before it is asserted absent.
+      gate.complete();
+      await _settleRoutes(tester);
+
+      expect(
+        await _deadLetters(queue),
+        1,
+        reason: 'the fixture must really produce a permanent dead-letter',
+      );
+      expect(
+        find.text(_failedCard),
+        findsOneWidget,
+        reason:
+            'a permanent rejection and a durable success are OPPOSITE '
+            'outcomes, and `findAdoptableOp` returns null for both. Reporting '
+            'this one as `idle` says the receipt simply is not there, when the '
+            'server refused it and no drain will ever send it again',
+      );
+      expect(
+        find.byType(StReceiveScreen),
+        findsOneWidget,
+        reason: 'a rejected receipt must NOT pop as though it had posted',
+      );
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-checkin: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.textContaining(_checkinSuccess), findsNothing);
+    });
+
+    testWidgets('pm-notes: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.text(_savedCard), findsNothing);
+    });
+
+    testWidgets('pm-checklist: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.text(_savedCard), findsNothing);
+    });
+
+    testWidgets('field-progress: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.text(_savedCard), findsNothing);
+    });
+
+    testWidgets('field-stock (MONEY): a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
 
       await _mountStock(tester, queue, transport);
       await _stageOne(tester);
       await _tap(tester, _confirmRecv);
-      expect((await _queued(queue)).single.endpoint, '/inventory/issues');
       await _kill(tester);
 
-      // Session 2: the signal is back, and the server will REJECT this issue
-      // permanently (400 — e.g. the shelf no longer holds the quantity).
       transport.offline = false;
       transport.status = 400;
       final Completer<void> gate = Completer<void>();
@@ -1651,11 +2168,7 @@ void main() {
       gate.complete();
       await _flush(tester, 20);
 
-      expect(
-        await _deadLetters(queue),
-        1,
-        reason: 'the fixture must really produce a permanent dead-letter',
-      );
+      expect(await _deadLetters(queue), 1);
       expect(
         find.text(_failedCard),
         findsOneWidget,
@@ -1671,6 +2184,57 @@ void main() {
         reason: '"saved, will retry" is false of an op no drain will retry',
       );
     });
+
+    testWidgets(
+      'pm-checkin: the confirmed caption is when the check-in was CAPTURED, '
+      'not when the signal came back',
+      (WidgetTester tester) async {
+        // `_submitTime` dies with the State, so on a relaunch the confirmed card
+        // fell back to `DateTime.now()` — captioning a check-in made hours ago
+        // with the moment the network happened to return. The adopted op carries
+        // the real instant: [_acquireAndSubmit] passes the very `now` it stores in
+        // `_submitTime` as the op's `createdAt`, so seeding from it is the SAME
+        // quantity rather than a second-best stand-in.
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        // A check-in captured three hours ago, straight into the durable queue —
+        // built by the production repository, so the op is the real shape.
+        final DateTime captured = DateTime.now().subtract(
+          const Duration(hours: 3),
+        );
+        await _CheckinRepo(_processor(queue, transport)).submitCheckin(
+          workOrderId: 'wo-1',
+          opId: 'k-old',
+          gps: '13.7563, 100.5018',
+          now: captured,
+        );
+        expect((await _queued(queue)).single.id, 'k-old');
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountCheckin(tester, queue, transport);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        gate.complete();
+        await _flush(tester, 20);
+
+        final String capturedHhMm = formatCheckinTime(captured);
+        expect(
+          find.textContaining(capturedHhMm),
+          findsOneWidget,
+          reason:
+              'the caption must read $capturedHhMm — when the technician stood '
+              'at the asset — not the time the replay happened to succeed',
+        );
+        expect(
+          find.textContaining(formatCheckinTime(DateTime.now())),
+          findsNothing,
+          reason: 'a `DateTime.now()` fallback is a fabricated check-in time',
+        );
+      },
+    );
   });
 
   // =========================================================================
