@@ -105,6 +105,15 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// Nothing lists GRs on mobile yet, so a bare tab route follows the register's
 /// newest RECEIVED receipt (the srv-track precedent) and the nullable-id push
 /// seam is ready for a future list. It performs NO write.
+/// `field-stock` is the on-site MATERIAL ISSUE (GET /inventory/stock balances for a
+/// warehouse -> POST /inventory/issues through the offline queue). It is the
+/// heaviest write on mobile: one transaction cuts the stock ledger AND posts a
+/// Dr 1140 / Cr 5020 JV, which is why it carries a B-312 idempotency key. Its
+/// prototype CTA shows a money total and this screen's does NOT — no endpoint
+/// prices a basket before it is posted, so the figure could only be computed on the
+/// client (field_stock_agg.dart "THE 18,000 BAHT"). Like the rest of the
+/// pushed-subject screens its warehouse id is nullable: nothing lists warehouses on
+/// mobile today, so a bare tab route follows the newest.
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -127,6 +136,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'field-progress',
   'field-pr',
   'field-gr',
+  'field-stock',
 };
 
 /// The set of all known route ids.
