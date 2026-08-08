@@ -143,11 +143,20 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   ///
   /// A null does NOT mean "nothing of mine is queued" — only "this State is not
   /// tracking one". State is not durable and the QUEUE is, so the two disagree after
-  /// an app kill AND, on a perfectly healthy network, for the whole duration of the
-  /// on-mount drain, before [_resumeQueued] has come back to adopt. [_resumeQueued]
-  /// makes the outstanding write VISIBLE; what keeps a tap from minting a second key
-  /// is that [_onPrimary] asks the queue itself before minting.
+  /// an app kill — and, until [_settling] clears, before this mount's own queue read
+  /// has answered. [_resumeQueued] makes the outstanding write VISIBLE; what keeps a
+  /// tap from minting a second key is that [_onPrimary] asks the queue itself before
+  /// minting, and that no tap is possible before the read lands (B-341).
   String? _opId;
+
+  /// True until this mount's QUEUE READ has answered "is a check-in of mine still
+  /// outstanding for this work order?" — the window the CTA is quiet for (B-341).
+  ///
+  /// Raised in [initState], so the very FIRST frame already renders the quiet CTA, and
+  /// lowered in a `finally` so a queue read that throws opens the button rather than
+  /// parking it forever. The contract, and why the window is bounded, is in
+  /// offline/pending_op_adoption.dart.
+  bool _settling = false;
 
   /// The honest client submit time, shown in the confirmed state (the server's
   /// ActionOk carries no timestamp — pm.ts workOrderWire).
@@ -161,39 +170,78 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   void initState() {
     super.initState();
     if (widget.workOrderId != null) {
+      _settling = true;
       unawaited(_resumeQueued());
     }
   }
 
   /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
-  /// app kill (B-330).
+  /// app kill (B-330), in the order B-341 requires.
   ///
-  /// The drain runs FIRST and is awaited, so the online case resolves normally and
-  /// leaves nothing to adopt. A check-in STILL pending for this work order afterwards
-  /// is one this device captured and the server has not accepted, so the screen takes
-  /// its id back and shows the honest queued state instead of a clean slate.
+  /// THE QUEUE READ RUNS FIRST and the CTA is quiet for exactly it. A drain can only
+  /// shrink what is adoptable, so reading first cannot miss anything a post-drain read
+  /// would have found — and it keeps every network call OUT of the window the user is
+  /// waiting on (pending_op_adoption.dart). A check-in pending for this work order is
+  /// one this device captured and the server has not accepted, so the screen takes its
+  /// id back and says so instead of showing a clean slate.
   ///
-  /// WHAT THIS DOES NOT CLOSE: `await drain()` is one real HTTP round trip (Dio is
-  /// built with no `connectTimeout`), and the check-in CTA is live for all of it with
-  /// [_opId] still null. This is the VISIBLE half of the rehydration; the half that
-  /// prevents the second key is the pre-mint queue check in [_onPrimary].
+  /// The drain then runs, and [_reconcile] takes the card back down if it resolved the
+  /// very write the card was about.
   Future<void> _resumeQueued() async {
     final String? woId = widget.workOrderId;
     if (woId == null) return;
+    final String? adopted = await _settleQueue(woId);
     await widget.repo.drain();
-    if (!mounted) return;
-    final SyncOperation? mine = findAdoptableOp(
+    if (adopted != null) await _reconcile(woId, adopted);
+  }
+
+  /// The queue read the CTA waits on. Returns the adopted op id, or null.
+  Future<String?> _settleQueue(String woId) async {
+    try {
+      final SyncOperation? mine = findAdoptableOp(
+        await widget.repo.due(),
+        pmCheckinOpIdentity(woId),
+      );
+      if (mine == null || !mounted) return null;
+      setState(() {
+        _opId = mine.id;
+        // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+        // precisely what `queued` means: captured, not confirmed.
+        _state = PmCheckinState.queued;
+      });
+      return mine.id;
+    } catch (_) {
+      // A queue read that FAILED has answered nothing, and a CTA left quiet on an
+      // unanswerable question is the dead end B-341 forbids. The button opens; the
+      // mint site asks the same queue again before it mints.
+      return null;
+    } finally {
+      if (mounted) setState(() => _settling = false);
+    }
+  }
+
+  /// Take the queued state down once the drain has resolved the write it described —
+  /// the display cost of adopting before the drain, paid back one round trip later on
+  /// exactly the state the old drain-first ordering reached. Skipped once the
+  /// technician has acted: their flow owns `_state` from that point.
+  Future<void> _reconcile(String woId, String adopted) async {
+    if (!_stillShowing(adopted)) return;
+    final SyncOperation? still = findAdoptableOp(
       await widget.repo.due(),
       pmCheckinOpIdentity(woId),
     );
-    if (mine == null || !mounted) return;
+    // At most one op per identity is adoptable at a time (the B-330 invariant), so a
+    // non-null answer is the same check-in, still outstanding.
+    if (still != null || !_stillShowing(adopted)) return;
     setState(() {
-      _opId = mine.id;
-      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
-      // precisely what `queued` means: captured, not confirmed.
-      _state = PmCheckinState.queued;
+      _opId = null;
+      _state = PmCheckinState.idle;
     });
   }
+
+  /// True while the screen is still showing exactly what [_settleQueue] adopted.
+  bool _stillShowing(String adopted) =>
+      mounted && _opId == adopted && _state == PmCheckinState.queued;
 
   String _t(String field) => widget.i18n.t(widget.strings[field]);
 
@@ -216,6 +264,10 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
         _state == PmCheckinState.submitting) {
       return;
     }
+    // The CTA is already rendered quiet for this window ([_actionBar]); this is the
+    // same refusal at the handler, so a tap delivered against a stale frame cannot
+    // slip past it either (B-341).
+    if (_settling) return;
 
     final String? tracked = _opId;
     if (tracked != null) {
@@ -556,9 +608,14 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   /// (feature/mobile-pm-checklist), so this no longer has to sit honest-disabled.
   Widget _actionBar() {
     final bool confirmed = _state == PmCheckinState.confirmed;
+    // Quiet during the on-mount queue read as well as while acquiring/submitting
+    // (B-341). It wears the SAME muted-fill + spinner those already use, which needs
+    // no new copy and states the truth: the screen is working, briefly, on a local
+    // read.
     final bool busy =
         _state == PmCheckinState.acquiringGps ||
-        _state == PmCheckinState.submitting;
+        _state == PmCheckinState.submitting ||
+        _settling;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 28),
       decoration: const BoxDecoration(

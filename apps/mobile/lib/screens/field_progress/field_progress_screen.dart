@@ -182,6 +182,20 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   /// Null means "no op of mine is currently being tracked here".
   String? _opId;
 
+  /// True until the QUEUE READ for the periods now on view has answered "is a delivery
+  /// of mine still outstanding?" — the window every deliver button is quiet for
+  /// (B-341).
+  ///
+  /// Raised in [initState] AND AGAIN IN [_selectContract], which is this screen's own
+  /// difference: the other five ask the question once per mount, because their anchor
+  /// is fixed for the mount. Here the foreman can swap the whole set of anchors
+  /// without leaving the screen, and the answer that was true for contract A says
+  /// nothing about contract B — so the window re-opens with the new period list.
+  /// Lowered in a `finally` so a queue read that throws opens the buttons rather than
+  /// parking them forever. The contract, and why the window is bounded, is in
+  /// offline/pending_op_adoption.dart.
+  bool _settling = true;
+
   @override
   void initState() {
     super.initState();
@@ -190,50 +204,101 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   }
 
   /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an app
-  /// kill (B-330). The drain runs first, so the online case resolves normally and
-  /// leaves nothing to adopt.
+  /// kill (B-330), in the order B-341 requires.
+  ///
+  /// THE DRAIN NO LONGER BLOCKS THE READ. It used to be awaited first, which put an
+  /// unbounded HTTP round trip (Dio sets no `connectTimeout`) in front of the period
+  /// list itself: the screen was blank for the whole of it and the ONE thing B-341
+  /// bounds — the quiet CTA — would have been unbounded with it. Now the drain is
+  /// started immediately but awaited last, and what the buttons wait on is the load
+  /// plus a LOCAL queue read. A drain can only shrink what is adoptable, so nothing is
+  /// missed by reading before it (offline/pending_op_adoption.dart).
   Future<void> _resumeQueued() async {
-    await widget.repo.drain();
-    await _loadThenAdopt();
+    // Handled at construction, so a drain that throws cannot surface as an unhandled
+    // async error while it sits unawaited below.
+    final Future<void> drained = widget.repo.drain().then<void>(
+      (DrainReport _) {},
+      onError: (Object _) {},
+    );
+    final String? adopted = await _loadThenAdopt();
+    await drained;
+    if (adopted != null) await _reconcile(adopted);
   }
 
   /// Read this contract's periods, then adopt whichever of them already has a write
-  /// waiting in the queue.
-  Future<void> _loadThenAdopt() async {
+  /// waiting in the queue. Returns the adopted op id, or null.
+  Future<String?> _loadThenAdopt() async {
     await _load();
-    await _adoptQueued();
+    return _adoptQueued();
   }
 
   /// Take back the id of a delivery still pending for one of the periods ON VIEW.
   ///
-  /// This screen's shape differs from the other four offline-write screens: their
-  /// anchor is fixed for the whole mount (one work order, one PO), so they can adopt
-  /// straight after the drain. Here the anchor is one of N periods that a READ has to
-  /// resolve first — and the foreman can switch contracts without leaving the screen —
-  /// so adoption is deliberately tied to a completed load, and an op belonging to a
-  /// period of some OTHER contract is left alone rather than raising a status bar
-  /// about a row that is not on screen.
-  Future<void> _adoptQueued() async {
-    if (!mounted || _opId != null) return;
-    final List<FieldProgressPeriod> periods =
-        _periods ?? const <FieldProgressPeriod>[];
-    if (periods.isEmpty) return;
-    final ({SyncOperation op, int identityIndex})? mine = findAdoptableOpAmong(
+  /// This screen's shape differs from the other five offline-write screens: their
+  /// anchor is fixed for the whole mount (one work order, one PO, one warehouse), so
+  /// their queue read needs nothing but a widget parameter. Here the anchor is one of N
+  /// periods that a READ has to resolve first — and the foreman can switch contracts
+  /// without leaving the screen — so adoption is deliberately tied to a completed load,
+  /// and an op belonging to a period of some OTHER contract is left alone rather than
+  /// raising a status bar about a row that is not on screen.
+  ///
+  /// Waiting on that load costs the buttons nothing they had: a deliver button is
+  /// rendered PER PERIOD, so until the periods land there is no button to quieten.
+  Future<String?> _adoptQueued() async {
+    try {
+      if (!mounted || _opId != null) return null;
+      final List<FieldProgressPeriod> periods =
+          _periods ?? const <FieldProgressPeriod>[];
+      if (periods.isEmpty) return null;
+      final ({SyncOperation op, int identityIndex})? mine =
+          findAdoptableOpAmong(await widget.repo.due(), <SyncOpIdentity>[
+            for (final FieldProgressPeriod p in periods)
+              fieldDeliverOpIdentity(p.id),
+          ]);
+      if (mine == null || !mounted) return null;
+      setState(() {
+        _opId = mine.op.id;
+        _pendingPeriodId = periods[mine.identityIndex].id;
+        // Only a still-replayable op is adoptable (findAdoptableOpAmong), and that is
+        // precisely what `queued` means: captured, not confirmed.
+        _state = FieldDeliverState.queued;
+      });
+      return mine.op.id;
+    } catch (_) {
+      // A queue read that FAILED has answered nothing, and buttons left quiet on an
+      // unanswerable question are the dead end B-341 forbids. They open; the mint site
+      // asks the same queue again before it mints.
+      return null;
+    } finally {
+      if (mounted) setState(() => _settling = false);
+    }
+  }
+
+  /// Take the status bar down once the drain has resolved the delivery it described —
+  /// the display cost of adopting before the drain, paid back one round trip later on
+  /// exactly the state the old drain-first ordering reached. Skipped once the foreman
+  /// has acted, or has switched contracts: their flow owns `_state` from that point.
+  Future<void> _reconcile(String adopted) async {
+    if (!_stillShowing(adopted)) return;
+    final String? periodId = _pendingPeriodId;
+    if (periodId == null) return;
+    final SyncOperation? still = findAdoptableOp(
       await widget.repo.due(),
-      <SyncOpIdentity>[
-        for (final FieldProgressPeriod p in periods)
-          fieldDeliverOpIdentity(p.id),
-      ],
+      fieldDeliverOpIdentity(periodId),
     );
-    if (mine == null || !mounted) return;
+    // At most one op per identity is adoptable at a time (the B-330 invariant), so a
+    // non-null answer is the same delivery, still outstanding.
+    if (still != null || !_stillShowing(adopted)) return;
     setState(() {
-      _opId = mine.op.id;
-      _pendingPeriodId = periods[mine.identityIndex].id;
-      // Only a still-replayable op is adoptable (findAdoptableOpAmong), and that is
-      // precisely what `queued` means: captured, not confirmed.
-      _state = FieldDeliverState.queued;
+      _opId = null;
+      _pendingPeriodId = null;
+      _state = FieldDeliverState.idle;
     });
   }
+
+  /// True while the screen is still showing exactly what [_adoptQueued] adopted.
+  bool _stillShowing(String adopted) =>
+      mounted && _opId == adopted && _state == FieldDeliverState.queued;
 
   Future<void> _load() async {
     try {
@@ -307,6 +372,11 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
       _state = FieldDeliverState.idle;
       _opId = null;
       _pendingPeriodId = null;
+      // A whole new set of anchors is on its way in, and nothing is yet known about
+      // any of them — so the window re-opens exactly as it did on mount (B-341).
+      // Without this, the first frame of the new contract's period list would carry
+      // live deliver buttons over an unasked queue.
+      _settling = true;
     });
     // Adopt again after the read: the chosen contract may be the one whose period
     // still has a write waiting in the queue (B-330).
@@ -319,6 +389,10 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   Future<void> _deliver(FieldProgressPeriod period) async {
     if (_state == FieldDeliverState.sending) return;
     if (!period.deliverable) return;
+    // The buttons are already rendered quiet for this window ([_deliverButton]); this
+    // is the same refusal at the handler, so a tap delivered against a stale frame
+    // cannot slip past it either (B-341).
+    if (_settling) return;
 
     // Read the slot BEFORE the flip below overwrites `_pendingPeriodId`: this is the
     // question "is the op I am already tracking THIS period's?", and the answer has to
@@ -592,7 +666,10 @@ class _FieldProgressScreenState extends State<FieldProgressScreen> {
   /// the screen shows the contract's whole period list rather than the mock's single
   /// pre-selected one. The money on the prototype's label is dropped (money = SERVER).
   Widget _deliverButton(FieldProgressPeriod p, bool busy) {
-    final bool enabled = !busy && _state != FieldDeliverState.sending;
+    // Quiet until this contract's queue read has answered (B-341) — greyed exactly as
+    // it already greys while another row is sending, which needs no new copy.
+    final bool enabled =
+        !busy && _state != FieldDeliverState.sending && !_settling;
     return GestureDetector(
       onTap: enabled ? () => _deliver(p) : null,
       behavior: HitTestBehavior.opaque,

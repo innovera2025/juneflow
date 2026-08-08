@@ -271,6 +271,12 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   String? _projectId;
   String? _projectName;
 
+  /// The attribution the LOAD defaulted to, captured before an adopted op's charged
+  /// project replaces it, so [_reconcile] can put it back when that op resolves
+  /// (B-341). Meaningless while nothing is adopted.
+  String? _defaultProjectId;
+  String? _defaultProjectName;
+
   FieldStockState _state = FieldStockState.idle;
 
   /// The stable client idempotency key of the CURRENT attempt. Generated on the
@@ -302,6 +308,17 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// its only recovery).
   bool get _locked => _opId != null;
 
+  /// True until this mount's QUEUE READ has answered "is an issue of mine still
+  /// outstanding for this warehouse?" — the window the confirm CTA is quiet for
+  /// (B-341).
+  ///
+  /// Raised at construction, so the very FIRST frame already renders the quiet CTA: a
+  /// frame painted before the read starts would be the same hole one paint earlier.
+  /// Lowered in a `finally`, so a queue read that throws opens the button rather than
+  /// parking it forever. The contract, and why the window is bounded, is in
+  /// offline/pending_op_adoption.dart.
+  bool _settling = true;
+
   @override
   void initState() {
     super.initState();
@@ -317,18 +334,18 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   ///   * the DRAIN is started IMMEDIATELY, exactly as before, so a queue left over
   ///     from a prior session begins flushing without waiting on this screen's read
   ///     chain;
-  ///   * the LOAD is awaited before adopting, because unlike every other adopting
-  ///     screen this one's identity is NOT a widget parameter: the warehouse is
-  ///     resolved BY the load (a bare tab route follows the register's newest), so
-  ///     there is nothing to match against until it lands;
-  ///   * the DRAIN is awaited too, so the online case has already resolved and left
-  ///     nothing to adopt. Whatever is STILL pending for this warehouse afterwards is
-  ///     an issue this device captured and the server has not accepted.
-  ///
-  /// WHAT THIS DOES NOT CLOSE: the screen is fully rendered with a LIVE CTA for the
-  /// whole of that drain, and [_opId] is null throughout it, so this alone would
-  /// still let a tap mint a second key. This is the VISIBLE half; the money half is
-  /// the pre-mint queue check in [_onConfirm].
+  ///   * the LOAD is awaited before adopting, because unlike the four widget-parameter
+  ///     screens this one's identity is NOT a parameter: the warehouse is resolved BY
+  ///     the load (a bare tab route follows the register's newest), so there is nothing
+  ///     to match against until it lands. It costs the CTA nothing to wait on it —
+  ///     `_canSubmit` is false over an unloaded shelf, so the button was already inert
+  ///     for exactly that stretch, and B-341 only makes the refusal visible;
+  ///   * the QUEUE READ then answers, and THAT is what the CTA waits on (B-341);
+  ///   * the DRAIN is awaited LAST. It used to be awaited before the adoption, which
+  ///     put an unbounded HTTP round trip (Dio sets no `connectTimeout`) inside the
+  ///     window; a drain can only shrink what is adoptable, so nothing is missed by
+  ///     reading before it (offline/pending_op_adoption.dart), and [_reconcile] takes
+  ///     the card down afterwards if the drain resolved the very op it described.
   Future<void> _resumeQueued() async {
     // Handled at construction, so a drain that throws can never surface as an
     // unhandled async error from this unawaited future — and cannot abandon the
@@ -337,54 +354,113 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
       (DrainReport _) {},
       onError: (Object _) {},
     );
-    try {
-      await _future;
-    } catch (_) {
-      return; // the read chain failed: there is no warehouse to match against
-    }
+    final String? adopted = await _settleQueue();
     await drained;
-    if (!mounted) return;
+    if (adopted != null) await _reconcile(adopted);
+  }
+
+  /// The queue read the CTA waits on. Returns the adopted op id, or null.
+  Future<String?> _settleQueue() async {
+    try {
+      try {
+        await _future;
+      } catch (_) {
+        return null; // the read chain failed: there is no warehouse to match against
+      }
+      if (!mounted) return null;
+      // The project the load defaulted to, kept so [_reconcile] can put it back if
+      // the drain resolves the op whose charged project replaces it below. Read
+      // AFTER the load, which is the only thing that ever sets it: reading it before
+      // captures the null this State starts with, and the "restore" then blanks the
+      // slot to an em-dash instead of returning it to the default.
+      final String? defaultProjectId = _projectId;
+      final String? defaultProjectName = _projectName;
+      final String? warehouseId = _warehouseId;
+      if (warehouseId == null) return null;
+      final SyncOperation? mine = findAdoptableOp(
+        await widget.repo.due(),
+        fieldStockOpIdentity(warehouseId),
+      );
+      if (mine == null || !mounted) return null;
+      _defaultProjectId = defaultProjectId;
+      _defaultProjectName = defaultProjectName;
+      setState(() {
+        _opId = mine.id;
+        // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+        // precisely what `queued` means: captured, not confirmed.
+        _state = FieldStockState.queued;
+        // The picker is about to be FROZEN behind this op, so it must show what the op
+        // actually charges rather than the primary project the fresh load just
+        // defaulted to. The anchor deliberately excludes `project_id` (see
+        // fieldStockOpIdentity), so the adopted op may legitimately carry a project the
+        // storekeeper picked in the previous mount; displaying the default instead
+        // would be an affirmative false statement about an outstanding write.
+        //
+        // THE MISS BRANCH IS THE SAME RULE, NOT AN EXCEPTION TO IT. When the charged id
+        // does not resolve against the loaded projects — it was archived, or it fell off
+        // GET /projects' first page (the read sends no pagination params) — the id is
+        // still adopted and only the NAME is left null, so the slot renders the em-dash
+        // that `MInput(value: _projectName ?? _dash)` already provides. Leaving the
+        // default in place instead would put a DIFFERENT real project's name on an
+        // outstanding write the user cannot edit, which is the affirmative false
+        // statement this block exists to prevent — an em-dash is honest, the default is
+        // not, and the two are not alike merely because neither is invented.
+        final Object? charged = mine.payload['project_id'];
+        if (charged is String) {
+          _projectId = charged;
+          _projectName = null;
+          for (final FieldStockEnt p in _projects) {
+            if (fieldStockStr(p, const <String>['id']) == charged) {
+              _projectName = fieldStockStr(p, const <String>['name']);
+              break;
+            }
+          }
+        }
+      });
+      return mine.id;
+    } catch (_) {
+      // A queue read that FAILED has answered nothing, and a CTA left quiet on an
+      // unanswerable question is the dead end B-341 forbids. The button opens; the
+      // mint site asks the same queue again before it mints, so nothing is duplicated
+      // on the strength of this failure.
+      return null;
+    } finally {
+      if (mounted) setState(() => _settling = false);
+    }
+  }
+
+  /// Unfreeze the basket once the drain has resolved the issue that owned it — the
+  /// display cost of adopting before the drain, paid back one round trip later on
+  /// exactly the state the old drain-first ordering reached. Skipped once the
+  /// storekeeper has acted: their flow owns `_state` from that point.
+  ///
+  /// The charged project goes back to the load's default with it. While the op was
+  /// live the picker HAD to show what that op charges (see [_settleQueue]); once it is
+  /// resolved there is no outstanding write to describe, and leaving the previous
+  /// issue's attribution in a now-editable slot would silently pre-address the NEXT
+  /// basket to it.
+  Future<void> _reconcile(String adopted) async {
+    if (!_stillShowing(adopted)) return;
     final String? warehouseId = _warehouseId;
     if (warehouseId == null) return;
-    final SyncOperation? mine = findAdoptableOp(
+    final SyncOperation? still = findAdoptableOp(
       await widget.repo.due(),
       fieldStockOpIdentity(warehouseId),
     );
-    if (mine == null || !mounted) return;
+    // At most one op per identity is adoptable at a time (the B-330 invariant), so a
+    // non-null answer is the same issue, still outstanding.
+    if (still != null || !_stillShowing(adopted)) return;
     setState(() {
-      _opId = mine.id;
-      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
-      // precisely what `queued` means: captured, not confirmed.
-      _state = FieldStockState.queued;
-      // The picker is about to be FROZEN behind this op, so it must show what the op
-      // actually charges rather than the primary project the fresh load just
-      // defaulted to. The anchor deliberately excludes `project_id` (see
-      // fieldStockOpIdentity), so the adopted op may legitimately carry a project the
-      // storekeeper picked in the previous mount; displaying the default instead
-      // would be an affirmative false statement about an outstanding write.
-      //
-      // THE MISS BRANCH IS THE SAME RULE, NOT AN EXCEPTION TO IT. When the charged id
-      // does not resolve against the loaded projects — it was archived, or it fell off
-      // GET /projects' first page (the read sends no pagination params) — the id is
-      // still adopted and only the NAME is left null, so the slot renders the em-dash
-      // that `MInput(value: _projectName ?? _dash)` already provides. Leaving the
-      // default in place instead would put a DIFFERENT real project's name on an
-      // outstanding write the user cannot edit, which is the affirmative false
-      // statement this block exists to prevent — an em-dash is honest, the default is
-      // not, and the two are not alike merely because neither is invented.
-      final Object? charged = mine.payload['project_id'];
-      if (charged is String) {
-        _projectId = charged;
-        _projectName = null;
-        for (final FieldStockEnt p in _projects) {
-          if (fieldStockStr(p, const <String>['id']) == charged) {
-            _projectName = fieldStockStr(p, const <String>['name']);
-            break;
-          }
-        }
-      }
+      _opId = null;
+      _state = FieldStockState.idle;
+      _projectId = _defaultProjectId;
+      _projectName = _defaultProjectName;
     });
   }
+
+  /// True while the screen is still showing exactly what [_settleQueue] adopted.
+  bool _stillShowing(String adopted) =>
+      mounted && _opId == adopted && _state == FieldStockState.queued;
 
   /// The real read chain: warehouses → the chosen warehouse → its stock balances,
   /// plus the tenant's projects for the attribution slot.
@@ -510,6 +586,10 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
   /// [_locked] for exactly this branch ([_actionBar]).
   Future<void> _onConfirm() async {
     if (_state == FieldStockState.submitting) return;
+    // The CTA is already rendered quiet for this window ([_actionBar]); this is the
+    // same refusal at the handler, so a tap delivered against a stale frame cannot
+    // slip past it either (B-341).
+    if (_settling) return;
 
     final String? tracked = _opId;
     if (tracked != null) {
@@ -821,8 +901,15 @@ class _FieldStockScreenState extends State<FieldStockScreen> {
     // is false, and the screen shows `queued` over a zeroed frozen basket with no
     // affordance at all. It cannot enqueue a second issue — the live-op branch of
     // [_onConfirm] returns before any mint.
+    // Quiet until this mount's queue read has answered (B-341) — greyed exactly as it
+    // already greys over an unstaged basket, which needs no new copy. On this screen
+    // that stretch was ALREADY dead (`_canSubmit` is false over the unloaded shelf the
+    // read waits on); what changes is that a basket staged the instant the shelf lands
+    // can no longer be confirmed against an unasked queue.
     final bool enabled =
-        (_canSubmit || _locked) && _state != FieldStockState.submitting;
+        (_canSubmit || _locked) &&
+        _state != FieldStockState.submitting &&
+        !_settling;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
       decoration: const BoxDecoration(

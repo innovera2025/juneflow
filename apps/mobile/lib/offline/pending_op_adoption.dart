@@ -63,6 +63,43 @@
 //     to stay crash-consistent), so this is unreachable rather than latent; a
 //     processor that starts using it must also surface those ops to this matcher.
 //
+// WHEN THE ANSWER HAS TO ARRIVE — the quiet CTA (BLOCKERS.md B-341)
+// ------------------------------------------------------------------------------
+// Asking at the mint site stops the DUPLICATE, but it cannot stop the other half of
+// the same window. Before the on-mount adoption lands, the screen is a CLEAN SLATE
+// with a live CTA: no queued card, `_opId` null. A user who re-stages a basket there
+// and confirms hits the pre-mint check, which adopts the PREVIOUS op — so the basket
+// on screen is never sent, while the screen reports the previous write's success.
+// Neither minting (a duplicate) nor adopting (a silent drop) is acceptable, so Wei
+// ruled the third way: THE CTA IS QUIET UNTIL THE QUEUE READ COMPLETES, and no tap is
+// possible inside the window at all. This deviates from the prototype, which has no
+// offline state whatsoever — the ruling is recorded on B-341 rather than six times.
+//
+// Two properties make that window BOUNDED, which matters because a CTA quiet forever
+// is worse than the defect it fixes:
+//
+//   * THE READ COMES FIRST, BEFORE THE DRAIN. A drain can only ever SHRINK the set of
+//     ops adoptable by one identity: `markSynced` removes an op, `markFailed` makes it
+//     non-adoptable (only `pending` is adoptable, above), and a deferral re-enqueues
+//     the SAME id still `pending` (sync_processor.dart `_deferPending`). Nothing in a
+//     drain ADDS one. So reading the queue BEFORE the drain returns a SUPERSET of
+//     reading it after: adopt-first can never miss an op that adopt-after would find,
+//     and waiting for the drain would only delay an answer the queue already has.
+//
+//   * WITH THE DRAIN OUT OF IT, THE WINDOW CONTAINS NO NETWORK CALL. `SyncQueue`'s two
+//     implementations are both local — an in-memory list, and the drift/SQLite store —
+//     while the drain goes out over a Dio built with NO `connectTimeout`
+//     (app_services.dart), i.e. a genuinely unbounded wait. The bound is therefore
+//     structural rather than a chosen duration, and a read that THROWS still opens the
+//     CTA (each screen releases it in a `finally`), because an unanswerable question
+//     must not park the button forever — the mint site asks again anyway.
+//
+// What the drain still owes the screen afterwards is only the DISPLAY: a card adopted
+// before the drain describes a write the drain may have just resolved. Each screen
+// therefore re-asks once the drain returns and takes the card back down if the write
+// is no longer outstanding — which lands on exactly the state the drain-first ordering
+// used to reach, one round trip later.
+//
 //   * A screen adopts ONLY ITS OWN op. `SyncQueue.pending()` is a single global
 //     FIFO across every screen — it has no notion of ownership — so identity has to
 //     be reconstructed from what the op itself carries. [SyncOpIdentity] is that
