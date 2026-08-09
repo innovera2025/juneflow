@@ -63,6 +63,86 @@
 //     to stay crash-consistent), so this is unreachable rather than latent; a
 //     processor that starts using it must also surface those ops to this matcher.
 //
+// WHEN THE ANSWER HAS TO ARRIVE — the quiet CTA (BLOCKERS.md B-341)
+// ------------------------------------------------------------------------------
+// Asking at the mint site stops the DUPLICATE, but it cannot stop the other half of
+// the same window. Before the on-mount adoption lands, the screen is a CLEAN SLATE
+// with a live CTA: no queued card, `_opId` null. A user who re-stages a basket there
+// and confirms hits the pre-mint check, which adopts the PREVIOUS op — so the basket
+// on screen is never sent, while the screen reports the previous write's success.
+// Neither minting (a duplicate) nor adopting (a silent drop) is acceptable, so Wei
+// ruled the third way: THE CTA IS QUIET UNTIL THE QUEUE READ COMPLETES, and no tap is
+// possible inside the window at all. This deviates from the prototype, which has no
+// offline state whatsoever — the ruling is recorded on B-341 rather than six times.
+//
+// Two properties make that window BOUNDED, which matters because a CTA quiet forever
+// is worse than the defect it fixes:
+//
+//   * THE READ COMES FIRST, BEFORE THE DRAIN. A drain can only ever SHRINK the set of
+//     ops adoptable by one identity: `markSynced` removes an op, `markFailed` makes it
+//     non-adoptable (only `pending` is adoptable, above), and a deferral re-enqueues
+//     the SAME id still `pending` (sync_processor.dart `_deferPending`). Nothing in a
+//     drain ADDS one. So reading the queue BEFORE the drain returns a SUPERSET of
+//     reading it after: adopt-first can never miss an op that adopt-after would find,
+//     and waiting for the drain would only delay an answer the queue already has.
+//
+//   * THE DRAIN IS OUT OF THE WINDOW ON ALL SIX SCREENS, and the queue read itself is
+//     LOCAL: `SyncQueue`'s two implementations are an in-memory list and the
+//     drift/SQLite store, while the drain goes out over a Dio built with NO
+//     `connectTimeout` (app_services.dart), i.e. a genuinely unbounded wait. So the
+//     bound is structural rather than a chosen duration.
+//
+//     THREE OF THE SIX DO HOLD A NETWORK READ IN THE WINDOW, and a blanket "the window
+//     contains no network call at all" would be a claim this file cannot keep.
+//     st_receive, pm_checkin and pm_checklist wait on the queue read ALONE. The other
+//     three await their own read chain first, over that same unbounded Dio, because
+//     each needs it before the queue can even be asked the right question: pm_notes
+//     awaits `listWorkOrders` (seeding the form fires the edit listener, which drops
+//     `_opId`, so the controllers must have settled before an adoption may land),
+//     field_stock awaits `_future` (there is no warehouse to match an op against until
+//     the load resolves one), and field_progress awaits `_load` (its anchor is one of N
+//     periods a read has to produce).
+//
+//     What bounds those three is not a duration but the fact that THERE IS NO LIVE CTA
+//     TO TAKE AWAY: pm_notes renders no form, and therefore no save button, until
+//     `_loaded`; field_stock's `_canSubmit` is false over an unloaded shelf; and
+//     field_progress renders a deliver button PER PERIOD, so it has none until the
+//     periods land. The quiet CTA there is a button that was already absent or inert.
+//
+//     And no read can strand the window either way: each screen's settle sits in a
+//     `catch`/`try…finally` and releases in the `finally`, so a read that THROWS still
+//     OPENS the CTA — an unanswerable question must not park the button forever, and
+//     the mint site asks the queue again before it mints anyway.
+//
+// WHAT THE RECONCILIATION AFTERWARDS MAY SAY, AND WHEN IT MAY SAY ANYTHING
+// ------------------------------------------------------------------------------
+// Adopting before the drain is what bounds the window; the cost is that the card can
+// outlive its subject by one round trip. Each screen therefore RECONCILES once the
+// drain returns. Two rules govern it, and both are load-bearing:
+//
+//   * IT REPORTS THE DRAIN'S ACTUAL OUTCOME, through the screen's OWN resolver
+//     (`resolveReceiveState` / `resolveCheckinState` / …), fed the SAME [DrainReport]
+//     the drain produced. That resolver already distinguishes the three answers by
+//     construction: the report is authoritative when it touched the op, and otherwise
+//     the op's ID is looked up in the queue — GONE means `markSynced` removed it
+//     (a SUCCESS), `failed` means a permanent 4xx DEAD-LETTER, `pending` means still
+//     outstanding. Asking `findAdoptableOp` instead cannot tell the first two apart:
+//     it returns null for a synced op AND for a dead-letter, which are opposite
+//     outcomes. Reporting a succeeded write as `idle` is worse than imprecise — `idle`
+//     means "nothing enqueued", so the screen states that the write never happened,
+//     and the next tap mints a SECOND key against a record the server already has.
+//
+//   * IT IS ARMED ONLY UNTIL THE USER ACTS, and the arming is a LATCH, not something
+//     inferred from `_state`. No state value can carry "nobody has touched this":
+//     `_opId == adopted && _state == queued` is exactly where a user's own manual
+//     retry lands when the op is still due, so that tuple is reachable both from an
+//     untouched mount adoption and from a tap. Each screen therefore raises a
+//     `_reconcileArmed` flag at adoption and lowers it at every user entry point.
+//     Once the user has acted, THEIR flow owns `_state`, `_opId` and every terminal
+//     side effect (the pop, the basket clear, the shelf re-read), and a second
+//     unprompted writer racing it would fire those effects twice — the reconciliation
+//     retires rather than becoming a background subscription to the queue.
+//
 //   * A screen adopts ONLY ITS OWN op. `SyncQueue.pending()` is a single global
 //     FIFO across every screen — it has no notion of ownership — so identity has to
 //     be reconstructed from what the op itself carries. [SyncOpIdentity] is that

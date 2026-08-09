@@ -143,14 +143,45 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   ///
   /// A null does NOT mean "nothing of mine is queued" — only "this State is not
   /// tracking one". State is not durable and the QUEUE is, so the two disagree after
-  /// an app kill AND, on a perfectly healthy network, for the whole duration of the
-  /// on-mount drain, before [_resumeQueued] has come back to adopt. [_resumeQueued]
-  /// makes the outstanding write VISIBLE; what keeps a tap from minting a second key
-  /// is that [_onPrimary] asks the queue itself before minting.
+  /// an app kill — and, until [_settling] clears, before this mount's own queue read
+  /// has answered. [_resumeQueued] makes the outstanding write VISIBLE; what keeps a
+  /// tap from minting a second key is that [_onPrimary] asks the queue itself before
+  /// minting, and that no tap is possible before the read lands (B-341).
   String? _opId;
+
+  /// True until this mount's QUEUE READ has answered "is a check-in of mine still
+  /// outstanding for this work order?" — the window the CTA is quiet for (B-341).
+  ///
+  /// Raised in [initState], so the very FIRST frame already renders the quiet CTA, and
+  /// lowered in a `finally` so a queue read that throws opens the button rather than
+  /// parking it forever. The contract, and why the window is bounded, is in
+  /// offline/pending_op_adoption.dart.
+  bool _settling = false;
+
+  /// True while this mount's ADOPTION is still un-acted-upon — the single fact
+  /// [_reconcile] is allowed to run on.
+  ///
+  /// It exists because no combination of state VALUES can carry it. The obvious
+  /// substitute, `_opId == adopted && _state == queued`, is exactly where the
+  /// documented manual retry lands when the check-in is still due ([_onPrimary]'s
+  /// `tracked != null` branch → [_retryDrain] → [_resolve] → `resolveCheckinState`,
+  /// still-due ⇒ `queued`), so that tuple is reachable BOTH from an untouched mount
+  /// adoption AND from a technician who re-tapped. `_state` is cyclic; this is
+  /// monotonic — raised once at adoption, lowered at the first tap and never raised
+  /// again — which is the only shape that can distinguish "nobody has touched this"
+  /// from "touched, and it came back to the same value".
+  /// See offline/pending_op_adoption.dart.
+  bool _reconcileArmed = false;
 
   /// The honest client submit time, shown in the confirmed state (the server's
   /// ActionOk carries no timestamp — pm.ts workOrderWire).
+  ///
+  /// Also seeded from an ADOPTED op's `createdAt` ([_settleQueue]), which is the same
+  /// instant this field would otherwise hold: [_acquireAndSubmit] passes the very
+  /// `now` it stores here as the op's `createdAt`. That matters because a restart
+  /// leaves this null while the queue still holds the check-in, and the confirmed card
+  /// falls back to `DateTime.now()` — which would caption a check-in made at 08:03 with
+  /// the time the network happened to come back.
   DateTime? _submitTime;
 
   /// The REAL device coordinate obtained for this check-in ("<lat>, <long>"), shown
@@ -161,38 +192,101 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   void initState() {
     super.initState();
     if (widget.workOrderId != null) {
+      _settling = true;
       unawaited(_resumeQueued());
     }
   }
 
   /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
-  /// app kill (B-330).
+  /// app kill (B-330), in the order B-341 requires.
   ///
-  /// The drain runs FIRST and is awaited, so the online case resolves normally and
-  /// leaves nothing to adopt. A check-in STILL pending for this work order afterwards
-  /// is one this device captured and the server has not accepted, so the screen takes
-  /// its id back and shows the honest queued state instead of a clean slate.
+  /// THE QUEUE READ RUNS FIRST and the CTA is quiet for exactly it. A drain can only
+  /// shrink what is adoptable, so reading first cannot miss anything a post-drain read
+  /// would have found — and it keeps every network call OUT of the window the user is
+  /// waiting on (pending_op_adoption.dart). A check-in pending for this work order is
+  /// one this device captured and the server has not accepted, so the screen takes its
+  /// id back and says so instead of showing a clean slate.
   ///
-  /// WHAT THIS DOES NOT CLOSE: `await drain()` is one real HTTP round trip (Dio is
-  /// built with no `connectTimeout`), and the check-in CTA is live for all of it with
-  /// [_opId] still null. This is the VISIBLE half of the rehydration; the half that
-  /// prevents the second key is the pre-mint queue check in [_onPrimary].
+  /// The drain then runs, and [_reconcile] reports what it did to the very check-in the
+  /// card is about — using the drain's OWN report, so a success and a dead-letter are
+  /// told apart rather than both reading as "no longer adoptable".
   Future<void> _resumeQueued() async {
     final String? woId = widget.workOrderId;
     if (woId == null) return;
-    await widget.repo.drain();
-    if (!mounted) return;
-    final SyncOperation? mine = findAdoptableOp(
-      await widget.repo.due(),
-      pmCheckinOpIdentity(woId),
-    );
-    if (mine == null || !mounted) return;
-    setState(() {
-      _opId = mine.id;
-      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
-      // precisely what `queued` means: captured, not confirmed.
-      _state = PmCheckinState.queued;
-    });
+    final String? adopted = await _settleQueue(woId);
+    final DrainReport report = await widget.repo.drain();
+    if (adopted != null) await _reconcile(adopted, report);
+  }
+
+  /// The queue read the CTA waits on. Returns the adopted op id, or null.
+  Future<String?> _settleQueue(String woId) async {
+    try {
+      final SyncOperation? mine = findAdoptableOp(
+        await widget.repo.due(),
+        pmCheckinOpIdentity(woId),
+      );
+      if (mine == null || !mounted) return null;
+      setState(() {
+        _opId = mine.id;
+        // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+        // precisely what `queued` means: captured, not confirmed.
+        _state = PmCheckinState.queued;
+        // WHEN the technician checked in, taken from the op itself. It is the same
+        // instant the live path stores (`_acquireAndSubmit` passes its `now` as the
+        // op's `createdAt`), so the confirmed caption reads the same whether this
+        // check-in was accepted on the first attempt or on a replay days later —
+        // rather than falling back to `DateTime.now()` and captioning it with the
+        // moment the signal returned.
+        _submitTime = mine.createdAt;
+        // Raised in the SAME setState as the adoption, and there is no await between
+        // it and the `finally` below that opens the CTA — so the latch is up before
+        // any tap can be accepted, and every accepted tap is therefore able to lower
+        // it.
+        _reconcileArmed = true;
+      });
+      return mine.id;
+    } catch (_) {
+      // A queue read that FAILED has answered nothing, and a CTA left quiet on an
+      // unanswerable question is the dead end B-341 forbids. The button opens; the
+      // mint site asks the same queue again before it mints.
+      return null;
+    } finally {
+      if (mounted) setState(() => _settling = false);
+    }
+  }
+
+  /// Say what the drain actually did to the check-in the card is about.
+  ///
+  /// Adopting before the drain is what bounds the quiet window; the cost is that the
+  /// card can outlive its subject by one round trip. This pays it back by running the
+  /// SCREEN'S OWN [_resolve] over the drain's own [report] — the identical path a
+  /// manual retry takes — so the reconciliation cannot drift from it and cannot invent
+  /// an outcome of its own:
+  ///
+  ///   * synced        → `confirmed`: the green card, captioned with the time the
+  ///                     check-in was CAPTURED (seeded in [_settleQueue]), and the CTA
+  ///                     becomes the onward checklist affordance.
+  ///   * dead-lettered → `failed`, the danger card. A permanent 4xx is the OPPOSITE of
+  ///                     a success and must never be reported as one.
+  ///   * still due     → `queued`, unchanged: the card stands.
+  ///
+  /// It never returns the screen to `idle`. `idle` is the state with NOTHING enqueued,
+  /// so on a check-in the server ACCEPTED it states that the write never happened —
+  /// and it leaves a live CTA with `_opId` null over an empty queue, which mints a
+  /// SECOND key and records a SECOND check-in.
+  ///
+  /// Runs at most once, and only while [_reconcileArmed]: after a tap the technician's
+  /// flow owns the outcome.
+  Future<void> _reconcile(String adopted, DrainReport report) async {
+    if (!mounted || !_reconcileArmed || _opId != adopted) return;
+    _reconcileArmed = false;
+    // Flipped SYNCHRONOUSLY, before [_resolve]'s first await, exactly as every tap
+    // path here does: it is what stops a tap arriving DURING the resolve from opening
+    // a second one over the same op (`_onPrimary` refuses while `submitting`). The
+    // window is one local queue read, and the CTA already renders `submitting` as the
+    // same spinner — no new state, no new copy.
+    setState(() => _state = PmCheckinState.submitting);
+    await _resolve(adopted, report);
   }
 
   String _t(String field) => widget.i18n.t(widget.strings[field]);
@@ -216,6 +310,16 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
         _state == PmCheckinState.submitting) {
       return;
     }
+    // The CTA is already rendered quiet for this window ([_actionBar]); this is the
+    // same refusal at the handler, so a tap delivered against a stale frame cannot
+    // slip past it either (B-341).
+    if (_settling) return;
+    // The technician has acted, so the mount's reconciliation retires here — before
+    // any await, and whatever this tap goes on to do. From now on THIS flow owns
+    // `_state` and `_opId`. Lowered at the accepted tap rather than at the refused
+    // one: the latch is raised inside the settle that the `_settling` guard above is
+    // still refusing for, so anything earlier would lower a latch that is not up yet.
+    _reconcileArmed = false;
 
     final String? tracked = _opId;
     if (tracked != null) {
@@ -556,9 +660,14 @@ class _PmCheckinScreenState extends State<PmCheckinScreen> {
   /// (feature/mobile-pm-checklist), so this no longer has to sit honest-disabled.
   Widget _actionBar() {
     final bool confirmed = _state == PmCheckinState.confirmed;
+    // Quiet during the on-mount queue read as well as while acquiring/submitting
+    // (B-341). It wears the SAME muted-fill + spinner those already use, which needs
+    // no new copy and states the truth: the screen is working, briefly, on a local
+    // read.
     final bool busy =
         _state == PmCheckinState.acquiringGps ||
-        _state == PmCheckinState.submitting;
+        _state == PmCheckinState.submitting ||
+        _settling;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 28),
       decoration: const BoxDecoration(

@@ -48,6 +48,7 @@ import 'package:juneflow_mobile/screens/field_progress/field_progress_screen.dar
 import 'package:juneflow_mobile/screens/field_stock/field_stock_agg.dart';
 import 'package:juneflow_mobile/screens/field_stock/field_stock_repository.dart';
 import 'package:juneflow_mobile/screens/field_stock/field_stock_screen.dart';
+import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_agg.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_repository.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_screen.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_agg.dart';
@@ -59,6 +60,7 @@ import 'package:juneflow_mobile/screens/pm_notes/pm_notes_screen.dart';
 import 'package:juneflow_mobile/screens/st_receive/st_receive_agg.dart';
 import 'package:juneflow_mobile/screens/st_receive/st_receive_repository.dart';
 import 'package:juneflow_mobile/screens/st_receive/st_receive_screen.dart';
+import 'package:juneflow_mobile/theme/juneflow_theme.dart';
 
 // ---------------------------------------------------------------------------
 // Transport + production repositories with only their READS stubbed
@@ -282,6 +284,37 @@ class _StockRepo extends DioFieldStockRepository {
   ];
 }
 
+/// [_StockRepo] whose shelf CHANGES between reads — a server that has since applied
+/// the withdrawal, which is what a real one does the moment the issue posts.
+///
+/// It exists because the pre-fix reconciliation and the fixed one are hard to tell
+/// apart on this screen by state alone: BOTH end with the op released and the basket
+/// editable. What only the fixed one does is re-read `on_hand`, and that is not
+/// cosmetic — it is the figure the storekeeper decides the NEXT withdrawal against,
+/// and after a posted issue every balance still on screen is the PRE-issue one.
+class _RefreshingStockRepo extends _StockRepo {
+  _RefreshingStockRepo(super.p);
+
+  /// How many times the shelf has been read. The FIRST read is the mount's; any
+  /// later one is a refresh, and only a refresh can see the post-issue figure.
+  int reads = 0;
+
+  @override
+  Future<List<FieldStockEnt>> listStock(String warehouseId) async {
+    reads++;
+    return <FieldStockEnt>[
+      <String, Object?>{
+        'item_id': 'i1',
+        'warehouse_id': warehouseId,
+        'item_code': 'MAT-CEM-001',
+        'item_name': 'ปูนซีเมนต์ตราเสือ',
+        'unit': 'ถุง',
+        'on_hand': reads <= 1 ? 1240 : 1239,
+      },
+    ];
+  }
+}
+
 /// [_ProgressRepo] whose QUEUE READ takes real time.
 ///
 /// `due()` is `SyncQueue.pending()`, and in the app that is drift/SQLite — disk I/O,
@@ -389,6 +422,79 @@ class _SlowDueStockRepo extends _StockRepo {
   Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
 }
 
+/// A QUEUE READ THAT FAILS — the local store is unreadable (B-341).
+///
+/// The screens release the quiet CTA in a `finally`, so this must open the button
+/// rather than park it: a question that cannot be answered is not a reason to disable
+/// the only control on the screen forever. What then stops a duplicate is the pre-mint
+/// check, which asks again at the mint site — so [throwing] is flipped off before the
+/// user's tap, exactly as a transient store failure would clear.
+Future<List<SyncOperation>> _throwingDue(
+  bool throwing,
+  Future<List<SyncOperation>> rows,
+) {
+  if (throwing) {
+    return Future<List<SyncOperation>>.error(
+      StateError('the local queue could not be read'),
+    );
+  }
+  return rows;
+}
+
+class _ThrowingDueRecvRepo extends _RecvRepo {
+  _ThrowingDueRecvRepo(super.p);
+
+  bool throwing = true;
+
+  @override
+  Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
+}
+
+class _ThrowingDueCheckinRepo extends _CheckinRepo {
+  _ThrowingDueCheckinRepo(super.p);
+
+  bool throwing = true;
+
+  @override
+  Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
+}
+
+class _ThrowingDueNotesRepo extends _StoredNotesRepo {
+  _ThrowingDueNotesRepo(super.p);
+
+  bool throwing = true;
+
+  @override
+  Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
+}
+
+class _ThrowingDueChecklistRepo extends _ChecklistRepo {
+  _ThrowingDueChecklistRepo(super.p);
+
+  bool throwing = true;
+
+  @override
+  Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
+}
+
+class _ThrowingDueProgressRepo extends _ProgressRepo {
+  _ThrowingDueProgressRepo(super.p);
+
+  bool throwing = true;
+
+  @override
+  Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
+}
+
+class _ThrowingDueStockRepo extends _StockRepo {
+  _ThrowingDueStockRepo(super.p);
+
+  bool throwing = true;
+
+  @override
+  Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
+}
+
 // ---------------------------------------------------------------------------
 // i18n + sidecars (the real field names; dict values from docs/extract/i18n-full.json)
 // ---------------------------------------------------------------------------
@@ -445,6 +551,25 @@ final JuneflowI18n _i18n = JuneflowI18n.fromJsonString('''
 /// captured-not-confirmed write. Its presence on mount IS the visible half of the
 /// rehydration: the relaunched screen says a write is still outstanding.
 const String _queuedCard = 'รอส่ง';
+
+/// The shared honest copy for a PERMANENT (4xx) rejection — the dead-letter every
+/// future drain skips. It is the OPPOSITE outcome to a success, and the whole point of
+/// resolving through each screen's own resolver is that the two stop collapsing into
+/// one another (`findAdoptableOp` returns null for both).
+const String _failedCard = 'ทำรายการไม่สำเร็จ · ลองใหม่อีกครั้ง';
+
+/// The durable-success copy pm-notes, pm-checklist and field-progress render — the
+/// answer a reconciliation owes a write the server ACCEPTED, and the one `idle`
+/// replaced with a screen claiming nothing had been sent.
+const String _savedCard = 'บันทึกแล้ว';
+
+/// pm-checkin's success card is `"Check-in หน้างานสำเร็จ · {time}"`, so it is matched
+/// on its stem — the caption is asserted separately, and on purpose.
+const String _checkinSuccess = 'Check-in หน้างานสำเร็จ';
+
+/// Stands in for st-grlist, the route st-receive is pushed FROM and pops back to.
+/// A pop is only observable when there is something underneath to be revealed.
+const String _grlistSentinel = 'ST-GRLIST';
 
 final ScreenStrings _recvStrings = ScreenStrings.fromJsonString('''
 {
@@ -579,6 +704,91 @@ Future<void> _tap(WidgetTester tester, String label) async {
   await _flush(tester);
 }
 
+/// Tap [label] only if the screen is still offering it — "the user tries again,
+/// if there is still something to try".
+///
+/// A plain [_tap] would THROW here rather than fail an assertion, and it would throw
+/// on precisely the outcome that is CORRECT: pm-checkin replaces its check-in CTA with
+/// the onward checklist affordance once the write is confirmed, so the control that
+/// could mint a second key is GONE. The tests using this assert on what reached the
+/// server, so the tap is the user's attempt and not the property — a screen that has
+/// removed the control has already satisfied it.
+Future<void> _tapIfPresent(WidgetTester tester, String label) async {
+  final Finder target = find.text(label);
+  if (target.evaluate().isEmpty) return;
+  await tester.tap(target.first);
+  await _flush(tester);
+}
+
+/// How long a slow queue read is held open. Any real duration works — the point is
+/// that it is not a microtask, so `_flush`'s zero-duration pumps leave the test INSIDE
+/// the window until it deliberately advances the clock.
+const Duration _slow = Duration(milliseconds: 120);
+
+/// Tap the CTA on the four screens that render it as a SPINNER while quiet.
+///
+/// Their label is gone in that state (that is the visible refusal), so it cannot be
+/// used as a handle. The spinner sits inside the CTA's own `GestureDetector`, which is
+/// `HitTestBehavior.opaque` and therefore takes the tap whether or not it has a
+/// callback — so this really does deliver a tap AT the button, rather than proving the
+/// button is merely un-findable.
+Future<void> _tapCtaSpinner(WidgetTester tester) async {
+  final Finder spinner = find.byType(CircularProgressIndicator);
+  expect(
+    spinner,
+    findsOneWidget,
+    reason:
+        'the quiet CTA must be showing the spinner it already uses for a '
+        'submit — if it is not, this tap is landing on nothing and the test '
+        'would pass for the wrong reason',
+  );
+  await tester.tap(spinner);
+  await _flush(tester);
+}
+
+/// Let a route transition that an ASYNC callback started actually run.
+///
+/// Both kinds of pump are needed, in this order. The zero-duration frames come first
+/// because the pop is not INITIATED until `_resolve`'s own awaits have flushed; the
+/// real durations come after because a transition moves no distance on frames that
+/// take no time — a pop begun and then frozen leaves the route in the tree, and an
+/// assertion on its absence fails while the code under test is perfectly correct.
+Future<void> _settleRoutes(WidgetTester tester) async {
+  await _flush(tester, 20);
+  for (int i = 0; i < 6; i++) {
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+  await _flush(tester, 5);
+}
+
+/// Let every outstanding `_slow` queue read finish.
+///
+/// A `_SlowDue*Repo` turns each `due()` into a real timer, and the screens call
+/// `due()` again from `_resolve` and `_reconcile`. `_flush` pumps ZERO-duration
+/// frames, so it can never retire one; leaving them pending trips the binding's
+/// "a Timer is still pending" invariant at teardown.
+Future<void> _drainSlowTimers(WidgetTester tester) async {
+  for (int i = 0; i < 4; i++) {
+    await tester.pump(_slow * 2);
+    await _flush(tester);
+  }
+}
+
+/// Assert the CTA under [label] is painted in the disabled fill — the visible refusal
+/// on the two screens that grey their button rather than spin it (field-progress
+/// renders one button per row, and field-stock's bar has no spinner at all; both
+/// already use this exact muted fill for "not actionable").
+void _expectMutedCta(WidgetTester tester, Finder label) {
+  final Container box = tester.widget<Container>(
+    find.ancestor(of: label, matching: find.byType(Container)).first,
+  );
+  expect(
+    (box.decoration! as BoxDecoration).color,
+    JuneflowTokens.surfaceMuted,
+    reason: 'a live CTA is brandPrimary; this one must read as refused',
+  );
+}
+
 /// A brand-new processor over the surviving queue — what `AppServices.bootstrap`
 /// builds on every launch.
 QueueDrainProcessor _processor(InMemorySyncQueue queue, _Transport transport) =>
@@ -588,6 +798,13 @@ Future<List<SyncOperation>> _queued(InMemorySyncQueue queue) => queue.pending();
 
 Future<List<String>> _queuedIds(InMemorySyncQueue queue) async =>
     (await queue.pending()).map((SyncOperation o) => o.id).toList();
+
+/// How many permanent 4xx dead-letters the queue is holding — ops the drain will
+/// skip forever, so they have written nothing and never will.
+Future<int> _deadLetters(InMemorySyncQueue queue) async =>
+    (await queue.pending())
+        .where((SyncOperation o) => o.status == SyncOpStatus.failed)
+        .length;
 
 // Per-screen mounts, each over a freshly-built production repository.
 
@@ -606,6 +823,50 @@ Future<void> _mountRecv(
     poId: poId,
   ),
 );
+
+/// st-receive mounted the way the app really reaches it: PUSHED over st-grlist.
+///
+/// [_mountRecv] puts the screen at the root, where `Navigator.maybePop` is a no-op —
+/// which silently hides the whole confirmed outcome, since B-266 made the POP the
+/// confirmation. Here there is a route underneath, so the pop is observable and a pop
+/// that should NOT have happened is too.
+Future<void> _mountRecvPushed(
+  WidgetTester tester,
+  InMemorySyncQueue queue,
+  _Transport transport, {
+  String poId = 'po-A',
+}) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Builder(
+        builder: (BuildContext context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (BuildContext _) => Scaffold(
+                    body: StReceiveScreen(
+                      repo: _RecvRepo(_processor(queue, transport)),
+                      strings: _recvStrings,
+                      i18n: _i18n,
+                      poId: poId,
+                    ),
+                  ),
+                ),
+              ),
+              child: const Text(_grlistSentinel),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await _flush(tester, 3);
+  await tester.tap(find.text(_grlistSentinel));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400)); // the push transition
+  await _flush(tester);
+}
 
 Future<void> _mountCheckin(
   WidgetTester tester,
@@ -898,26 +1159,35 @@ void main() {
   });
 
   // =========================================================================
-  // 1b. THE ADOPTION WINDOW — the same duplicate, with the network HEALTHY.
+  // 1b. THE WINDOW, AND THE CTA THAT IS QUIET FOR IT — BLOCKERS.md B-341.
   //
-  //     `_resumeQueued` is fired `unawaited` from initState and the adoption
-  //     lands only AFTER `await repo.drain()` — one real HTTP round trip, and
-  //     `AppServices` builds Dio with no `connectTimeout`, so nothing bounds it
-  //     but the OS. Throughout that window the screen is fully rendered, its CTA
-  //     is live, `_opId` is null and no queued card is shown.
+  //     `_resumeQueued` is fired `unawaited` from initState, so for a stretch
+  //     after the first frame the screen is fully rendered while `_opId` is still
+  //     null and no queued card is up: a CLEAN SLATE over a queue that is not.
+  //     A tap in there is a lose-lose. Minting is the duplicate this whole file
+  //     exists to prevent; adopting — what the pre-mint check does — sends the
+  //     PREVIOUS op and never sends the basket the user just staged, while the
+  //     screen reports the previous write's outcome as if it were this one's.
   //
-  //     A tap in there used to take the mint branch and produce a SECOND key.
-  //     The nested drain hits the processor's re-entrancy guard and returns an
-  //     EMPTY report, so the screen even showed a reassuring `queued` — while the
-  //     outer drain walked the FIFO and sent BOTH ops.
+  //     Wei ruled the third way (B-341): the CTA is QUIET until the queue read
+  //     completes, so no tap is possible in the window at all. Two consequences
+  //     the tests below pin down:
   //
-  //     Each test below must go RED on its own when the pre-mint queue check is
-  //     removed from ITS screen: the assertion is on what the SERVER received,
-  //     not on what the screen believes.
+  //       * THE READ RUNS FIRST, BEFORE THE DRAIN. A drain can only shrink what
+  //         is adoptable, so reading first cannot miss anything — and it takes
+  //         the one unbounded call (Dio sets no `connectTimeout`) out of the
+  //         window. What the user waits on is local storage, nothing else. That
+  //         is the bound, and group 1b-b holds the drain open FOREVER to prove
+  //         it: a CTA quiet forever would be worse than the defect it fixes.
+  //       * The window is therefore the QUEUE READ, and every fixture here holds
+  //         `due()` open rather than the transport.
+  //
+  //     Each test must go RED on its own when `_settling` is dropped from ITS
+  //     screen's CTA: six screens, six independent reds.
   // =========================================================================
-  group('a tap while the on-mount drain is still in flight', () {
+  group('the CTA is quiet until the queue read completes (B-341)', () {
     testWidgets(
-      'st-receive (MONEY — a second key is a second GR + a second JV)',
+      'st-receive (MONEY — the basket that would be silently dropped is a GR)',
       (WidgetTester tester) async {
         final InMemorySyncQueue queue = InMemorySyncQueue();
         final _Transport transport = _Transport(); // offline
@@ -928,21 +1198,1410 @@ void main() {
         final String k1 = (await _queued(queue)).single.id;
         await _kill(tester);
 
-        // Relaunch with the signal BACK — but hold the replay open.
+        // Relaunch with the signal BACK, over a queue read that takes real time.
+        // The replay is HELD open so k1 is still pending for the whole window —
+        // otherwise the drain resolves it and there is no window to test.
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountRecv(
+          tester,
+          queue,
+          transport,
+          repo: _SlowDueRecvRepo(_processor(queue, transport), delay: _slow),
+        );
+
+        // INSIDE the window. The confirm bar has replaced its label with the
+        // spinner it already uses for a submit: visibly refusing, not silently
+        // swallowing.
+        expect(
+          find.text(_confirmRecv),
+          findsNothing,
+          reason: 'the CTA must not be presenting itself as tappable',
+        );
+        await _tapCtaSpinner(tester);
+        expect(
+          await _queuedIds(queue),
+          <String>[k1],
+          reason: 'a tap inside the window must enqueue nothing at all',
+        );
+
+        // The read lands: the window closes and the screen states the truth.
+        await tester.pump(_slow * 2);
+        await _flush(tester);
+        expect(find.text(_queuedCard), findsOneWidget);
+        expect(find.text(_confirmRecv), findsOneWidget);
+
+        // The held replay finally lands. The server received exactly the one key,
+        // and the card that described it comes back down.
+        gate.complete();
+        await _flush(tester, 20);
+        await _drainSlowTimers(tester);
+        expect(transport.acceptedKeys, <String>[k1]);
+        expect(await queue.length(), 0);
+        expect(find.text(_queuedCard), findsNothing);
+      },
+    );
+
+    testWidgets('pm-checkin', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueCheckinRepo(_processor(queue, transport), delay: _slow),
+      );
+
+      expect(find.text(_checkinBtn), findsNothing);
+      await _tapCtaSpinner(tester);
+      expect(await _queuedIds(queue), <String>[k1]);
+
+      await tester.pump(_slow * 2);
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsOneWidget);
+      expect(find.text(_checkinBtn), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      await _drainSlowTimers(tester);
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-notes', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueNotesRepo(_processor(queue, transport), delay: _slow),
+      );
+
+      expect(find.text(_saveNotes), findsNothing);
+      await _tapCtaSpinner(tester);
+      expect(await _queuedIds(queue), <String>[k1]);
+
+      await tester.pump(_slow * 2);
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsOneWidget);
+      expect(find.text(_saveNotes), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      await _drainSlowTimers(tester);
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-checklist', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueChecklistRepo(_processor(queue, transport), delay: _slow),
+      );
+
+      expect(find.text(_saveChecklist), findsNothing);
+      await _tapCtaSpinner(tester);
+      expect(await _queuedIds(queue), <String>[k1]);
+
+      await tester.pump(_slow * 2);
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsOneWidget);
+      expect(find.text(_saveChecklist), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      await _drainSlowTimers(tester);
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets(
+      'field-progress: N anchors on view, and every deliver button is quiet '
+      'until the read that covers ALL of them has answered',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        await _mountProgress(tester, queue, transport);
+        await _tap(tester, _deliver);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountProgress(
+          tester,
+          queue,
+          transport,
+          repo: _SlowDueProgressRepo(
+            _processor(queue, transport),
+            delay: _slow,
+          ),
+        );
+
+        // This screen renders a button PER PERIOD and greys rather than spins
+        // (one spinner per row would be noise), so the refusal is the muted fill
+        // it already uses while another row is sending. Both rows are quiet: the
+        // one read answers for every anchor on view.
+        expect(find.text(_deliver), findsNWidgets(2));
+        _expectMutedCta(tester, find.text(_deliver).first);
+        _expectMutedCta(tester, find.text(_deliver).last);
+        await _tap(tester, _deliver);
+        expect(await _queuedIds(queue), <String>[k1]);
+
+        await tester.pump(_slow * 2);
+        await _flush(tester);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        gate.complete();
+        await _flush(tester, 20);
+        await _drainSlowTimers(tester);
+        expect(transport.accepted.length, 1);
+        expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
+        expect(await queue.length(), 0);
+      },
+    );
+
+    testWidgets(
+      'field-stock (MONEY — the basket that would be silently dropped is a '
+      'stock cut + a JV)',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        await _mountStock(tester, queue, transport);
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountStock(
+          tester,
+          queue,
+          transport,
+          repo: _SlowDueStockRepo(_processor(queue, transport), delay: _slow),
+        );
+
+        // The shelf has landed — this screen's read chain never sat behind the
+        // drain — so the storekeeper can stage a basket, which is exactly the
+        // input B-341 refuses to let him confirm into someone else's op.
+        await _stageOne(tester);
+        _expectMutedCta(tester, find.text(_confirmRecv));
+        await _tap(tester, _confirmRecv);
+        expect(await _queuedIds(queue), <String>[k1]);
+
+        await tester.pump(_slow * 2);
+        await _flush(tester);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        gate.complete();
+        await _flush(tester, 20);
+        await _drainSlowTimers(tester);
+        expect(transport.acceptedKeys, <String>[k1]);
+        expect(await queue.length(), 0);
+      },
+    );
+  });
+
+  group('the card comes back down when the drain resolves what it described', () {
+    testWidgets(
+      'field-stock: and the charged project goes with it, so the NEXT basket '
+      'is not silently pre-addressed to the last one',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        // Session 1: an issue against the SECOND project, captured offline.
+        await _mountStock(tester, queue, transport);
+        await _stageOne(tester);
+        await _pickSecondProject(tester);
+        await _tap(tester, _confirmRecv);
+        expect(
+          (await _queued(queue)).single.payload['project_id'],
+          'p2',
+          reason: 'the fixture must really charge the second project',
+        );
+        await _kill(tester);
+
+        // Session 2: adopted before the drain (that is what bounds the window),
+        // so the frozen picker must show what the OP charges, not the default the
+        // fresh load just picked.
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountStock(tester, queue, transport);
+        expect(find.text(_queuedCard), findsOneWidget);
+        expect(find.text(_projectSecond), findsOneWidget);
+        expect(find.text(_projectPrimary), findsNothing);
+
+        // The held replay lands: the op is gone, so nothing outstanding is left
+        // to describe.
+        gate.complete();
+        await _flush(tester, 20);
+
+        expect(await queue.length(), 0);
+        expect(
+          find.text(_queuedCard),
+          findsNothing,
+          reason:
+              'the card outlived its subject by exactly one round trip, which '
+              'is the price of asking the queue before the drain',
+        );
+        expect(
+          find.text(_projectPrimary),
+          findsOneWidget,
+          reason:
+              'the basket is editable again and unattributed; leaving p2 in an '
+              'editable slot would address the next issue to it in silence',
+        );
+        expect(find.text(_projectSecond), findsNothing);
+      },
+    );
+  });
+
+  // =========================================================================
+  // 1b-c. WHAT THE RECONCILIATION IS ALLOWED TO SAY — BLOCKERS.md B-341.
+  //
+  //       Adopting BEFORE the drain is what bounds the quiet window, and the
+  //       price is that the card can outlive its subject by one round trip.
+  //       `_reconcile` pays that back — and it is the ONE writer on these screens
+  //       that runs with nobody's finger on the screen, so what it is allowed to
+  //       say, and when it is allowed to say anything, are both load-bearing.
+  //
+  //       THE FAILURE THESE PIN DOWN. Asking `findAdoptableOp` again cannot tell a
+  //       SYNCED op from a DEAD-LETTERED one — it returns null for both, because
+  //       only `pending` is adoptable — so a reconciliation built on it reports
+  //       the two OPPOSITE outcomes identically, as `idle`. And `idle` is not a
+  //       neutral shrug: it is the state with NOTHING enqueued, so on a write the
+  //       server ACCEPTED the screen states that nothing happened, drops `_opId`,
+  //       and hands the next tap a clean slate over an empty queue — which mints a
+  //       SECOND key. On st-receive that is a second GR and a second JV.
+  //
+  //       Every test below therefore drives the ordinary sequence: a write captured
+  //       offline, a relaunch while the signal is back, and a replay HELD in flight
+  //       (which needs no faking — `AppServices` builds Dio with NO `connectTimeout`)
+  //       across the user's own documented manual retry.
+  // =========================================================================
+  group('the on-mount replay SUCCEEDS the adopted write', () {
+    testWidgets(
+      'st-receive (MONEY — a second key is a second GR + a second JV): the '
+      'next tap does not mint one',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        // Session 1 — captured offline, deferred, still `pending` in the queue.
+        await _mountRecv(tester, queue, transport);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        // Session 2 — the signal is back, so the on-mount drain is a REAL replay,
+        // and it is held in flight for the whole of what follows.
         transport.offline = false;
         final Completer<void> gate = Completer<void>();
         transport.gate = gate;
         await _mountRecv(tester, queue, transport);
 
-        // Inside the window: the drain has not come back, so nothing has been
-        // adopted and the confirm bar is live.
+        // The storekeeper takes the documented manual retry. The inner drain is a
+        // re-entrancy no-op, the receipt is still due, and the retry therefore
+        // resolves back to `queued` ON THE SAME ID — the exact tuple that a
+        // `_opId == adopted && _state == queued` guard cannot tell apart from an
+        // untouched mount adoption.
+        await _tap(tester, _confirmRecv);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        // The held replay lands: 201, and the op is synced and gone.
+        gate.complete();
+        await _flush(tester, 20);
+        expect(await queue.length(), 0);
+
+        // The receipt is POSTED. The storekeeper, who has still seen no success
+        // takeover (B-266 dropped it), taps the CTA again if the screen still
+        // offers one.
+        await _tapIfPresent(tester, _confirmRecv);
+        await _flush(tester, 20);
+
+        expect(
+          transport.acceptedKeys,
+          <Object?>[k1],
+          reason:
+              'the server must hold ONE goods receipt. A second key here is a '
+              'second GR and a second JV, and `gr_idempotency_uq` cannot stop '
+              'it — two distinct keys are legitimately two distinct receipts',
+        );
+      },
+    );
+
+    testWidgets('pm-checkin: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _checkinBtn);
+      await _flush(tester, 20);
+
+      // This endpoint carries no `idempotency_key` in its BODY — the client key is
+      // the op id and never leaves the device — so what the server received is
+      // counted, not read off the payload. Two requests are two check-ins recorded
+      // against one work order.
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/pm/workorders/wo-1/checkin');
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('pm-notes: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      await _tap(tester, _saveNotes);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _saveNotes);
+      await _flush(tester, 20);
+
+      // Counted, not read off the payload: this endpoint carries no
+      // `idempotency_key` in its body — the client key is the op id and never
+      // leaves the device.
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/pm/workorders/wo-1/close');
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('pm-checklist: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _saveChecklist);
+      await _flush(tester, 20);
+
+      // Counted, not read off the payload: this endpoint carries no
+      // `idempotency_key` in its body — the client key is the op id and never
+      // leaves the device.
+      expect(transport.accepted.length, 1);
+      expect(
+        transport.accepted.single.endpoint,
+        '/pm/workorders/wo-1/checklist',
+      );
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('field-progress: the next tap does not mint a second key', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver); // period p1
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      expect(await queue.length(), 0);
+
+      await _tapIfPresent(tester, _deliver);
+      await _flush(tester, 20);
+
+      // Counted, not read off the payload: this endpoint carries no
+      // `idempotency_key` in its body — the client key is the op id and never
+      // leaves the device.
+      expect(
+        transport.accepted.length,
+        1,
+        reason:
+            'a second op is a second POST against a period the server has '
+            'already moved out of `pending`, which its C3 guard 4xxs into a '
+            'permanent dead-letter (B-330 F2)',
+      );
+      expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets(
+      'field-stock (MONEY — a second key is a second stock cut + a second JV): '
+      'the basket stays frozen behind the op being retried',
+      (WidgetTester tester) async {
+        // THIS SCREEN NEEDS THE RE-STAGE TO EXPRESS THE DEFECT, and that is the
+        // defect: `_onConfirm` returns early on an empty basket, and the basket
+        // after a tab swap IS empty, so the second key cannot be minted by a bare
+        // tap the way it can on the other five. It is minted by a storekeeper who
+        // sees an unfrozen, empty basket, concludes nothing was sent, and stages
+        // the same withdrawal again. `_locked` is what stands in the way, and it
+        // is `_opId` — released by a reconciliation that had no business writing.
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport(); // offline
+
+        await _mountStock(tester, queue, transport);
+        await _stageOne(tester);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        expect((await _queued(queue)).single.endpoint, '/inventory/issues');
+        await _kill(tester);
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountStock(tester, queue, transport);
+        await _tap(tester, _confirmRecv);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        gate.complete();
+        await _flush(tester, 20);
+
+        // The storekeeper, who has been shown no confirmation, stages the same
+        // bag again and confirms.
+        await _stageOne(tester);
+        await _tapIfPresent(tester, _confirmRecv);
+        await _flush(tester, 20);
+
+        expect(
+          transport.acceptedKeys,
+          <Object?>[k1],
+          reason:
+              'a second key here is a second POST /inventory/issues: a second '
+              'material_issue, a second stock_ledger row at -qty AND a second '
+              'Dr 1140 / Cr 5020 JV. `material_issue_idempotency_uq` cannot '
+              'stop it — the two keys differ, so they are legitimately two '
+              'issues',
+        );
+      },
+    );
+  });
+
+  // =========================================================================
+  // 1b-c-2. WHAT AN UNTOUCHED SCREEN IS TOLD — the other half of B-341.
+  //
+  //         Nobody taps in these. The screen adopts on mount, the held replay
+  //         lands, and the reconciliation is the only thing that runs — so this
+  //         is where its ANSWER is pinned down, as opposed to 1b-d, which pins
+  //         down when it is allowed to answer at all.
+  //
+  //         `findAdoptableOp` returns null for a SYNCED op (removed by
+  //         `markSynced`) and for a 4xx DEAD-LETTER (made unadoptable by
+  //         `markFailed`) alike, so a reconciliation built on it collapses two
+  //         OPPOSITE outcomes into one — and into `idle`, the state that means
+  //         nothing was ever enqueued. Resolving through each screen's own
+  //         resolver, fed the drain's own report, is what separates them.
+  // =========================================================================
+  group('an untouched screen is told what the drain did', () {
+    testWidgets('st-receive (MONEY): a synced receipt CONFIRMS, and confirmed pops back '
+        'to st-grlist', (WidgetTester tester) async {
+      // THE OPEN QUESTION, ANSWERED IN THE ONE PLACE IT IS VISIBLE. `confirmed`
+      // on this screen IS the pop — B-266 dropped the success takeover because
+      // all four of its claims are unbacked, and left the return to st-grlist as
+      // the confirmation. So the storekeeper lands exactly where their own tap
+      // one beat later would have put them, which is also where both of the
+      // prototype's back paths go (L54/L61).
+      //
+      // Mounted as a PUSHED route over a sentinel, because a pop is only
+      // observable when there is something to pop to.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountRecvPushed(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+      expect(find.byType(StReceiveScreen), findsOneWidget);
+
+      gate.complete();
+      await _settleRoutes(tester);
+
+      expect(transport.acceptedKeys, <Object?>[k1]);
+      // The pop is witnessed by the PUSHED route's absence, not by the sentinel
+      // appearing: `maintainState` is the MaterialPageRoute default, so the route
+      // underneath is in the tree the whole time and findable throughout.
+      expect(
+        find.byType(StReceiveScreen),
+        findsNothing,
+        reason:
+            'the receipt is POSTED, and on this screen `confirmed` IS the pop '
+            '(B-266 dropped the takeover, leaving the return to st-grlist as '
+            'the confirmation). `idle` would instead leave a live green CTA '
+            'over the same counts with `_opId` null and an empty queue — a '
+            'screen stating the write never happened, one tap from a second '
+            'GR and a second JV',
+      );
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-checkin: a synced check-in CONFIRMS', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        find.textContaining(_checkinSuccess),
+        findsOneWidget,
+        reason: 'the check-in is recorded; the green card says so',
+      );
+      expect(find.text(_queuedCard), findsNothing);
+      expect(
+        find.text(_checkinBtn),
+        findsNothing,
+        reason:
+            'confirmed swaps the CTA for the onward checklist affordance, so '
+            'the control that could mint a second key is gone entirely',
+      );
+    });
+
+    testWidgets('pm-notes: a synced close-out SAVES', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_savedCard), findsOneWidget);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-checklist: a synced checklist SAVES', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_savedCard), findsOneWidget);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('field-progress: a synced delivery is SENT', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_savedCard), findsOneWidget);
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('field-stock (MONEY): a synced issue re-reads the shelf the next '
+        'withdrawal is decided on', (WidgetTester tester) async {
+      // THIS SCREEN RENDERS NO SUCCESS CARD AT ALL — B-266: the copy has no key,
+      // and the server's `value`/`jv_no` are deliberately not disclosed. So
+      // `confirmed` and the old `idle` look almost alike here: both release the
+      // op and unfreeze the basket, and asserting only that would pass on the
+      // defect as readily as on the fix.
+      //
+      // What only a real terminal outcome does is re-read `on_hand`. That is the
+      // one thing on this screen that a posted issue actually changes, and it is
+      // the figure the storekeeper decides the NEXT withdrawal against: after a
+      // cut, every balance still on screen is the PRE-issue one.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+      final _RefreshingStockRepo repo1 = _RefreshingStockRepo(
+        _processor(queue, transport),
+      );
+
+      await _mountStock(tester, queue, transport, repo: repo1);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      final _RefreshingStockRepo repo2 = _RefreshingStockRepo(
+        _processor(queue, transport),
+      );
+      await _mountStock(tester, queue, transport, repo: repo2);
+      expect(find.text(_queuedCard), findsOneWidget);
+      // `code · stock N unit` is ONE Text, so the balance is matched inside it.
+      expect(
+        find.textContaining('1,240'),
+        findsOneWidget,
+        reason: 'the mount read must really show the PRE-issue balance',
+      );
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsNothing);
+      expect(
+        repo2.reads,
+        greaterThan(1),
+        reason: 'a resolved issue must send the screen back for the shelf',
+      );
+      expect(
+        find.textContaining('1,239'),
+        findsOneWidget,
+        reason:
+            'the ledger really was cut, so the balance on screen has to be '
+            'the post-issue one — `idle` leaves the pre-issue figure up, and '
+            'that figure is what decides how much may be taken next',
+      );
+      expect(find.textContaining('1,240'), findsNothing);
+      // And the op is released with it, so the basket is editable again.
+      await _stageOne(tester);
+      expect(
+        find.text('1'),
+        findsOneWidget,
+        reason: 'the op is resolved, so the stepper must accept a new basket',
+      );
+    });
+
+    // ---- the same six, when the server said NO ----
+
+    testWidgets('st-receive (MONEY): a 4xx DEAD-LETTER is not the same answer as a '
+        'success', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountRecvPushed(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      // Settled EXACTLY as the synced case above, so a pop this outcome must not
+      // make would have had every chance to run before it is asserted absent.
+      gate.complete();
+      await _settleRoutes(tester);
+
+      expect(
+        await _deadLetters(queue),
+        1,
+        reason: 'the fixture must really produce a permanent dead-letter',
+      );
+      expect(
+        find.text(_failedCard),
+        findsOneWidget,
+        reason:
+            'a permanent rejection and a durable success are OPPOSITE '
+            'outcomes, and `findAdoptableOp` returns null for both. Reporting '
+            'this one as `idle` says the receipt simply is not there, when the '
+            'server refused it and no drain will ever send it again',
+      );
+      expect(
+        find.byType(StReceiveScreen),
+        findsOneWidget,
+        reason: 'a rejected receipt must NOT pop as though it had posted',
+      );
+      expect(find.text(_queuedCard), findsNothing);
+    });
+
+    testWidgets('pm-checkin: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.textContaining(_checkinSuccess), findsNothing);
+    });
+
+    testWidgets('pm-notes: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.text(_savedCard), findsNothing);
+    });
+
+    testWidgets('pm-checklist: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.text(_savedCard), findsNothing);
+    });
+
+    testWidgets('field-progress: a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.text(_savedCard), findsNothing);
+    });
+
+    testWidgets('field-stock (MONEY): a 4xx DEAD-LETTER surfaces', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountStock(tester, queue, transport);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountStock(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(await _deadLetters(queue), 1);
+      expect(
+        find.text(_failedCard),
+        findsOneWidget,
+        reason:
+            'a 4xx is the OPPOSITE of a success. Reporting it as `idle` — no '
+            'card at all — tells the storekeeper the withdrawal simply is not '
+            'there, when the server has refused it and the op will never be '
+            'replayed again',
+      );
+      expect(
+        find.text(_queuedCard),
+        findsNothing,
+        reason: '"saved, will retry" is false of an op no drain will retry',
+      );
+    });
+
+    testWidgets(
+      'pm-checkin: the confirmed caption is when the check-in was CAPTURED, '
+      'not when the signal came back',
+      (WidgetTester tester) async {
+        // `_submitTime` dies with the State, so on a relaunch the confirmed card
+        // fell back to `DateTime.now()` — captioning a check-in made hours ago
+        // with the moment the network happened to return. The adopted op carries
+        // the real instant: [_acquireAndSubmit] passes the very `now` it stores in
+        // `_submitTime` as the op's `createdAt`, so seeding from it is the SAME
+        // quantity rather than a second-best stand-in.
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        // A check-in captured three hours ago, straight into the durable queue —
+        // built by the production repository, so the op is the real shape.
+        final DateTime captured = DateTime.now().subtract(
+          const Duration(hours: 3),
+        );
+        await _CheckinRepo(_processor(queue, transport)).submitCheckin(
+          workOrderId: 'wo-1',
+          opId: 'k-old',
+          gps: '13.7563, 100.5018',
+          now: captured,
+        );
+        expect((await _queued(queue)).single.id, 'k-old');
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        await _mountCheckin(tester, queue, transport);
+        expect(find.text(_queuedCard), findsOneWidget);
+
+        gate.complete();
+        await _flush(tester, 20);
+
+        final String capturedHhMm = formatCheckinTime(captured);
+        expect(
+          find.textContaining(capturedHhMm),
+          findsOneWidget,
+          reason:
+              'the caption must read $capturedHhMm — when the technician stood '
+              'at the asset — not the time the replay happened to succeed',
+        );
+        expect(
+          find.textContaining(formatCheckinTime(DateTime.now())),
+          findsNothing,
+          reason: 'a `DateTime.now()` fallback is a fabricated check-in time',
+        );
+      },
+    );
+  });
+
+  // =========================================================================
+  // 1b-d. THE LATCH — when the reconciliation is allowed to say anything.
+  //
+  //       `_reconcile` is armed at the mount adoption and disarmed at the first
+  //       user action. It CANNOT infer that from state values: the user's own
+  //       manual retry lands on `_opId == adopted && _state == queued` whenever
+  //       the write is still due, which is bit-for-bit the tuple an untouched
+  //       mount adoption leaves behind. So a guard written over those values
+  //       fires on a screen the user is actively driving, and the reconciliation
+  //       becomes a SECOND writer racing the first — one that owns the same
+  //       terminal side effects (st-receive's pop back to st-grlist, field-stock's
+  //       emptied basket and `on_hand` re-read, pm-checkin's success caption).
+  //
+  //       Each test below drives the user to a retry FIRST, then lands the held
+  //       replay, and asserts the reconciliation stayed out of it. Each goes RED
+  //       on its own when ITS screen's `_reconcileArmed` check is swapped back for
+  //       a `_state == queued` inference: six screens, six independent reds.
+  //
+  //       The screen keeping the user's own `queued` answer is not a stale lie
+  //       adopted as policy: NONE of these screens subscribes to the queue, on any
+  //       branch — every drain outcome that arrives outside a tap is picked up by
+  //       the next tap, through the same `_resolve`. The reconciliation is a
+  //       one-shot compensation for a display decision made at MOUNT, and once the
+  //       user's own flow owns the screen it retires rather than promoting itself
+  //       into a background subscription.
+  // =========================================================================
+  group('once the user has acted, the reconciliation retires', () {
+    testWidgets('st-receive: and does not pop st-grlist off the stack', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountRecv(tester, queue, transport);
+
+      // The storekeeper acts. The retry resolves back to `queued` on the same id,
+      // so every state VALUE now reads exactly as an untouched adoption does.
+      await _tap(tester, _confirmRecv);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        find.text(_queuedCard),
+        findsOneWidget,
+        reason:
+            'the storekeeper owns this screen from their tap onwards. A '
+            'reconciliation that writes here writes over a flow already in '
+            'progress — and on this screen a confirmed outcome POPS, so an '
+            'unprompted second one takes st-grlist off the stack with it',
+      );
+    });
+
+    testWidgets('pm-checkin', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('pm-notes', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(tester, queue, transport);
+      await _tap(tester, _saveNotes);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('pm-checklist', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('field-progress', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('field-stock (MONEY): and does not empty the basket twice', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountStock(tester, queue, transport);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountStock(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        find.text(_queuedCard),
+        findsOneWidget,
+        reason:
+            'the storekeeper owns this screen from their tap onwards, and a '
+            'confirmed outcome here empties the basket and re-reads `on_hand` '
+            '— side effects an unprompted second writer would fire on top of '
+            'the flow already running',
+      );
+    });
+  });
+
+  // =========================================================================
+  // 1b-b. THE BOUND — what "until the queue settles" is allowed to wait on.
+  //
+  //       A CTA quiet forever is worse than the defect it fixes, and the drain
+  //       is genuinely unbounded: `AppServices` builds Dio with NO
+  //       `connectTimeout`, so a half-open link holds a replay for as long as the
+  //       OS allows. The bound is therefore structural rather than a chosen
+  //       duration — the window contains no network call at all, only
+  //       `SyncQueue.pending()`, whose two implementations are an in-memory list
+  //       and the local drift/SQLite store.
+  //
+  //       Each test below holds the replay open and NEVER completes it, then
+  //       drives the screen to a real outcome anyway. They go red the moment the
+  //       drain is moved back in front of the queue read.
+  // =========================================================================
+  group('a drain that never returns does not hold the CTA (B-341)', () {
+    testWidgets('st-receive', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      // The signal is "back", but the replay never lands. The gate is never
+      // completed by this test — that is the point.
+      transport
+        ..offline = false
+        ..gate = Completer<void>();
+      await _mountRecv(tester, queue, transport);
+
+      expect(
+        find.text(_confirmRecv),
+        findsOneWidget,
+        reason: 'the CTA is live: it waited on the queue read, not the drain',
+      );
+      expect(
+        find.text(_queuedCard),
+        findsOneWidget,
+        reason: 'and it says what is outstanding, without the drain answering',
+      );
+      expect(await _queuedIds(queue), <String>[k1]);
+    });
+
+    testWidgets('pm-checkin', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      await _kill(tester);
+
+      transport
+        ..offline = false
+        ..gate = Completer<void>();
+      await _mountCheckin(tester, queue, transport);
+
+      expect(find.text(_checkinBtn), findsOneWidget);
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('pm-notes', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      await _kill(tester);
+
+      transport
+        ..offline = false
+        ..gate = Completer<void>();
+      await _mountNotes(tester, queue, transport);
+
+      expect(find.text(_saveNotes), findsOneWidget);
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets('pm-checklist', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      await _kill(tester);
+
+      transport
+        ..offline = false
+        ..gate = Completer<void>();
+      await _mountChecklist(tester, queue, transport);
+
+      expect(find.text(_saveChecklist), findsOneWidget);
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+
+    testWidgets(
+      'field-progress: the period list itself used to sit behind the drain, so '
+      'a held replay blanked the whole screen',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        await _mountProgress(tester, queue, transport);
+        await _tap(tester, _deliver);
+        await _kill(tester);
+
+        transport
+          ..offline = false
+          ..gate = Completer<void>();
+        await _mountProgress(tester, queue, transport);
+
+        expect(
+          find.text(_deliver),
+          findsWidgets,
+          reason:
+              'the rows no longer wait on the drain — `_resumeQueued` starts it '
+              'and awaits it LAST',
+        );
+        expect(find.text(_queuedCard), findsOneWidget);
+      },
+    );
+
+    testWidgets('field-stock', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountStock(tester, queue, transport);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      await _kill(tester);
+
+      transport
+        ..offline = false
+        ..gate = Completer<void>();
+      await _mountStock(tester, queue, transport);
+
+      expect(find.text(_confirmRecv), findsOneWidget);
+      expect(find.text(_queuedCard), findsOneWidget);
+    });
+  });
+
+  // =========================================================================
+  // 1b-c. THE QUEUE READ ITSELF FAILING — the CTA still opens, and the PRE-MINT
+  //        check is what holds.
+  //
+  //        B-341 releases the button in a `finally`, so a read that THROWS opens
+  //        it rather than parking it forever: an unanswerable question must not
+  //        become a dead end. That is precisely the state the pre-mint check was
+  //        written for — `_opId` null, the CTA live, an op still in the queue —
+  //        and after B-341 it is the main way to reach it, so these tests are
+  //        the surviving red-on-removal probe for that check on five of the six
+  //        screens. Each asserts what the SERVER received.
+  // =========================================================================
+  group('a queue read that throws opens the CTA, and the mint site holds', () {
+    testWidgets(
+      'st-receive (MONEY — a second key is a second GR + a second JV)',
+      (WidgetTester tester) async {
+        final InMemorySyncQueue queue = InMemorySyncQueue();
+        final _Transport transport = _Transport();
+
+        await _mountRecv(tester, queue, transport);
+        await _tap(tester, _confirmRecv);
+        final String k1 = (await _queued(queue)).single.id;
+        await _kill(tester);
+
+        transport.offline = false;
+        final Completer<void> gate = Completer<void>();
+        transport.gate = gate;
+        final _ThrowingDueRecvRepo repo = _ThrowingDueRecvRepo(
+          _processor(queue, transport),
+        );
+        await _mountRecv(tester, queue, transport, repo: repo);
+
+        // The read failed, so nothing could be adopted — and the button is open
+        // rather than parked on a question that cannot be answered.
         expect(find.text(_queuedCard), findsNothing);
         expect(find.text(_confirmRecv), findsOneWidget);
 
-        // The storekeeper, seeing no confirmation, confirms again.
+        // The storekeeper confirms again. The mint site's own read succeeds.
+        repo.throwing = false;
         await _tap(tester, _confirmRecv);
 
-        // The held replay lands and the drain walks the rest of the FIFO.
         gate.complete();
         await _flush(tester, 20);
 
@@ -964,15 +2623,18 @@ void main() {
 
       await _mountCheckin(tester, queue, transport);
       await _tap(tester, _checkinBtn);
-      final String k1 = (await _queued(queue)).single.id;
       await _kill(tester);
 
       transport.offline = false;
       final Completer<void> gate = Completer<void>();
       transport.gate = gate;
-      await _mountCheckin(tester, queue, transport);
+      final _ThrowingDueCheckinRepo repo = _ThrowingDueCheckinRepo(
+        _processor(queue, transport),
+      );
+      await _mountCheckin(tester, queue, transport, repo: repo);
 
-      expect(find.text(_queuedCard), findsNothing);
+      expect(find.text(_checkinBtn), findsOneWidget);
+      repo.throwing = false;
       await _tap(tester, _checkinBtn);
 
       gate.complete();
@@ -983,36 +2645,40 @@ void main() {
         1,
         reason: 'a second op here is a second check-in on the same work order',
       );
-      expect(transport.accepted.single.endpoint, '/pm/workorders/wo-1/checkin');
       expect(await queue.length(), 0);
-      expect(k1, isNotEmpty);
     });
 
     testWidgets('pm-notes', (WidgetTester tester) async {
       final InMemorySyncQueue queue = InMemorySyncQueue();
       final _Transport transport = _Transport();
+      PmNotesRepository stored() =>
+          _StoredNotesRepo(_processor(queue, transport));
 
-      await _mountNotes(tester, queue, transport);
+      await _mountNotes(tester, queue, transport, repo: stored());
       await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
       await _flush(tester);
       await _tap(tester, _saveNotes);
-      final String k1 = (await _queued(queue)).single.id;
       await _kill(tester);
 
       transport.offline = false;
       final Completer<void> gate = Completer<void>();
       transport.gate = gate;
-      await _mountNotes(tester, queue, transport);
+      final _ThrowingDueNotesRepo repo = _ThrowingDueNotesRepo(
+        _processor(queue, transport),
+      );
+      await _mountNotes(tester, queue, transport, repo: repo);
 
-      expect(find.text(_queuedCard), findsNothing);
+      expect(find.text(_saveNotes), findsOneWidget);
+      // Nothing is TYPED — the seed is what fills the form — so `_edited` stays
+      // false and the save really does reach the pre-mint check.
+      repo.throwing = false;
       await _tap(tester, _saveNotes);
 
       gate.complete();
       await _flush(tester, 20);
 
       expect(transport.accepted.length, 1);
-      expect(await _queuedIds(queue), <String>[]);
-      expect(k1, isNotEmpty);
+      expect(await queue.length(), 0);
     });
 
     testWidgets('pm-checklist', (WidgetTester tester) async {
@@ -1021,64 +2687,60 @@ void main() {
 
       await _mountChecklist(tester, queue, transport);
       await _tap(tester, _saveChecklist);
-      final String k1 = (await _queued(queue)).single.id;
       await _kill(tester);
 
       transport.offline = false;
       final Completer<void> gate = Completer<void>();
       transport.gate = gate;
-      await _mountChecklist(tester, queue, transport);
+      final _ThrowingDueChecklistRepo repo = _ThrowingDueChecklistRepo(
+        _processor(queue, transport),
+      );
+      await _mountChecklist(tester, queue, transport, repo: repo);
 
-      expect(find.text(_queuedCard), findsNothing);
+      expect(find.text(_saveChecklist), findsOneWidget);
+      repo.throwing = false;
       await _tap(tester, _saveChecklist);
 
       gate.complete();
       await _flush(tester, 20);
 
       expect(transport.accepted.length, 1);
-      expect(await _queuedIds(queue), <String>[]);
-      expect(k1, isNotEmpty);
+      expect(await queue.length(), 0);
     });
 
-    testWidgets(
-      'field-progress has no such window to test — its READS are serialized '
-      'behind the drain, so there is nothing tappable until the drain returns',
-      (WidgetTester tester) async {
-        final InMemorySyncQueue queue = InMemorySyncQueue();
-        final _Transport transport = _Transport();
+    testWidgets('field-progress', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
 
-        await _mountProgress(tester, queue, transport);
-        await _tap(tester, _deliver);
-        await _kill(tester);
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      await _kill(tester);
 
-        transport.offline = false;
-        final Completer<void> gate = Completer<void>();
-        transport.gate = gate;
-        await _mountProgress(tester, queue, transport);
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      final _ThrowingDueProgressRepo repo = _ThrowingDueProgressRepo(
+        _processor(queue, transport),
+      );
+      await _mountProgress(tester, queue, transport, repo: repo);
 
-        // `_resumeQueued` there is `await drain(); await _loadThenAdopt();`, so a
-        // held replay also holds the period list. That is a LIVENESS cost, not a
-        // money one — this screen already asks the queue before minting (the
-        // `delivering period B` test below) — but it is why the window above has no
-        // field-progress case. If the reads are ever moved off the drain's critical
-        // path, this expectation flips and that case has to be written.
-        expect(find.text(_deliver), findsNothing);
+      expect(find.text(_deliver), findsWidgets);
+      repo.throwing = false;
+      await _tap(tester, _deliver);
 
-        gate.complete();
-        await _flush(tester, 20);
+      gate.complete();
+      await _flush(tester, 20);
 
-        // The replay landed and the screen came back to life.
-        expect(transport.accepted.length, 1);
-        expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
-        expect(find.text(_deliver), findsWidgets);
-      },
-    );
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/periods/p1/deliver');
+      expect(await queue.length(), 0);
+    });
 
     testWidgets(
       'field-stock (MONEY — a second key is a second stock cut + a second JV)',
       (WidgetTester tester) async {
         final InMemorySyncQueue queue = InMemorySyncQueue();
-        final _Transport transport = _Transport(); // offline
+        final _Transport transport = _Transport();
 
         await _mountStock(tester, queue, transport);
         await _stageOne(tester);
@@ -1086,25 +2748,19 @@ void main() {
         final String k1 = (await _queued(queue)).single.id;
         await _kill(tester);
 
-        // Back on the tab with the signal RESTORED — but hold the replay open.
         transport.offline = false;
         final Completer<void> gate = Completer<void>();
         transport.gate = gate;
-        await _mountStock(tester, queue, transport);
+        final _ThrowingDueStockRepo repo = _ThrowingDueStockRepo(
+          _processor(queue, transport),
+        );
+        await _mountStock(tester, queue, transport, repo: repo);
 
-        // Unlike field-progress, this screen's READS do not sit behind the drain
-        // (the warehouse/stock/project chain runs in parallel with it, so a queue
-        // left over from a prior session starts flushing immediately). The price of
-        // that is a REAL window: the shelf is rendered, the basket is editable and
-        // the CTA is live while `_opId` is still null.
         expect(find.text(_queuedCard), findsNothing);
-        expect(find.text(_confirmRecv), findsOneWidget);
-
-        // The storekeeper, seeing no confirmation, stages and confirms again.
         await _stageOne(tester);
+        repo.throwing = false;
         await _tap(tester, _confirmRecv);
 
-        // The held replay lands and the drain walks the rest of the FIFO.
         gate.complete();
         await _flush(tester, 20);
 
@@ -1113,9 +2769,7 @@ void main() {
           <String>[k1],
           reason:
               'two distinct keys = two material issues = two stock_ledger '
-              'decrements and two JVs; material_issue_idempotency_uq is a '
-              'partial unique index on the key ALONE and correctly lets them '
-              'both through',
+              'decrements and two JVs',
         );
         expect(await queue.length(), 0);
       },
@@ -1175,6 +2829,143 @@ void main() {
   });
 
   // =========================================================================
+  // 1c-a. B-330 F1 CASE A — an edit typed INSIDE the window and saved AFTER it
+  //       closes.
+  //
+  //       B-341 quietens the CTA, so there is no save inside the window. But the
+  //       FORM is not quiet — nothing stops the technician typing — and the
+  //       adoption lands after he does. If the adoption simply overwrites, the
+  //       save that follows takes the `tracked != null` branch, re-drains the OLD
+  //       op, and the body he typed never leaves the device while the screen
+  //       reports the write as handled. That is case A, and quietening the button
+  //       does NOT by itself close it: the save is after the window, not in it.
+  //
+  //       What closes it is the rule the mint site already applies, applied at
+  //       the OTHER place that adopts: `_edited` means the body on screen is no
+  //       longer the body the queued op carries, so that op is not this write and
+  //       must not be adopted. Both tests below go red the moment `_edited` is
+  //       dropped from ITS screen's adoption guard.
+  // =========================================================================
+  group('B-330 F1 case A: typed inside the window, saved after it closed', () {
+    testWidgets('pm-notes: the server receives the body that is ON SCREEN', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      // Session 1: the log is captured offline and stays queued.
+      await _mountNotes(
+        tester,
+        queue,
+        transport,
+        repo: _StoredNotesRepo(_processor(queue, transport)),
+      );
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      // Session 2: the signal is back but the replay is HELD, so k1 is still
+      // pending when the queue read snapshots it — and that read takes real time.
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountNotes(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueNotesRepo(_processor(queue, transport), delay: _slow),
+      );
+
+      // INSIDE the window the CTA is quiet — and the form is not. He types what
+      // he actually found.
+      expect(find.text(_saveNotes), findsNothing);
+      await tester.enterText(find.byType(TextField).first, 'มอเตอร์ไหม้');
+      await _flush(tester);
+
+      // The window closes, the CTA comes back, and only NOW does he save.
+      await tester.pump(_slow * 2);
+      await _flush(tester);
+      expect(find.text(_saveNotes), findsOneWidget);
+      await _tap(tester, _saveNotes);
+
+      gate.complete();
+      await _flush(tester, 30);
+      await _drainSlowTimers(tester);
+
+      expect(
+        find.text('มอเตอร์ไหม้'),
+        findsOneWidget,
+        reason: 'the screen is showing the body he typed',
+      );
+      expect(
+        transport.accepted
+            .map(
+              (({String endpoint, Map<String, Object?> payload}) r) =>
+                  r.payload['cause'],
+            )
+            .toList(),
+        <String>['สายพานขาด', 'มอเตอร์ไหม้'],
+        reason:
+            'FIFO replays the queued body then his, so the column ends up '
+            'holding what is on screen. Adopting over his edit sends the OLD '
+            'body ONLY — the screen reports a handled write and his text never '
+            'left the device (B-330 F1 case A).',
+      );
+      expect(k1, isNotEmpty);
+    });
+
+    testWidgets('pm-checklist: the server receives the results that are ON '
+        'SCREEN', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist); // every line still unchecked
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountChecklist(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueChecklistRepo(_processor(queue, transport), delay: _slow),
+      );
+
+      // Inside the window the save button is quiet; the checklist rows are not.
+      expect(find.text(_saveChecklist), findsNothing);
+      await _tap(tester, _resultNormal);
+
+      await tester.pump(_slow * 2);
+      await _flush(tester);
+      expect(find.text(_saveChecklist), findsOneWidget);
+      await _tap(tester, _saveChecklist);
+
+      gate.complete();
+      await _flush(tester, 30);
+      await _drainSlowTimers(tester);
+
+      expect(
+        transport.accepted
+            .map(
+              (({String endpoint, Map<String, Object?> payload}) r) =>
+                  (r.payload['items']! as List<Object?>).first,
+            )
+            .toList(),
+        <Object?>[isNot(contains('result')), containsPair('result', 'normal')],
+        reason:
+            'adopting over the result he just set re-sends the UNCHECKED list '
+            'and drops it (B-330 F1 case A)',
+      );
+      expect(k1, isNotEmpty);
+    });
+  });
+
+  // =========================================================================
   // 1c-b. SEEDING IS NOT TYPING — the `_seeding` flag, on the ordinary work
   //       order: one that already HAS a stored log.
   //
@@ -1212,22 +3003,30 @@ void main() {
         final String k1 = (await _queued(queue)).single.id;
         await _kill(tester);
 
-        // Session 2, INSIDE the adoption window: the signal is back but the replay
-        // is held open, so `_opId` is still null and the CTA is live. The read is
-        // NOT held — it still returns the OLD stored log, because the queued write
-        // never reached the server — so the form re-seeds it.
+        // Session 2: the signal is back but the replay is held open, so k1 is
+        // still pending. The read is NOT held — it still returns the OLD stored
+        // log, because the queued write never reached the server — so the form
+        // re-seeds it.
         transport.offline = false;
         final Completer<void> gate = Completer<void>();
         transport.gate = gate;
         await _mountNotes(tester, queue, transport, repo: stored());
 
-        expect(find.text(_queuedCard), findsNothing); // nothing adopted yet
         expect(
           find.text(_StoredNotesRepo.storedCause),
           findsOneWidget,
           reason:
               'the seed fired for real — the listener DID run, which is the '
               'whole condition `_seeding` exists to classify',
+        );
+        expect(
+          find.text(_queuedCard),
+          findsOneWidget,
+          reason:
+              'the queue read has answered (B-341) and NOTHING was typed, so '
+              'the adoption stands. Counting the seed as an edit would set '
+              '`_edited`, the adoption would refuse it, and this card would be '
+              'absent — which is the same defect one step earlier.',
         );
 
         // He taps save. He has typed nothing: the only thing that touched the
@@ -1238,8 +3037,9 @@ void main() {
           await _queuedIds(queue),
           <String>[k1],
           reason:
-              'counting the seed as an edit skips the pre-mint check, and the '
-              'second key sits right here as a second close-out',
+              'counting the seed as an edit skips both the adoption and the '
+              'pre-mint check, and the second key sits right here as a second '
+              'close-out',
         );
 
         gate.complete();
@@ -1278,7 +3078,7 @@ void main() {
       'must not swallow it into the queued op',
       (WidgetTester tester) async {
         final InMemorySyncQueue queue = InMemorySyncQueue();
-        final _Transport transport = _Transport();
+        final _Transport transport = _Transport(); // offline throughout
 
         await _mountNotes(tester, queue, transport);
         await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
@@ -1287,21 +3087,37 @@ void main() {
         final String k1 = (await _queued(queue)).single.id;
         await _kill(tester);
 
-        // Inside the window: the replay is held, so nothing has been adopted and
-        // the screen looks exactly as it does when nothing was ever submitted —
-        // which is the whole reason the listener cannot infer "seeding" from the
-        // state and needs `_seeding` to be told.
-        final Completer<void> gate = Completer<void>();
-        transport.gate = gate;
-        await _mountNotes(tester, queue, transport);
+        // Inside the window — which after B-341 is the QUEUE READ, so that is
+        // what this fixture holds open. Nothing has been adopted yet and the
+        // screen looks exactly as it does when nothing was ever submitted, which
+        // is the whole reason the listener cannot infer "seeding" from the state
+        // and needs `_seeding` to be told.
+        await _mountNotes(
+          tester,
+          queue,
+          transport,
+          repo: _SlowDueNotesRepo(_processor(queue, transport), delay: _slow),
+        );
         expect(find.text(_queuedCard), findsNothing);
 
+        // The CTA is quiet in here (B-341) — the FORM is not.
         await tester.enterText(find.byType(TextField).first, 'มอเตอร์ไหม้');
         await _flush(tester);
-        await _tap(tester, _saveNotes); // saved while still inside the window
 
-        gate.complete();
-        await _flush(tester, 20);
+        // The window closes. The adoption must REFUSE the queued op, because the
+        // body on screen is no longer the body it carries.
+        await tester.pump(_slow * 2);
+        await _flush(tester);
+        expect(
+          find.text(_queuedCard),
+          findsNothing,
+          reason:
+              'adopting here would send the OLD body at the next save and drop '
+              'what he just typed (B-330 F1 case A)',
+        );
+
+        await _tap(tester, _saveNotes);
+        await _drainSlowTimers(tester);
 
         final List<SyncOperation> ops = await _queued(queue);
         expect(
@@ -2082,5 +3898,149 @@ void main() {
         );
       },
     );
+  });
+
+  // =========================================================================
+  // 4. B-330 F2 — THE IN-SESSION DEAD-LETTER, MEASURED RATHER THAN ASSUMED.
+  //
+  //    A 4xx is permanent: `QueueDrainProcessor` marks the op `failed` and every
+  //    later drain SKIPS it, so the write will never be sent. Whether the user
+  //    can make a new one without leaving the screen depends on one line —
+  //    whether `_resolve` releases `_opId` on the failed outcome — and on whether
+  //    the screen has an edit that releases it instead.
+  //
+  //    B-341 QUIETENS THE CTA FOR THE ON-MOUNT QUEUE READ, AND THIS IS NOT THAT.
+  //    `_settling` is long false by the time a write can fail, and the failed
+  //    branch never consults it, so the matrix below is exactly what it was
+  //    before the ruling. These tests exist to SAY that with measurements rather
+  //    than to claim it: they were run against dev's `lib/` and against this
+  //    branch's, and they answer identically. What is recorded here is therefore
+  //    the state of F2, not a fix for it.
+  // =========================================================================
+  group('B-330 F2: what a 4xx dead-letter leaves the user able to do', () {
+    testWidgets('st-receive: STRANDED — a re-tap re-drains an op the drain will '
+        'never send again', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false, status: 400);
+
+      await _mountRecv(tester, queue, transport);
+      await _tap(tester, _confirmRecv);
+      expect(await _deadLetters(queue), 1);
+      expect(transport.accepted.length, 1);
+
+      // He taps again. There is no edit on this screen that could release the id.
+      await _tap(tester, _confirmRecv);
+
+      expect(
+        await queue.length(),
+        1,
+        reason: 'no new write was made: `_opId` survives the failed outcome',
+      );
+      expect(
+        transport.accepted.length,
+        1,
+        reason: 'and the drain skips the dead-letter, so nothing was re-sent',
+      );
+    });
+
+    testWidgets('pm-checkin: STRANDED', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false, status: 400);
+
+      await _mountCheckin(tester, queue, transport);
+      await _tap(tester, _checkinBtn);
+      expect(await _deadLetters(queue), 1);
+
+      await _tap(tester, _checkinBtn);
+      expect(await queue.length(), 1);
+      expect(transport.accepted.length, 1);
+    });
+
+    testWidgets('field-progress: STRANDED — the third screen, and the '
+        'correction that made F2 three rather than two', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false, status: 400);
+
+      await _mountProgress(tester, queue, transport);
+      await _tap(tester, _deliver);
+      expect(await _deadLetters(queue), 1);
+
+      // `_resolve` releases `_opId` only on `sent`, and `_pendingPeriodId` still
+      // names this period — so the next tap takes the re-drain branch and never
+      // reaches the queue check.
+      await _tap(tester, _deliver);
+      expect(await queue.length(), 1);
+      expect(transport.accepted.length, 1);
+    });
+
+    testWidgets('pm-notes: ESCAPES, but only through an EDIT', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false, status: 400);
+
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      expect(await _deadLetters(queue), 1);
+
+      // A plain re-tap is the same dead end as st-receive's.
+      await _tap(tester, _saveNotes);
+      expect(await queue.length(), 1);
+
+      // Typing is what releases the id here — `_onEdited` — so the technician
+      // gets out by changing what he is sending.
+      await tester.enterText(find.byType(TextField).first, 'มอเตอร์ไหม้');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      expect(
+        await queue.length(),
+        2,
+        reason: 'the edit minted a fresh key, which the drain WILL send',
+      );
+    });
+
+    testWidgets('pm-checklist: ESCAPES, but only through an EDIT', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false, status: 400);
+
+      await _mountChecklist(tester, queue, transport);
+      await _tap(tester, _saveChecklist);
+      expect(await _deadLetters(queue), 1);
+
+      await _tap(tester, _saveChecklist);
+      expect(await queue.length(), 1);
+
+      await _tap(tester, _resultNormal); // `_setResult` releases the id
+      await _tap(tester, _saveChecklist);
+      expect(await queue.length(), 2);
+    });
+
+    testWidgets('field-stock: ESCAPES on a plain re-tap — its `_resolve` '
+        'releases the id on BOTH terminal outcomes', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false, status: 400);
+
+      await _mountStock(tester, queue, transport);
+      await _stageOne(tester);
+      await _tap(tester, _confirmRecv);
+      expect(await _deadLetters(queue), 1);
+
+      // The basket is NOT cleared on a failure (only on a confirmed issue), and
+      // the id is released, so the storekeeper simply confirms again.
+      await _tap(tester, _confirmRecv);
+      expect(
+        await queue.length(),
+        2,
+        reason: 'a 4xx wrote nothing, so the retry must be a FRESH key',
+      );
+    });
   });
 }

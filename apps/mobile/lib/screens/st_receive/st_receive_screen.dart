@@ -204,51 +204,137 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
   ///
   /// A null does NOT mean "nothing of mine is queued". It means only "this State is
   /// not tracking one", and State is not durable while the QUEUE is, so the two
-  /// disagree in two places: after an app kill, and — on a perfectly healthy network
-  /// — for the whole duration of the on-mount drain, before [_resumeQueued] has come
-  /// back to adopt. [_resumeQueued] narrows the gap and makes it VISIBLE; what makes
-  /// it SAFE is that [_onConfirm] asks the queue itself before it mints.
+  /// disagree after an app kill — and, until [_settling] clears, before this mount's
+  /// own queue read has answered. [_resumeQueued] makes an outstanding receipt
+  /// VISIBLE; what makes it SAFE is that [_onConfirm] asks the queue itself before it
+  /// mints, and that no tap is possible before the read lands (B-341).
   String? _opId;
+
+  /// True until this mount's QUEUE READ has answered "is a receipt of mine still
+  /// outstanding for this PO?" — the window the confirm CTA is quiet for (B-341).
+  ///
+  /// Raised in [initState], so the very FIRST frame already renders the quiet CTA: a
+  /// frame painted before the read starts would be the same hole one paint earlier.
+  /// Lowered in a `finally`, so a queue read that throws opens the button rather than
+  /// parking it forever. The full contract, and why this window is bounded, is in
+  /// offline/pending_op_adoption.dart.
+  bool _settling = false;
+
+  /// True while this mount's ADOPTION is still un-acted-upon — the single fact
+  /// [_reconcile] is allowed to run on.
+  ///
+  /// It exists because no combination of state VALUES can carry it. The obvious
+  /// substitute, `_opId == adopted && _state == queued`, is exactly where the
+  /// documented manual retry lands when the receipt is still due ([_onConfirm]'s
+  /// `tracked != null` branch → [_resolve] → `resolveReceiveState`, still-due ⇒
+  /// `queued`), so that tuple is reachable BOTH from an untouched mount adoption AND
+  /// from a storekeeper who re-tapped. `_state` is cyclic; this is monotonic — raised
+  /// once at adoption, lowered at the first tap and never raised again — which is the
+  /// only shape that can distinguish "nobody has touched this" from "touched, and it
+  /// came back to the same value".
+  ///
+  /// Once it is down the storekeeper's own flow owns `_state`, `_opId` and the pop; a
+  /// second unprompted writer racing it would pop TWICE, taking st-grlist off the
+  /// stack with it. See offline/pending_op_adoption.dart.
+  bool _reconcileArmed = false;
 
   @override
   void initState() {
     super.initState();
     _future = _load();
-    if (widget.poId != null) unawaited(_resumeQueued());
+    if (widget.poId != null) {
+      _settling = true;
+      unawaited(_resumeQueued());
+    }
   }
 
   /// The (a) on-mount trigger, plus the rehydration that makes [_opId] survive an
-  /// app kill (B-330).
+  /// app kill (B-330), in the order B-341 requires.
   ///
-  /// The drain runs FIRST and is awaited, so the online case resolves normally and
-  /// leaves nothing to adopt. Whatever is STILL pending for this PO afterwards is a
+  /// THE QUEUE READ RUNS FIRST and the CTA is quiet for exactly it. A drain can only
+  /// shrink what is adoptable, so reading first cannot miss anything a post-drain read
+  /// would have found — and it keeps every network call OUT of the window the user is
+  /// waiting on (pending_op_adoption.dart). Whatever is pending for this PO is a
   /// receipt this device captured and the server has not accepted yet, so the screen
-  /// takes its id back and shows the honest queued state rather than presenting a
-  /// clean slate.
+  /// takes its id back and says so instead of presenting a clean slate.
   ///
-  /// WHAT THIS DOES NOT CLOSE: `await drain()` is one real HTTP round trip, bounded
-  /// only by the OS default (app_services.dart builds Dio with no `connectTimeout`),
-  /// and the screen is fully rendered with a LIVE confirm CTA for all of it. Inside
-  /// that window [_opId] is still null and no queued card is up, so this alone would
-  /// still let a tap mint a second key — on a healthy network, with no app kill
-  /// anywhere in the story. This is the VISIBLE half of the rehydration; the money
-  /// half is the pre-mint queue check in [_onConfirm].
+  /// The drain then runs, and [_reconcile] reports what it did to the very receipt the
+  /// card is about — using the drain's OWN report, so a success and a dead-letter are
+  /// told apart rather than both reading as "no longer adoptable".
   Future<void> _resumeQueued() async {
     final String? poId = widget.poId;
     if (poId == null) return;
-    await widget.repo.drain();
-    if (!mounted) return;
-    final SyncOperation? mine = findAdoptableOp(
-      await widget.repo.due(),
-      stReceiveOpIdentity(poId),
-    );
-    if (mine == null || !mounted) return;
-    setState(() {
-      _opId = mine.id;
-      // Only a still-replayable op is adoptable (findAdoptableOp), and that is
-      // precisely what `queued` means: captured, not confirmed.
-      _state = StRecvState.queued;
-    });
+    final String? adopted = await _settleQueue(poId);
+    final DrainReport report = await widget.repo.drain();
+    if (adopted != null) await _reconcile(adopted, report);
+  }
+
+  /// The queue read the CTA waits on. Returns the adopted op id, or null.
+  Future<String?> _settleQueue(String poId) async {
+    try {
+      final SyncOperation? mine = findAdoptableOp(
+        await widget.repo.due(),
+        stReceiveOpIdentity(poId),
+      );
+      if (mine == null || !mounted) return null;
+      setState(() {
+        _opId = mine.id;
+        // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+        // precisely what `queued` means: captured, not confirmed.
+        _state = StRecvState.queued;
+        // Raised in the SAME setState as the adoption, and there is no await between
+        // it and the `finally` below that opens the CTA — so the latch is up before
+        // any tap can be accepted, and every accepted tap is therefore able to lower
+        // it.
+        _reconcileArmed = true;
+      });
+      return mine.id;
+    } catch (_) {
+      // A queue read that FAILED has answered nothing, and a CTA left quiet on an
+      // unanswerable question is the dead end B-341 forbids. The button opens; the
+      // mint site asks the same queue again before it mints, so nothing is duplicated
+      // on the strength of this failure.
+      return null;
+    } finally {
+      if (mounted) setState(() => _settling = false);
+    }
+  }
+
+  /// Say what the drain actually did to the receipt the card is about.
+  ///
+  /// Adopting before the drain is what bounds the quiet window; the cost is that the
+  /// card can outlive its subject by one round trip. This pays it back by running the
+  /// SCREEN'S OWN [_resolve] over the drain's own [report] — the identical path a
+  /// manual retry takes — so the reconciliation cannot drift from it and cannot invent
+  /// an outcome of its own:
+  ///
+  ///   * synced        → `confirmed`, and confirmed POPS back to st-grlist (that is
+  ///                     what confirmed IS on this screen — B-266 dropped the takeover,
+  ///                     so the pop is the confirmation). The storekeeper lands exactly
+  ///                     where their own tap one beat later would have put them.
+  ///   * dead-lettered → `failed`, the danger card. A permanent 4xx is the OPPOSITE of
+  ///                     a success and must never be reported as one.
+  ///   * still due     → `queued`, unchanged: the card stands.
+  ///
+  /// It never returns the screen to `idle`. `idle` means "counting, nothing enqueued"
+  /// (StRecvState), so on a receipt the server ACCEPTED it states that the write never
+  /// happened — and it leaves a live green CTA over the same counts with `_opId` null
+  /// and an empty queue, which is precisely the state that mints a SECOND key and posts
+  /// a SECOND GR and a SECOND JV.
+  ///
+  /// Runs at most once, and only while [_reconcileArmed]: after a tap the storekeeper's
+  /// flow owns the outcome AND the pop, and a second pop would take st-grlist off the
+  /// stack too.
+  Future<void> _reconcile(String adopted, DrainReport report) async {
+    if (!mounted || !_reconcileArmed || _opId != adopted) return;
+    _reconcileArmed = false;
+    // Flipped SYNCHRONOUSLY, before [_resolve]'s first await, exactly as every tap
+    // path here does: it is what stops a tap arriving DURING the resolve from opening
+    // a second one over the same op (`_onConfirm` refuses while `submitting`). The
+    // window is one local queue read, and the CTA already renders `submitting` as the
+    // same muted spinner — no new state, no new copy.
+    setState(() => _state = StRecvState.submitting);
+    await _resolve(adopted, report);
   }
 
   /// The real read chain: PO -> its `pr_id` -> that PR's priced lines.
@@ -298,6 +384,17 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
     final String? poId = widget.poId;
     if (poId == null || _lines.isEmpty) return;
     if (_state == StRecvState.submitting) return;
+    // The CTA is already rendered quiet for this window ([_actionBar]); this is the
+    // same refusal at the handler, so a tap delivered against a stale frame cannot
+    // slip past it either (B-341).
+    if (_settling) return;
+    // The storekeeper has acted, so the mount's reconciliation retires here — before
+    // any await, and whatever this tap goes on to do. From now on THIS flow owns
+    // `_state`, `_opId` and the pop; an unprompted second writer would fire them
+    // twice. Lowered at the accepted tap rather than at the refused one: the latch is
+    // raised inside the settle that the `_settling` guard above is still refusing for,
+    // so anything earlier would lower a latch that is not up yet.
+    _reconcileArmed = false;
     // Flipped SYNCHRONOUSLY, before the first await below, so the CTA is already
     // disabled when a second tap could otherwise arrive during the queue read.
     setState(() => _state = StRecvState.submitting);
@@ -403,9 +500,20 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
   }
 
   /// A 34px round back button (mobile-field.jsx L61 — surface-3 circle + chevL).
+  ///
+  /// LEAVING IS ACTING, and on THIS screen that is a money-visible fact rather than
+  /// tidiness. `_resolve` pops on `confirmed`, and during a `MaterialPageRoute` exit
+  /// transition the State stays MOUNTED for ~300ms — so a replay landing inside that
+  /// window would reach `_reconcile`, resolve `confirmed`, and fire a SECOND pop,
+  /// taking st-grlist off the stack with it. The storekeeper taps back once and lands
+  /// two screens away. Retiring the latch here is what makes this screen's own comment
+  /// above `_reconcile` ("a second unprompted writer racing it would pop TWICE") true.
   Widget _backButton() {
     return GestureDetector(
-      onTap: () => Navigator.maybePop(context),
+      onTap: () {
+        _reconcileArmed = false;
+        Navigator.maybePop(context);
+      },
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: 34,
@@ -669,7 +777,10 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
   /// labels carry, and it is what survives here since neither label has a key.
   Widget _actionBar() {
     final bool short = anyShort(_lines, _counts);
-    final bool busy = _state == StRecvState.submitting;
+    // Quiet during the on-mount queue read as well as during a submit (B-341). It
+    // wears the SAME muted-fill + spinner the submit already uses, which needs no new
+    // copy and states the truth: the screen is working, briefly, on a local read.
+    final bool busy = _state == StRecvState.submitting || _settling;
     final Color tone = short
         ? JuneflowTokens.statusWarnFg
         : JuneflowTokens.statusOkFg;
