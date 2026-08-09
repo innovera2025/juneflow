@@ -1,0 +1,28 @@
+-- B-338 / B-342 · attendance_costed_day_uq — at most ONE attendance row per
+-- (worker_id, day, cc_id) among COSTED rows. The complement of 0062's
+-- attendance_self_day_uq (WHERE cc_id IS NULL); together the two partition the table.
+--
+-- THIS STATEMENT ABORTS IF DUPLICATES ALREADY EXIST. Run the detector FIRST on any stack
+-- that has recorded attendance, and resolve a non-empty result BY HAND — every row it
+-- returns is a day POST /labor/payroll is already SUMMING twice, so deleting one blindly
+-- destroys the evidence of a real overpayment:
+--
+--   SELECT worker_id, day, cc_id, count(*) AS rows, sum(day_fraction) AS day_fraction
+--     FROM attendance
+--    WHERE cc_id IS NOT NULL
+--    GROUP BY worker_id, day, cc_id
+--   HAVING count(*) > 1
+--    ORDER BY worker_id, day;
+--
+-- NOT CLOSED BY THIS INDEX, and it does NOT abort on it (B-343): Σ(day_fraction) per
+-- (worker, day) can still exceed 1.0 ACROSS allocations — one uncosted row plus one
+-- costed row is two rows payroll pays as two days. A unique index constrains tuple
+-- equality; this is an inequality over an aggregate, so it needs a check in the write.
+-- Its own detector, for an operator who wants the current exposure:
+--
+--   SELECT worker_id, day, sum(day_fraction) AS day_fraction
+--     FROM attendance
+--    GROUP BY worker_id, day
+--   HAVING sum(day_fraction) > 1.0
+--    ORDER BY worker_id, day;
+CREATE UNIQUE INDEX "attendance_costed_day_uq" ON "attendance" USING btree ("worker_id","day","cc_id") WHERE "attendance"."cc_id" IS NOT NULL;

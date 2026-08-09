@@ -90,7 +90,7 @@
 //     the coherent existing-account choice; stated here so a ratify blocker is filed.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   inventoryItems,
   issueLines,
@@ -109,6 +109,7 @@ import { pick, readIdempotencyKey, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed, type CallerAuthz } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
 import { entryOrder, newestFirst, stampEntryOrder } from "./list-order.js";
+import { inLockOrder } from "./lock-order.js";
 import {
   ACCT,
   allocJvNo,
@@ -826,20 +827,37 @@ async function createTransfer(
         status: "pending",
       })
       .returning()) as StockTransferRow[];
-    // B-323: transfer_line is a no-`seq` LINE table read back as the ordered body of
-    // one transfer (GET /inventory/transfers/{id}). One insertThrough = one now() =
-    // every line tied, so stamp the batch apart in body order.
+    // ONE ARRAY, TWO CONSUMERS — and the composition order below is load-bearing.
+    //
+    // B-323 (stampEntryOrder): transfer_line is a no-`seq` LINE table read back as the
+    // ordered body of one transfer (GET /inventory/transfers/{id} renders
+    // entryOrder(lines), i.e. created_at ASC). One insertThrough = one INSERT = one
+    // now() = every line tied, so the batch is stamped 1 ms apart to RECORD entry order.
+    //
+    // B-340 (inLockOrder): `transfer_line.item_id` is an FK, so this INSERT also takes an
+    // implicit `FOR KEY SHARE` on each inventory_item — in ROW ORDER, which is CLIENT
+    // order — and that conflicts with the `FOR UPDATE` approveTransfer and createIssue
+    // take below. Body order deadlocked 16 of 48 requests across 6 of 6 rounds against
+    // concurrent issues (measured at 039bfcb; PG 40P01 -> uncaught -> 500 -> the phone's
+    // offline drain wedges). See lock-order.ts.
+    //
+    // STAMP FIRST, THEN SORT. Composed the other way round the stamp would follow the
+    // LOCK order, and every transfer detail screen would silently render its lines in
+    // item-id order instead of the order the storekeeper typed them. Stamping first ties
+    // each line's created_at to its BODY position, so reordering for the insert moves the
+    // locks without moving the body — gr.ts needed no such care because its stamped rows
+    // (gr_item) and its sorted rows (stock_ledger) are two separate arrays.
     await tx.insertThrough(
       transferLines,
       stockTransfers,
       transferId,
-      stampEntryOrder(lines.map((l) => ({
+      inLockOrder(stampEntryOrder(lines.map((l) => ({
         transferId,
         itemId: l.itemId,
         qty: qtyStr(l.qty),
         fromWh: fromWarehouseId,
         toWh: toWarehouseId,
-      }))),
+      })))),
     );
     return header!;
   });
@@ -898,6 +916,26 @@ async function approveTransfer(
 
   try {
     await db.transaction(async (tx) => {
+      // B-342: TAKE THE ROW LOCKS FIRST — before the ledger read, as the first
+      // statement in the transaction. Without this the guard below is a pure TOCTOU:
+      // measured live at 2f42244, 2 SEPARATE PROCESSES each approving a transfer of
+      // the whole balance answered [200,200] with a source balance of −100 in 5 of 6
+      // rounds.
+      //
+      // THIS PATH — NOT THE ISSUE PATH — IS THE ONE THAT WAS ACTUALLY EXPOSED. B-339
+      // item 2 named the issue guard, but a transfer posts NO JV ("an internal
+      // relocation touches no P&L"), so nothing serialises it, whereas the issue path
+      // turned out to be protected BY ACCIDENT (see the note at createIssue's lock).
+      // An accidental guard on one path is not a reason to leave the other unlocked.
+      const itemIds = [...new Set(lines.map((l) => l.itemId))];
+      const locked = await tx.selectForUpdate(
+        inventoryItems,
+        inArray(inventoryItems.id, itemIds),
+      );
+      if (locked.length !== itemIds.length) {
+        // An item vanished between the line read and the lock, or is not ours.
+        throw new NegativeStockError("a transferred item no longer exists in this tenant");
+      }
       // Read the ledger INSIDE the tx so the guard is consistent with the writes.
       const ledgers = (await tx.select(stockLedgers)) as StockLedgerRow[];
       const running = onHandByItemWarehouse(ledgers);
@@ -1221,6 +1259,35 @@ async function createIssue(
     created = await withDocNoRetry(async () => {
       jvNo = await allocJvNo(db);
       return db.transaction(async (tx) => {
+        // B-342: TAKE THE ROW LOCKS FIRST, before the ledger read.
+        //
+        // HONEST NOTE ON WHAT THIS PATH ALREADY HAD. Measured live at 2f42244, this
+        // path did NOT reproduce the race: 6 rounds of 2 separate processes each
+        // issuing the whole balance gave one 201 and one 409 every time. The reason is
+        // ACCIDENTAL and worth writing down, because it is the kind of protection that
+        // silently disappears. allocJvNo runs OUTSIDE the tx; a concurrent pair
+        // therefore reads the same max and both build the same jv.no, so the loser
+        // trips jv_company_no_uq (migration 0061, added for the UNRELATED B-318
+        // allocator defect), rolls its WHOLE tx back — ledger row included — and
+        // withDocNoRetry re-runs it; the retry's fresh ledger read then sees the
+        // winner's commit and answers an honest 409. The two possible interleavings
+        // both land safe: if the loser's allocJvNo DOES see the winner's JV it gets a
+        // free number, but then its ledger read sees the winner's movement too.
+        //
+        // That is a real mechanism, not luck — but it is undocumented, it depends on a
+        // unique index added for another purpose, and it evaporates the moment this
+        // path stops posting a JV or starts allocating numbers differently. The
+        // transfer path, which posts no JV, had nothing equivalent and failed 5 of 6
+        // rounds. So the lock is taken HERE TOO, explicitly, rather than resting the
+        // money guard on a side effect of document numbering.
+        const itemIds = [...new Set(lines.map((l) => l.itemId))];
+        const locked = await tx.selectForUpdate(
+          inventoryItems,
+          inArray(inventoryItems.id, itemIds),
+        );
+        if (locked.length !== itemIds.length) {
+          throw new NegativeStockError("an issued item no longer exists in this tenant");
+        }
         // NEGATIVE-STOCK GUARD (B6): read the ledger inside the tx for consistency.
         const ledgers = (await tx.select(stockLedgers)) as StockLedgerRow[];
         const running = onHandByItemWarehouse(ledgers);

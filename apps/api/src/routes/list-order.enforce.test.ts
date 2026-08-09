@@ -172,6 +172,33 @@ const EXEMPT: Exemption[] = [
       "shell and debug output.",
   },
   {
+    file: "apps/api/src/routes/lock-order.ts",
+    starts: "(a, b) => (a.itemId < b.itemId ? -1 : a.itemId > b.itemId ? 1 : 0)",
+    floor: "itemId",
+    floorKind: "string",
+    why:
+      // This entry was written while inLockOrder() still lived in gr.ts, and the
+      // scan caught the move rather than letting the reason drift away from the
+      // code: on `lock-order.ts` the comparator was unregistered and the gr.ts
+      // entry was stale, and BOTH halves of the scan failed. That is the whole
+      // point of pinning an exemption to its source instead of to a file name in
+      // prose — the same defect class this file exists to stop.
+      "B-340: a LOCK ORDER, not a list order — the only comparator in the tree whose " +
+      "consumer is Postgres rather than a screen. inLockOrder() sorts a receipt's " +
+      "stock_ledger inserts ascending by inventory_item id so their implicit FK " +
+      "`FOR KEY SHARE` locks are acquired in the SAME direction as " +
+      "TenantDb.selectForUpdate's `ORDER BY id FOR UPDATE`; opposite directions deadlocked " +
+      "8 of 14 measured rounds (40P01 -> 500 -> the phone's offline drain wedged). It needs " +
+      "an entry for TWO reasons the probe cannot settle by itself: the rows are stock " +
+      "DRAFTS carrying no `id` at all (the probe's default floor), so the floor is declared " +
+      "as `itemId`, on which it demonstrably discriminates; and a TIE here is NOT the B-323 " +
+      "defect — two receipt lines naming the SAME item tie deliberately, and their relative " +
+      "order is unobservable, because taking a row lock twice inside one transaction is a " +
+      "no-op. Nothing sorted here is rendered or returned: the output is consumed only by " +
+      "the INSERT loop. Reuse it to order something a reader sees and this entry stops " +
+      "matching, which is the scan saying so.",
+  },
+  {
     file: "apps/api/src/routes/list-order.ts",
     starts: "(a, b) => { const ra = sourceRank(a);",
     unprobeable: true,
@@ -543,9 +570,24 @@ describe("B-323 · list comparators are enforced TOTAL, not counted", () => {
     // list-order.ts explains why the order is applied to resolved rows and not pushed
     // into the read doors. A SQL clause would be a second ordering surface that this
     // scan cannot model, so it must break the build rather than pass unseen.
+    //
+    // ONE NARROW CARVE-OUT (B-342): an `.orderBy(...)` that is part of a
+    // `… .orderBy(x).for("update")` chain is a LOCK ORDER, not a presentation order.
+    // TenantDb.selectForUpdate sorts so its callers acquire overlapping row sets in one
+    // ascending direction; its result is used only for a `.length` check and is NEVER
+    // rendered, so this scan stays blind to nothing. (Deadlock-freedom is a REPO-WIDE
+    // invariant, not this clause's property — the implicit FK locks a stock_ledger INSERT
+    // takes must run the same direction, which is what gr.ts inLockOrder() does. See the
+    // selectForUpdate comment in tenant-db.ts, and B-340.)
+    // The carve-out requires `.for("update")` IN THE SAME STATEMENT: a bare
+    // `.orderBy(` anywhere — including elsewhere in tenant-db.ts — still breaks the build.
     const offenders: string[] = [];
     for (const file of sourceFiles()) {
-      if (readFileSync(join(REPO_ROOT, file), "utf8").includes(".orderBy(")) offenders.push(file);
+      const src = readFileSync(join(REPO_ROOT, file), "utf8");
+      const ordersWithoutLocking = src
+        .split(";")
+        .some((stmt) => stmt.includes(".orderBy(") && !stmt.includes('.for("update")'));
+      if (ordersWithoutLocking) offenders.push(file);
     }
     expect(offenders, "SQL ordering appeared; this scan only models TypeScript sorts").toEqual([]);
   });

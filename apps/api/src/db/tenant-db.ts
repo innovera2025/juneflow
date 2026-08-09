@@ -149,6 +149,79 @@ export class TenantDb {
       .where(this.#scope(table, where));
   }
 
+  /**
+   * SELECT … WHERE company_id = ? [AND extra] ORDER BY id FOR UPDATE — the same
+   * scoped read as select(), plus a ROW LOCK on every row it returns (B-342).
+   *
+   * WHY THIS DOOR EXISTS. The negative-stock guard reads stock_ledger inside a
+   * transaction and compares Σ(qty) in memory. Under READ COMMITTED — the default,
+   * and there is no isolation override anywhere in apps/api — two storekeepers
+   * moving the same item both read the same balance, both pass, and both commit.
+   * Measured live on real Postgres, 2 separate processes, 6 rounds: the
+   * transfer-approve path answered [200,200] with a source balance of −100 in 5 of
+   * them.
+   *
+   * WHY LOCKING THE LEDGER WOULD NOT WORK, and this locks inventory_item instead:
+   * `SELECT … FOR UPDATE` locks rows that EXIST. It cannot block another
+   * transaction's INSERT (there is no predicate locking under READ COMMITTED), and
+   * on a first movement there are no ledger rows to lock at all. The lock therefore
+   * has to be taken on a row that already exists and that both writers must pass
+   * through — the inventory_item. Coarser than per-(item, warehouse): two issues of
+   * the same material from DIFFERENT stores serialise against each other. That is
+   * accepted deliberately at human operating pace, and named rather than hidden.
+   *
+   * ORDER BY id IS LOAD-BEARING, not tidiness: the sort sits below the LockRows node,
+   * so THIS door locks rows ascending by id. That is one half of an invariant — and the
+   * only half this door can enforce.
+   *
+   * THE INVARIANT IS REPO-WIDE, AND THIS DOOR DOES NOT HOLD IT ALONE — nor does any
+   * paragraph. This comment has now been WRONG TWICE, both times by the same move: it
+   * enumerated the lock takers its author could see and then asserted a property of the
+   * table.
+   *   - Version 1 claimed the sort meant "two multi-line documents with overlapping item
+   *     sets cannot deadlock by grabbing them in opposite orders". True of the two
+   *     callers that come THROUGH here; false of the table. gr.ts then inserted
+   *     stock_ledger rows in body order and deadlocked 8 of 14 measured rounds.
+   *   - Version 2 (87e10c2) named "all three places" and said a fourth writer should join
+   *     them. There were already four: inventory.ts createTransfer inserts `transfer_line`
+   *     — another FK child of inventory_item — in CLIENT body order, and had done all
+   *     along. It became a live cycle the moment this door was added, because before
+   *     B-342 there was no FOR UPDATE taker on inventory_item anywhere in apps/api
+   *     (`git grep selectForUpdate dev -- apps/api/src` is empty) and FOR KEY SHARE never
+   *     conflicts with FOR KEY SHARE. Measured at 039bfcb: 16 of 48 requests answered
+   *     500 on a PG 40P01, in 6 of 6 rounds.
+   * A third hand-written list would be the same move a third time. So the enumeration
+   * is NOT here. It lives in the registry in routes/lock-order.enforce.test.ts, which
+   * derives the FK children of `inventory_item` from the schema and fails when a child, a
+   * writer or a guard appears or disappears.
+   *
+   * WHAT THIS DOOR CONTRIBUTES, and it is only this: callers taking the explicit guard
+   * lock acquire ASCENDING, and may then insert their own ledger rows in any order
+   * because they ALREADY HOLD every row they will touch. The other way to hold the
+   * invariant is to sort the inserts (routes/lock-order.ts inLockOrder). Both are
+   * ascending; a third direction is what makes a cycle possible, since a waiter that only
+   * ever holds rows with ids BELOW the one it waits on cannot be waited on by a row it
+   * holds.
+   *
+   * THE HAZARD, written down because it is invisible at the call site: this is
+   * correct BECAUSE READ COMMITTED takes a fresh snapshot per statement, so the
+   * ledger SELECT issued after the lock wait sees the winner's commit. Under
+   * REPEATABLE READ or SERIALIZABLE the snapshot is fixed at the first statement and
+   * THIS GUARD SILENTLY STOPS WORKING. Anyone raising the isolation level for an
+   * unrelated reason breaks the money guard without touching the calling file.
+   *
+   * Tenant scope is identical to select(): the company_id predicate is AND-ed in by
+   * #scope, so a lock can never be taken on another tenant's row.
+   */
+  selectForUpdate<T extends TenantTable & { id: PgColumn }>(table: T, where?: SQL) {
+    return this.#db
+      .select()
+      .from<T>(table as never)
+      .where(this.#scope(table, where))
+      .orderBy(table.id)
+      .for("update");
+  }
+
   /** INSERT with company_id force-set to this tenant (any caller value ignored). */
   insert<T extends TenantTable>(table: T, values: TenantInsert<T>) {
     const row = { ...values, companyId: this.companyId } as T["$inferInsert"];

@@ -67,7 +67,16 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, isNull } from "drizzle-orm";
-import { attendances, jvLines, jvs, payrolls, users, workers } from "@juneflow/db/schema";
+import {
+  attendances,
+  costCenters,
+  jvLines,
+  jvs,
+  payrolls,
+  projects,
+  users,
+  workers,
+} from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { has, pick, readIdempotencyKey, str, toNum } from "./procurement.js";
@@ -98,6 +107,17 @@ type JvRow = typeof jvs.$inferSelect;
 
 /** The perms-matrix module (seed MODULE_IDS) that governs finance mutations. */
 const FINANCE_MODULE = "finance";
+
+/**
+ * uuid matcher — the per-file idiom already in gr.ts / ai-qto.ts / audit-log.ts.
+ *
+ * B-340 gate-4.5 finding 4: a MALFORMED cc_id is refused BEFORE it reaches a query, for
+ * the same reason requireCalendarDay shape-checks `day` (B-332 finding 2) instead of
+ * letting the date column decide — `WHERE id = 'not-a-uuid'` is 22P02, and a 22P02 is a
+ * 500 exactly like the 23503 this round is closing. Fixing only the well-formed-but-
+ * unknown case would leave the same 5xx one keystroke away.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The WIP/CIP account labor capitalises into — 1140 งานระหว่างก่อสร้าง (a real
@@ -780,6 +800,17 @@ const ATTENDANCE_IDEMPOTENCY_CONSTRAINT = "attendance_idempotency_uq";
  */
 const ATTENDANCE_SELF_DAY_CONSTRAINT = "attendance_self_day_uq";
 
+/**
+ * B-338 / B-342: the COMPLEMENT of the index above — at most ONE attendance row per
+ * (worker, day, COST CENTRE) (migration 0063, `WHERE cc_id IS NOT NULL`). Named here
+ * for the SAME B-263 reason, and it is not optional: measured live at 2f42244, the
+ * costed duplicate answered [201,201] → day_fraction 2.00 → payroll 1000 for one day
+ * on a 500/day worker. With the index but WITHOUT this name the pair would answer
+ * 500 instead, and sync_processor.dart DEFERS a 5xx and stops the whole offline
+ * drain — trading a double-payment for a wedged queue.
+ */
+const ATTENDANCE_COSTED_DAY_CONSTRAINT = "attendance_costed_day_uq";
+
 /** The ONE 409 message for a day already on the books — pre-check AND catch, so the
  * concurrent loser and the sequential loser cannot be told apart by the client. */
 const DUPLICATE_DAY_MESSAGE = "this day is already recorded for this worker";
@@ -953,11 +984,20 @@ async function resolveAttendanceConflict(
     const existing = await findAttendanceByIdempotencyKey(db, { idempotencyKey, workerId, day });
     if (existing) return sendExistingAttendance(reply, existing);
   }
+  // B-338 / B-342 INVERTED THE DEFAULT, and the direction is the point. There are now
+  // THREE constraint names and TWO of them (self-day + costed-day) mean "this day is
+  // already recorded"; only the key index means "idempotency_key already used". The
+  // old form tested for the ONE day-constraint and defaulted everything else to the
+  // key message, so adding a second day-constraint would have silently mislabelled it
+  // — telling a supervisor his key was reused when what actually happened is that the
+  // day was already on the books. Testing for the KEY constraint and defaulting to the
+  // day message fails SAFE: an unrecognised name can only ever be reached from the
+  // caller-side of the catch below, which admits exactly these three names.
   return conflict(
     reply,
-    constraint === ATTENDANCE_SELF_DAY_CONSTRAINT
-      ? DUPLICATE_DAY_MESSAGE
-      : "idempotency_key already used",
+    constraint === ATTENDANCE_IDEMPOTENCY_CONSTRAINT
+      ? "idempotency_key already used"
+      : DUPLICATE_DAY_MESSAGE,
   );
 }
 
@@ -1088,6 +1128,37 @@ async function createLaborAttendance(
   )) as WorkerRow[];
   if (!worker) return badRequest(reply, "worker not found in this tenant");
 
+  // B-340 gate-4.5 finding 4: AND SO MUST THE COST CENTRE. cc_id was read above and
+  // never resolved, so an id with no cost_center row went straight to the INSERT and
+  // hit the FK — 23503, which is not a unique violation, so the catch below rethrows it:
+  // measured `{"code":"INTERNAL_ERROR"}` 500 on the ONE door this round reworked
+  // precisely so that its refusals are never 5xx (a 5xx makes sync_processor.dart DEFER,
+  // and the phone's whole offline drain stops behind the deferred op).
+  //
+  // 400, not 409, and the distinction is deliberate: 409 on this door means "the day is
+  // already recorded" — a state conflict about rows that exist. An unresolvable cc_id is
+  // a bad REFERENCE, exactly like `worker not found in this tenant` immediately above,
+  // and it is answered the same way for the same reason. Both are 4xx, which is what the
+  // phone needs (it dead-letters rather than retrying an op that can never succeed).
+  //
+  // AND IT IS A TENANT DOOR, not just a shape check. cost_center carries NO company_id —
+  // it is scoped through project (CC_HOPS is the fa.ts / gl.ts / petty.ts idiom), so a
+  // plain scoped select cannot express it and the FK could not either: another tenant's
+  // cost centre satisfies the FK perfectly and would have been STORED on our attendance
+  // row, carrying into the payroll JV's cc allocation. selectThrough joins
+  // cost_center → project and applies company_id there, so a foreign id resolves to
+  // nothing and is refused as not found — the same fail-closed shape as every other
+  // cross-tenant reference in this repo.
+  if (ccId) {
+    if (!UUID_RE.test(ccId)) return badRequest(reply, "cc_id must be a uuid");
+    const [cc] = await db.selectThrough(
+      costCenters,
+      [{ fk: costCenters.projectId, parent: projects }],
+      eq(costCenters.id, ccId),
+    );
+    if (!cc) return badRequest(reply, "cc_id not found in this tenant");
+  }
+
   // B-307 PRE-CHECK: resolve the client's OWN row before writing. It sits BELOW all
   // validation on purpose — unlike POST /gr there is no state gate above the insert
   // that a legitimate replay could trip, so nothing is gained by hoisting it, and
@@ -1163,10 +1234,15 @@ async function createLaborAttendance(
     // NOTE the missing `idempotencyKey &&`: the B-336 index fires on KEYLESS inserts too
     // (that is the burst it exists for), so requiring a key here would have rethrown the
     // duplicate to a 500 and left the phone's drain wedged on the one case that matters.
+    // B-338 / B-342 adds the THIRD name. It fires on keyless inserts for the same
+    // reason the second one does — the burst it exists for carries no key — and
+    // leaving it unnamed would rethrow the costed duplicate to a 500 and wedge the
+    // drain, which is the exact regression B-336 nearly shipped on break-attempt #4.
     const constraint = isUniqueViolation(err) ? violatedConstraint(err) : undefined;
     if (
       constraint === ATTENDANCE_IDEMPOTENCY_CONSTRAINT ||
-      constraint === ATTENDANCE_SELF_DAY_CONSTRAINT
+      constraint === ATTENDANCE_SELF_DAY_CONSTRAINT ||
+      constraint === ATTENDANCE_COSTED_DAY_CONSTRAINT
     ) {
       return resolveAttendanceConflict(db, reply, { constraint, idempotencyKey, workerId, day });
     }
