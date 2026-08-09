@@ -500,9 +500,20 @@ class _StReceiveScreenState extends State<StReceiveScreen> {
   }
 
   /// A 34px round back button (mobile-field.jsx L61 — surface-3 circle + chevL).
+  ///
+  /// LEAVING IS ACTING, and on THIS screen that is a money-visible fact rather than
+  /// tidiness. `_resolve` pops on `confirmed`, and during a `MaterialPageRoute` exit
+  /// transition the State stays MOUNTED for ~300ms — so a replay landing inside that
+  /// window would reach `_reconcile`, resolve `confirmed`, and fire a SECOND pop,
+  /// taking st-grlist off the stack with it. The storekeeper taps back once and lands
+  /// two screens away. Retiring the latch here is what makes this screen's own comment
+  /// above `_reconcile` ("a second unprompted writer racing it would pop TWICE") true.
   Widget _backButton() {
     return GestureDetector(
-      onTap: () => Navigator.maybePop(context),
+      onTap: () {
+        _reconcileArmed = false;
+        Navigator.maybePop(context);
+      },
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: 34,
