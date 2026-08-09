@@ -172,11 +172,17 @@ const EXEMPT: Exemption[] = [
       "shell and debug output.",
   },
   {
-    file: "apps/api/src/routes/gr.ts",
+    file: "apps/api/src/routes/lock-order.ts",
     starts: "(a, b) => (a.itemId < b.itemId ? -1 : a.itemId > b.itemId ? 1 : 0)",
     floor: "itemId",
     floorKind: "string",
     why:
+      // This entry was written while inLockOrder() still lived in gr.ts, and the
+      // scan caught the move rather than letting the reason drift away from the
+      // code: on `lock-order.ts` the comparator was unregistered and the gr.ts
+      // entry was stale, and BOTH halves of the scan failed. That is the whole
+      // point of pinning an exemption to its source instead of to a file name in
+      // prose — the same defect class this file exists to stop.
       "B-340: a LOCK ORDER, not a list order — the only comparator in the tree whose " +
       "consumer is Postgres rather than a screen. inLockOrder() sorts a receipt's " +
       "stock_ledger inserts ascending by inventory_item id so their implicit FK " +
