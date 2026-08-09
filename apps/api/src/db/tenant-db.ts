@@ -174,35 +174,34 @@ export class TenantDb {
    * so THIS door locks rows ascending by id. That is one half of an invariant — and the
    * only half this door can enforce.
    *
-   * THE INVARIANT IS REPO-WIDE, AND THIS DOOR DOES NOT HOLD IT ALONE. An earlier version
-   * of this comment claimed the sort meant "two multi-line documents with overlapping
-   * item sets cannot deadlock by grabbing them in opposite orders" — which was true only
-   * of the two callers that come THROUGH here, while reading as a property of the table.
-   * It is not one: `stock_ledger.item_id` is an FK, so EVERY stock_ledger INSERT silently
-   * takes `SELECT 1 FROM inventory_item … FOR KEY SHARE` on the referenced row, and FOR
-   * KEY SHARE CONFLICTS with the FOR UPDATE taken here. An unsorted inserter is a second,
-   * invisible lock taker, in whatever order its body happened to arrive in.
+   * THE INVARIANT IS REPO-WIDE, AND THIS DOOR DOES NOT HOLD IT ALONE — nor does any
+   * paragraph. This comment has now been WRONG TWICE, both times by the same move: it
+   * enumerated the lock takers its author could see and then asserted a property of the
+   * table.
+   *   - Version 1 claimed the sort meant "two multi-line documents with overlapping item
+   *     sets cannot deadlock by grabbing them in opposite orders". True of the two
+   *     callers that come THROUGH here; false of the table. gr.ts then inserted
+   *     stock_ledger rows in body order and deadlocked 8 of 14 measured rounds.
+   *   - Version 2 (87e10c2) named "all three places" and said a fourth writer should join
+   *     them. There were already four: inventory.ts createTransfer inserts `transfer_line`
+   *     — another FK child of inventory_item — in CLIENT body order, and had done all
+   *     along. It became a live cycle the moment this door was added, because before
+   *     B-342 there was no FOR UPDATE taker on inventory_item anywhere in apps/api
+   *     (`git grep selectForUpdate dev -- apps/api/src` is empty) and FOR KEY SHARE never
+   *     conflicts with FOR KEY SHARE. Measured at 039bfcb: 16 of 48 requests answered
+   *     500 on a PG 40P01, in 6 of 6 rounds.
+   * A third hand-written list would be the same move a third time. So the enumeration
+   * is NOT here. It lives in the registry in routes/lock-order.enforce.test.ts, which
+   * derives the FK children of `inventory_item` from the schema and fails when a child, a
+   * writer or a guard appears or disappears.
    *
-   * MEASURED at 87e10c2, the round in which gr.ts became the third lock taker and
-   * inserted in body-line order: 14 rounds of POST /gr (lines DESCENDING) against POST
-   * /inventory/issues (ASCENDING) over 8 shared items, fired from separate OS processes
-   * on one barrier — 8 rounds ended in PG "deadlock detected" (40P01). Nothing in
-   * apps/api catches 40P01, so it surfaced as a 500 on whichever side lost (7 issue,
-   * 1 gr), and a 500 on a receipt stops the phone's whole offline drain.
-   *
-   * WHAT ACTUALLY HOLDS IT — all three places, named so a fourth writer knows what to
-   * join:
-   *   - this ORDER BY id, for callers taking the explicit guard lock (inventory.ts
-   *     approveTransfer + createIssue — both then insert their ledger rows while ALREADY
-   *     holding FOR UPDATE on those items, so their insert order is free);
-   *   - gr.ts inLockOrder(), which sorts the receipt's ledger inserts (create) and its
-   *     reversals (return/cancel) ascending by item id — that path takes no guard lock,
-   *     so its FK locks are all it has;
-   *   - the direction being the SAME in both. Ascending everywhere is what makes a cycle
-   *     impossible: a waiter only ever holds rows with ids BELOW the one it waits on, so
-   *     "A waits on a row B holds" and "B waits on a row A holds" cannot both be true.
-   * Any new writer of a table whose FK points at inventory_item must acquire ascending by
-   * inventory_item.id — through this door, or by sorting its own inserts.
+   * WHAT THIS DOOR CONTRIBUTES, and it is only this: callers taking the explicit guard
+   * lock acquire ASCENDING, and may then insert their own ledger rows in any order
+   * because they ALREADY HOLD every row they will touch. The other way to hold the
+   * invariant is to sort the inserts (routes/lock-order.ts inLockOrder). Both are
+   * ascending; a third direction is what makes a cycle possible, since a waiter that only
+   * ever holds rows with ids BELOW the one it waits on cannot be waited on by a row it
+   * holds.
    *
    * THE HAZARD, written down because it is invisible at the call site: this is
    * correct BECAUSE READ COMMITTED takes a fresh snapshot per statement, so the

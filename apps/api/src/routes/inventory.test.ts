@@ -37,6 +37,7 @@ import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
+import { entryOrder } from "./list-order.js";
 
 const COMPANY = "22222222-2222-2222-2222-222222222222";
 const SESSION = {
@@ -747,6 +748,50 @@ describe("POST /api/v1/inventory/transfers", () => {
     expect(times[1]!).toBeGreaterThan(times[0]!);
     // NO stock movement on create (deferred to approve).
     expect(inserted.find((i) => i.table === stockLedgers)).toBeUndefined();
+  });
+
+  it("writes the lines in LOCK order but stamps them in BODY order — the detail screen still renders what was typed", async () => {
+    // B-340 gate-4.5 finding 1, and the trap that comes with its fix. `transfer_line` is
+    // BOTH the rendered body of one transfer AND an FK child of `inventory_item`, so ONE
+    // array has two consumers with two different required orders:
+    //   - Postgres wants ASCENDING item id, because this multi-row INSERT takes an
+    //     implicit `FOR KEY SHARE` per row IN ROW ORDER and a descending one deadlocks a
+    //     concurrent issue's `FOR UPDATE` (16 of 48 requests 500 before the fix);
+    //   - the storekeeper wants the order they typed, which GET /inventory/transfers/{id}
+    //     recovers via entryOrder (created_at ASC).
+    // Both are satisfied only by stamp-THEN-sort. Sorting first would move the stamps too
+    // and silently reorder every transfer detail screen — which nothing else here would
+    // catch, because the test above sends its lines ALREADY ascending, so for it the sort
+    // is a no-op and it passes with the composition either way round.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: transferDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/inventory/transfers",
+      // DESCENDING body — line order is client-controlled, and ITEM1 > ITEM0.
+      payload: {
+        from_warehouse_id: WH_FROM,
+        to_warehouse_id: WH_TO,
+        lines: [
+          { item_id: ITEM1, qty: 5 },
+          { item_id: ITEM0, qty: 4 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const lines = inserted.find((i) => i.table === transferLines)!.values as {
+      itemId: string;
+      createdAt: Date;
+    }[];
+    // WRITTEN ascending by item id — the row order Postgres takes its FK locks in.
+    expect(lines.map((l) => l.itemId)).toEqual([ITEM0, ITEM1]);
+    // STAMPED in body order: the line typed FIRST (ITEM1) carries the EARLIER instant,
+    // even though it is now written SECOND.
+    const at = new Map(lines.map((l) => [l.itemId, l.createdAt.getTime()]));
+    expect(at.get(ITEM1)!).toBeLessThan(at.get(ITEM0)!);
+    // So the reader the detail route actually uses reproduces the typed body exactly.
+    expect(entryOrder(lines).map((l) => l.itemId)).toEqual([ITEM1, ITEM0]);
   });
 
   it("400s a line item that is not in this tenant (ownership)", async () => {

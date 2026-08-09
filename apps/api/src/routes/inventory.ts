@@ -109,6 +109,7 @@ import { pick, readIdempotencyKey, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed, type CallerAuthz } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
 import { entryOrder, newestFirst, stampEntryOrder } from "./list-order.js";
+import { inLockOrder } from "./lock-order.js";
 import {
   ACCT,
   allocJvNo,
@@ -826,20 +827,37 @@ async function createTransfer(
         status: "pending",
       })
       .returning()) as StockTransferRow[];
-    // B-323: transfer_line is a no-`seq` LINE table read back as the ordered body of
-    // one transfer (GET /inventory/transfers/{id}). One insertThrough = one now() =
-    // every line tied, so stamp the batch apart in body order.
+    // ONE ARRAY, TWO CONSUMERS — and the composition order below is load-bearing.
+    //
+    // B-323 (stampEntryOrder): transfer_line is a no-`seq` LINE table read back as the
+    // ordered body of one transfer (GET /inventory/transfers/{id} renders
+    // entryOrder(lines), i.e. created_at ASC). One insertThrough = one INSERT = one
+    // now() = every line tied, so the batch is stamped 1 ms apart to RECORD entry order.
+    //
+    // B-340 (inLockOrder): `transfer_line.item_id` is an FK, so this INSERT also takes an
+    // implicit `FOR KEY SHARE` on each inventory_item — in ROW ORDER, which is CLIENT
+    // order — and that conflicts with the `FOR UPDATE` approveTransfer and createIssue
+    // take below. Body order deadlocked 16 of 48 requests across 6 of 6 rounds against
+    // concurrent issues (measured at 039bfcb; PG 40P01 -> uncaught -> 500 -> the phone's
+    // offline drain wedges). See lock-order.ts.
+    //
+    // STAMP FIRST, THEN SORT. Composed the other way round the stamp would follow the
+    // LOCK order, and every transfer detail screen would silently render its lines in
+    // item-id order instead of the order the storekeeper typed them. Stamping first ties
+    // each line's created_at to its BODY position, so reordering for the insert moves the
+    // locks without moving the body — gr.ts needed no such care because its stamped rows
+    // (gr_item) and its sorted rows (stock_ledger) are two separate arrays.
     await tx.insertThrough(
       transferLines,
       stockTransfers,
       transferId,
-      stampEntryOrder(lines.map((l) => ({
+      inLockOrder(stampEntryOrder(lines.map((l) => ({
         transferId,
         itemId: l.itemId,
         qty: qtyStr(l.qty),
         fromWh: fromWarehouseId,
         toWh: toWarehouseId,
-      }))),
+      })))),
     );
     return header!;
   });
