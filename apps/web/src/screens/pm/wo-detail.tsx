@@ -816,14 +816,18 @@ function SignaturePad({ pad, onInkChanged }: { pad: SignaturePadBinding; onInkCh
     }
     ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx2d.clearRect(0, 0, rect.width, rect.height);
-    // Canvas 2D cannot take `var(--text)` directly, so the token is RESOLVED rather
-    // than a hex being hardcoded beside it (§0 rule 6 — tokens back every colour).
-    // Cached: getComputedStyle forces a style flush, and this is a per-move path.
+    // Canvas 2D cannot take `var(--text)` directly, so the token is RESOLVED (§0 rule
+    // 6 — tokens back every colour). Read as the canvas's own COMPUTED `color`, which
+    // its inline style sets to var(--text): the computed value of `color` is ALWAYS a
+    // real colour, so there is nothing to fall back to and no literal is written here.
+    // This line used to end in a literal fallback, and that literal was byte-equal to
+    // --text as tokens.css:25 defines it — but tokens.css:55 redefines --text for the
+    // OTHER theme, so the fallback baked one theme's value into guarded source
+    // (B-357/F6). It could only ever fire with no `window`, which is unreachable from
+    // a mounted canvas, so this is a literal removed rather than a bug fixed. Cached:
+    // getComputedStyle forces a style flush, and this is a per-move path.
     if (inkColor.current === null) {
-      inkColor.current =
-        (typeof window === "undefined"
-          ? ""
-          : window.getComputedStyle(canvas).getPropertyValue("--text").trim()) || "#223548";
+      inkColor.current = window.getComputedStyle(canvas).color;
     }
     ctx2d.strokeStyle = inkColor.current;
     ctx2d.lineWidth = 2;
@@ -882,6 +886,10 @@ function SignaturePad({ pad, onInkChanged }: { pad: SignaturePadBinding; onInkCh
           border: "1.5px dashed var(--border-strong)",
           borderRadius: 10,
           background: "var(--surface-2)",
+          // The pen colour, read back as the canvas's computed `color` in redraw() so
+          // no hex is written in this file (B-357/F6). Not otherwise visible — a
+          // canvas paints nothing from `color` by itself.
+          color: "var(--text)",
           // Without this a touch drag scrolls the modal instead of drawing.
           touchAction: "none",
           cursor: "crosshair",
