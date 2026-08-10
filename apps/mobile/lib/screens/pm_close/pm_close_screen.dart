@@ -95,6 +95,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
+import '../../offline/pending_op_adoption.dart';
 import '../../offline/sync_operation.dart';
 import '../../offline/sync_processor.dart';
 import '../../theme/juneflow_theme.dart';
@@ -199,7 +200,36 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
 
   /// The stable client id of the op in flight, reused across manual retries so a
   /// re-tap re-drains the SAME queued write instead of enqueuing a second one.
+  ///
+  /// A null does NOT mean "nothing of mine is queued" — only "this State is not
+  /// tracking one". State is not durable and the QUEUE is, so the two disagree after
+  /// an app kill, and until [_settling] clears they disagree on this mount too. What
+  /// makes the outstanding write VISIBLE is [_settleQueue]; what stops a tap minting a
+  /// SECOND key is that [_onClose] asks the queue itself before minting, and that no
+  /// tap is possible before the read lands (B-341). B-330 / B-357/F7.
   String? _opId;
+
+  /// True until this mount's QUEUE READ has answered "is a close of mine still
+  /// outstanding for this work order?" — the window the CTA is quiet for (B-341).
+  ///
+  /// Raised in [initState] so the very first frame is already quiet, and lowered in a
+  /// `finally` so a queue read that THROWS opens the button rather than parking it
+  /// forever. The window holds a LOCAL read only: this screen's anchor is the
+  /// work-order id it was pushed with, so unlike pm-notes / field-stock /
+  /// field-progress it needs no network read before the queue can be asked the right
+  /// question. See offline/pending_op_adoption.dart.
+  bool _settling = false;
+
+  /// True while this mount's ADOPTION is still un-acted-upon — the single fact
+  /// [_reconcile] may run on.
+  ///
+  /// No combination of state VALUES can carry it: `_opId == adopted && _state ==
+  /// queued` is exactly where a user's own manual retry lands while the close is still
+  /// due, so that tuple is reachable both from an untouched mount adoption and from a
+  /// tap. This is monotonic — raised once at adoption, lowered at the first tap — which
+  /// is the only shape that tells "nobody has touched this" from "touched, and it came
+  /// back to the same value".
+  bool _reconcileArmed = false;
 
   /// The encoded stroke JSON of what is on the pad right now, or null when the pad
   /// is empty. This is the ONLY gate on the CTA — see [_canSubmit].
@@ -215,10 +245,99 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
   void initState() {
     super.initState();
     if (widget.workOrderId != null) {
+      // Raised BEFORE the first frame, so the CTA is never live over a queue this
+      // mount has not read yet (B-341).
+      _settling = true;
       unawaited(_load());
+      unawaited(_resumeQueued());
     } else {
       _loaded = true;
     }
+  }
+
+  /// The on-mount queue read + drain, in the order B-341 requires (B-357/F7).
+  ///
+  /// THE QUEUE READ RUNS FIRST, and it runs INDEPENDENTLY of [_load]: this screen's
+  /// anchor is the work-order id it was pushed with, so there is nothing a read has to
+  /// resolve before the queue can be asked. A drain can only ever shrink what is
+  /// adoptable, so reading first cannot miss anything a post-drain read would find —
+  /// and it keeps the one unbounded call (Dio sets no `connectTimeout`) out of the
+  /// window the technician is waiting on.
+  ///
+  /// The drain then runs, and [_reconcile] reports what it did to the very close the
+  /// screen is now describing — using the drain's OWN report, so an accepted write and
+  /// a dead-letter are told apart rather than both reading as "no longer adoptable".
+  Future<void> _resumeQueued() async {
+    final String? woId = widget.workOrderId;
+    if (woId == null) return;
+    final String? adopted = await _settleQueue(woId);
+    final DrainReport report = await widget.repo.drain();
+    if (adopted != null) await _reconcile(adopted, report);
+  }
+
+  /// The queue read the CTA waits on. Returns the adopted op id, or null.
+  ///
+  /// THE ANCHOR is [pmCloseOpIdentity]: entity type `pm_close` plus the endpoint
+  /// `/pm/workorders/{id}/close`. The path carries the record, so no `payloadAnchor` is
+  /// needed — but the endpoint ALONE would be the wrong matcher here, and this screen
+  /// is the one place in the app where that matters: pm-notes writes the maintenance
+  /// log to the SAME path (`pmNotesOpIdentity`), differing only in entity type. A
+  /// matcher that ignored the type would let this screen adopt pm-notes' queued log,
+  /// believe the signature had already been sent, and drop the customer's mark
+  /// entirely. Both halves of the identity are therefore load-bearing, and both are
+  /// built by the expression the repository builds the op from, so they cannot drift.
+  Future<String?> _settleQueue(String woId) async {
+    try {
+      final SyncOperation? mine = findAdoptableOp(
+        await widget.repo.due(),
+        pmCloseOpIdentity(woId),
+      );
+      if (mine == null || !mounted) return null;
+      setState(() {
+        _opId = mine.id;
+        // Only a still-replayable op is adoptable (findAdoptableOp), and that is
+        // exactly what `queued` means here: captured, not accepted. It is NOT
+        // `closed` — nothing is stored server-side yet.
+        _state = PmCloseState.queued;
+        // Raised in the SAME setState as the adoption, with no await between it and
+        // the `finally` that opens the CTA, so the latch is up before any tap can be
+        // accepted and every accepted tap can therefore lower it.
+        _reconcileArmed = true;
+      });
+      return mine.id;
+    } on Object {
+      // A queue read that FAILED has answered nothing, and a CTA left quiet on an
+      // unanswerable question is the dead end B-341 forbids. The button opens; the
+      // mint site asks the same queue again before it mints.
+      return null;
+    } finally {
+      if (mounted) setState(() => _settling = false);
+    }
+  }
+
+  /// Say what the drain actually did to the close the screen is describing.
+  ///
+  /// Adopting before the drain is what bounds the quiet window; the cost is that the
+  /// adopted state can outlive its subject by one round trip. This pays it back by
+  /// running the screen's OWN [_resolve] over the drain's own report — the identical
+  /// path a manual retry takes — so it cannot invent an outcome of its own: synced →
+  /// `closed`, dead-lettered → `failed`, still due → `queued`, unchanged.
+  ///
+  /// It never returns the screen to `idle`. `idle` is the state with NOTHING enqueued,
+  /// so on a close the server ACCEPTED it would state the write never happened — and
+  /// it would leave a live CTA with `_opId` null over an empty queue, which mints a
+  /// SECOND key and closes the work order twice.
+  ///
+  /// Runs at most once, and only while [_reconcileArmed]: after a tap the technician's
+  /// own flow owns the outcome.
+  Future<void> _reconcile(String adopted, DrainReport report) async {
+    if (!mounted || !_reconcileArmed || _opId != adopted) return;
+    _reconcileArmed = false;
+    // Flipped SYNCHRONOUSLY, before [_resolve]'s first await, exactly as every tap
+    // path here does: it is what stops a tap arriving DURING the resolve from opening
+    // a second one over the same op.
+    setState(() => _state = PmCloseState.submitting);
+    await _resolve(adopted, report);
   }
 
   Future<void> _load() async {
@@ -265,13 +384,23 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
 
   /// Whether the CTA may fire.
   ///
-  /// Ink is REQUIRED. This screen's entire body is the signature, so a close with an
-  /// empty pad would send nothing, and the handler would then write nothing at all
-  /// (`Object.keys(set).length > 0` is false, pm.ts L796) while still returning 200 —
-  /// the fabricated outcome B-288 refused to ship. An in-flight submit also blocks,
-  /// so one signature cannot be sent twice by a double tap.
+  /// Ink is REQUIRED for a NEW close. This screen's entire body is the signature, so a
+  /// close with an empty pad would send nothing, and the handler would then write
+  /// nothing at all (`Object.keys(set).length > 0` is false, pm.ts L796) while still
+  /// returning 200 — the fabricated outcome B-288 refused to ship.
+  ///
+  /// An outstanding op is the other way in, and it has to be: after a restart (or an
+  /// adoption on this mount) the pad is blank while a real close of this work order's
+  /// is still sitting in the queue, and the technician must be able to re-drain it.
+  /// That tap sends nothing new — see [_onClose].
+  ///
+  /// It refuses while the queue read is still open (B-341: no tap may happen before
+  /// the screen knows whether a write of its own is already outstanding), while a
+  /// submit is in flight (so one signature cannot be sent twice by a double tap), and
+  /// once the close is accepted.
   bool get _canSubmit =>
-      _pending != null &&
+      !_settling &&
+      (_pending != null || _opId != null) &&
       _state != PmCloseState.submitting &&
       _state != PmCloseState.closed;
 
@@ -297,16 +426,72 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
   /// Submit the captured signature, or re-drain the op already queued.
   ///
   /// A retry REUSES [_opId]: the queue keys on it, so re-tapping replays the existing
-  /// write instead of stacking a second one behind it.
+  /// write instead of stacking a second one behind it. Across a RESTART that field is
+  /// gone while the queue is not, which is what [_settleQueue] and the pre-mint check
+  /// below exist for (B-330 / B-357/F7).
   Future<void> _onClose() async {
     if (!_canSubmit) return;
     final String? woId = widget.workOrderId;
-    final Map<String, Object?>? body = pmClosePayload(_pending);
-    // Both are already guaranteed by _canSubmit and the load path; refusing here as
-    // well means no future edit can open a path to an empty body.
-    if (woId == null || body == null) return;
+    if (woId == null) return;
+    // The technician has acted, so the mount's reconciliation retires HERE — before
+    // any await, and whatever this tap goes on to do. From now on this flow owns
+    // `_state` and `_opId`. Lowered at the ACCEPTED tap rather than at a refused one:
+    // the latch is raised inside the settle that `_canSubmit` is still refusing for,
+    // so anything earlier would lower a latch that is not up yet.
+    _reconcileArmed = false;
 
-    final String opId = _opId ??= _newOpId();
+    final String? tracked = _opId;
+    final Map<String, Object?>? body = pmClosePayload(_pending);
+
+    if (body == null) {
+      // NOTHING ON THIS PAD. The only honest tap is a retry of a write already
+      // queued — reachable via `_canSubmit`'s `_opId != null` after a restart or an
+      // adoption. It re-drains and sends nothing: the queued op carries the signature
+      // it was CAPTURED with, exactly as pm-checkin re-drains rather than re-acquiring
+      // a coordinate, and re-enqueuing under that key with an empty pad would replace
+      // the customer's mark with nothing.
+      if (tracked == null) return;
+      await _retryDrain(tracked);
+      return;
+    }
+
+    if (tracked != null) {
+      // This session's own submit, being retried with the ink still on the pad. Same
+      // key, so the queue replays one write rather than stacking a second.
+      await _submit(woId, tracked, body);
+      return;
+    }
+
+    // Flipped SYNCHRONOUSLY before the queue read below, so the CTA is already
+    // untappable when a second tap could otherwise arrive during it. Without this the
+    // two taps both read a queue that has not seen either enqueue yet, and both mint.
+    setState(() => _state = PmCloseState.submitting);
+
+    // About to MINT a key — so ask the QUEUE rather than trust this State's null
+    // (B-330). That null also covers the whole on-mount drain, during which a close of
+    // this work order's may already be queued; minting there enqueues a SECOND op
+    // under a SECOND key, and the server would then store the signature twice under
+    // two client keys that are legitimately two writes.
+    final SyncOperation? already = findAdoptableOp(
+      await widget.repo.due(),
+      pmCloseOpIdentity(woId),
+    );
+    if (!mounted) return;
+    if (already != null) {
+      setState(() => _opId = already.id);
+      await _retryDrain(already.id);
+      return;
+    }
+
+    await _submit(woId, _opId = _newOpId(), body);
+  }
+
+  /// Enqueue (or re-enqueue under the same key) and drain.
+  Future<void> _submit(
+    String woId,
+    String opId,
+    Map<String, Object?> body,
+  ) async {
     setState(() => _state = PmCloseState.submitting);
     final DrainReport report = await widget.repo.submitClose(
       workOrderId: woId,
@@ -314,6 +499,14 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
       body: body,
       now: DateTime.now(),
     );
+    await _resolve(opId, report);
+  }
+
+  /// Re-drain an already-enqueued op (the manual retry) — no enqueue, so the payload
+  /// the customer signed is replayed untouched.
+  Future<void> _retryDrain(String opId) async {
+    setState(() => _state = PmCloseState.submitting);
+    final DrainReport report = await widget.repo.drain();
     await _resolve(opId, report);
   }
 
@@ -584,7 +777,13 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
   /// enables its button on a local `signed` flag set by a tap; here it enables on
   /// REAL INK being on the pad. An empty pad keeps it disabled — with nothing to
   /// send, a close would write nothing and still return 200, which is exactly the
-  /// fabricated outcome B-288 refused.
+  /// fabricated outcome B-288 refused. The one other way in is an outstanding op
+  /// (see [_canSubmit]): a re-drain sends nothing new, so it cannot fabricate either.
+  ///
+  /// It is also QUIET for the on-mount queue read (B-341, B-357/F7) — muted fill, no
+  /// tap handler. That needs no new state and no new copy: it wears the same muted
+  /// fill and the same `pm.closeWithSignBtn` label a not-yet-signed pad already shows,
+  /// and it is honest about the same thing, that the control is not ready to fire.
   ///
   /// Its label stays the dict key pm.closeWithSignBtn, NOT the prototype's "close PM
   /// + send report": the report half promises a LINE push that is a no-op stub

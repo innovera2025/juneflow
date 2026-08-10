@@ -1,5 +1,10 @@
-// The post-restart idempotency-key property, proven on ALL FIVE offline-write
+// The post-restart idempotency-key property, proven on ALL SEVEN offline-write
 // screens against the REAL queue and the REAL production write path (B-330).
+//
+// SEVEN, not five: the file was written for five, gained field-stock, and gained
+// pm-close under B-357/F7 — that screen became a write path only when B-331 ruled the
+// `customer_sign` encoding and its CTA went live, and it arrived carrying the very
+// defect the other six had just had removed.
 //
 // WHY THIS FILE EXISTS, AND WHY IT DOES NOT USE THE SCREENS' FAKE REPOSITORIES
 // ------------------------------------------------------------------------------
@@ -54,6 +59,10 @@ import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_screen.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_agg.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_repository.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_screen.dart';
+import 'package:juneflow_mobile/screens/pm_close/pm_close_agg.dart';
+import 'package:juneflow_mobile/screens/pm_close/pm_close_repository.dart';
+import 'package:juneflow_mobile/screens/pm_close/pm_close_screen.dart';
+import 'package:juneflow_mobile/screens/pm_close/signature_pad.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_agg.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_repository.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_screen.dart';
@@ -186,6 +195,33 @@ class _SlowNotesRepo extends _StoredNotesRepo {
     await Future<void>.delayed(delay);
     return super.listWorkOrders();
   }
+}
+
+/// pm-close's reads, stubbed. The write half — the real [SyncOperation], the real
+/// [pmCloseOpIdentity], the real `{signature}` payload — is inherited untouched.
+///
+/// TWO work orders, because this screen shares its ENDPOINT with pm-notes
+/// (`/pm/workorders/{id}/close`; only the entity type differs), so a fixture with one
+/// work order could not tell a working identity from a broken one.
+class _CloseRepo extends DioPmCloseRepository {
+  _CloseRepo(QueueDrainProcessor p) : super(_unusedDio, p);
+
+  @override
+  Future<List<PmCloseEnt>> listWorkOrders() async => <PmCloseEnt>[
+    for (final String id in <String>['wo-1', 'wo-2'])
+      <String, Object?>{
+        'id': id,
+        'asset_id': 'a1',
+        'items': <Object?>[
+          <String, Object?>{'label': 'A', 'result': 'normal'},
+        ],
+      },
+  ];
+
+  @override
+  Future<List<PmCloseEnt>> listAssets() async => <PmCloseEnt>[
+    <String, Object?>{'id': 'a1', 'name': 'ลิฟต์ MX-1000', 'code': 'LIFT-A01'},
+  ];
 }
 
 class _ChecklistRepo extends DioPmChecklistRepository {
@@ -422,6 +458,33 @@ class _SlowDueStockRepo extends _StockRepo {
   Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
 }
 
+/// pm-close's slow queue read, plus a DRAIN COUNTER.
+///
+/// The counter exists because pm-close's quiet CTA is otherwise hard to catch. On the
+/// other five screens a tap inside the window either mints a second key or silently
+/// drops a staged basket, and the queue shows it. Here the pre-mint check would ADOPT
+/// the outstanding op, so the queue looks identical either way — what actually happens
+/// is that the signature just drawn is never sent while the screen reports the
+/// PREVIOUS write's outcome. `drains` makes the difference observable: with the window
+/// honoured a tap inside it reaches nothing at all.
+class _SlowDueCloseRepo extends _CloseRepo {
+  _SlowDueCloseRepo(super.p, {required this.delay});
+
+  final Duration delay;
+
+  /// Every drain this screen asked for — the mount's own, plus one per accepted tap.
+  int drains = 0;
+
+  @override
+  Future<List<SyncOperation>> due() => _slowDue(super.due(), delay);
+
+  @override
+  Future<DrainReport> drain() {
+    drains++;
+    return super.drain();
+  }
+}
+
 /// A QUEUE READ THAT FAILS — the local store is unreadable (B-341).
 ///
 /// The screens release the quiet CTA in a `finally`, so this must open the button
@@ -495,6 +558,15 @@ class _ThrowingDueStockRepo extends _StockRepo {
   Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
 }
 
+class _ThrowingDueCloseRepo extends _CloseRepo {
+  _ThrowingDueCloseRepo(super.p);
+
+  bool throwing = true;
+
+  @override
+  Future<List<SyncOperation>> due() => _throwingDue(throwing, super.due());
+}
+
 // ---------------------------------------------------------------------------
 // i18n + sidecars (the real field names; dict values from docs/extract/i18n-full.json)
 // ---------------------------------------------------------------------------
@@ -541,13 +613,19 @@ final JuneflowI18n _i18n = JuneflowI18n.fromJsonString('''
     "inv.issueAdd.title": {"th":"เบิกวัสดุออก (Material Issue)"},
     "inv.issueAdd.itemsTitle": {"th":"รายการที่เบิก"},
     "inv.issueAdd.colStock": {"th":"สต็อก"},
-    "inv.issue.colUsedFor": {"th":"ใช้กับ"}
+    "inv.issue.colUsedFor": {"th":"ใช้กับ"},
+    "pm.fieldAsset": {"th":"อุปกรณ์"},
+    "pm.timeTotal": {"th":"รวมเวลา"},
+    "pm.signatureLabel": {"th":"ลายเซ็นลูกค้า / ผู้ดูแลอาคาร"},
+    "pm.checkProgress": {"th":"{n}/{count} รายการ"},
+    "pm.closeWithSignBtn": {"th":"ปิดงาน + ลายเซ็น"},
+    "pm.closedNote": {"th":"ปิดงานแล้ว · ลูกค้าลงนามรับงาน"}
   },
   "nav_i18n": {}, "phrases": {}, "phrase_patterns": []
 }
 ''', lang: 'th');
 
-/// The shared honest-offline status copy every one of the five screens renders for a
+/// The shared honest-offline status copy every one of the seven screens renders for a
 /// captured-not-confirmed write. Its presence on mount IS the visible half of the
 /// rehydration: the relaunched screen says a write is still outstanding.
 const String _queuedCard = 'รอส่ง';
@@ -665,6 +743,26 @@ final ScreenStrings _stockStrings = ScreenStrings.fromJsonString('''
   "failed": "admin.common.actionFailedToast"
 }
 ''');
+
+final ScreenStrings _closeStrings = ScreenStrings.fromJsonString('''
+{
+  "title": "สรุป + ปิดงาน",
+  "summaryTitle": "สรุปงาน",
+  "rowAsset": "pm.fieldAsset",
+  "rowChecks": "ผลตรวจ",
+  "checkProgress": "pm.checkProgress",
+  "repairCount": "ซ่อม {n}",
+  "rowTime": "เริ่ม-เสร็จ",
+  "rowTotalTime": "pm.timeTotal",
+  "rowParts": "อะไหล่",
+  "signatureTitle": "pm.signatureLabel",
+  "recipient": "ผู้รับบริการ",
+  "close": "pm.closeWithSignBtn",
+  "closed": "pm.closedNote",
+  "queued": "tax.etax.statusPending",
+  "failed": "admin.common.actionFailedToast"
+}
+''', assetPath: 'test/inline');
 
 class _FixedGps implements GpsSource {
   const _FixedGps();
@@ -932,6 +1030,37 @@ Future<void> _mountProgress(
   ),
 );
 
+Future<void> _mountClose(
+  WidgetTester tester,
+  InMemorySyncQueue queue,
+  _Transport transport, {
+  String workOrderId = 'wo-1',
+  PmCloseRepository? repo,
+}) => _mount(
+  tester,
+  PmCloseScreen(
+    repo: repo ?? _CloseRepo(_processor(queue, transport)),
+    strings: _closeStrings,
+    i18n: _i18n,
+    workOrderId: workOrderId,
+  ),
+);
+
+/// Draw a real signature on pm-close's pad: pen-down, several MOVES, pen-up.
+///
+/// Anything short of a MOVE is refused by the encoder — a tap is not a signature, and
+/// neither is a one-pixel drag (kSignatureMinStrokeSpan, B-357/F2) — so this is what a
+/// genuine capture looks like and there is no shorter way to arm this screen's CTA.
+Future<void> _signClose(WidgetTester tester) async {
+  final Offset origin = tester.getCenter(find.byType(SignaturePad));
+  final TestGesture g = await tester.startGesture(origin - const Offset(60, 0));
+  for (int i = 1; i <= 6; i++) {
+    await g.moveBy(Offset(20, i.isEven ? 12 : -12));
+  }
+  await g.up();
+  await _flush(tester);
+}
+
 /// field-stock's mount. [warehouseId] null is the REAL router path — the tab route
 /// carries no parameter, so the screen follows the register's newest warehouse (w-B
 /// here, by `created_at`). An explicit id is the push seam, and is what lets one test
@@ -986,12 +1115,18 @@ const String _saveNotes = 'บันทึก';
 const String _saveChecklist = 'บันทึกผล + ต่อไป';
 const String _resultNormal = 'ปกติ';
 const String _deliver = 'ส่งมอบงาน';
+const String _closeWo = 'ปิดงาน + ลายเซ็น';
+
+/// pm-close's durable-success copy (pm.closedNote). It is the one sentence on that
+/// screen that asserts the customer signed, so it may only appear once a drain has
+/// reported the write SYNCED — never over a queued or dead-lettered one.
+const String _closedNote = 'ปิดงานแล้ว · ลูกค้าลงนามรับงาน';
 
 void main() {
   // =========================================================================
   // 1. RESTART — the defect itself, on each screen independently.
-  //    Each of these five must go RED on its own when the rehydration is
-  //    removed from ITS screen: one red does not cover the other four.
+  //    Each of these seven must go RED on its own when the rehydration is
+  //    removed from ITS screen: one red does not cover the other six.
   // =========================================================================
   group('a restart while a write is queued adopts the SAME key', () {
     testWidgets(
@@ -1081,6 +1216,59 @@ void main() {
       await _tap(tester, _saveChecklist);
 
       expect(await _queuedIds(queue), <String>[k1]);
+    });
+
+    testWidgets('pm-close (the SEVENTH screen — B-357/F7)', (
+      WidgetTester tester,
+    ) async {
+      // It joined this inventory the moment it became a write path. Until B-331 the
+      // close was withheld (no signature could be captured), so there was no key to
+      // mint twice; the signature encoding was ruled, the CTA went live, and the
+      // screen arrived carrying the same defect the other six had just had removed.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      final SyncOperation op = (await _queued(queue)).single;
+      final String k1 = op.id;
+      // Both halves of the identity, because BOTH are load-bearing here: pm-notes
+      // writes to this very endpoint and is told apart only by the entity type.
+      expect(op.endpoint, '/pm/workorders/wo-1/close');
+      expect(op.entityType, 'pm_close');
+      expect(op.payload.keys.toSet(), <String>{'signature'});
+
+      await _kill(tester);
+      await _mountClose(tester, queue, transport);
+
+      // The relaunched screen already knows a close is outstanding — it did not
+      // present a clean slate with an empty pad and a dead button.
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      // The technician, still seeing no confirmation, taps again. The pad is BLANK on
+      // this mount, so the tap can only be a retry — and it must re-drain the op
+      // rather than mint a key or send an empty signature.
+      await _tap(tester, _queuedCard);
+
+      expect(
+        await _queuedIds(queue),
+        <String>[k1],
+        reason:
+            'a second key here is a second POST /pm/workorders/wo-1/close: the '
+            'server stores customer_sign twice under two client keys that are '
+            'legitimately two writes, and every reader treats the column as the '
+            "customer's consent without looking inside",
+      );
+      // The queued payload is still the signature the CUSTOMER gave, not a blank one
+      // written over it by a retry from an empty pad.
+      expect((await _queued(queue)).single.payload['signature'], isNotNull);
+
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(transport.accepted.single.endpoint, '/pm/workorders/wo-1/close');
+      expect(await queue.length(), 0);
     });
 
     testWidgets('field-progress', (WidgetTester tester) async {
@@ -1183,7 +1371,7 @@ void main() {
   //         `due()` open rather than the transport.
   //
   //     Each test must go RED on its own when `_settling` is dropped from ITS
-  //     screen's CTA: six screens, six independent reds.
+  //     screen's CTA: seven screens, seven independent reds.
   // =========================================================================
   group('the CTA is quiet until the queue read completes (B-341)', () {
     testWidgets(
@@ -1443,6 +1631,67 @@ void main() {
         expect(await queue.length(), 0);
       },
     );
+
+    testWidgets('pm-close — the signature drawn inside the window would be the thing '
+        'silently dropped (B-357/F7)', (WidgetTester tester) async {
+      // THE LOSE-LOSE, on this screen. Inside the window `_opId` is null and the pad
+      // is blank, so the CTA looks harmless — until the customer signs INSIDE it.
+      // Then a tap is: mint (a second close of the same work order) or, via the
+      // pre-mint check, ADOPT — which sends the previous op and never sends the mark
+      // the customer just made, while reporting the previous write's outcome as if
+      // it were this one's. B-341 rules out both by making the tap impossible.
+      //
+      // The queue alone cannot tell the two apart here (adopting leaves exactly one
+      // op either way), so the observable is `drains`: a tap inside the window must
+      // reach NOTHING.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      final String k1 = (await _queued(queue)).single.id;
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      final _SlowDueCloseRepo repo = _SlowDueCloseRepo(
+        _processor(queue, transport),
+        delay: _slow,
+      );
+      await _mountClose(tester, queue, transport, repo: repo);
+
+      // The summary landed — this screen's reads never sat behind the queue — so
+      // the pad is on screen and can be signed, which is exactly the input B-341
+      // refuses to let the technician submit into someone else's op.
+      final int drainsAfterMount = repo.drains;
+      await _signClose(tester);
+      _expectMutedCta(tester, find.text(_closeWo));
+      await tester.tap(find.text(_closeWo), warnIfMissed: false);
+      await _flush(tester);
+
+      expect(
+        repo.drains,
+        drainsAfterMount,
+        reason:
+            'a tap inside the window must reach neither the queue nor the '
+            'network: minting duplicates the close, and adopting silently '
+            'discards the signature just drawn',
+      );
+      expect(await _queuedIds(queue), <String>[k1]);
+
+      // The read lands: the window closes and the screen states the truth.
+      await tester.pump(_slow * 2);
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+      await _drainSlowTimers(tester);
+      expect(transport.acceptedKeys.length, 1);
+      expect(await queue.length(), 0);
+    });
   });
 
   group('the card comes back down when the drain resolves what it described', () {
@@ -1912,6 +2161,69 @@ void main() {
       expect(find.text(_queuedCard), findsNothing);
     });
 
+    testWidgets('pm-close: a synced close is CLOSED (B-357/F7)', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountClose(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      // pm.closedNote — "closed, the customer signed for the work" — and it is true
+      // only now: the server accepted the write, so `customer_sign` really does hold
+      // the mark this device captured. `idle` here would state the close never
+      // happened over an empty queue, one tap from a second one.
+      expect(find.text(_closedNote), findsOneWidget);
+      expect(find.text(_queuedCard), findsNothing);
+      expect(
+        find.text(_closeWo),
+        findsNothing,
+        reason: 'the control that could send a second close is gone',
+      );
+    });
+
+    testWidgets('pm-close: a DEAD-LETTERED close is failed, never closed', (
+      WidgetTester tester,
+    ) async {
+      // The opposite outcome to the one above, and the reason the reconciliation runs
+      // the screen's own resolver over the drain's OWN report: `findAdoptableOp`
+      // returns null for a synced op AND for a 4xx dead-letter, so asking it instead
+      // would paint "closed, the customer signed" over a close the server REFUSED.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      await _kill(tester);
+
+      transport.offline = false;
+      transport.status = 400;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      await _mountClose(tester, queue, transport);
+      expect(find.text(_queuedCard), findsOneWidget);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(find.text(_failedCard), findsOneWidget);
+      expect(find.text(_closedNote), findsNothing);
+      expect(await _deadLetters(queue), 1);
+    });
+
     testWidgets('field-progress: a synced delivery is SENT', (
       WidgetTester tester,
     ) async {
@@ -2000,7 +2312,7 @@ void main() {
       );
     });
 
-    // ---- the same six, when the server said NO ----
+    // ---- the same seven, when the server said NO ----
 
     testWidgets('st-receive (MONEY): a 4xx DEAD-LETTER is not the same answer as a '
         'success', (WidgetTester tester) async {
@@ -2253,7 +2565,8 @@ void main() {
   //       Each test below drives the user to a retry FIRST, then lands the held
   //       replay, and asserts the reconciliation stayed out of it. Each goes RED
   //       on its own when ITS screen's `_reconcileArmed` check is swapped back for
-  //       a `_state == queued` inference: six screens, six independent reds.
+  //       a `_state == queued` inference: six screens, six independent reds
+  //       (pm-close's own reconciliation is asserted in group 3 instead).
   //
   //       The screen keeping the user's own `queued` answer is not a stale lie
   //       adopted as policy: NONE of these screens subscribes to the queue, on any
@@ -2570,7 +2883,7 @@ void main() {
   //        become a dead end. That is precisely the state the pre-mint check was
   //        written for — `_opId` null, the CTA live, an op still in the queue —
   //        and after B-341 it is the main way to reach it, so these tests are
-  //        the surviving red-on-removal probe for that check on five of the six
+  //        the surviving red-on-removal probe for that check on six of the seven
   //        screens. Each asserts what the SERVER received.
   // =========================================================================
   group('a queue read that throws opens the CTA, and the mint site holds', () {
@@ -2644,6 +2957,44 @@ void main() {
         transport.accepted.length,
         1,
         reason: 'a second op here is a second check-in on the same work order',
+      );
+      expect(await queue.length(), 0);
+    });
+
+    testWidgets('pm-close (B-357/F7)', (WidgetTester tester) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      await _kill(tester);
+
+      transport.offline = false;
+      final Completer<void> gate = Completer<void>();
+      transport.gate = gate;
+      final _ThrowingDueCloseRepo repo = _ThrowingDueCloseRepo(
+        _processor(queue, transport),
+      );
+      await _mountClose(tester, queue, transport, repo: repo);
+
+      // The read failed, so nothing could be adopted — and the CTA is OPEN rather
+      // than parked forever on a question that cannot be answered. On this screen
+      // "open" means the pad accepts a signature and the bar arms once it does.
+      expect(find.text(_queuedCard), findsNothing);
+      repo.throwing = false;
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+
+      gate.complete();
+      await _flush(tester, 20);
+
+      expect(
+        transport.accepted.length,
+        1,
+        reason:
+            'the mint site asks the same queue again before it mints, so the '
+            'failed read costs an adoption and never a duplicate close',
       );
       expect(await queue.length(), 0);
     });
@@ -3221,7 +3572,7 @@ void main() {
   //     read opened a gap the guard no longer covers unless the busy state is
   //     flipped SYNCHRONOUSLY first.
   //
-  //     ALL FIVE SCREENS ARE COVERED HERE. `field-progress` was the one handler
+  //     ALL SEVEN SCREENS ARE COVERED HERE. `field-progress` was the one handler
   //     that did not flip synchronously (round 3); the other four were given the
   //     flip in round 2 and then asserted only by READING them, which is one tidy-up
   //     away from gone — move the flip below the `due()` await, exactly the shape
@@ -3439,6 +3790,56 @@ void main() {
       expect(await queue.length(), 0);
     });
 
+    testWidgets('pm-close: two taps enqueue ONE close (B-357/F7)', (
+      WidgetTester tester,
+    ) async {
+      // The busy flip, on the seventh screen. `field_progress` was the one screen
+      // that got the pre-mint check WITHOUT the synchronous flip, and two taps
+      // enqueued two ops — so the flip is asserted here on its own rather than
+      // assumed to ride along with the check.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(); // offline
+
+      await _mountClose(
+        tester,
+        queue,
+        transport,
+        repo: _SlowDueCloseRepo(
+          _processor(queue, transport),
+          delay: const Duration(milliseconds: 120),
+        ),
+      );
+      // Let the on-mount adoption finish first (it reads the queue too), so the only
+      // read in flight below is the one the tap opens.
+      await tester.pump(const Duration(milliseconds: 200));
+      await _flush(tester);
+      expect(find.text(_queuedCard), findsNothing); // nothing was queued yet
+
+      // The customer signs, and the technician taps close twice — the first tap has
+      // not repainted yet, which is exactly why he taps again.
+      await _signClose(tester);
+      await tester.tap(find.text(_closeWo).first);
+      await tester.tap(find.text(_closeWo).first);
+      await tester.pump(const Duration(milliseconds: 300));
+      await _flush(tester, 20);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(
+        ops.length,
+        1,
+        reason:
+            'a second op here is a second POST /pm/workorders/wo-1/close under a '
+            'SECOND key: nothing server-side can refuse it, because two distinct '
+            'client keys are legitimately two writes',
+      );
+      expect(ops.single.endpoint, '/pm/workorders/wo-1/close');
+
+      transport.offline = false;
+      await _processor(queue, transport).drain();
+      expect(transport.accepted.length, 1);
+      expect(await queue.length(), 0);
+    });
+
     testWidgets('pm-notes: two taps enqueue ONE close-out', (
       WidgetTester tester,
     ) async {
@@ -3640,6 +4041,87 @@ void main() {
         }
       },
     );
+
+    testWidgets('pm-close and pm-notes share the SAME ENDPOINT and are told apart only by '
+        'entity type (B-357/F7)', (WidgetTester tester) async {
+      // The sharpest ownership case in the app, and the one that justifies
+      // pm-close's anchor. `POST /pm/workorders/{id}/close` is written by BOTH
+      // screens: pm-notes sends the maintenance log through it, pm-close sends the
+      // signature. The path pins the record; only `entityType` pins the SCREEN.
+      //
+      // A matcher on the endpoint alone would let pm-close adopt pm-notes' queued
+      // log, believe its own write was already outstanding, and never send the
+      // customer's signature at all — while showing "pending" for a mark that was
+      // silently dropped.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      // wo-1's maintenance log is queued, from pm-notes.
+      await _mountNotes(tester, queue, transport);
+      await tester.enterText(find.byType(TextField).first, 'สายพานขาด');
+      await _flush(tester);
+      await _tap(tester, _saveNotes);
+      final SyncOperation notesOp = (await _queued(queue)).single;
+      expect(notesOp.entityType, 'pm_notes');
+      expect(notesOp.endpoint, '/pm/workorders/wo-1/close');
+      await _kill(tester);
+
+      // pm-close opens on the SAME work order. Nothing of ITS own is queued.
+      await _mountClose(tester, queue, transport);
+      expect(
+        find.text(_queuedCard),
+        findsNothing,
+        reason:
+            "adopting pm-notes' log would make this screen claim a close of "
+            'its own was already outstanding',
+      );
+
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(ops.length, 2, reason: 'the signature is a genuinely new write');
+      final SyncOperation own = ops.firstWhere(
+        (SyncOperation o) => o.id != notesOp.id,
+      );
+      expect(own.entityType, 'pm_close');
+      expect(own.endpoint, '/pm/workorders/wo-1/close');
+      expect(own.payload.keys.toSet(), <String>{'signature'});
+      // …and pm-notes' log is untouched: adopting its key would have replaced its
+      // payload with `{signature}` and blanked the cause/fix/advice it carries.
+      expect(
+        ops.firstWhere((SyncOperation o) => o.id == notesOp.id).payload,
+        notesOp.payload,
+      );
+    });
+
+    testWidgets('pm-close: wo-2 does not adopt wo-1\'s close (B-357/F7)', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport();
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      final String k1 = (await _queued(queue)).single.id;
+
+      // The technician moves to the NEXT work order (and the app restarts).
+      await _kill(tester);
+      await _mountClose(tester, queue, transport, workOrderId: 'wo-2');
+      expect(find.text(_queuedCard), findsNothing);
+
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+
+      final List<SyncOperation> ops = await _queued(queue);
+      expect(ops.length, 2, reason: "wo-2's close must be its OWN write");
+      final SyncOperation opB = ops.firstWhere((SyncOperation o) => o.id != k1);
+      expect(opB.endpoint, '/pm/workorders/wo-2/close');
+      // Had wo-2 adopted wo-1's key, wo-2 would simply never have been closed —
+      // and the screen would have reported wo-1's outcome as its own.
+      expect(opB.id, isNot(k1));
+    });
 
     testWidgets(
       'field-progress: delivering period B leaves period A\'s op in the QUEUE but '
@@ -3850,6 +4332,65 @@ void main() {
         expect(left.single.status, SyncOpStatus.failed);
       },
     );
+
+    testWidgets('pm-close: a 4xx dead-letter is NOT adopted, so the customer can sign again '
+        '(B-357/F7)', (WidgetTester tester) async {
+      // The mirror-image failure for this screen would be the worst of the set: a
+      // stranded id means the technician can re-tap forever over a write the drain
+      // will never send again, with no way to capture the signature the customer is
+      // standing there waiting to give.
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false, status: 400);
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      final SyncOperation dead = (await _queued(queue)).single;
+      expect(dead.status, SyncOpStatus.failed);
+
+      await _kill(tester);
+      transport.status = 200;
+      await _mountClose(tester, queue, transport);
+      // No queued card: there is nothing replayable to be waiting for, so the pad
+      // is offered again rather than the screen reporting a write it cannot send.
+      expect(find.text(_queuedCard), findsNothing);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+
+      expect(transport.accepted.length, 2);
+      expect(transport.accepted.first.payload['signature'], isNotNull);
+      expect(
+        find.text(_closedNote),
+        findsOneWidget,
+        reason: 'the second, genuinely-new close was accepted',
+      );
+      final List<SyncOperation> left = await _queued(queue);
+      expect(left.single.id, dead.id);
+      expect(left.single.status, SyncOpStatus.failed);
+    });
+
+    testWidgets('pm-close: once the close SYNCS the key is released (B-357/F7)', (
+      WidgetTester tester,
+    ) async {
+      final InMemorySyncQueue queue = InMemorySyncQueue();
+      final _Transport transport = _Transport(offline: false);
+
+      await _mountClose(tester, queue, transport);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+      expect(await queue.length(), 0); // 2xx removed it
+      expect(transport.accepted.length, 1);
+
+      // A later visit to the same work order — a re-signature, and a genuinely new
+      // write. Holding the old key would have the server dedup it into the first.
+      await _kill(tester);
+      await _mountClose(tester, queue, transport);
+      expect(find.text(_queuedCard), findsNothing);
+      await _signClose(tester);
+      await _tap(tester, _closeWo);
+
+      expect(transport.accepted.length, 2);
+    });
 
     testWidgets(
       'field-stock: once the issue SYNCS the key is released, so the NEXT basket '
