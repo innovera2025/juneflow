@@ -351,14 +351,16 @@ describe("B-340 · every lock taker on inventory_item acquires ascending", () =>
     ).toEqual([]);
   });
 
-  it("keeps the receipt's anchor lock AHEAD of its gr insert and its ledger writes (B-TBD-QTY)", () => {
+  it("keeps the receipt's PR lock AHEAD of its gr insert and its ledger writes (B-TBD-QTY)", () => {
     // THE ONE CROSS-TABLE EDGE, and the only one this file models: a receipt locks
-    // its anchor po/wo row (a guarded UPDATE — the B-361 pattern, since po/wo carry
-    // no company_id) before it reads what has already been received against that
-    // order. The ORDER of the three statements is the whole guarantee and none of it
-    // is visible at the call site:
+    // its SOURCE PR row (a guarded UPDATE — the B-361 pattern, since `pr` carries no
+    // company_id) before it reads what has already been received against that order.
+    // The PR and not the anchor: the ceiling's basis and its accumulator are both
+    // PR-grained, and two POs raised from one PR are two different anchor rows that
+    // would never block each other. The ORDER of the three statements is the whole
+    // guarantee and none of it is visible at the call site:
     //
-    //   · anchor lock BEFORE the `gr` insert — because `gr.po_id` is an FK, so the
+    //   · PR lock BEFORE the `gr` insert — because `gr.po_id` is an FK, so the
     //     insert takes an implicit FOR KEY SHARE on the anchor. KEY SHARE does not
     //     conflict with KEY SHARE, so two receipts would both take it and then both
     //     try to UPGRADE to the exclusive lock, each waiting on the other. Reversing
@@ -399,31 +401,31 @@ describe("B-340 · every lock taker on inventory_item acquires ascending", () =>
         "restructured, so the lock-order claim below has to be re-read, not re-run",
     ).toBeDefined();
 
-    const anchorLock = Math.min(
-      ...["updateThroughChain(pos,", "updateThroughChain(wos,"]
-        .map((t) => body!.indexOf(t))
-        .filter((i) => i >= 0),
-    );
+    const prLock = body!.indexOf("updateThroughChain(prs,");
     const grInsert = body!.indexOf("insertThrough(grs,");
     const ledger = body!.indexOf("insert(stockLedgers,");
     expect(
-      Number.isFinite(anchorLock) && anchorLock >= 0,
-      "createGr no longer locks its anchor po/wo row before reading what has been " +
+      prLock,
+      "createGr no longer locks its source PR row before reading what has been " +
         "received. The over-receipt ceiling is a read-then-write; without this lock " +
-        "two receipts that each fit under it both pass and both commit (B-342's shape).",
-    ).toBe(true);
+        "two receipts that each fit under it both pass and both commit (B-342's " +
+        "shape). It must be the PR and not the anchor po/wo: the basis and the " +
+        "accumulator are both PR-grained, and two POs of one PR are two different " +
+        "anchor rows that would never block each other.",
+    ).toBeGreaterThan(-1);
     expect(grInsert, "createGr's gr header insert was not found").toBeGreaterThan(-1);
     expect(ledger, "createGr's stock_ledger insert was not found").toBeGreaterThan(-1);
     expect(
-      anchorLock,
-      "the anchor lock must precede the `gr` INSERT. The insert takes FOR KEY SHARE " +
-        "on the anchor via gr.po_id; upgrading that to the exclusive lock from two " +
-        "transactions at once is a deadlock, not a wait.",
+      prLock,
+      "the PR lock must precede the `gr` INSERT. That insert takes FOR KEY SHARE on " +
+        "the anchor via gr.po_id, and INSERT INTO po takes one on the PR via po.pr_id; " +
+        "upgrading a KEY SHARE to the exclusive lock from two transactions at once is " +
+        "a deadlock, not a wait.",
     ).toBeLessThan(grInsert);
     expect(
-      anchorLock,
-      "the anchor lock must precede the stock_ledger writes — the repo-wide order is " +
-        "anchor po/wo -> gr -> inventory_item.",
+      prLock,
+      "the PR lock must precede the stock_ledger writes — the repo-wide order is " +
+        "pr -> gr -> inventory_item.",
     ).toBeLessThan(ledger);
   });
 

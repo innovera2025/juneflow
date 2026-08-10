@@ -399,6 +399,58 @@ describe("POST /api/v1/pr — create", () => {
     expect(foreign.json().message).toBe("project not found");
   });
 
+  // ── B-TBD-QTY (Wei, ก): an ordered line must carry a quantity ────────────────
+  //
+  // `qty: 0` was accepted here, and gr.ts skips its over-receipt ceiling for a line
+  // ordered at 0 (a ceiling of 0 would make an un-quantified line unreceivable). That
+  // handed an ordinary user a switch that turns the receipt ceiling OFF. Proven live
+  // at 016308e through the public API: PR one line qty 0 → submit → approve → PO
+  // (total 0.00) → approve → POST /gr qty_ok 99,999,999 → 201 → JV-2026-0438
+  // Dr 5020 / Cr 2010 14,199,999,858.00. 14.2 billion on an order totalling zero.
+  const prCreateDb = () =>
+    stubDb({
+      rows: [[projects, [project]], [prs, []], [boqItems, [boqItemPriced("b0", "168.50")]]],
+    });
+  const prCreate = (items: unknown[]) => ({
+    method: "POST" as const,
+    url: "/api/v1/pr",
+    payload: { no: "PR-QTY", type: "material", project_id: PROJECT, items },
+  });
+
+  it("400s a BOQ line ordered at qty 0 — the receipt ceiling's off switch (B-TBD-QTY)", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([{ boq_item_id: "b0", qty: 0 }]));
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("qty > 0");
+  });
+
+  it("still 400s a NEGATIVE qty — the pre-existing rule is not what closed the hole", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([{ boq_item_id: "b0", qty: -1 }]));
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain(">= 0");
+  });
+
+  it("a NON-BOQ line (expense / advance) may still carry qty 0 — it has no price basis to exploit", async () => {
+    // pr_item.boq_item_id is nullable exactly for expense/advance lines. gr.ts can
+    // never price or receive against one, so the narrowest form of the ruling leaves
+    // it alone rather than breaking a shape the schema exists to support.
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([{ qty: 0 }]));
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("a PR with NO lines at all is still valid — Wei accepted it, and it is a different thing", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([]));
+    expect(res.statusCode).toBe(201);
+  });
+
   it("400s when a line references a BOQ item outside the tenant", async () => {
     const res = await (
       await buildTestApp({

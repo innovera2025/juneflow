@@ -1146,7 +1146,7 @@ export function registerGrRoute(app: FastifyInstance): void {
     try {
       await db.transaction(async (tx) => {
         // -------------------------------------------------------------------
-        // B-TBD-QTY — THE ANCHOR LOCK. Taken FIRST, and the order is forced.
+        // B-TBD-QTY — THE PR LOCK. Taken FIRST, and the order is forced.
         // -------------------------------------------------------------------
         // The over-receipt guard below is read-then-write: it sums what has
         // already been received and compares. Under READ COMMITTED two receipts
@@ -1155,27 +1155,38 @@ export function registerGrRoute(app: FastifyInstance): void {
         // approval chain. So the read must happen while holding a row both writers
         // must pass through.
         //
-        // THE ROW IS THE ANCHOR PO/WO, and the lock is a guarded UPDATE rather than
-        // a FOR UPDATE — the B-361 pattern, for the same reason: `po`/`wo` carry no
-        // company_id (they scope through pr → project), so TenantDb.selectForUpdate
-        // cannot reach them, while an UPDATE takes the same row-level exclusive
-        // lock. `updated_at` is the only column it touches, and that is honest: this
-        // receipt may well close the order two statements later.
+        // THE ROW IS THE SOURCE PR, NOT THE ANCHOR PO/WO, and this is the second
+        // half of the grain fix below. The basis is the PR's ordered lines and the
+        // accumulator now sums the PR's receipts, so the PR is the only row EVERY
+        // racing receipt against that order passes through. Locking the anchor
+        // instead left the race wide open one level up: two receipts against two
+        // DIFFERENT POs of the same PR would take two DIFFERENT locks, never block,
+        // and both commit — which is exactly the N-POs hole, arrived at by racing
+        // rather than by sequencing.
+        //
+        // The lock is a guarded UPDATE rather than a FOR UPDATE — the B-361
+        // pattern, for the same reason: `pr` carries no company_id (it scopes
+        // through project), so TenantDb.selectForUpdate cannot reach it, while an
+        // UPDATE takes the same row-level exclusive lock. `updated_at` is the only
+        // column it touches, which is honest (a receipt against this PR's order
+        // does advance that order's fulfilment) and invents no state — nothing
+        // reads it, and no list orders by it (newestFirst sorts on created_at).
         //
         // IT MUST PRECEDE THE HEADER INSERT, and getting this backwards is a
         // DEADLOCK, not a style point. `gr.po_id` is an FK, so INSERT INTO gr takes
-        // an implicit `FOR KEY SHARE` on the anchor row. KEY SHARE does not conflict
-        // with KEY SHARE, so two receipts would BOTH acquire it, and then both try to
-        // upgrade to the exclusive lock this UPDATE needs — each waiting on the
-        // other's KEY SHARE. That is PG 40P01, and a 40P01 here is strictly worse
-        // than the hole it would be guarding: there is no deadlock handler in
-        // apps/api, so it surfaces as a 500, and sync_processor.dart DEFERS a 5xx —
-        // one deadlocked receipt stops a field phone's entire offline drain and
-        // deadlocks again on every retry (lock-order.ts says this at length).
-        // Taking the exclusive lock BEFORE any KEY SHARE exists makes the upgrade
-        // impossible: the second receipt waits at the very first statement.
+        // an implicit `FOR KEY SHARE` on the anchor row, and `po.pr_id` is an FK so
+        // INSERT INTO po takes one on the PR. KEY SHARE does not conflict with KEY
+        // SHARE, so two writers would BOTH acquire it and then both try to upgrade
+        // to the exclusive lock this UPDATE needs — each waiting on the other's.
+        // That is PG 40P01, and a 40P01 here is strictly worse than the hole it
+        // would be guarding: there is no deadlock handler in apps/api, so it
+        // surfaces as a 500, and sync_processor.dart DEFERS a 5xx — one deadlocked
+        // receipt stops a field phone's entire offline drain and deadlocks again on
+        // every retry (lock-order.ts says this at length). Taking the exclusive
+        // lock BEFORE any KEY SHARE exists makes the upgrade impossible: the second
+        // receipt waits at the very first statement.
         //
-        // THE REPO-WIDE ORDER this joins is: anchor po/wo → gr → inventory_item.
+        // THE REPO-WIDE ORDER this joins is: pr → gr → inventory_item.
         // Registered in lock-order.ts and pinned by lock-order.enforce.test.ts.
         //
         // ONLY WHEN THERE IS SOMETHING TO GUARD. A receipt with no priced line
@@ -1184,11 +1195,7 @@ export function registerGrRoute(app: FastifyInstance): void {
         // receipt still blocks on the holder's lock at its own header insert, which
         // is a wait and never a cycle — it takes KEY SHARE and never upgrades.
         if (orderedQtyByBoqItem.size > 0) {
-          if (poId) {
-            await tx.updateThroughChain(pos, PO_HOPS, { updatedAt: new Date() }, eq(pos.id, poId));
-          } else {
-            await tx.updateThroughChain(wos, WO_HOPS, { updatedAt: new Date() }, eq(wos.id, woId));
-          }
+          await tx.updateThroughChain(prs, PR_HOPS, { updatedAt: new Date() }, eq(prs.id, prId));
         }
 
         [created] = await tx.insertThrough(grs, projects, projectId, [
@@ -1281,22 +1288,42 @@ export function registerGrRoute(app: FastifyInstance): void {
               (requestedByBoqItem.get(d.boqItemId) ?? 0) + Number(d.receivedQty),
             );
           }
-          // What the anchor's ACTIVE receipts already hold, per line. Read INSIDE
-          // the transaction, AFTER the lock: under READ COMMITTED each statement
-          // takes a fresh snapshot, so a rival that committed while we waited on the
-          // lock is visible here. (That is also the hazard: under REPEATABLE READ
-          // the snapshot would be fixed at the first statement and this guard would
-          // silently stop working — the same warning tenant-db.ts carries over
-          // selectForUpdate.) The receipt inserted just above contributes nothing:
-          // its gr_item rows do not exist yet, and the INNER JOIN drops it.
-          const priorLines = await tx.selectThrough(
-            grItems,
-            poId ? GR_ITEM_PO_HOPS : GR_ITEM_WO_HOPS,
-            and(
-              poId ? eq(grs.poId, poId) : eq(grs.woId, woId),
-              eq(grs.status, "received"),
-            ),
-          );
+          // What THE PR's ACTIVE receipts already hold, per line.
+          //
+          // THE ACCUMULATOR IS PR-GRAINED BECAUSE THE BASIS IS. This read used to
+          // filter on the ANCHOR (`eq(grs.poId, poId)`) while the basis above came
+          // from `pr_item` of the source PR — two different grains compared against
+          // each other. po.ts places NO cap on how many POs are raised from one PR,
+          // so the effective ceiling was `N × 1.1 × ordered` with N chosen by the
+          // caller. Proven live at 016308e: one PR ordering 10,000 → two approved
+          // POs → 11,000 received on each → 22,000 against a ceiling of 11,000,
+          // both receipts 201. The earlier note here argued per-line-cumulative was
+          // "the only shape the spec draws" — that argument was about per-line vs
+          // whole-PR and never addressed WHICH DOCUMENTS a line's receipts are
+          // summed over. Ordered by the PR, so received by the PR.
+          //
+          // BOTH ANCHOR CHAINS, UNIONED, because one PR can raise a PO *and* a WO
+          // (the seed does exactly that — po:i and wo:i-1 share a PR, and 5 such
+          // PRs exist on the live stack). Reading only the chain this receipt
+          // happens to arrive on would leave the other document's receipts
+          // uncounted, which is the same hole one door over. There is no double
+          // counting: a gr row carries EITHER po_id or wo_id (enforced at the top
+          // of this handler) and each chain INNER JOINs on its own FK, so a
+          // WO-anchored receipt cannot appear in the PO chain or vice versa.
+          //
+          // Read INSIDE the transaction, AFTER the lock: under READ COMMITTED each
+          // statement takes a fresh snapshot, so a rival that committed while we
+          // waited on the lock is visible here. (That is also the hazard: under
+          // REPEATABLE READ the snapshot would be fixed at the first statement and
+          // this guard would silently stop working — the same warning tenant-db.ts
+          // carries over selectForUpdate.) The receipt inserted just above
+          // contributes nothing: its gr_item rows do not exist yet, and the INNER
+          // JOIN drops it.
+          const activeOfThisPr = and(eq(prs.id, prId), eq(grs.status, "received"));
+          const priorLines = [
+            ...(await tx.selectThrough(grItems, GR_ITEM_PO_HOPS, activeOfThisPr)),
+            ...(await tx.selectThrough(grItems, GR_ITEM_WO_HOPS, activeOfThisPr)),
+          ];
           const priorByBoqItem = new Map<string, number>();
           for (const l of priorLines) {
             if (l.boqItemId == null) continue;

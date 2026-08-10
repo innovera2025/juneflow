@@ -905,7 +905,10 @@ describe("POST /api/v1/gr — create receipt", () => {
   const CEILING = (ORDERED * (100 + GR_OVER_RECEIPT_TOLERANCE_PCT)) / 100;
   /** The fixture every over-receipt test shares: an order for ORDERED units @300. */
   const overReceiptDb = (opts: {
+    /** Already received against this PR through its PO chain. */
     prior?: unknown[];
+    /** Already received against this PR through its WO chain — one PR can raise BOTH. */
+    priorWo?: unknown[];
     inserted?: Inserted[];
     captured?: Captured[];
     orderedQty?: string;
@@ -920,7 +923,12 @@ describe("POST /api/v1/gr — create receipt", () => {
         // own qty_ok, so a guard reading that would compare a claim to itself.
         [prItems, [prLine("l0", opts.orderedQty ?? String(ORDERED))]],
         [grs, [gr("new-0", { poId: PO, received: 0 })]],
-        [grItems, cumulativeGrItems(opts.prior ?? [], [])],
+        // The accumulator reads BOTH anchor chains and unions them, so the two reads
+        // must be stubbed SEPARATELY — keyed on the join that tells them apart. One
+        // shared entry would hand the same rows to both and double-count every prior
+        // receipt, which is a fixture inventing an over-receipt that never happened.
+        [[grItems, pos], cumulativeGrItems(opts.prior ?? [], [])],
+        [[grItems, wos], cumulativeGrItems(opts.priorWo ?? [], [])],
         [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
         [vendors, [vendorRow]],
       ],
@@ -1063,8 +1071,59 @@ describe("POST /api/v1/gr — create receipt", () => {
     const cumulative = captured.filter(
       (c) => c.table === grItems && sqlOf(c.where).includes('"status"'),
     );
-    expect(cumulative).toHaveLength(1);
-    expect(paramsOf(cumulative[0]!.where)).toContain("received");
+    // TWO reads, one per anchor chain — the accumulator unions them (a PR can raise
+    // a PO and a WO). Both must carry the filter; a chain that dropped it would let a
+    // returned receipt keep holding its quantity through the other door.
+    expect(cumulative).toHaveLength(2);
+    for (const c of cumulative) expect(paramsOf(c.where)).toContain("received");
+  });
+
+  it("the accumulator is PR-GRAINED: it filters on pr.id, never on the anchor po_id (B-TBD-QTY)", async () => {
+    // THE GRAIN MISMATCH, pinned. The basis is Σ pr_item.qty of the SOURCE PR; the
+    // accumulator used to filter on `gr.po_id`. po.ts caps nothing about how many POs
+    // one PR raises, so the effective ceiling was N × tolerance × ordered with N
+    // chosen by the caller — proven live at 016308e: one PR ordering 10,000, two
+    // approved POs, 22,000 received, both receipts 201.
+    //
+    // A ROW-COUNT FIXTURE CANNOT SEE THIS. Both POs sit on the same PO chain, so a
+    // stub returning rows either way looks identical whichever column the predicate
+    // names. The COLUMN in the compiled SQL is the only thing that distinguishes
+    // "summed over this PR" from "summed over this one PO" (the B-362 shape).
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: overReceiptDb({ captured }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(3) });
+    expect(res.statusCode).toBe(201);
+    const cumulative = captured.filter(
+      (c) => c.table === grItems && sqlOf(c.where).includes('"status"'),
+    );
+    expect(cumulative).toHaveLength(2);
+    for (const c of cumulative) {
+      const sql = sqlOf(c.where);
+      expect(sql).toContain('"pr"."id"');
+      expect(sql).not.toContain('"po_id"');
+      expect(sql).not.toContain('"wo_id"');
+      expect(paramsOf(c.where)).toContain(PR);
+    }
+  });
+
+  it("a receipt on the PR's WO counts against a receipt on the PR's PO — both chains are unioned (B-TBD-QTY)", async () => {
+    // One PR can raise a PO *and* a WO (the seed does exactly that, and 5 such PRs
+    // exist on the live stack). Reading only the chain this receipt arrived on would
+    // leave the other document's receipts uncounted — the N-documents hole, one door
+    // over. Here the WO chain already holds the whole ceiling, so a PO-anchored
+    // receipt of even 1 must be refused.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: overReceiptDb({ prior: [], priorWo: [priorLine("w0", CEILING)] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(1) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("over-receipt tolerance");
   });
 
   it("an UN-QUANTIFIED line (pr_item.qty = 0) has NO ceiling — a tolerance on 0 would make it unreceivable", async () => {
@@ -2182,18 +2241,21 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     expect(res1.statusCode).toBe(201);
     expect(res1.json().partial).toBe(false); // the order is fully received…
     // …so this very handler closed the PO — the state that used to strand the replay.
-    // B-TBD-QTY: `po` now takes TWO writes on a priced receipt — the ANCHOR LOCK
-    // (updated_at only) and the auto-close — so the close is selected by the column
-    // it sets rather than by being the only po write.
+    // B-TBD-QTY: the close is selected by the column it sets, not by being the only
+    // po write — a priced receipt also touches po elsewhere in this flow.
     const closes = updated.filter((u) => u.table === pos && "status" in u.set);
     expect(closes).toHaveLength(1);
     expect(closes[0]!.set).toEqual({ status: "closed" });
-    // …and the lock is the FIRST of the two. Order is the whole guarantee: it has to
-    // precede the gr insert, whose FK takes KEY SHARE on this same row (upgrading
-    // that from two transactions at once is a deadlock, not a wait).
-    const poWrites = updated.filter((u) => u.table === pos);
-    expect(poWrites).toHaveLength(2);
-    expect(Object.keys(poWrites[0]!.set)).toEqual(["updatedAt"]);
+    // B-TBD-QTY: the ceiling's lock is on the SOURCE PR, not the anchor, and it is
+    // the FIRST write of the whole request. Order is the guarantee: it must precede
+    // the gr insert (whose FK takes KEY SHARE on the anchor, and whose PO in turn
+    // takes one on this PR — upgrading a KEY SHARE from two transactions at once is
+    // a deadlock, not a wait). The PR grain is what makes it work at all: two POs of
+    // one PR are two different anchor rows that would never block each other.
+    const prLocks = updated.filter((u) => u.table === prs);
+    expect(prLocks).toHaveLength(1);
+    expect(Object.keys(prLocks[0]!.set)).toEqual(["updatedAt"]);
+    expect(updated[0]!.table).toBe(prs);
 
     // The response never reached the client (the SyncProcessor's lost 201). The
     // world moved on exactly as the handler left it: the PO is closed, the receipt
