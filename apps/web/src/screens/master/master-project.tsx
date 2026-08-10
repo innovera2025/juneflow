@@ -291,9 +291,45 @@ export function MasterProject() {
           >
             {`${t("common.import")}${Lunit}`}
           </Btn>
-          {/* B-058: CreateProjectForm (master.jsx L1242, POST /projects) is out of the
-              P1-WEB-09 range + the backend create-project route is unimplemented; the
-              action stays present (g2/32) but its wizard is deferred to a follow-up. */}
+          {/* CreateProjectForm (master.jsx L1242-1338) — STILL DEFERRED, but NOT for the
+              reason this comment used to give. "the backend create-project route is
+              unimplemented" was FALSE as of 2026-08-10: apps/api projects.ts:200 mounts
+              POST /projects, quota-gated 402 at :212, and it materializes the wizard's
+              phase + unit nodes. ProjectInput (generated types.ts:3815) matches the wizard
+              payload exactly, and the 12 createProj.* dict keys are minted (0 consumed),
+              including createProj.quotaLabel for that 402.
+
+              The REAL blocker is i18n (B-346): 11 of the wizard's visible strings have NO
+              key in docs/extract/i18n-full.json — neither dict nor phrases — so the form
+              cannot be rendered without minting, and minting is a Wei-approved sacred round.
+              Verified missing, each grepped against all 3701 dict keys and 1108 phrases,
+              cited by prototype line rather than quoted (comments stay English, CLAUDE.md).
+              Line numbers RE-VERIFIED against master.jsx 2026-08-10 — three of them
+              (L1305/L1306/L1315) previously landed on structural JSX carrying no string at
+              all (L1305 a closing div, L1306 a closing fragment, L1315 the
+              `{step === 3 && <>` gate), which is an unverifiable citation inside a comment
+              whose whole point is to be checkable:
+                master.jsx L1288 step counter · L1270 the step-2 and step-3 step labels
+                (2 strings, the stepLabel array) · L1309 step-2 field label · L1310 step-2
+                placeholder · L1312 step-2 skip hint · L1316 step-3 field label · L1321 +
+                L1322 the two summary bullet prefixes · L1304 the hierarchy prefix in the
+                step-1 type preview · L1279 the created toast.
+              (Present and reusable: createProj.* x12, common.cancel, common.back,
+              project.createBtn, and pm.fieldProjectType for the L1296 type field label.
+              NOT reusable, and named here so the next reader does not have to re-find them
+              and mistake this comment for a stale one: TWO near misses survive a keyword
+              grep and neither is a legitimate reuse. pm.toastProjectCreated is close to the
+              L1279 toast but omits the short code and the optional phase clause.
+              block.fieldUnits is close to the L1270 step-3 stepLabel but hardcodes the
+              real-estate unit noun, while the wizard interpolates Lunit and so reads
+              differently for all four project types. Bending either to fit is
+              re-translating, forbidden by §0 rule 2.)
+
+              The button is a RENDER-ONLY STUB with no onClick — it is in g2/32 so it renders
+              enabled, the same deliberate convention as master-project-type.tsx addBtn and
+              master-model.tsx edit. It is worth naming plainly: an enabled control that does
+              nothing on click is its own small lie, and whether this family should become
+              honest-disabled is a cross-screen ruling (B-347), not a side effect of one port. */}
           <Btn kind="outline" size="md" icon="grid">
             {t("project.createBtn")}
           </Btn>

@@ -17,7 +17,7 @@
  * resolves from project_id via GET /projects. Row logic (search / status tone / version label /
  * money format / approval narrowing) reuses the unit-tested boq-rows.ts + boq-archive-rows.ts
  * (gate G3).
- *   - REAL (B-278 re-wire): the latest-approver cell = approved_by_name (resolved server-side
+ *   - REAL (B-355 re-wire): the latest-approver cell = approved_by_name (resolved server-side
  *     from `users`, B-081/F4 + migration 0021); the approve-date cell = approved_at, rendered
  *     ISO/UTC per the house formatApprovedAt. A doc with no approval carries null for both and
  *     keeps its em-dash — the unapproved state is shown, never filled in.
@@ -32,7 +32,7 @@
  *      expandable here — the chevron is a static structural marker. Flagged.
  *   3. the year filter stays a display-only pill (em-dash value): approved_at is the only date
  *      on the payload and it is null for every unapproved doc, so filtering by it would
- *      silently hide drafts — that needs a filter-semantics ruling, not a guess (B-279). The
+ *      silently hide drafts — that needs a filter-semantics ruling, not a guess (B-356). The
  *      header filter button + the row "copy to new BOQ" action have no backend endpoint (no
  *      server filter-persist, no BOQ copy/duplicate route), so they are deferred no-op stubs
  *      (boq-overview export / boq-list duplicate precedent). The row "view" action navigates
@@ -252,7 +252,7 @@ export function BOQArchive() {
           </FilterSelect>
           {/* Year filter: approved_at is the payload's only date and it is null for every
               unapproved doc, so filtering by it would silently hide drafts -> display-only,
-              em-dash value pending a filter-semantics ruling (WIRE GAP 3, B-279). */}
+              em-dash value pending a filter-semantics ruling (WIRE GAP 3, B-356). */}
           <DisplayFilterPill label={tp(A("yearLabel"))} value="—" />
         </div>
 

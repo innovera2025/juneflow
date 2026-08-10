@@ -24,12 +24,41 @@
  * ptype-strings.json `mod`). Data values (row.name / row.hierarchy / meta.* / project
  * names) render raw. §9 verified ZERO residual keys.
  *
- * Write-path DEFERRED (B-065): the Add / Edit modal (ProjectTypeForm, POST/PUT
- * /project-types) is a platform-global write with no backend route yet, so it is not
- * ported. The header add button + per-card edit button RENDER (they are in g2/29) but
- * have NO onClick — render-only stubs, mirroring master-project.tsx createBtn (B-058) +
- * master-model.tsx edit (B-050). tokens back every colour except the per-type meta.color
- * hex, which is prototype-verbatim (B-037), same precedent as the sibling screens.
+ * Write-path DEFERRED — but CORRECTED 2026-08-10: "no backend route yet" was FALSE.
+ * project-types.ts:117 mounts POST and :168 mounts PUT; both validate name + hierarchy,
+ * 409 on a duplicate key across the tenant's visible set, force-set company_id so a custom
+ * type can never be global, and 404 a platform-global default. B-065 was answered and
+ * shipped.
+ *
+ * The Add/Edit FORM keys are all minted and all unconsumed — RE-COUNTED 2026-08-10, because
+ * the first version of this paragraph said "26 ... form keys" and named secWbs + secCostTypes
+ * among them, which THIS FILE RENDERS. The arithmetic, all three terms grepped: 34 ptype.*
+ * dict keys exist; 8 are consumed here as direct t() literals (title / subtitle / addBtn /
+ * secWbs / secCostTypes / modUsed / projUsage / noProjects); 7 more are consumed INDIRECTLY
+ * as the module-chip labels, routed through MOD_DICT (ptype-cards.ts:50-58) — ptype.mod.
+ * procure / timeline / salesRe / aftersales / lineoa / om / pm. 34 - 8 - 7 leaves 19, and
+ * every one of the 19 is a form key with zero hits across apps/web/src and apps/mobile/lib:
+ * editTitle · modalSubtitle · formSubmitAdd · fldNameTh · fldNameEn · fldIcon · secModules ·
+ * moduleNote · hintWbs · hintCostTypes · phNameTh · phNameEn · phDesc · phWbs · phCostTypes ·
+ * defHierarchy · defCostTypes · toastAdd · toastEdit.
+ *
+ * The real blocker is a SCHEMA gap needing a ruling (B-352): project_type stores only
+ * { key, name, hierarchy, modules } (packages/db project.ts:113-134), while the prototype
+ * form (project-type-screen.jsx:114-218) also collects nameEn (:116), icon (:117), color
+ * (:118), desc (:119) and costTypes (:121) — five fields the handler drops on the floor
+ * (the insert at project-types.ts:161-163 passes key/name/hierarchy/modules and nothing
+ * else). This screen already
+ * knows it: those five are read from a CLIENT meta file (ptype-meta.json, keyed by `key`),
+ * so a user-created type falls through to DEFAULT_META and renders with a borrowed icon and
+ * colour. Options are add-columns (a sacred migration), render the five disabled, or keep
+ * deferring — a ruling, not a port decision.
+ *
+ * The header add button + per-card edit button RENDER (they are in g2/29) but have NO
+ * onClick — render-only stubs, mirroring master-project.tsx createBtn + master-model.tsx
+ * edit (B-050). Worth naming plainly: an enabled control that does nothing on click is its
+ * own small lie; whether this three-screen family should become honest-disabled is the
+ * cross-screen ruling B-347. tokens back every colour except the per-type meta.color hex,
+ * which is prototype-verbatim (B-037), same precedent as the sibling screens.
  */
 import { Fragment, useMemo, type CSSProperties } from "react";
 import type { DictKey, NavKey, PhraseKey } from "@juneflow/i18n";
@@ -120,8 +149,9 @@ export function MasterProjectType() {
       title={t("ptype.title")}
       subtitle={t("ptype.subtitle")}
       actions={
-        // B-065: add-type write-path deferred (platform-global write, no backend route).
-        // Render-only stub — no onClick (present in g2/29).
+        // Add-type deferred on the SCHEMA gap (B-352), not on a missing route:
+        // POST /project-types is mounted (project-types.ts:117). Render-only stub —
+        // no onClick (present in g2/29); see B-347 on that convention.
         <Btn kind="primary" size="md" icon="plus">
           {t("ptype.addBtn")}
         </Btn>
@@ -188,7 +218,8 @@ export function MasterProjectType() {
                         {meta.desc}
                       </div>
                     </div>
-                    {/* B-065: per-card edit — render-only stub, no onClick (deferred write-path). */}
+                    {/* Per-card edit — PUT /project-types/{id} is mounted (:168); deferred on
+                        the schema gap B-352. Render-only stub, no onClick (see B-347). */}
                     <Btn kind="ghost" size="sm" icon="edit">
                       {t("common.edit")}
                     </Btn>

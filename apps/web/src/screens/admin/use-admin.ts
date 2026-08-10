@@ -24,9 +24,10 @@
  * B-197) — money = SERVER (price_y is DERIVED server-side; the client sends price_m only) and
  * both invalidate ADMIN_PACKAGES_KEY. The CompanyControl "Save settings" write is real too
  * (W1c, PUT /admin/subscribers/{id}/package) — it writes package_id + a seat override onto the
- * subscription row (money = SERVER) and invalidates ADMIN_SUBSCRIBERS_KEY. The remaining
- * prototype writes (reset-pw, invite, remind, export) have NO merged handler and stay honest
- * toasts / honest-disabled.
+ * subscription row (money = SERVER) and invalidates ADMIN_SUBSCRIBERS_KEY. Reset-password is
+ * real as well (B-282, POST /admin/users/{id}/reset-password) — see resetUserPasswordRequest.
+ * The remaining prototype writes (invite, remind, export) have NO merged handler and stay
+ * honest toasts / honest-disabled.
  */
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { components } from "@juneflow/contracts";
@@ -155,6 +156,34 @@ export function useUnblockUser(): UseMutationResult<unknown, unknown, string> {
     mutationFn: (id: string) => unwrap(apiClient.POST("/admin/users/{id}/unblock", { params: { path: { id } } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_USERS_KEY }),
   });
+}
+
+/**
+ * POST /admin/users/{id}/reset-password — id = the USER id (PATH); NO request body (the
+ * contract types `resetAdminUserPassword.requestBody?: never`).
+ *
+ * The handler (apps/api admin.ts, B-282) issues a reset token and hands it to the delivery
+ * seam; the token is delivered ONLY to the user's own stored address and is never in the
+ * 200 body, so nothing here reads or renders it. The owner-only 401/403 and the 404 for a
+ * user with no credential row both land in the mutation's error state, which is the whole
+ * point of wiring this: until now the confirm dialog fired a "reset link sent to {email}"
+ * toast and called NOTHING, telling a platform owner an email had been sent to somebody
+ * else's address when none had.
+ *
+ * NO cache invalidation, deliberately: this write changes credential state only. Every
+ * field the subscribers/users reads render is untouched, so invalidating them would be a
+ * refetch that proves nothing — "sends what it claims and nothing more".
+ *
+ * Exported as a plain function (not only as a hook) so G3 can assert the exact call shape
+ * — path, params, and the ABSENCE of a body — without a React tree.
+ */
+export function resetUserPasswordRequest(id: string): Promise<unknown> {
+  return unwrap(apiClient.POST("/admin/users/{id}/reset-password", { params: { path: { id } } }));
+}
+
+/** The reset-password mutation (see resetUserPasswordRequest). No invalidation by design. */
+export function useResetUserPassword(): UseMutationResult<unknown, unknown, string> {
+  return useMutation({ mutationFn: resetUserPasswordRequest });
 }
 
 /* ---------------------------------------------------------------------------------------- */

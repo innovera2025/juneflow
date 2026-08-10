@@ -20,7 +20,7 @@
  * LIST PAYLOAD (apps/api/src/routes/po.ts poWire, pinned by po.test.ts's exact-key
  * assertion): { id, no, pr_id, vendor_id, status, approval_step, currency_code,
  * credit_term, total, vat, amount, doc_date, paid, deposit }.
- *   - REAL (B-278 re-wire): `paid` (= Σ ap_billing on the PO, server-computed 2dp,
+ *   - REAL (B-355 re-wire): `paid` (= Σ ap_billing on the PO, server-computed 2dp,
  *     B-079/F2) drives the จ่ายไป column + its proportion bar; `doc_date` (= created_at)
  *     drives the detail document-date SmallStat, ISO/UTC per the house formatDate.
  *     Both are displayed verbatim — never recomputed (money = SERVER).
@@ -28,7 +28,7 @@
  *   - deposit column: the prototype cell is a CONTRACTED down-payment PERCENT pill
  *     (po.list.depositPaid/depositDue "{pct}% · ..."), but the wire's `deposit` is a PAID
  *     amount and `pos` has no agreed-rate column — deriving pct from a payment would
- *     misstate a contract term, so the cell stays an em-dash (B-279).
+ *     misstate a contract term, so the cell stays an em-dash (B-356).
  *   - payment-schedule amounts + "PO remaining": amount×pct / total−paid are monetary
  *     totals that would be originated in the browser — em-dash (money = SERVER).
  *   - NO GR% column on the po wire: the receive-goods(%) list cell renders an em-dash
@@ -39,7 +39,7 @@
  *     em-dash. The mock money sub-captions are unkeyed and omitted.
  *   - credit_term / vat ARE on the payload, but pototype/po-wo.jsx POList (L12-205) has
  *     no cell for either (8 fixed columns, 4 fixed detail SmallStats) — adding one would
- *     be a redesign (§0 rule 1). Reported, not invented (B-279).
+ *     be a redesign (§0 rule 1). Reported, not invented (B-356).
  *   - Detail actions target mock subsystems: pay (no deposit endpoint) shows a
  *     confirm + toast only; receive-goods navigates to the GR screen; edit / print are
  *     presentational (no PO line-item edit endpoint; print is icon-only in the
@@ -457,7 +457,7 @@ export function POList() {
                         </td>
                         {/* deposit: the prototype pill is a CONTRACTED down-payment percent
                             ("{pct}% · paid/due"); the wire's `deposit` is a PAID amount, and
-                            pos has no agreed-rate column — em-dash, never imputed (B-279). */}
+                            pos has no agreed-rate column — em-dash, never imputed (B-356). */}
                         <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
                         {/* paid (จ่ายไป): real Σ ap_billing off the LIST payload (po.ts
                             sumBillings, B-079/F2) — server-computed, displayed verbatim.

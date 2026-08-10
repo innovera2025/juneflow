@@ -5,66 +5,110 @@
  * file land.jsx). Previously unwired: registered in routes/registry.ts (L88) but absent
  * from router.tsx — this port adds the import + PORTED_SCREENS entry.
  *
- * READ-ONLY display (no write bundle wired). The read-side wire (GET /land/plots,
- * apps/api/src/routes/land-sales.ts plotWire) returns
- *   { id, project_id, deed_no, area_sqm, gps, price_per_rai, currency_code, stage,
- *     tenure, title, amphoe, prov, created_at }
- * (title/amphoe/prov = the merged LA-2 display columns). This screen ships the honest
- * kanban:
+ * The read-side wire (GET /land/plots, apps/api/src/routes/land-sales.ts plotWire) returns
+ *   { id, project_id, deed_no, area_sqm, gps, price_per_rai, currency_code, total_value,
+ *     stage, tenure, title, tambon, amphoe, prov, owner, created_at }
+ * (title/tambon/amphoe/prov/owner = the merged LA-2 display columns). This screen ships the
+ * honest kanban:
  *   - breadcrumb / title / subtitle are the prototype's (land.pipeline.* dict keys);
- *   - the two header actions (Export / add-plot) are honest-DISABLED — Export has no
- *     endpoint (dropped mock, mirror land-bank) and the add-plot form is out of this read
- *     scope (POST /land/plots exists but the write round wires the form later);
- *   - the 4 KPI cards are REAL, client-derived from the loaded plots (in-pipeline count =
+ *   - the two header actions (Export / add-plot) are honest-DISABLED, but NEITHER is
+ *     disabled for a missing endpoint — that reason was FALSE and is retired: Export is
+ *     contract-DECLARED (POST /exports) and mounted NOWHERE in apps/api (B-351), and
+ *     POST /land/plots IS mounted, so what blocks add-plot is the unported LandPlotForm.
+ *     The evidence, with its exact line citations, lives on the two button comments below
+ *     and is deliberately NOT restated here — one site, so the two cannot drift apart;
+ *   - the 4 KPI cards are REAL, client-AGGREGATED over the loaded plots (in-pipeline count =
  *     stage != close, total area in rai, total budget = summed value over non-closed plots,
- *     pending deals = stage in {nego, deal, dd});
+ *     pending deals = stage in {nego, deal, dd}). Aggregated, not derived: the budget KPI's
+ *     terms are SERVER money (plotWire.total_value, like the card cell), and only the
+ *     addition happens here — there is no server aggregate for it;
  *   - the 7 kanban columns come from the local LAND_STAGES domain constant; each column
  *     groups the plots by stage and renders a static card (id / tenure badge / title /
- *     amphoe · prov / area in rai / compact millions price);
+ *     amphoe · prov / area in rai / compact millions price). The card price is SERVER money
+ *     (plotWire.total_value via cardValueText) and em-dashes for an unpriced plot — it was
+ *     a local areaRai x pricePerRai until 2026-08-10, which printed a fabricated "0.0M"
+ *     the plot's OWN detail modal contradicted with an em-dash. The card's AREA cell had
+ *     the identical contradiction and was fixed with it: it printed "0.0 rai" for a plot
+ *     whose own modal em-dashed the area row, and now em-dashes too (cardAreaText);
  *   - loading = token skeleton columns; an empty catalogue shows every column's own
  *     empty-state cell (land.pipeline.emptyCol) — naturally honest.
  *
- * Divergences from the prototype's mock mechanics (§0 rule 3): the card onClick detail
- * drawer + advance-stage action are DROPPED (cards render static, non-interactive); the
- * `pin` glyph is UNDEFINED in ds.jsx (renders invisible) and absent from the IconName union,
- * so the location line renders WITHOUT a pin (matching the prototype's blank null render),
- * with an 11px spacer preserving the 4px-gap layout.
+ * WRITE PATH — card detail + advance-stage (wired here; previously deferred).
+ * The earlier port dropped the card onClick as "mock mechanics", but only the DRAWER was
+ * mock: the advance action behind it has been a merged endpoint since 2026-07-27. The card
+ * now opens PlotDetail (land.jsx openPlotDetail L279-317) and its primary action posts
+ *   POST /land/plots/{id}/advance-stage   (use-land-bank.ts useAdvancePlotStage)
+ * with NO body — the SERVER owns the stage order and the terminal 409 (§0 rule 3: the
+ * prototype's local `setPlots(... next.id)` is the dropped part, not the button). The toast
+ * labels the stage the SERVER returned, never a client-predicted next stage; the register is
+ * invalidated so the card actually moves columns. The action is not rendered at the terminal
+ * stage (land.jsx L311 `plot.stage !== "close"`).
+ * STILL honest-DISABLED, and each for its own reason — neither of which is a missing
+ * endpoint: Export is declared in the contract and mounted nowhere (B-351); add-plot has a
+ * mounted POST /land/plots and an unported LandPlotForm. See the two button comments.
+ *
+ * Detail rows with NO wire source render an em-dash, never a plausible default: the project
+ * name resolves through GET /projects (never a raw uuid) and the plot id is the server uuid,
+ * not the prototype's human "L-068" code.
+ *
+ * The `pin` glyph is UNDEFINED in ds.jsx (renders invisible) and absent from the IconName
+ * union, so the location line renders WITHOUT a pin (matching the prototype's blank null
+ * render), with an 11px spacer preserving the 4px-gap layout.
  *
  * i18n (§0 rule 2): every visible string is an existing land.* dict key via t() (breadcrumb
  * root land.bc.root, the land.pipeline.* labels/subs, the 7 land.stage.* column headers, the
- * land.tenure.* card badges, land.unit.plot / land.unit.rai) — none minted. The ONE non-dict
- * string, the KPI-3 unit "million baht", reuses the existing phrases key via
+ * land.tenure.* card badges, land.unit.plot / land.unit.rai, and for the detail modal the 8
+ * row labels land.field.deed / land.detail.rowArea / land.bank.colGps /
+ * land.detail.rowPricePerRai / land.detail.rowTotalValue / land.detail.rowFormerOwner /
+ * land.common.project / land.bank.filterTenureHint, the 3 actions land.detail.btnSurvey /
+ * land.stage.dd / land.detail.btnAdvance, and the toasts land.pipeline.toastAdvance /
+ * land.pipeline.toastClosed) — NONE minted; every one was verified byte-exact against
+ * docs/extract/i18n-full.json before use. The two non-dict strings, the KPI-3 unit "million
+ * baht" and the baht sign on the price rows, reuse existing phrases keys via
  * land-pipeline-strings.json (tp), exactly like land-bank-strings.json. The compact card
  * price carries a trailing ASCII "M" magnitude glyph (land.jsx L121) rendered as a chrome
  * literal — it has no i18n key and is B-073-safe (ASCII 'M' is not Thai). Tokens back every
  * colour (§0 rule 6); the per-stage + KPI-accent + card-badge hexes are prototype-verbatim
- * (land.jsx L6-14 / L94-97 / L115; no matching token, B-037(a)); numeric cells carry class
- * `num` (§0 rule 7). No Thai/baht literal sits in this source (B-073).
+ * (land.jsx L6-14 / L94-97 / L115 / L296; no matching token, B-037(a)); numeric cells carry
+ * class `num` (§0 rule 7). No Thai/baht literal sits in this source (B-073).
  */
 import { useMemo } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Icon, type IconName } from "../../ui/icon";
 import { Page } from "../../shell/page";
-import { useLandPlots } from "./use-land-bank";
+import { useShellCtx } from "../../shell/shell-context";
+import { useProjects } from "../../shell/use-shell-data";
+import { useLandPlots, useAdvancePlotStage } from "./use-land-bank";
 import {
   toPipelinePlot,
-  areaRai,
+  areaDetailText,
   totalRai,
-  plotValue,
+  cardAreaText,
+  cardValueText,
   raiText,
   millionsText,
+  formatMoney,
+  projectNameById,
   LAND_STAGES,
   plotsInStage,
   pipelineCount,
   pendingCount,
   totalBudget,
   tenureToneHex,
+  detailTenureToneHex,
   tenureLabelKey,
   locationText,
+  detailTitle,
+  detailSubtitle,
+  stageById,
+  stageLabelKey,
+  canAdvance,
+  advanceErrorKind,
+  advanceErrorMessage,
   type PipelinePlot,
 } from "./land-pipeline-rows";
 import landPipelineStrings from "./land-pipeline-strings.json" with { type: "json" };
@@ -140,6 +184,174 @@ function Tag({ tone, children }: { tone: string; children: ReactNode }) {
   );
 }
 
+/* --------------------------------------------------------------------------- */
+/* PlotDetail — the card-click detail modal (land.jsx openPlotDetail L279-317)   */
+/* --------------------------------------------------------------------------- */
+
+/** One label/value row of the detail grid (land.jsx openPlotDetail `row`, L286-291). */
+function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  const cell: CSSProperties = {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "9px 0",
+    borderBottom: "1px solid var(--border)",
+  };
+  return (
+    <div style={cell}>
+      <span style={{ fontSize: 12, color: "var(--text-3)" }}>{label}</span>
+      <span
+        className={mono ? "num" : undefined}
+        style={{ fontSize: 12.5, fontWeight: 600, textAlign: "right" }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The plot-detail modal body. Every value is wire-backed or an em-dash — nothing here is
+ * derived from a fallback: `totalValue` is the SERVER's total_value (money = SERVER; null
+ * renders an em-dash and is NEVER recomputed locally from area x price), and the project
+ * name comes from GET /projects so a raw uuid is never shown.
+ *
+ * The advance action posts the bodiless POST and closes the modal; the toast fires off the
+ * SETTLED promise, because closing the modal unmounts this body before the POST resolves
+ * (the admin-subs / B-200b precedent). A rejection surfaces the server's own message rather
+ * than a swallowed catch — the whole point of the round is that a control never reports a
+ * success it did not get.
+ */
+function PlotDetail({
+  plot,
+  projectName,
+  onClose,
+  onAdvance,
+}: {
+  plot: PipelinePlot;
+  projectName: string;
+  onClose: () => void;
+  onAdvance: () => void;
+}) {
+  const { t, tp } = useI18n();
+  const ctx = useShellCtx();
+
+  const stage = stageById(plot.stage);
+  const stageColor = stage?.color ?? LAND_STAGES[0]!.color;
+  const stageLabel = stage ? t(stage.labelKey) : plot.stage || DASH;
+  const tenureKey = tenureLabelKey(plot.tenure);
+  const unitRai = t("land.unit.rai");
+  const baht = tp(landPipelineStrings.unitBaht as PhraseKey);
+
+  return (
+    <div>
+      {/* stage pill + tenure badge (land.jsx L294-297) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <span
+          style={{
+            fontSize: 11.5,
+            fontWeight: 700,
+            padding: "4px 11px",
+            borderRadius: 999,
+            background: `color-mix(in srgb, ${stageColor} 14%, white)`,
+            color: stageColor,
+          }}
+        >
+          {stageLabel}
+        </span>
+        <Tag tone={detailTenureToneHex(plot.tenure)}>{tenureKey ? t(tenureKey) : DASH}</Tag>
+      </div>
+
+      {/* 8 rows, two columns (land.jsx L298-308) */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px" }}>
+        <DetailRow label={t("land.field.deed")} value={plot.deedNo || DASH} mono />
+        <DetailRow label={t("land.detail.rowArea")} value={areaDetailText(plot.areaSqm, unitRai) || DASH} mono />
+        <DetailRow label={t("land.bank.colGps")} value={plot.gps || DASH} mono />
+        <DetailRow
+          label={t("land.detail.rowPricePerRai")}
+          value={plot.pricePerRai > 0 ? `${formatMoney(plot.pricePerRai)} ${baht}` : DASH}
+          mono
+        />
+        {/* money = SERVER: plotWire.total_value. Unpriced -> em-dash, never a locally
+            re-derived area x price (B-316/A2).
+            The `== null` guard alone was NOT enough, fixed 2026-08-10: the server's
+            `priced` test is PRESENCE-only (land-sales.ts:296), so a stored
+            price_per_rai = 0 yields total_value: 0, not null (:306). This row then
+            rendered "0" directly under the price/rai row above, which em-dashes on
+            `> 0` — two rows contradicting each other in one grid, and a fabricated
+            zero valuation for a plot nobody has priced. Same `> 0` guard as its
+            neighbour now; a genuine zero-value plot is not a thing this screen can
+            distinguish from an unpriced one, and never-0 wins over never-hide. */}
+        <DetailRow
+          label={t("land.detail.rowTotalValue")}
+          value={
+            plot.totalValue != null && plot.totalValue > 0
+              ? `${formatMoney(plot.totalValue)} ${baht}`
+              : DASH
+          }
+          mono
+        />
+        <DetailRow label={t("land.detail.rowFormerOwner")} value={plot.owner || DASH} />
+        {/* project — resolved from project_id via GET /projects (never a raw uuid). */}
+        <DetailRow label={t("land.common.project")} value={projectName || DASH} />
+        <DetailRow
+          label={t("land.bank.filterTenureHint")}
+          value={tenureKey ? t(tenureKey) : DASH}
+        />
+      </div>
+
+      {/* actions (land.jsx L309-313) */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          justifyContent: "flex-end",
+          marginTop: 18,
+          paddingTop: 14,
+          borderTop: "1px solid var(--border)",
+        }}
+      >
+        <Btn
+          kind="outline"
+          size="md"
+          icon="compass"
+          onClick={() => {
+            onClose();
+            ctx.navigate("land.survey");
+          }}
+        >
+          {t("land.detail.btnSurvey")}
+        </Btn>
+        <Btn
+          kind="outline"
+          size="md"
+          icon="shield"
+          onClick={() => {
+            onClose();
+            ctx.navigate("land.dd");
+          }}
+        >
+          {t("land.stage.dd")}
+        </Btn>
+        {/* Not rendered at the terminal stage (land.jsx L311) — the server 409s there. */}
+        {canAdvance(plot.stage) && (
+          <Btn
+            kind="primary"
+            size="md"
+            icon="arrowR"
+            onClick={() => {
+              onAdvance();
+              onClose();
+            }}
+          >
+            {t("land.detail.btnAdvance")}
+          </Btn>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Kanban loading skeleton — 7 token column blocks, no invented copy (mirror land-bank). */
 function PipelineSkeleton() {
   return (
@@ -176,16 +388,69 @@ function PipelineSkeleton() {
 
 export function LandPipeline() {
   const { t, tp } = useI18n();
+  const ctx = useShellCtx();
 
   const plotsQ = useLandPlots();
+  const projectsQ = useProjects();
+  const advance = useAdvancePlotStage();
   const rows = useMemo<PipelinePlot[]>(
     () => (plotsQ.data ?? []).map(toPipelinePlot),
     [plotsQ.data],
   );
+  const projectNames = useMemo(() => projectNameById(projectsQ.data), [projectsQ.data]);
 
   const unitPlot = t("land.unit.plot");
   const unitRai = t("land.unit.rai");
   const unitMillion = tp(landPipelineStrings.unitMillionBaht as PhraseKey);
+
+  /**
+   * Advance one plot (land.jsx LandPipeline advance, L69-75). The POST carries no body —
+   * the server picks the next stage — and the toast labels the stage the SERVER returned.
+   * PlotDetail closes before the POST settles (single modal slot), so the toast fires off
+   * the settled promise, not a mutate-scoped onSuccess bound to a dead observer.
+   */
+  const advancePlot = (plot: PipelinePlot) => {
+    advance.mutateAsync(plot.id).then(
+      (res) => {
+        const nextStage = typeof res.stage === "string" ? res.stage : "";
+        const key = stageLabelKey(nextStage);
+        ctx.notify(
+          t("land.pipeline.toastAdvance")
+            .replace("{id}", plot.id)
+            .replace("{stage}", key ? t(key) : nextStage || DASH),
+        );
+      },
+      (err: unknown) => {
+        // The server's own answer decides the message: its single 409 on this route means
+        // the plot is already terminal (the prototype's "closed" toast); anything else
+        // surfaces the server message as a failure, never a swallowed catch.
+        if (advanceErrorKind(err) === "terminal") {
+          ctx.notify(t("land.pipeline.toastClosed").replace("{id}", plot.id));
+          return;
+        }
+        ctx.notify(advanceErrorMessage(err) || DASH, "danger");
+      },
+    );
+  };
+
+  const openDetail = (plot: PipelinePlot) => {
+    const stage = stageById(plot.stage);
+    ctx.openModal({
+      title: detailTitle(plot) || DASH,
+      subtitle: detailSubtitle(plot) || DASH,
+      icon: "landplot",
+      iconTone: stage?.color ?? LAND_STAGES[0]!.color,
+      size: "lg",
+      body: ({ close }: { close: () => void }) => (
+        <PlotDetail
+          plot={plot}
+          projectName={plot.projectId ? (projectNames.get(plot.projectId) ?? "") : ""}
+          onClose={close}
+          onAdvance={() => advancePlot(plot)}
+        />
+      ),
+    });
+  };
 
   return (
     <Page
@@ -194,18 +459,34 @@ export function LandPipeline() {
       subtitle={t("land.pipeline.subtitle")}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          {/* Honest-DISABLED: no export endpoint / the export modal is a dropped mock. */}
+          {/* Honest-DISABLED — but NOT because the contract has no export. It HAS one:
+              openapi.yaml:4235 declares POST /exports (operationId createExport, body
+              {type, params} -> 202 Job) and :4262 declares GET /exports/{id} (getExport),
+              and both are generated into packages/contracts types + a whole Dart client.
+              NOTHING MOUNTS THEM: apps/api/src/app.ts registers no exports route (every
+              other door is registered in the one block at :221-284) and the only
+              "/exports" anywhere in apps/api/src is a design comment, worker.ts:6 —
+              a description of the job pipeline that was never built. A contract-following
+              caller
+              therefore gets a 404 on the ordinary path — declared-but-never-mounted, the
+              same shape as B-282 reset-password, which is the defect class this round
+              exists to close. Filed as B-351. The control stays disabled for that reason,
+              not for the one this comment used to give. (The prototype's openExportModal
+              is a mock file-picker either way, §0 rule 3.) */}
           <Btn kind="outline" size="md" icon="download" disabled>
             {t("land.action.export")}
           </Btn>
-          {/* Honest-DISABLED for this READ port: the add-plot form is out of read scope. */}
+          {/* Honest-DISABLED: POST /land/plots IS merged (use-land-bank.ts useCreatePlot),
+              but the add affordance is the LandPlotForm modal (land.jsx L~230), a separate
+              port — the endpoint is NOT the blocker here, the unported form is. */}
           <Btn kind="primary" size="md" icon="plus" disabled>
             {t("land.pipeline.addBtn")}
           </Btn>
         </div>
       }
     >
-      {/* KPI strip (4) — all REAL, client-derived from the loaded plots. */}
+      {/* KPI strip (4) — all REAL, client-AGGREGATED over the loaded plots (the budget
+          KPI's terms are server money; see totalBudget). */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 18 }}>
         <LandKpi
           label={t("land.pipeline.kpiInPipeline")}
@@ -302,15 +583,34 @@ export function LandPipeline() {
                   {col.map((p) => {
                     const labelKey = tenureLabelKey(p.tenure);
                     const loc = locationText(p);
+                    const cardArea = cardAreaText(p);
+                    const cardValue = cardValueText(p);
                     return (
-                      // Static card (§0 rule 3): the mock detail/advance actions are dropped.
+                      // Card click opens the plot-detail modal (land.jsx L113 onClick ->
+                      // openPlotDetail), whose primary action posts the real advance-stage.
+                      // role=button + tabIndex + Enter/Space (B-354): the card is the ONLY
+                      // route to the detail, and the detail is the only route to the
+                      // advance write — a bare <div onClick> made that whole path
+                      // unreachable for keyboard and AT users. Same shape as the merged
+                      // solar-monitor.tsx:342-354 ticket card; the visual stays a div, so
+                      // nothing paints differently at rest.
                       <div
                         key={p.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openDetail(p)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openDetail(p);
+                          }
+                        }}
                         style={{
                           background: "var(--surface)",
                           border: "1px solid var(--border)",
                           borderRadius: 10,
                           padding: 11,
+                          cursor: "pointer",
                           // Verbatim prototype shadow (land.jsx L112; no matching token, B-037(a)).
                           boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
                         }}
@@ -356,13 +656,30 @@ export function LandPipeline() {
                             borderTop: "1px solid var(--border)",
                           }}
                         >
+                          {/* Area in rai, from area_sqm. Em-dashes for a plot with no area
+                              instead of printing "0.0", and the rai unit goes with the
+                              number — the same shape as the price cell beside it, and for
+                              the same reason: this plot's OWN detail modal em-dashes its
+                              area row (areaDetailText), and a card that says "0.0 rai" next
+                              to a modal that says em-dash is two views of one plot
+                              disagreeing on one screen. See cardAreaText. */}
                           <span className="num" style={{ fontSize: 11, color: "var(--text-2)", fontWeight: 600 }}>
-                            {areaRai(p.areaSqm).toFixed(1)} {unitRai}
+                            {cardArea == null ? DASH : `${cardArea} ${unitRai}`}
                           </span>
-                          {/* Compact price: (area x price/rai) in millions. Trailing "M" is an ASCII
-                              magnitude glyph literal (land.jsx L121) — no i18n key, B-073-safe chrome. */}
+                          {/* Compact price in millions, from the SERVER's total_value (money =
+                              SERVER) — the same rule, and now the same source, as the detail
+                              modal's total-value row 380 lines up. This cell used to render
+                              millionsText(plotValue(p)), a LOCAL areaRai x pricePerRai
+                              re-derivation that the row comment explicitly forbids, and it
+                              printed "0.0M" for an unpriced plot whose own modal said em-dash
+                              for both total value and price/rai — two views of one plot
+                              disagreeing on one screen. Unpriced now em-dashes here too, and
+                              the trailing "M" (an ASCII magnitude glyph literal, land.jsx L121;
+                              no i18n key, B-073-safe chrome) belongs to the number, so it goes
+                              with it rather than leaving a bare suffix.
+                              Nothing moves for a priced plot: see cardValueText. */}
                           <span className="num" style={{ fontSize: 11.5, fontWeight: 700 }}>
-                            {millionsText(plotValue(p))}M
+                            {cardValue == null ? DASH : `${cardValue}M`}
                           </span>
                         </div>
                       </div>

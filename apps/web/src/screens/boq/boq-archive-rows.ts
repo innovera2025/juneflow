@@ -12,7 +12,7 @@
  * map the row's project column uses) and folds it into the searchable haystack, so a search
  * for a project name finds its docs. project/status stay exact-match filters.
  *
- * B-278 UPDATE — the approver / approve-date columns DO have a wire source. GET /boq's
+ * B-355 UPDATE — the approver / approve-date columns DO have a wire source. GET /boq's
  * docWire carries { approved_by, approved_by_name, approved_at } (apps/api/src/routes/boq.ts
  * docWire, migration 0021 / B-081-F4; pinned by boq.test.ts's exact-key assertion on the list
  * rows), and the list handler resolves the display name from `users`. Those two columns are
@@ -25,7 +25,7 @@
  *     payload (GET /boq/{id}), not on the list rows this screen reads.
  *   - the year filter: `approved_at` is the only date on the payload and it is null for every
  *     unapproved doc, so filtering the archive by it would silently hide drafts — that needs a
- *     filter-semantics ruling, not a guess (B-279).
+ *     filter-semantics ruling, not a guess (B-356).
  */
 import type { BoqRow } from "./boq-rows";
 
@@ -63,7 +63,7 @@ export function filterArchiveRows(
 }
 
 /* --------------------------------------------------------------------------- */
-/* Archive approval columns (B-278) — GET /boq approved_by_name + approved_at   */
+/* Archive approval columns (B-355) — GET /boq approved_by_name + approved_at   */
 /* --------------------------------------------------------------------------- */
 
 /**

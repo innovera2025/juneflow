@@ -19,16 +19,30 @@
  * stage-bucketing / hot-count logic (toLeadRow / groupByStage / countHot / userNameById)
  * lives in sales-crm-rows.ts (unit-tested, G3).
  *
- * READ-ONLY (P3 Wave-1): the P3 write bundle (add lead / advance stage / convert /
- * send quote / log follow-up) is NOT filed yet, so no write endpoint is wired. Every
- * write affordance is honest-disabled or omitted:
- *   - add-lead (sales.crm.btnAddLead, header primary) -> DISABLED (create endpoint not filed).
- *   - all-sales filter (sales.crm.btnAllSales, header) -> DISABLED (the prototype's per-sales
- *     filter is a mock notify; no real sales filter exists, so it does nothing honest).
- *   - the per-column ghost "+" (add-to-stage) -> DISABLED (create endpoint not filed).
- *   - the lead-detail modal is READ-ONLY: it shows the real phone / source / interest /
- *     owner and a Close button; the prototype's mock contact-history timeline and its
- *     write forms (follow-up textarea, send-quote, advance-stage) are OMITTED.
+ * READ-ONLY. Every write affordance is honest-disabled or omitted, but CORRECTED
+ * 2026-08-10: this header used to say "the create endpoint is not filed" three times and
+ * that was FALSE — POST /sales/leads is mounted (land-sales.ts:422, registered :1062,
+ * `name` required else 400) and the sales.crm.form* dict keys for all 11 prototype fields
+ * exist. The two remaining blockers are different from each other, and neither is the
+ * create endpoint:
+ *   - add-lead (sales.crm.btnAddLead, header primary) and the per-column ghost "+" ->
+ *     DISABLED pending a ruling (B-349). The endpoint exists; the SCHEMA does not. The
+ *     prototype's LeadForm (sales-crm.jsx:303-329) collects 11 fields (:308-318) and the
+ *     `lead` table (packages/db extensions.ts:326) has columns for 6 of them (name, phone,
+ *     source, interest, owner_user_id, note). email, Line ID, unit type,
+ *     budget and the follow-up date have NO column, so wiring the form as drawn means the
+ *     user fills five fields that vanish on save. That is not an honest-omit — honest-omit
+ *     is about DISPLAY (render an em-dash for what the wire lacks); silently discarding
+ *     what a user typed is a different and worse thing.
+ *   - advance-stage / send-quote / log-follow-up -> correctly blocked (B-350), for the
+ *     reason the old comment should have given: there is NO lead UPDATE endpoint of any
+ *     kind. POST /sales/leads is the only lead write in the whole api; a grep for
+ *     put/patch on /sales/leads finds nothing. sales.crm.btnAdvanceStage has nothing to
+ *     call, so the lead-detail modal stays READ-ONLY (real phone / source / interest /
+ *     owner + Close) and the prototype's mock contact-history timeline stays OMITTED.
+ *   - all-sales filter (sales.crm.btnAllSales, header) -> DISABLED, and this one was
+ *     accurate: the prototype's per-sales filter is a mock notify, so there is nothing
+ *     honest for it to do.
  *
  * HONEST DIVERGENCES (rule 4 — never fabricated):
  *   - hot is a BOOLEAN column; SA-1's 3-state warmth (hot/warm/cold) is a not-yet-merged
@@ -221,7 +235,8 @@ export function SalesCRM() {
           <Btn kind="outline" size="md" icon="filter" disabled>
             {t("sales.crm.btnAllSales")}
           </Btn>
-          {/* Add-lead: the P3 create endpoint is not filed — disabled (read-only). */}
+          {/* Add-lead: POST /sales/leads IS merged. Disabled pending B-349 — 5 of the
+              form's 11 fields have no column, so the form would discard user input. */}
           <Btn kind="primary" size="md" icon="plus" disabled>
             {t("sales.crm.btnAddLead")}
           </Btn>
@@ -286,7 +301,8 @@ export function SalesCRM() {
                       {items.length} {t("sales.crm.customersSuffix")}
                     </div>
                   </div>
-                  {/* Add-to-stage: create endpoint not filed — disabled (read-only). */}
+                  {/* Add-to-stage: same as the header add-lead — endpoint merged, disabled
+                      pending B-349 (5 of 11 form fields have no column). */}
                   <Btn kind="ghost" size="sm" icon="plus" label={t("sales.crm.btnAddLead")} disabled />
                 </div>
                 <div style={{ flex: 1, overflow: "auto", padding: 8 }}>

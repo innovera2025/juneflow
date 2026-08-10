@@ -1,5 +1,5 @@
 /*
- * POList-only wire helpers (B-278) — pure, i18n-free, ASCII-only.
+ * POList-only wire helpers (B-355) — pure, i18n-free, ASCII-only.
  *
  * WHY A SEPARATE MODULE: po-wo-rows.ts is shared by 14 modules (po/wo lists, forms,
  * subcon, sales, fa). The two fields re-wired here are consumed by POList ALONE, so they
@@ -23,14 +23,14 @@
  *     ("{pct}% - paid/due", i18n po.list.depositPaid/depositDue). The wire's `deposit` is a
  *     PAID amount (SUM of kind=deposit billings), not the agreed rate; `pos` has no
  *     down-payment-percent column, so deriving pct = deposit/total would impute a contract
- *     term from a payment (wrong whenever a deposit is part-paid). B-279.
- *   - kpiDepositDue (deposits OUTSTANDING) needs that same missing agreed rate. B-279.
+ *     term from a payment (wrong whenever a deposit is part-paid). B-356.
+ *   - kpiDepositDue (deposits OUTSTANDING) needs that same missing agreed rate. B-356.
  *   - receive-goods %: lives on GET /gr, not on this payload.
  *   - payment-schedule amounts + "PO remaining": both are amount x pct / total - paid, i.e.
  *     monetary totals that would be originated in the browser. money = SERVER.
  *   - credit_term / vat: real on the payload, but pototype/po-wo.jsx POList (L12-205) has no
  *     cell for either - its 8 columns and 4 detail SmallStats are fixed, and adding one would
- *     be a redesign (PLAN.md section 0 rule 1). Reported, not invented. B-279.
+ *     be a redesign (PLAN.md section 0 rule 1). Reported, not invented. B-356.
  */
 
 /** Read a string field off an opaque row ({ [k]: unknown }); "" when absent/null. */

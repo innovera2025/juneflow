@@ -1,5 +1,5 @@
 /*
- * POList SCREEN-SEAM tests (B-278, gate G3) — the component<->payload wiring, not the pure
+ * POList SCREEN-SEAM tests (B-355, gate G3) — the component<->payload wiring, not the pure
  * narrowing (that is po-list-rows.test.ts).
  *
  * WHY THIS FILE EXISTS: po-list-rows.test.ts can only prove that toPoListWire / formatDate /
@@ -130,7 +130,7 @@ beforeEach(() => {
   h.po = { data: SERVED, isLoading: false };
 });
 
-describe("POList <-> GET /po paid column (B-278)", () => {
+describe("POList <-> GET /po paid column (B-355)", () => {
   it("renders the served `paid` figure in the row's paid cell", () => {
     expect(rowOf(render(), "PO-2026-0291")).toContain("317,000");
   });
@@ -163,7 +163,7 @@ describe("POList <-> GET /po paid column (B-278)", () => {
   });
 });
 
-describe("POList <-> GET /po document date (B-278)", () => {
+describe("POList <-> GET /po document date (B-355)", () => {
   it("renders the selected PO's doc_date as an ISO/UTC calendar date", () => {
     // The detail panel opens on the first row of the active tab.
     expect(text(render())).toContain("2026-05-24");
@@ -191,7 +191,7 @@ describe("POList <-> GET /po document date (B-278)", () => {
 });
 
 /*
- * Money-honesty guards. These hold BOTH before and after the B-278 re-wire — they are stated
+ * Money-honesty guards. These hold BOTH before and after the B-355 re-wire — they are stated
  * as negative invariants, not as evidence the wire works (see the revert probe in the slice
  * report). They fail only if a later change starts originating these figures in the browser.
  */
@@ -201,7 +201,7 @@ describe("POList originates no monetary total in the browser", () => {
   });
 
   it("never derives a down-payment percent from the paid deposit amount", () => {
-    // 300,000 / 1,268,000 = 23.66% — an imputed contract term (B-279), never rendered.
+    // 300,000 / 1,268,000 = 23.66% — an imputed contract term (B-356), never rendered.
     const shown = text(render());
     expect(shown).not.toContain("23.66");
     expect(shown).not.toContain("300,000");
