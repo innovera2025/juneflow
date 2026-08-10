@@ -291,7 +291,7 @@ export function MasterProject() {
           >
             {`${t("common.import")}${Lunit}`}
           </Btn>
-          {/* CreateProjectForm (master.jsx L1242-1344) — STILL DEFERRED, but NOT for the
+          {/* CreateProjectForm (master.jsx L1242-1338) — STILL DEFERRED, but NOT for the
               reason this comment used to give. "the backend create-project route is
               unimplemented" was FALSE as of 2026-08-10: apps/api projects.ts:200 mounts
               POST /projects, quota-gated 402 at :212, and it materializes the wizard's
@@ -303,14 +303,20 @@ export function MasterProject() {
               key in docs/extract/i18n-full.json — neither dict nor phrases — so the form
               cannot be rendered without minting, and minting is a Wei-approved sacred round.
               Verified missing, each grepped against all 3701 dict keys and 1108 phrases,
-              cited by prototype line rather than quoted (comments stay English, CLAUDE.md):
+              cited by prototype line rather than quoted (comments stay English, CLAUDE.md).
+              Line numbers RE-VERIFIED against master.jsx 2026-08-10 — three of them
+              (L1305/L1306/L1315) previously landed on closing tags, which is an
+              unverifiable citation inside a comment whose whole point is to be checkable:
                 master.jsx L1288 step counter · L1270 the step-2 and step-3 step labels
-                (2 strings) · L1305 step-2 field label · L1306 step-2 placeholder ·
-                L1312 step-2 skip hint · L1315 step-3 field label · L1321 + L1322 the two
-                summary bullet prefixes · L1304 the hierarchy prefix in the step-1 type
-                preview · L1279 the created toast.
+                (2 strings, the stepLabel array) · L1309 step-2 field label · L1310 step-2
+                placeholder · L1312 step-2 skip hint · L1316 step-3 field label · L1321 +
+                L1322 the two summary bullet prefixes · L1304 the hierarchy prefix in the
+                step-1 type preview · L1279 the created toast.
               (Present and reusable: createProj.* x12, common.cancel, common.back,
-              project.createBtn, and pm.fieldProjectType for the L1296 type field label.)
+              project.createBtn, and pm.fieldProjectType for the L1296 type field label.
+              NOT reusable: pm.toastProjectCreated is a NEAR MISS for the L1279 toast — it
+              omits the short code and the optional phase clause — so reusing it would be
+              re-translating, forbidden by §0 rule 2.)
 
               The button is a RENDER-ONLY STUB with no onClick — it is in g2/32 so it renders
               enabled, the same deliberate convention as master-project-type.tsx addBtn and

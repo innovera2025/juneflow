@@ -28,14 +28,26 @@
  * project-types.ts:117 mounts POST and :168 mounts PUT; both validate name + hierarchy,
  * 409 on a duplicate key across the tenant's visible set, force-set company_id so a custom
  * type can never be global, and 404 a platform-global default. B-065 was answered and
- * shipped. The 26 ptype.* form keys (editTitle / fldNameTh / fldNameEn / fldIcon / secWbs /
- * secCostTypes / secModules / hints / placeholders / toastAdd / toastEdit) are all minted
- * and all unconsumed.
+ * shipped.
+ *
+ * The Add/Edit FORM keys are all minted and all unconsumed — RE-COUNTED 2026-08-10, because
+ * the first version of this paragraph said "26 ... form keys" and named secWbs + secCostTypes
+ * among them, which THIS FILE RENDERS. The arithmetic, all three terms grepped: 34 ptype.*
+ * dict keys exist; 8 are consumed here as direct t() literals (title / subtitle / addBtn /
+ * secWbs / secCostTypes / modUsed / projUsage / noProjects); 7 more are consumed INDIRECTLY
+ * as the module-chip labels, routed through MOD_DICT (ptype-cards.ts:50-58) — ptype.mod.
+ * procure / timeline / salesRe / aftersales / lineoa / om / pm. 34 - 8 - 7 leaves 19, and
+ * every one of the 19 is a form key with zero hits across apps/web/src and apps/mobile/lib:
+ * editTitle · modalSubtitle · formSubmitAdd · fldNameTh · fldNameEn · fldIcon · secModules ·
+ * moduleNote · hintWbs · hintCostTypes · phNameTh · phNameEn · phDesc · phWbs · phCostTypes ·
+ * defHierarchy · defCostTypes · toastAdd · toastEdit.
  *
  * The real blocker is a SCHEMA gap needing a ruling (B-352): project_type stores only
  * { key, name, hierarchy, modules } (packages/db project.ts:113-134), while the prototype
- * form (project-type-screen.jsx:114-190) also collects nameEn, icon, color, desc and
- * costTypes — five fields the handler drops (project-types.ts:161-163). This screen already
+ * form (project-type-screen.jsx:114-218) also collects nameEn (:116), icon (:117), color
+ * (:118), desc (:119) and costTypes (:121) — five fields the handler drops on the floor
+ * (the insert at project-types.ts:161-163 passes key/name/hierarchy/modules and nothing
+ * else). This screen already
  * knows it: those five are read from a CLIENT meta file (ptype-meta.json, keyed by `key`),
  * so a user-created type falls through to DEFAULT_META and renders with a borrowed icon and
  * colour. Options are add-columns (a sacred migration), render the five disabled, or keep

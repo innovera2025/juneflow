@@ -16,9 +16,10 @@
  *     is merged", was FALSE on both halves: PUT /land/plots/{id}/dd is mounted
  *     (land-sales.ts:520, registered :1080) and the READ side already carries dd_checklist
  *     on plotWire (:318). The real blocker is a CONTRACT/HANDLER key mismatch that fails
- *     SILENTLY (B-348): openapi.yaml:3654 declares the body as { checklist } and the
- *     generated client types it as `checklist?` only, but the handler reads
- *     pick(body, "dd", "dd_checklist", "ddChecklist") — `checklist` is not in that list.
+ *     SILENTLY (B-348): openapi.yaml:3647-3663 declares the body with exactly one property,
+ *     `checklist` (:3661), and the generated client types it as `checklist?` only — but the
+ *     handler reads pick(body, "dd", "dd_checklist", "ddChecklist") at land-sales.ts:533,
+ *     and `checklist` is not in that list.
  *     A contract-shaped PUT therefore builds an empty patch, merges nothing, and answers
  *     200: the UI would appear to save and silently revert on the next refetch. It was
  *     never caught because the api test sends the HANDLER shape ({ dd: ... },

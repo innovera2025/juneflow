@@ -27,8 +27,9 @@
  * create endpoint:
  *   - add-lead (sales.crm.btnAddLead, header primary) and the per-column ghost "+" ->
  *     DISABLED pending a ruling (B-349). The endpoint exists; the SCHEMA does not. The
- *     prototype's LeadForm (sales-crm.jsx:303-328) collects 11 fields and the `lead` table
- *     (packages/db extensions.ts:326) has columns for 6 of them. email, Line ID, unit type,
+ *     prototype's LeadForm (sales-crm.jsx:303-329) collects 11 fields (:308-318) and the
+ *     `lead` table (packages/db extensions.ts:326) has columns for 6 of them (name, phone,
+ *     source, interest, owner_user_id, note). email, Line ID, unit type,
  *     budget and the follow-up date have NO column, so wiring the form as drawn means the
  *     user fills five fields that vanish on save. That is not an honest-omit — honest-omit
  *     is about DISPLAY (render an em-dash for what the wire lacks); silently discarding
