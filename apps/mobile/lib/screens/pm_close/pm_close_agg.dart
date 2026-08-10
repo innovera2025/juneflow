@@ -195,8 +195,21 @@ PmCloseChecks tallyChecks(Object? items) {
 /// Reads `customer_sign` and nothing else. This is the single column the merged
 /// `deriveStatus` (apps/web/src/screens/pm/wo-rows.ts L206) turns into the "done"
 /// status, and the same column pm_jobs_agg reads — so a true here means the same
-/// thing on every surface. It is never set by a tap on this screen: no signature can
-/// be captured (B-288), so the value can only have arrived from elsewhere.
+/// thing on every surface.
+///
+/// THIS SCREEN CAN NOW BE THE THING THAT SETS IT (corrected under B-357/F2). The line
+/// here used to read "it is never set by a tap on this screen: no signature can be
+/// captured (B-288)". That was true only while the encoding was undefined; B-331 ruled
+/// it (stroke JSON), the pad captures a real mark and the CTA performs the close, so
+/// after this screen's own write syncs and the summary is re-read the value can have
+/// arrived from HERE. Nothing about the READ changes — a stored value is a stored
+/// value whoever wrote it — which is exactly why the stale line was dangerous rather
+/// than merely untidy: it sits on the function that decides whether the screen says
+/// the work order is signed.
+///
+/// It is deliberately NOT fed from the pad or from `_pending`. The screen's own
+/// unsynced ink is not a stored signature, and claiming otherwise before the drain
+/// reports success is the fabricated outcome B-288 refused in the first place.
 bool isSigned(PmCloseEnt e) => pmCloseStr(e, 'customer_sign') != null;
 
 /// The whole honest summary of one work order, as the screen renders it.
