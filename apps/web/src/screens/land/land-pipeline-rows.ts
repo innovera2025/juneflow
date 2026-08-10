@@ -24,22 +24,18 @@
  * server money, like land-bank's totalValue KPI); nothing is fabricated and no write lives
  * here (read/display port).
  *
- * ONE deliberate asymmetry, named so it does not read as an oversight: cardValueText reads
- * the SERVER's total_value, while totalBudget (KPI3) still SUMS the local plotValue. The
- * card states ONE plot's valuation, so a re-derived figure there is a claim about that plot
- * and a zero is a fabricated valuation; the KPI is an aggregate the screen header already
- * declares as client-derived, and a 0 term changes no sum. Moving the KPI to server money
- * too would change a rendered figure for any plot whose total_value is null — a separate
- * decision with a G5 consequence, not a side effect of this fix.
+ * NO local money survives here: cardValueText (the card cell) and totalBudget (KPI3) both
+ * read plotWire.total_value. KPI3 summed the LOCAL plotValue until 2026-08-10, deferred on
+ * the stated ground that moving it "would change a rendered figure for any plot whose
+ * total_value is null". That ground was FALSE, which is worth recording rather than quietly
+ * deleting: total_value is null EXACTLY when area_sqm or price_per_rai is NULL (the server's
+ * `priced` test is presence-only, land-sales.ts:296), and both of those reach the client
+ * through num() as 0 — so the local product was already exactly 0 in every null case. There
+ * was no figure to change and no G5 consequence to defer. The KPI now adds server terms;
+ * the ADDING is still client-side (there is no server aggregate for it), which is why the
+ * screen header calls the KPI strip client-AGGREGATED rather than client-derived.
  */
-import {
-  toPlotRow,
-  plotValue,
-  areaRai,
-  areaText,
-  millionsText,
-  type PlotRow,
-} from "./land-bank-rows";
+import { toPlotRow, areaRai, areaText, millionsText, type PlotRow } from "./land-bank-rows";
 import type { DictKey } from "@juneflow/i18n";
 
 // Re-export the shared display helpers the pipeline view also consumes (from the same
@@ -155,14 +151,48 @@ export function pendingCount(rows: readonly PlotRow[]): number {
  * KPI3 — total acquisition budget in FULL units: the summed assessed value of every plot
  * NOT yet closed/transferred (land.jsx totalBudget, L65). The millions display + unit are
  * applied in the view (millionsText + the tp million-baht phrase).
+ *
+ * money = SERVER, same rule and same source as cardValueText: every term is the server's
+ * total_value. A null term adds 0 — which is not a guess dressed as a number, because a null
+ * total_value means a NULL area_sqm or price_per_rai, and the local formula this replaced
+ * scored those exactly 0 too (num() reads a missing number as 0). Whether an aggregate over
+ * a partly-unpriced set should render at all is a product question the prototype answers by
+ * summing (land.jsx L65); it is not re-decided here.
+ *
+ * Display-neutral: the only difference a term can carry is the server's per-plot round2
+ * (land-sales.ts:117), under half a satang, which cannot survive /1e6 + toFixed(1). On the
+ * seed it is not even that — the one plot whose product needs the rounding (51680 sqm x
+ * 6,500,000) is the `close` plot this KPI excludes, so both sums are bit-identical at
+ * 725,032,500 -> "725.0".
  */
 export function totalBudget(rows: readonly PlotRow[]): number {
-  return rows.filter((p) => p.stage !== CLOSE_STAGE).reduce((s, p) => s + plotValue(p), 0);
+  return rows.filter((p) => p.stage !== CLOSE_STAGE).reduce((s, p) => s + (p.totalValue ?? 0), 0);
 }
 
 /* --------------------------------------------------------------------------- */
-/* Card compact price (land.jsx L121)                                            */
+/* Card footer cells — area (land.jsx L120) + compact price (L121)               */
 /* --------------------------------------------------------------------------- */
+
+/**
+ * The kanban card's area cell as a rai TEXT ("18.6"), or null when the plot carries no
+ * area — the view then renders an em-dash and drops the rai unit WITH the number, the same
+ * way the price cell drops its "M".
+ *
+ * The guard is `areaDetailText`'s, deliberately: that helper is the SAME plot's area row in
+ * the detail modal, and until 2026-08-10 the two disagreed — the modal em-dashed an arealess
+ * plot while the card beside it printed a confident "0.0 rai" off `areaRai(0).toFixed(1)`.
+ * That is the card-vs-modal contradiction the price cell had (B-316/A2), reachable the same
+ * way: createLandPlot stores `areaSqm: area == null ? null : String(area)`
+ * (land-sales.ts:465), and the client's num() reads a missing area as 0.
+ *
+ * Area is NOT money, so this is not a money=SERVER change — area_sqm is the wire field and
+ * rai is a fixed unit conversion (1 rai = 1600 sqm), computed here as it always was. What
+ * changed is only that an ABSENT area stops rendering as a measurement.
+ */
+export function cardAreaText(p: { areaSqm: number }): string | null {
+  if (!Number.isFinite(p.areaSqm) || p.areaSqm <= 0) return null;
+  return areaRai(p.areaSqm).toFixed(1);
+}
 
 /**
  * The kanban card's compact price cell as a millions TEXT ("83.4"), or null when the plot

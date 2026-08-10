@@ -43,9 +43,20 @@
  * next reader to delete the probe.
  *
  * EVERY comparison in this file therefore runs over FLATTENED text, never raw source, and
- * which flattener matters. A star-gutter block header takes `prose` (strip the gutter, then
- * collapse). master-project's JSX brace-comments carry no gutter, so they take the plain
- * `collapse` — running `prose` over them would be a guess about a file it does not describe.
+ * which flattener matters. These screens carry comment prose in THREE styles, not two: a
+ * `*`-gutter block header, a `//` line comment, and a no-gutter JSX brace comment. Only the
+ * first two put a gutter on the continuation line, so ONE flattener covers all three —
+ * `prose` strips a `*` or a `//` gutter when there is one and is otherwise plain `collapse`.
+ * Raw code/JSX slices take `collapse` directly; there is no comment gutter to strip there.
+ *
+ * The `//` style is in that list because leaving it out was this file's own version of the
+ * defect it exists to catch, and it was not hypothetical: dev's deleted-outright claim #1
+ * lives at land-pipeline.tsx:306 (dev 7cc23d8) as a `//` line comment 95 characters wide —
+ * the exact wrap boundary this header argues from. Measured 2026-08-10, before the fix: that
+ * claim on ONE `//` line died; THE SAME CLAIM across two `//` lines survived. So did all
+ * three deleted-outright claims wrapped that way, and the two quoted-bucket claims probed at
+ * `//` sites (master-project's, then under `collapse`, and land-dd's, under `prose`). An
+ * exhaustive-sounding taxonomy that is not exhaustive is the same defect one level up.
  *
  * These are deliberately narrow string assertions. They are not a substitute for a DOM
  * test; they are a tripwire on the one edit that would silently un-wire a control again.
@@ -63,21 +74,27 @@ function read(rel: string): string {
  * matches as one. Without this a claim only has to WRAP to escape the tripwire — which is
  * not a property anybody chose, it is an accident of reflow at ~95 columns.
  *
- * This is the right flattener for JSX brace-comments, which carry no gutter to strip.
+ * This is the flattener for RAW CODE/JSX slices, which carry no comment gutter to strip.
+ * Comment prose takes `prose`, whatever style the comment is written in.
  */
 function collapse(src: string): string {
   return src.replace(/\s+/g, " ");
 }
 
 /**
- * `collapse`, plus the leading `*` gutter of a star-style block comment. Only for files
- * whose comments carry that gutter; a file without one takes `collapse` directly.
+ * `collapse`, plus the leading gutter a wrapped comment puts on its continuation line: `*`
+ * for a star-style block, `//` for a line comment. BOTH, because a flattener that knows only
+ * one of them lets a claim escape by wrapping in the other — and `//` is the style dev used
+ * for the first deleted-outright claim, so it was the live case, not the exotic one.
+ *
+ * A comment with no gutter (the JSX brace style) has nothing to strip and falls through to
+ * `collapse` unchanged, which is why this one function is correct for all three styles.
  */
 function prose(src: string): string {
   // `[ \t]` not `\s` on purpose: a `\s*` would swallow the NEXT line's newline as well and
-  // leave that line's `*` gutter behind, which is exactly the kind of almost-right that
+  // leave that line's gutter behind, which is exactly the kind of almost-right that
   // makes a tripwire report the wrong thing.
-  return collapse(src.replace(/\n[ \t]*\*[ \t]?/g, " "));
+  return collapse(src.replace(/\n[ \t]*(?:\*|\/\/)[ \t]?/g, " "));
 }
 
 /** Every index at which `re` matches `text` (global, non-overlapping). */
@@ -230,53 +247,53 @@ describe("retired false claims stay retired — quoted in the correction (4 of 7
    * leading article matters too: the quotation opens BEFORE "the", so a regex starting at
    * "create" sees a letter where the quote is and reports its own quotation as a live claim.
    *
-   * `flatten` is per-case and NOT a detail. Three of these are star-gutter block headers and
-   * take `prose`; master-project's are JSX brace-comments with no gutter and take `collapse`.
+   * All four flatten with `prose`, master-project's JSX brace-comments included. That was a
+   * per-case choice until 2026-08-10 — `collapse` for the no-gutter file, `prose` for the
+   * star-gutter three — and the split was the SAME wrap hole one level down: `collapse` does
+   * not strip a `//` gutter either, so restating this claim across two `//` lines in
+   * master-project.tsx survived (measured GREEN; the same claim on ONE line died), in the one
+   * file whose wrap-escape is the reason this bucket exists. `prose` strips a gutter only
+   * where there is one, so it IS `collapse` for a no-gutter comment and strictly safer for
+   * every other style.
    */
   const cases: readonly {
     rel: string;
     label: string;
     claim: RegExp;
     fact: string;
-    flatten: (src: string) => string;
   }[] = [
     {
       rel: "./master/master-project-type.tsx",
       label: "no backend route yet",
       claim: /no backend route yet/,
       fact: "project-types.ts:117 mounts POST",
-      flatten: prose,
     },
     {
       rel: "./sales/sales-crm.tsx",
       label: "the create endpoint is not filed",
       claim: /(?:the )?create endpoint (?:is )?not filed/,
       fact: "POST /sales/leads is mounted",
-      flatten: prose,
     },
     {
       rel: "./land/land-dd.tsx",
       label: "no DD-status endpoint is merged",
       claim: /no DD-status endpoint is merged/,
       fact: "PUT /land/plots/{id}/dd is mounted",
-      flatten: prose,
     },
     {
       // MOVED here from the deleted-outright bucket 2026-08-10 — it never belonged there.
       // The claim is alive at master-project.tsx as a quotation, and the absence check only
-      // passed because it wraps. `collapse`, not `prose`: this file's comments are
-      // `{` + block-comment JSX with no `*` gutter.
+      // passed because it wraps.
       rel: "./master/master-project.tsx",
       label: "the backend create-project route is unimplemented",
       claim: /the backend create-project route is unimplemented/,
       fact: "projects.ts:200 mounts POST /projects",
-      flatten: collapse,
     },
   ];
 
-  for (const { rel, label, claim, fact, flatten } of cases) {
+  for (const { rel, label, claim, fact } of cases) {
     describe(`${rel} — "${label}"`, () => {
-      const text = flatten(read(rel));
+      const text = prose(read(rel));
 
       it("still quotes the retired claim (the correction is present)", () => {
         expect(matchIndexes(text, claim).length).toBeGreaterThan(0);
@@ -365,6 +382,15 @@ describe("land.pipeline — an unpriced plot never renders a fabricated zero", (
     // printed "0.0M" for the same plot the modal em-dashed. The braces are what separate the
     // rendered expression from the prose mention of it in the comment beside it.
     expect(src).not.toContain("{millionsText(plotValue(p))}");
+  });
+
+  it("the kanban card's AREA cell em-dashes through cardAreaText, like its own modal", () => {
+    // The same defect as the price cell, found one round later in the cell beside it: the
+    // card printed `areaRai(p.areaSqm).toFixed(1)` unconditionally -> "0.0 rai" for a plot
+    // whose own detail modal em-dashed the area row (areaDetailText returns "" at <= 0).
+    expect(src).toContain("const cardArea = cardAreaText(p);");
+    expect(collapse(src)).toContain("{cardArea == null ? DASH :");
+    expect(src).not.toContain("{areaRai(p.areaSqm).toFixed(1)}");
   });
 });
 

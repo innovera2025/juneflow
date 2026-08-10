@@ -17,15 +17,19 @@
  *     POST /land/plots IS mounted, so what blocks add-plot is the unported LandPlotForm.
  *     The evidence, with its exact line citations, lives on the two button comments below
  *     and is deliberately NOT restated here — one site, so the two cannot drift apart;
- *   - the 4 KPI cards are REAL, client-derived from the loaded plots (in-pipeline count =
+ *   - the 4 KPI cards are REAL, client-AGGREGATED over the loaded plots (in-pipeline count =
  *     stage != close, total area in rai, total budget = summed value over non-closed plots,
- *     pending deals = stage in {nego, deal, dd});
+ *     pending deals = stage in {nego, deal, dd}). Aggregated, not derived: the budget KPI's
+ *     terms are SERVER money (plotWire.total_value, like the card cell), and only the
+ *     addition happens here — there is no server aggregate for it;
  *   - the 7 kanban columns come from the local LAND_STAGES domain constant; each column
  *     groups the plots by stage and renders a static card (id / tenure badge / title /
  *     amphoe · prov / area in rai / compact millions price). The card price is SERVER money
  *     (plotWire.total_value via cardValueText) and em-dashes for an unpriced plot — it was
  *     a local areaRai x pricePerRai until 2026-08-10, which printed a fabricated "0.0M"
- *     the plot's OWN detail modal contradicted with an em-dash;
+ *     the plot's OWN detail modal contradicted with an em-dash. The card's AREA cell had
+ *     the identical contradiction and was fixed with it: it printed "0.0 rai" for a plot
+ *     whose own modal em-dashed the area row, and now em-dashes too (cardAreaText);
  *   - loading = token skeleton columns; an empty catalogue shows every column's own
  *     empty-state cell (land.pipeline.emptyCol) — naturally honest.
  *
@@ -81,9 +85,9 @@ import { useProjects } from "../../shell/use-shell-data";
 import { useLandPlots, useAdvancePlotStage } from "./use-land-bank";
 import {
   toPipelinePlot,
-  areaRai,
   areaDetailText,
   totalRai,
+  cardAreaText,
   cardValueText,
   raiText,
   millionsText,
@@ -481,7 +485,8 @@ export function LandPipeline() {
         </div>
       }
     >
-      {/* KPI strip (4) — all REAL, client-derived from the loaded plots. */}
+      {/* KPI strip (4) — all REAL, client-AGGREGATED over the loaded plots (the budget
+          KPI's terms are server money; see totalBudget). */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 18 }}>
         <LandKpi
           label={t("land.pipeline.kpiInPipeline")}
@@ -578,6 +583,7 @@ export function LandPipeline() {
                   {col.map((p) => {
                     const labelKey = tenureLabelKey(p.tenure);
                     const loc = locationText(p);
+                    const cardArea = cardAreaText(p);
                     const cardValue = cardValueText(p);
                     return (
                       // Card click opens the plot-detail modal (land.jsx L113 onClick ->
@@ -650,8 +656,15 @@ export function LandPipeline() {
                             borderTop: "1px solid var(--border)",
                           }}
                         >
+                          {/* Area in rai, from area_sqm. Em-dashes for a plot with no area
+                              instead of printing "0.0", and the rai unit goes with the
+                              number — the same shape as the price cell beside it, and for
+                              the same reason: this plot's OWN detail modal em-dashes its
+                              area row (areaDetailText), and a card that says "0.0 rai" next
+                              to a modal that says em-dash is two views of one plot
+                              disagreeing on one screen. See cardAreaText. */}
                           <span className="num" style={{ fontSize: 11, color: "var(--text-2)", fontWeight: 600 }}>
-                            {areaRai(p.areaSqm).toFixed(1)} {unitRai}
+                            {cardArea == null ? DASH : `${cardArea} ${unitRai}`}
                           </span>
                           {/* Compact price in millions, from the SERVER's total_value (money =
                               SERVER) — the same rule, and now the same source, as the detail
