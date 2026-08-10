@@ -50,9 +50,13 @@
 //     pm-close is built (feature/mobile-pm-close), so it no longer has to sit
 //     honest-disabled (the same unblocking pm-checklist got when this screen landed).
 //     It carries the REAL work-order id through the Navigator.push seam. NOTHING here
-//     closes a job or claims one is closed: pm-close is itself a read-only summary
-//     whose own close affordance is disabled (BLOCKERS.md B-288), and `pm.btnNext`
-//     ("next") names a step, not an outcome.
+//     closes a job or claims one is closed — and that is a fact about THIS screen, not
+//     about the next one. pm-close now performs the close itself (B-331 ruled the
+//     `customer_sign` encoding, so the signature is capturable and its CTA is live);
+//     this comment said its affordance was disabled, which was true under B-288 and is
+//     corrected under B-357/F4. What still holds is the only part that was ever load-
+//     bearing: `pm.btnNext` ("next") names a STEP, not an outcome, so pressing it
+//     claims nothing about the job being closed.
 //
 // The write is the REAL POST /pm/workorders/{id}/close { cause, fix, advice },
 // captured through the level-(a) offline queue (pm_notes_repository.dart — read its
@@ -802,9 +806,12 @@ class _PmNotesScreenState extends State<PmNotesScreen> {
   /// navigation to pm-close, which this button does not perform and which the app
   /// does not have — dropped like the amber banner (see the file header, B-285).
   /// While saving it is disabled (a spinner). Saved → the onward affordance, which
-  /// now NAVIGATES: pm-close is built (feature/mobile-pm-close), so this no longer
-  /// has to sit honest-disabled. It is still not a claim that the job is closed —
-  /// pm-close is a read-only summary whose own close affordance is disabled (B-288).
+  /// now NAVIGATES: pm-close is built (feature/mobile-pm-close), so this no longer has
+  /// to sit honest-disabled. It is still not a claim that the job is closed, and the
+  /// reason is about THIS button rather than the next screen: `pm.btnNext` names a
+  /// step. (This line used to add "pm-close is a read-only summary whose own close
+  /// affordance is disabled (B-288)" — no longer true, and corrected under B-357/F4:
+  /// pm-close performs the close now that B-331 ruled the signature encoding.)
   Widget _actionBar() {
     final bool saved = _state == PmNotesSaveState.saved;
     // Quiet during the on-mount queue read as well as during a save (B-341). It wears

@@ -10,6 +10,11 @@
 // app_services.dart (plus the class's own declaration). These tests pin the same
 // thing from the other direction: each host's repository must hold the IDENTICAL
 // instance AppServices owns.
+//
+// pm-close JOINED this inventory under B-331. It was read-only when this file was
+// written — its close was withheld because no signature could be captured (B-288) —
+// so it had no processor to get wrong. Now that it queues a real write, leaving it
+// out would be exactly the omission the paragraph above warns about.
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -17,9 +22,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juneflow_mobile/app/app_scope.dart';
 import 'package:juneflow_mobile/app/app_services.dart';
+import 'package:juneflow_mobile/offline/pending_op_adoption.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_repository.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_screen.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_repository.dart';
+import 'package:juneflow_mobile/screens/pm_close/pm_close_repository.dart';
+import 'package:juneflow_mobile/screens/pm_close/pm_close_screen.dart';
 import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_screen.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_repository.dart';
 import 'package:juneflow_mobile/screens/pm_notes/pm_notes_screen.dart';
@@ -129,5 +137,33 @@ void main() {
     final DioPmChecklistRepository repo =
         screen.repo as DioPmChecklistRepository;
     expect(identical(repo.processor, services.syncProcessor), isTrue);
+  });
+
+  testWidgets('pm-close host uses AppServices.syncProcessor (B-331)', (
+    WidgetTester tester,
+  ) async {
+    final AppServices services = await boot(tester);
+    await pumpHost(
+      tester,
+      services,
+      const PmCloseScreenHost(workOrderId: 'wo-1'),
+    );
+
+    final PmCloseScreen screen = tester.widget<PmCloseScreen>(
+      find.byType(PmCloseScreen),
+    );
+    final DioPmCloseRepository repo = screen.repo as DioPmCloseRepository;
+    expect(identical(repo.processor, services.syncProcessor), isTrue);
+    expect(identical(repo.processor.queue, services.syncQueue), isTrue);
+  });
+
+  test('the pm-close op identity names the REAL endpoint', () {
+    // The one place the queued write's endpoint and entity type are defined. The
+    // screen tests drive a fake repository, so nothing else would notice this drift
+    // — and a wrong endpoint here fails only at REPLAY time, offline, on a
+    // technician's phone, long after the screen reported the write as captured.
+    final SyncOpIdentity id = pmCloseOpIdentity('wo-1');
+    expect(id.entityType, 'pm_close');
+    expect(id.endpoint, '/pm/workorders/wo-1/close');
   });
 }

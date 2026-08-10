@@ -17,7 +17,7 @@
  * (join + status). The three actions run the real endpoints (use-pm.ts):
  *   - check-in : POST /pm/workorders/{id}/checkin {gps}
  *   - checklist: PUT  /pm/workorders/{id}/checklist {items}  (autosave, DEFAULT 3)
- *   - close    : POST /pm/workorders/{id}/close {cause,fix,advice}
+ *   - close    : POST /pm/workorders/{id}/close {cause,fix,advice[,signature]}
  *
  * HONEST DEFAULTS / GAPS (never fabricated — flagged for Wei / B-106):
  *   - DEFAULT 1 status: derived from real columns (wo-rows deriveStatus).
@@ -28,12 +28,19 @@
  *     full item list is sent positionally so the server preserves the labels).
  *   - DEFAULT 4 WO number: the id is a uuid (no wo_no column) -> em-dash everywhere.
  *   - DEFAULT 5: type / service-zone / check-in time / time-summary (start/end/total)
- *     have NO wire -> em-dash; the photo chips are presentational (no upload endpoint);
- *     the signature pad is decorative. cause/fix/advice ARE real, persisted on close.
- *   - CLOSE SIGNATURE (FLAG): the decorative pad captures no signature, so close sends
- *     only cause/fix/advice — customer_sign is NEVER fabricated. Because "done" is
- *     derived from customer_sign, a UI close records the maintenance log + toasts but
- *     does not flip the WO to "done" (that needs a real signature-capture, unbuilt).
+ *     have NO wire -> em-dash; the photo chips are presentational (no upload endpoint).
+ *     cause/fix/advice ARE real, persisted on close.
+ *   - CLOSE SIGNATURE (B-331): the pad is REAL. It captures strokes and close sends
+ *     them as the stroke JSON Wei ruled for `customer_sign` (BLOCKERS.md B-331), so a
+ *     signed close now genuinely flips the WO to "done" — "done" is derived from that
+ *     column (wo-rows.ts deriveStatus L206). The previous FLAG here recorded the
+ *     opposite ("the decorative pad captures no signature, so close sends only
+ *     cause/fix/advice"); it is removed because it is now false, not because the
+ *     concern lapsed. What REPLACES it is narrower and still enforced: a signature is
+ *     never FABRICATED. An empty pad — or one carrying only stray clicks — sends no
+ *     `signature` key at all (postCloseWorkorder), because the handler stores
+ *     `str(...).trim() || null` and any non-empty value is read as the customer's
+ *     consent by every surface without being inspected.
  *   - CHECKLIST PICKER (B-117): the "pick checklist" button opens the FUNCTIONAL
  *     template picker (checklist-picker.tsx) over the live GET /pm/checklist-templates.
  *     Picked item labels are appended to the local checklist AND persisted via PUT
@@ -44,7 +51,7 @@
  * literal in source; tokens back every colour (rule 6). "GPS" is a prototype-verbatim
  * ASCII abbreviation (no dict key, like wo-list's "Retention" / pm-dashboard's "%").
  */
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
@@ -74,6 +81,9 @@ import {
   useCheckinWorkorder,
   useUpdateChecklist,
   useCloseWorkorder,
+  closeToastText,
+  createSignaturePadBinding,
+  type SignaturePadBinding,
 } from "./use-pm";
 import { ChecklistPicker } from "./checklist-picker";
 
@@ -398,75 +408,34 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
       icon: "check",
       iconTone: "var(--ok)",
       size: "md",
+      // A COMPONENT, not inline JSX: the pad holds state, and modal-host calls this
+      // render prop as a plain function on every host render (modal-host.tsx L57), so
+      // hooks written inline here would belong to the host.
       body: ({ close }: { close: () => void }) => (
-        <div>
-          <div
-            style={{
-              padding: "10px 14px",
-              background: everyDone ? "var(--ok-soft)" : "var(--warn-soft)",
-              borderRadius: 9,
-              marginBottom: 14,
-              fontSize: 12,
-              color: everyDone ? "var(--ok)" : "var(--warn)",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Icon name={everyDone ? "check" : "warn"} size={15} />
-            {everyDone
-              ? t("pm.readyToClose").replace("{count}", String(total))
-              : t("pm.confirmIncomplete").replace("{n}", String(dCount)).replace("{count}", String(total))}
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>
-              {t("pm.signatureLabel")}
-            </div>
-            {/* Decorative signature pad (DEFAULT 5) — captures nothing. */}
-            <div
-              style={{
-                height: 90,
-                border: "1.5px dashed var(--border-strong)",
-                borderRadius: 10,
-                background: "var(--surface-2)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--text-3)",
-                fontSize: 12,
-              }}
-            >
-              <span style={{ fontFamily: "cursive", fontSize: 24, color: "var(--text-2)", transform: "rotate(-4deg)" }}>
-                {t("pm.signHere")}
-              </span>
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Btn kind="outline" size="md" onClick={close}>
-              {t("common.cancel")}
-            </Btn>
-            <Btn
-              kind="primary"
-              size="md"
-              icon="check"
-              onClick={() => {
-                // FLAG: signature is NOT sent (pad decorative) — close records the log only.
-                closeWo.mutate(
-                  { id: wo.id, cause, fix, advice },
-                  {
-                    onSuccess: () => {
-                      close();
-                      ctx.notify(t("pm.toastClosed").replace("{no}", DASH));
-                    },
-                    onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
-                  },
-                );
-              }}
-            >
-              {t("pm.confirmCloseBtn")}
-            </Btn>
-          </div>
-        </div>
+        <CloseWoModalBody
+          everyDone={everyDone}
+          done={dCount}
+          total={total}
+          onCancel={close}
+          onConfirm={(signature) => {
+            closeWo.mutate(
+              { id: wo.id, cause, fix, advice, signature },
+              {
+                onSuccess: () => {
+                  close();
+                  // The report-send half of pm.toastClosed is DROPPED rather than
+                  // rendered: lineNotifyStub is a verified no-op (B-108b) and no
+                  // certificate exists, so this toast was telling the technician a
+                  // report had gone to the customer while mobile's own sidecar test
+                  // names this very key as the live example of a forbidden claim.
+                  // See closeToastText (B-357/F5) — zero-mint, nothing re-translated.
+                  ctx.notify(closeToastText(t("pm.toastClosed"), DASH));
+                },
+                onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
+              },
+            );
+          }}
+        />
       ),
     });
   };
@@ -761,6 +730,299 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
         </div>
       </div>
     </Page>
+  );
+}
+
+/* ===========================================================================
+ * The close modal + its signature pad (B-331)
+ * ===========================================================================
+ * THIS PAD IS AN ADDITION BEYOND THE PROTOTYPE, and it is recorded rather than
+ * shipped quietly because §0 rule 1 forbids inventing UI. pototype/pm3.jsx L137 is a
+ * STATIC div rendering a cursive "ลงนาม ✓"; it has no canvas and no handler, so it
+ * captures nothing. (The mobile prototype's pad is no better — mobile-pm.jsx L206 is
+ * a tap toggle that paints a hardcoded customer name.) B-331 authorises a real pad:
+ * Wei ruled the storage encoding for `customer_sign`, and the whole point of that
+ * ruling was to make the signature capturable.
+ *
+ * What is kept EXACTLY from the prototype: the 90px box, radius 10, the 1.5px dashed
+ * border over surface-2, and its position under pm.signatureLabel. What is dropped is
+ * the cursive placeholder — pm.signHere reads "ลงนาม ✓", and that tick asserts an
+ * ALREADY-COMPLETED signature. Printing it over an empty pad would state the customer
+ * had signed when nothing has been drawn, which is the exact class of claim this
+ * screen's other DEFAULTs em-dash. The empty pad is simply empty; the label above it
+ * already says what it is, which also keeps this change ZERO-MINT.
+ *
+ * WHAT IS LEFT IN THIS FILE, AND WHY (B-357/F1). Only the PAINTING and the JSX. Every
+ * rule between a pointer event and the wire — rect-to-CSS-px, clamping, thinning, the
+ * capture viewport, stroke assembly, the encode — lives in use-pm.ts as pure functions,
+ * because apps/web's test environment is node (no canvas, no DOM, and no jsdom in the
+ * workspace — BLOCKERS.md B-358) and anything left in JSX here is unreachable by a
+ * test. The gate demonstrated exactly that: mutating the old `onChange` wiring to
+ * discard every stroke left the whole suite green.
+ *
+ * WHAT THAT DOES NOT BUY, and the correction (B-357/F1, second round). This paragraph
+ * used to end "there is no callback prop left to hand a discarding function to, so
+ * that mutation no longer type-checks". Killing the callback MOVED the seam; it did
+ * not close it. With `capture={…}` the seam was object identity, which nothing
+ * type-checks — the gate compiled `capture={createSignatureCapture()}` and
+ * `capture={{ ...capture.current }}` at exit 0 with 1794 green, the second of which
+ * renders the customer's signature perfectly and still closes the WO with
+ * `customer_sign` NULL.
+ *
+ * So the pad now takes a [SignaturePadBinding] — one closure over one capture, shared
+ * with the confirm button, with the capture object in scope at neither call site. That
+ * closes the shallow-copy probe by construction (every member closes over the same
+ * capture, so a copy of a binding IS the binding). It does not close "hand the pad a
+ * fresh binding", which stays expressible and stays invisible; that residue is
+ * disclosed in BLOCKERS.md B-358 with both probes as its reproduction, rather than
+ * claimed away.
+ */
+
+/**
+ * A real signature pad: pointer events into [pad], [pad] onto a canvas.
+ *
+ * It reports no VALUE — [onInkChanged] is a bare nudge so the modal can re-render its
+ * confirm gate, and carries nothing that could be dropped in transit. What may be
+ * SENT is read by the confirm button off the same binding (`pad.read()` →
+ * encodeSignatureInk, the single place the refusal rules live).
+ *
+ * It holds no ink state of its own: `pad.hasInk()` is read at render time and the
+ * nudge is what schedules that render. A nudge that was sabotaged would leave the
+ * clear affordance and the confirm gate visibly frozen rather than silently wrong.
+ */
+function SignaturePad({ pad, onInkChanged }: { pad: SignaturePadBinding; onInkChanged: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** Resolved ink colour, cached — see redraw(). */
+  const inkColor = useRef<string | null>(null);
+  const hasInk = pad.hasInk();
+
+  /** Repaint every stroke. The canvas is the only render surface — strokes live in a
+   *  ref so a 60 Hz pointer stream does not trigger a React render per point. */
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx2d = canvas?.getContext("2d");
+    if (!canvas || !ctx2d) return;
+    const rect = canvas.getBoundingClientRect();
+    // Back the canvas at device resolution so the ink is not blurry on HiDPI, while
+    // every coordinate below stays in CSS px — the unit `w`/`h` are recorded in.
+    // Resized only when it actually changed: assigning width/height reallocates the
+    // backing store, and this runs on every pointermove.
+    const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx2d.clearRect(0, 0, rect.width, rect.height);
+    // Canvas 2D cannot take `var(--text)` directly, so the token is RESOLVED (§0 rule
+    // 6 — tokens back every colour). Read as the canvas's own COMPUTED `color`, which
+    // its inline style sets to var(--text): the computed value of `color` is ALWAYS a
+    // real colour, so there is nothing to fall back to and no literal is written here.
+    // This line used to end in a literal fallback, and that literal was byte-equal to
+    // --text as tokens.css:25 defines it — but tokens.css:55 redefines --text for the
+    // OTHER theme, so the fallback baked one theme's value into guarded source
+    // (B-357/F6). It could only ever fire with no `window`, which is unreachable from
+    // a mounted canvas, so this is a literal removed rather than a bug fixed. Cached:
+    // getComputedStyle forces a style flush, and this is a per-move path.
+    if (inkColor.current === null) {
+      inkColor.current = window.getComputedStyle(canvas).color;
+    }
+    ctx2d.strokeStyle = inkColor.current;
+    ctx2d.lineWidth = 2;
+    ctx2d.lineCap = "round";
+    ctx2d.lineJoin = "round";
+    for (const stroke of pad.strokesToPaint()) {
+      if (stroke.length === 0) continue;
+      ctx2d.beginPath();
+      ctx2d.moveTo(stroke[0]!.x, stroke[0]!.y);
+      for (const p of stroke.slice(1)) ctx2d.lineTo(p.x, p.y);
+      // A single point draws nothing as a path; a dot is drawn as a short segment so
+      // the user SEES what they made (it still cannot close the WO — encodeSignatureInk
+      // refuses a taps-only pad).
+      if (stroke.length === 1) ctx2d.lineTo(stroke[0]!.x + 0.01, stroke[0]!.y);
+      ctx2d.stroke();
+    }
+  }, [pad]);
+
+  const clear = () => {
+    pad.clear();
+    redraw();
+    onInkChanged();
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <canvas
+        ref={canvasRef}
+        // Each handler is one call into the pure seam plus a repaint. Nothing decides
+        // anything here: the rules are in use-pm.ts, where a node test can reach them
+        // (B-357/F1). `React.PointerEvent<HTMLCanvasElement>` satisfies PadPointer
+        // structurally, so no adapter object is built on a 60 Hz path.
+        onPointerDown={(e) => {
+          pad.down(e);
+          redraw();
+        }}
+        onPointerMove={(e) => {
+          pad.move(e);
+          redraw();
+        }}
+        onPointerUp={() => {
+          pad.up();
+          redraw();
+          onInkChanged();
+        }}
+        onPointerCancel={() => {
+          pad.cancel();
+          redraw();
+          onInkChanged();
+        }}
+        style={{
+          display: "block",
+          width: "100%",
+          // pm3.jsx L137: 90px tall, radius 10, 1.5px dashed over surface-2.
+          height: 90,
+          border: "1.5px dashed var(--border-strong)",
+          borderRadius: 10,
+          background: "var(--surface-2)",
+          // The pen colour, read back as the canvas's computed `color` in redraw() so
+          // no hex is written in this file (B-357/F6). Not otherwise visible — a
+          // canvas paints nothing from `color` by itself.
+          color: "var(--text)",
+          // Without this a touch drag scrolls the modal instead of drawing.
+          touchAction: "none",
+          cursor: "crosshair",
+        }}
+      />
+      {hasInk && (
+        // Icon-only, so the pad needs no new i18n key (i18n-full.json is sacred).
+        // Load-bearing rather than convenient: with no way to take back a mis-stroke
+        // the technician's only options would be to submit a wrong mark or abandon
+        // the close.
+        <button
+          type="button"
+          onClick={clear}
+          style={{
+            position: "absolute",
+            top: 6,
+            right: 6,
+            width: 24,
+            height: 24,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            background: "var(--surface)",
+            color: "var(--text-3)",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          <Icon name="x" size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The close modal's body (pm3.jsx closeWO L128-147): the completeness banner, the
+ * signature pad, and the two buttons.
+ *
+ * A component rather than inline JSX because it owns the BINDING: modal-host calls the
+ * body render prop as a plain function on every host render, so a hook written inline
+ * at the call site would belong to the host.
+ *
+ * The binding is a ref rather than state — the ink itself must not drive rendering, or
+ * a 60 Hz pointer stream would render React 60 times a second. What DOES drive
+ * rendering is a bare counter bumped once per completed stroke and once per clear, and
+ * the only thing it drives is the confirm gate below and the pad's clear affordance.
+ *
+ * THE CONFIRM GATE (B-357/F3). It used to be permanently enabled, on the reasoning
+ * that the prototype's is and that a close genuinely records the cause/fix/advice log
+ * with or without a signature. That is sound for an EMPTY pad and wrong for a drawn-on
+ * one: a signature made entirely of short strokes — 12 strokes across the full 300 px
+ * pad, each about 6.4 px — encodes to null, so the pad was visibly covered in ink, the
+ * close sent `signature: undefined` and the toast reported success. Mobile never had
+ * that hole: `_canSubmit` gates on the ENCODE (pm_close_screen.dart:401), so
+ * un-encodable ink leaves the CTA quiet. The two clients now agree, mobile's way:
+ *
+ *   * empty pad          → ENABLED. Closing without a signature is legitimate here
+ *                          (the log is the other half of this write) and the toast
+ *                          claims no signature (closeToastText, B-357/F5).
+ *   * ink that encodes   → ENABLED, and the signature is sent.
+ *   * ink that does NOT  → DISABLED. Silently discarding a mark the customer made and
+ *     encode               then reporting success is the one outcome neither client
+ *                          may produce. The clear affordance is showing (it is driven
+ *                          by the same binding), so the way out is always one tap.
+ *
+ * The gate reads at RENDER time; the value SENT is read again at click time off the
+ * same binding, so a stroke still open under a second pointer cannot be dropped by a
+ * stale render.
+ */
+function CloseWoModalBody({
+  everyDone,
+  done,
+  total,
+  onCancel,
+  onConfirm,
+}: {
+  everyDone: boolean;
+  done: number;
+  total: number;
+  onCancel: () => void;
+  onConfirm: (signature: string | undefined) => void;
+}) {
+  const { t } = useI18n();
+  const pad = useRef(createSignaturePadBinding()).current;
+  const [, bumpInk] = useReducer((n: number) => n + 1, 0);
+
+  return (
+    <div>
+      <div
+        style={{
+          padding: "10px 14px",
+          background: everyDone ? "var(--ok-soft)" : "var(--warn-soft)",
+          borderRadius: 9,
+          marginBottom: 14,
+          fontSize: 12,
+          color: everyDone ? "var(--ok)" : "var(--warn)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <Icon name={everyDone ? "check" : "warn"} size={15} />
+        {everyDone
+          ? t("pm.readyToClose").replace("{count}", String(total))
+          : t("pm.confirmIncomplete").replace("{n}", String(done)).replace("{count}", String(total))}
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>{t("pm.signatureLabel")}</div>
+        <SignaturePad pad={pad} onInkChanged={bumpInk} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <Btn kind="outline" size="md" onClick={onCancel}>
+          {t("common.cancel")}
+        </Btn>
+        <Btn
+          kind="primary"
+          size="md"
+          icon="check"
+          // Quiet while the pad carries ink the encoder refuses (B-357/F3) — the
+          // mobile CTA's own rule. An EMPTY pad still closes: what is refused is a
+          // FABRICATED signature, so `pad.read()` returns null for an empty, taps-only
+          // or never-travelled pad and the key is then omitted rather than sent blank
+          // (blank would ERASE a stored signature).
+          disabled={pad.refusesInk()}
+          onClick={() => onConfirm(pad.read() ?? undefined)}
+        >
+          {t("pm.confirmCloseBtn")}
+        </Btn>
+      </div>
+    </div>
   );
 }
 
