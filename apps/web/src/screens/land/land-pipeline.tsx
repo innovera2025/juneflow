@@ -261,11 +261,23 @@ function PlotDetail({
           value={plot.pricePerRai > 0 ? `${formatMoney(plot.pricePerRai)} ${baht}` : DASH}
           mono
         />
-        {/* money = SERVER: plotWire.total_value. null (unpriced plot) -> em-dash, never a
-            locally re-derived area x price (B-316/A2). */}
+        {/* money = SERVER: plotWire.total_value. Unpriced -> em-dash, never a locally
+            re-derived area x price (B-316/A2).
+            The `== null` guard alone was NOT enough, fixed 2026-08-10: the server's
+            `priced` test is PRESENCE-only (land-sales.ts:296), so a stored
+            price_per_rai = 0 yields total_value: 0, not null (:306). This row then
+            rendered "0" directly under the price/rai row above, which em-dashes on
+            `> 0` — two rows contradicting each other in one grid, and a fabricated
+            zero valuation for a plot nobody has priced. Same `> 0` guard as its
+            neighbour now; a genuine zero-value plot is not a thing this screen can
+            distinguish from an unpriced one, and never-0 wins over never-hide. */}
         <DetailRow
           label={t("land.detail.rowTotalValue")}
-          value={plot.totalValue == null ? DASH : `${formatMoney(plot.totalValue)} ${baht}`}
+          value={
+            plot.totalValue != null && plot.totalValue > 0
+              ? `${formatMoney(plot.totalValue)} ${baht}`
+              : DASH
+          }
           mono
         />
         <DetailRow label={t("land.detail.rowFormerOwner")} value={plot.owner || DASH} />
