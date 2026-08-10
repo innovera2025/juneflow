@@ -65,11 +65,20 @@ Widget _buildPmChecklist(BuildContext context) => const PmChecklistScreenHost();
 /// pushes it with the REAL work-order id once the checklist save is confirmed.
 Widget _buildPmNotes(BuildContext context) => const PmNotesScreenHost();
 
-/// Builds the `pm-close` screen (the PM flow's last step — the READ-ONLY job summary
-/// plus the stored signature state). Same nullable-id contract as the rest of the
-/// flow: a bare tab route mounts it with workOrderId=null → an honest "no work order
-/// selected" state, while pm-notes pushes it with the REAL work-order id once the
-/// maintenance log is durably saved. It performs no write (BLOCKERS.md B-288).
+/// Builds the `pm-close` screen (the PM flow's last step — the job summary, the
+/// signature pad and the close). Same nullable-id contract as the rest of the flow: a
+/// bare tab route mounts it with workOrderId=null → an honest "no work order selected"
+/// state, while pm-notes pushes it with the REAL work-order id once the maintenance
+/// log is durably saved.
+///
+/// IT PERFORMS A WRITE — `POST /pm/workorders/{id}/close { signature }`, through the
+/// offline queue like pm-checkin / pm-checklist / pm-notes. This comment claimed the
+/// opposite until B-357/F4, and it was true when written: the close was withheld
+/// because `customer_sign`'s ENCODING was undefined and no signature could be captured
+/// (B-288). Wei ruled that encoding on 2026-08-07 (B-331: stroke JSON) and the CTA
+/// went live. The correction matters beyond tidiness — this file is the write-path
+/// inventory `test/app/offline_screen_wiring_test.dart` exists to enforce, and a
+/// reader who believed "no write" would skip pm-close in exactly that audit.
 Widget _buildPmClose(BuildContext context) => const PmCloseScreenHost();
 
 /// Builds the `approve` / `reject` PR action sheets. Each host resolves services +

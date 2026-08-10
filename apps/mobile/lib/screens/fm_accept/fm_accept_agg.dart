@@ -276,8 +276,14 @@ List<FmAcceptRow> filterAcceptRows(List<FmAcceptRow> rows, FmAcceptTab tab) {
 /// subcontractor's work period is therefore not shippable in either direction: with
 /// an invented defect it fabricates a record, without one it destroys recoverability
 /// silently. The button keeps its place in the prototype's two-button row as an
-/// honest-DISABLED affordance (the merged pm-close B-288 / pm-checklist precedent),
-/// and B-297 asks for the ruling. The merged WEB port
+/// honest-DISABLED affordance (the merged pm-checklist inert-photo-slot precedent),
+/// and B-297 asks for the ruling. The pm-close B-288 sticky bar was cited here too and
+/// no longer is: B-331 made its signature capturable and the CTA went live, so that
+/// precedent has expired (B-357/F4). The rest of the argument is untouched — it never
+/// rested on pm-close, and pm-close's own reason was the OPPOSITE of this one (a
+/// missing wire encoding, since ruled; here it is a missing form for a terminal,
+/// irreversible action).
+/// The merged WEB port
 /// (apps/web/src/screens/subcon/accept-form.tsx) does send a real Defect List — it
 /// has an inspection checklist to derive one from; this screen does not.
 const Map<String, Object?> kInspectPassPayload = <String, Object?>{

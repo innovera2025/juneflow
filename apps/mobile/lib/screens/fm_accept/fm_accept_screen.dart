@@ -445,7 +445,9 @@ class _FmAcceptScreenState extends State<FmAcceptScreen> {
   /// reason attached and nothing able to undo it. It is rendered rather than removed
   /// because the two-button row is the prototype's shape and the disabled control
   /// names where rejecting will live; a disabled control makes no claim (the merged
-  /// pm-close B-288 sticky-bar and pm-checklist inert-photo-slot precedent).
+  /// pm-checklist inert-photo-slot precedent). The pm-close B-288 sticky bar was cited
+  /// here as well and no longer is — B-331 made its signature capturable and that CTA
+  /// went live, so the precedent has expired (B-357/F4).
   Widget _actions(FmAcceptRow row, FmRowActionState state) {
     if (state == FmRowActionState.sending) {
       return const SizedBox(

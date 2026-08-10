@@ -75,13 +75,16 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// `pm-notes` is the PM flow's third write screen (feature/mobile-pm-notes): the
 /// maintenance log (cause / fix / advice), which pm-checklist pushes with the same
 /// work-order id once the checklist save is confirmed, and which is honest-empty as a
-/// bare tab route. `pm-close` completes that flow (feature/mobile-pm-close): the
-/// READ-ONLY job summary + the stored signature state, which pm-notes pushes with the
-/// same work-order id once the log is saved, and which is honest-empty as a bare tab
-/// route. It performs NO write — the close itself is blocked on signature capture
-/// (BLOCKERS.md B-288), so its CTA ships as an honest-disabled affordance. Every
-/// further screen port adds its id here and its widget in [mobileScreenBuilders]
-/// (mobile_screen_router.dart).
+/// bare tab route. `pm-close` completes that flow (feature/mobile-pm-close): the job
+/// summary, the signature pad and the close, which pm-notes pushes with the same
+/// work-order id once the log is saved, and which is honest-empty as a bare tab route.
+/// It is the PM flow's FOURTH offline-write screen — `POST
+/// /pm/workorders/{id}/close { signature }`. This paragraph said it performed no write
+/// and shipped an honest-disabled CTA, which was true until B-331 (corrected under
+/// B-357/F4): the close was withheld only because `customer_sign`'s ENCODING was
+/// undefined and no signature could be captured (B-288). Wei ruled that encoding on
+/// 2026-08-07 and the CTA went live. Every further screen port adds its id here and
+/// its widget in [mobileScreenBuilders] (mobile_screen_router.dart).
 ///
 ///
 /// The four after-sales SERVICE screens land together
