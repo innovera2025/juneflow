@@ -225,6 +225,13 @@ class StaleStateError extends Error {
  *    reversing a pass is money-adjacent and needs its own ruling (filed, B-351).
  *
  *  · `paid` — terminal by design, with money behind it. Correct as-is.
+ *
+ *  · OPEN DEFECT ROWS ON A PASSED PERIOD — B-364, DECIDED (see the inspect(pass)
+ *    handler for the full reasoning). Re-opening `rejected` made a `passed`/`paid`
+ *    period with `open` defect rows reachable for the first time. The decision is
+ *    ACCEPT: the pass neither closes nor requires the closure of defect rows, they
+ *    keep their own open→fixing→closed loop, and the money that follows withholds
+ *    retention precisely for outstanding work.
  */
 const DELIVERABLE_FROM: readonly WorkPeriodRow["status"][] = ["pending", "rejected"];
 
@@ -940,6 +947,50 @@ export function registerSubconRoute(app: FastifyInstance): void {
     // in the prototype — "อนุมัติจ่ายงวด → AP" — is the Wave-2 approve-payment op).
     // The %-gate ADVISORY (B-107c) rides the response as an honest, never-blocking
     // flag derived from the contract's own periods (the hard gate is FE-only).
+    //
+    // -----------------------------------------------------------------------
+    // B-364 — A PASS WITH OPEN DEFECT ROWS. DECIDED: ACCEPT, and here is why.
+    // -----------------------------------------------------------------------
+    // B-351 made this state reachable for the first time. Before it, `rejected` was
+    // a dead end, so the only way to a `passed` period was a first inspection that
+    // never recorded a defect. Now: reject a period with 2 defects (both `open`) →
+    // re-deliver → inspect(pass) → the period is `passed` with `open,open` still
+    // hanging off its acceptance, and approve-payment will write AP billing plus a
+    // retention HELD row off exactly that period. Verified live on the seeded stack,
+    // not reasoned about.
+    //
+    // THE THREE COHERENT ANSWERS WERE: require closure (409 until every defect is
+    // closed), reset them on re-delivery, or accept. ACCEPT, because:
+    //
+    //  1. THE PROTOTYPE DOES THIS, literally. subcon-accept2.jsx:106 — the rejected
+    //     row's "ขอตรวจซ้ำ" button sets `{state: "requested", inspectCount: +1}` and
+    //     TOUCHES NOTHING ELSE; the period keeps its `defect` text. AcceptForm's
+    //     accept is gated on `failN === 0` over THAT round's checklist (in-form
+    //     state), never on stored defect rows. A pass with recorded defects is what
+    //     the mock does, and pototype is law (PLAN.md §0).
+    //  2. THE DEFECT LOOP HAS ITS OWN DOOR. flows.html FLOW-B closes a defect on ITS
+    //     OWN recheck — "ตรวจซ้ำ → ผ่าน (Defect ปิด)" = POST /defects/{id}/recheck —
+    //     not on the period's pass. Two loops by design, at different granularities
+    //     (defect rows are not 1:1 with inspection rounds).
+    //  3. RESETTING OR AUTO-CLOSING THEM WOULD DESTROY THE RECORD. The Defect List is
+    //     what was wrong, with before/after photos; rewriting it as a side effect of
+    //     an unrelated pass is a data write nothing asked for (C10).
+    //  4. REQUIRING CLOSURE WOULD BE A NEW REFUSAL, i.e. a spec decision. It would
+    //     strand every period whose defects were fixed in the field without anyone
+    //     driving the per-defect recheck endpoint — and that endpoint is reachable
+    //     from no shipped screen today.
+    //  5. THE DOMAIN ALREADY CARRIES THE MONEY ANSWER. approve-payment withholds
+    //     `contract.retention_pct` as a retention HELD row (เงินประกันผลงาน) — money
+    //     kept back precisely to cover outstanding work. Accepting the pass does not
+    //     pay out the defect risk; it holds it.
+    //
+    // WHAT IS THEREFORE TRUE AND IS NOT HIDDEN: a `passed` (and later `paid`) period
+    // can carry `open` defect rows, and once it leaves `delivered|inspecting|rejected`
+    // it also leaves the acceptance-centre queue, so those defects are visible only
+    // through the defect list itself. That is the accepted cost of this decision, not
+    // an oversight, and reversing it is a ruling (B-364) rather than an
+    // implementer's call. The behaviour is pinned by a test so it cannot drift
+    // silently in either direction.
     if (result === "pass") {
       const siblings = await db.selectThrough(
         workPeriods,

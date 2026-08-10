@@ -846,6 +846,48 @@ describe("POST /api/v1/periods/:id/inspect", () => {
     expect(res.json().warning).toBe("accepted_ahead_of_progress");
   });
 
+  // ── B-364: a pass with OPEN defect rows — the decision, pinned ───────────────
+  // B-351 made this state reachable for the first time (before it, `rejected` was
+  // terminal). DECIDED: accept. The pass neither closes nor requires closure of the
+  // defect rows — they run their own open→fixing→closed loop through
+  // POST /defects/{id}/recheck (flows.html "ตรวจซ้ำ → ผ่าน (Defect ปิด)"), the
+  // prototype's own re-inspect button touches nothing but the period state
+  // (subcon-accept2.jsx:106), and approve-payment withholds retention precisely for
+  // outstanding work. This test exists so that decision cannot drift silently: if a
+  // future round decides to close or refuse instead, it has to change this test on
+  // purpose.
+  it("pass: a re-inspected period passes with its defect rows STILL OPEN, and does not touch them (B-364)", async () => {
+    const P = period(PERIOD, "delivered"); // re-delivered after a reject
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const open = [defect("d-1", "open"), defect("d-2", "open")];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [P]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            [acceptances, [acceptance(ACCEPTANCE, PERIOD)]],
+            [defects, open],
+            [projects, [project]],
+          ],
+          inserted,
+          updated,
+          updateBase: P,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/periods/${PERIOD}/inspect`, payload: { result: "pass" } });
+
+    expect(res.statusCode).toBe(200); // the pass is NOT refused
+    expect(res.json().status).toBe("passed");
+    // The defect rows are neither closed, re-opened, reset nor deleted — the ONLY
+    // write is the period's own status flip.
+    expect(updated.find((u) => u.table === defects)).toBeUndefined();
+    expect(inserted.find((w) => w.table === defects)).toBeUndefined();
+    expect(updated.filter((u) => u.table === workPeriods)).toHaveLength(1);
+  });
+
   it("reject: delivered → rejected + inserts defect rows (item/severity/before_photo)", async () => {
     const P = period(PERIOD, "delivered");
     const inserted: Inserted[] = [];
