@@ -27,11 +27,16 @@ SignatureInk _ink(
 void main() {
   group('the shape as shipped', () {
     test('encodes exactly {v,w,h,s} and nothing else', () {
+      // The FIRST stroke travels (kSignatureMinStrokeSpan); the SECOND is a 1 px
+      // nudge that rides along. The pairing is deliberate: the span rule is a test of
+      // the INK ("at least one stroke travelled"), not a filter that deletes short
+      // strokes out of a signature that already qualifies.
       final String? raw = encodeSignatureInk(
         _ink(<List<List<double>>>[
           <List<double>>[
             <double>[12, 40.5],
             <double>[13, 41.2],
+            <double>[30, 52.4],
           ],
           <List<double>>[
             <double>[80, 44],
@@ -52,6 +57,7 @@ void main() {
         <Object?>[
           <Object?>[12.0, 40.5],
           <Object?>[13.0, 41.2],
+          <Object?>[30.0, 52.4],
         ],
         <Object?>[
           <Object?>[80.0, 44.0],
@@ -70,7 +76,7 @@ void main() {
         _ink(<List<List<double>>>[
           <List<double>>[
             <double>[1, 2],
-            <double>[3, 4],
+            <double>[10, 9],
           ],
         ]),
       )!;
@@ -98,6 +104,7 @@ void main() {
           <List<double>>[
             <double>[12.34567, 40.55],
             <double>[13.99, 41.04],
+            <double>[25.04, 48.96],
           ],
         ]),
       )!;
@@ -105,6 +112,7 @@ void main() {
         <Object?>[
           <Object?>[12.3, 40.6],
           <Object?>[14.0, 41.0],
+          <Object?>[25.0, 49.0],
         ],
       ]);
     });
@@ -151,6 +159,7 @@ void main() {
             <List<double>>[
               <double>[12.34567, 40.55],
               <double>[13.99, 41.04],
+              <double>[25.04, 48.96],
             ],
           ]),
         )!;
@@ -216,7 +225,7 @@ void main() {
 
     test('a pad carrying only TAPS encodes to null', () {
       // A single-point stroke is a tap — the exact gesture the prototype used to
-      // fabricate a signature, and what an accidental brush produces.
+      // fabricate a signature.
       expect(
         encodeSignatureInk(
           _ink(<List<List<double>>>[
@@ -225,6 +234,116 @@ void main() {
             ],
             <List<double>>[
               <double>[20, 20],
+            ],
+          ]),
+        ),
+        isNull,
+      );
+    });
+
+    test('a ONE-PIXEL DRAG encodes to null (B-357/F2)', () {
+      // THE REVERT PROBE for the span guard. Under the previous rule — "any stroke
+      // with 2+ points" — this exact ink ENCODED, because the pad's own thinning
+      // (kSignatureMinPointGap) admits the second point at exactly 1.0 px. So the
+      // smallest thing that could close a work order was a one-pixel drag, while the
+      // rule was documented as stopping "an accidental brush against the pad".
+      //
+      // Restore `strokes.any((s) => s.length >= 2)` and this test alone goes red.
+      expect(
+        encodeSignatureInk(
+          _ink(<List<List<double>>>[
+            <List<double>>[
+              <double>[40, 55],
+              <double>[41, 55],
+            ],
+          ]),
+        ),
+        isNull,
+      );
+    });
+
+    test('JITTER IN PLACE encodes to null, however many points it carries', () {
+      // A finger resting on the pad while the phone is handed over: 40 points, every
+      // one of them 1 px from the last, all inside a 3 px box. A point COUNT reads
+      // that as a long, confident stroke; a SPAN reads it as what it is.
+      //
+      // It is also why the measure is the bounding-box diagonal rather than the
+      // summed path length — this path is ~40 px long and travels nowhere.
+      final List<List<double>> jitter = <List<double>>[
+        for (int i = 0; i < 40; i++)
+          <double>[50 + (i % 4).toDouble(), 60 + (i % 3).toDouble()],
+      ];
+      expect(encodeSignatureInk(_ink(<List<List<double>>>[jitter])), isNull);
+    });
+
+    test('the span threshold is exact: 8 px encodes, 7.9 px does not', () {
+      // Pinned on the constant, not on a literal, so a future change to the
+      // threshold moves this test with it rather than silently invalidating it.
+      const double span = kSignatureMinStrokeSpan;
+      // A pure horizontal stroke: its bounding-box diagonal IS its length.
+      expect(
+        encodeSignatureInk(
+          _ink(<List<List<double>>>[
+            <List<double>>[
+              <double>[10, 20],
+              <double>[10 + span, 20],
+            ],
+          ]),
+        ),
+        isNotNull,
+      );
+      expect(
+        encodeSignatureInk(
+          _ink(<List<List<double>>>[
+            <List<double>>[
+              <double>[10, 20],
+              <double>[10 + span - 0.1, 20],
+            ],
+          ]),
+        ),
+        isNull,
+      );
+      // BOTH AXES count, and the measure is the diagonal rather than the wider side.
+      // A 6-across / 8-down stroke spans 10 and encodes even though neither side
+      // alone would be decisive; a 3-across / 4-down stroke spans 5 and does not,
+      // even though it moved on both axes.
+      expect(
+        encodeSignatureInk(
+          _ink(<List<List<double>>>[
+            <List<double>>[
+              <double>[10, 20],
+              <double>[16, 28],
+            ],
+          ]),
+        ),
+        isNotNull,
+      );
+      expect(
+        encodeSignatureInk(
+          _ink(<List<List<double>>>[
+            <List<double>>[
+              <double>[10, 20],
+              <double>[13, 24],
+            ],
+          ]),
+        ),
+        isNull,
+      );
+    });
+
+    test('TWO ACCIDENTS DO NOT ADD UP to one signature', () {
+      // Why the span is measured per stroke and never over the union: a 1 px twitch
+      // in one corner and a stray dot 200 px away span the whole pad BETWEEN them,
+      // and neither is a mark. Measuring the union would accept this pair.
+      expect(
+        encodeSignatureInk(
+          _ink(<List<List<double>>>[
+            <List<double>>[
+              <double>[10, 10],
+              <double>[11, 10],
+            ],
+            <List<double>>[
+              <double>[210, 90],
             ],
           ]),
         ),
@@ -248,21 +367,21 @@ void main() {
       expect((jsonDecode(raw) as Map<String, Object?>)['s'], hasLength(2));
     });
 
-    test(
-      'a degenerate viewport encodes to null (points would be unitless)',
-      () {
-        final List<List<List<double>>> s = <List<List<double>>>[
-          <List<double>>[
-            <double>[1, 1],
-            <double>[2, 2],
-          ],
-        ];
-        expect(encodeSignatureInk(_ink(s, w: 0)), isNull);
-        expect(encodeSignatureInk(_ink(s, h: -5)), isNull);
-        expect(encodeSignatureInk(_ink(s, w: double.nan)), isNull);
-        expect(encodeSignatureInk(_ink(s, h: double.infinity)), isNull);
-      },
-    );
+    test('a degenerate viewport encodes to null (points would be unitless)', () {
+      // A stroke that DOES satisfy the span rule, so each null below is caused by
+      // the viewport and by nothing else — a 1 px fixture here would pass this test
+      // with the viewport check deleted.
+      final List<List<List<double>>> s = <List<List<double>>>[
+        <List<double>>[
+          <double>[1, 1],
+          <double>[20, 20],
+        ],
+      ];
+      expect(encodeSignatureInk(_ink(s, w: 0)), isNull);
+      expect(encodeSignatureInk(_ink(s, h: -5)), isNull);
+      expect(encodeSignatureInk(_ink(s, w: double.nan)), isNull);
+      expect(encodeSignatureInk(_ink(s, h: double.infinity)), isNull);
+    });
 
     test('non-finite coordinates are dropped, not written as JSON null', () {
       // jsonEncode turns NaN/Infinity handling into a trap: a point that survived as
@@ -275,7 +394,7 @@ void main() {
             <SignaturePoint>[
               SignaturePoint(1, 1),
               SignaturePoint(double.nan, 5),
-              SignaturePoint(2, 2),
+              SignaturePoint(12, 10),
             ],
           ],
         ),
@@ -315,7 +434,7 @@ void main() {
       // drawable"). This is the literal output of encodeSignatureInk in
       // apps/web/src/screens/pm/use-pm.ts for the same input.
       const String fromWeb =
-          '{"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44],[81,44]]]}';
+          '{"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2],[30,52.4]],[[80,44],[81,44]]]}';
       final SignatureInk ink = decodeSignatureInk(fromWeb)!;
 
       expect(ink.width, 300);
@@ -324,6 +443,7 @@ void main() {
         <SignaturePoint>[
           const SignaturePoint(12, 40.5),
           const SignaturePoint(13, 41.2),
+          const SignaturePoint(30, 52.4),
         ],
         <SignaturePoint>[
           const SignaturePoint(80, 44),

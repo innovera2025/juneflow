@@ -57,6 +57,7 @@ import {
   postCloseWorkorder,
   SIGNATURE_INK_VERSION,
   SIGNATURE_MAX_POINTS,
+  SIGNATURE_MIN_STROKE_SPAN,
   type SignatureInk,
   type SignaturePoint,
 } from "./use-pm";
@@ -69,7 +70,7 @@ const ink = (strokes: SignaturePoint[][], width = 300, height = 90): SignatureIn
   strokes,
 });
 
-/** A real signature: at least one stroke that moved. */
+/** A real signature: at least one stroke that TRAVELLED (SIGNATURE_MIN_STROKE_SPAN). */
 const SIGNED = ink([
   [pt(12, 40.5), pt(13, 41.2), pt(30, 20)],
   [pt(80, 44), pt(95.5, 12.1)],
@@ -89,7 +90,7 @@ beforeEach(() => {
 
 describe("encodeSignatureInk — the shared wire shape (B-331)", () => {
   it("encodes exactly {v,w,h,s}, at one decimal place", () => {
-    const raw = encodeSignatureInk(ink([[pt(12.34567, 40.55), pt(13.99, 41.04)]]))!;
+    const raw = encodeSignatureInk(ink([[pt(12.34567, 40.55), pt(13.99, 41.04), pt(25.04, 48.96)]]))!;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
     // The key set is the contract — an extra key would be a silent schema change on a
@@ -102,6 +103,7 @@ describe("encodeSignatureInk — the shared wire shape (B-331)", () => {
       [
         [12.3, 40.6],
         [14, 41],
+        [25, 49],
       ],
     ]);
   });
@@ -124,18 +126,26 @@ describe("encodeSignatureInk — the shared wire shape (B-331)", () => {
     // jsonEncode writes a whole double as `300.0`, JSON.stringify writes `300`. Run
     // against apps/mobile/lib/screens/pm_close/signature_ink.dart, the same input
     // gives
-    //   Dart: {"v":1,"w":300.0,"h":110.0,"s":[[[12.0,40.5],[13.0,41.2]],[[80.0,44.0],[81.0,44.0]]]}
-    //   here: {"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44],[81,44]]]}
+    //   Dart: {"v":1,"w":300.0,"h":110.0,"s":[[[12.0,40.5],[13.0,41.2],[30.0,52.4]],[[80.0,44.0],[81.0,44.0]]]}
+    //   here: {"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2],[30,52.4]],[[80,44],[81,44]]]}
     // Byte-identity is not the property that matters — nothing anywhere compares these
     // strings. What matters is that each side's DECODER accepts the other's output,
     // which is why decodeSignatureInk takes any `num` and why signature_ink_test.dart
     // decodes this exact integer-valued string.
-    const web = encodeSignatureInk(ink([[pt(12, 40.5), pt(13, 41.2)], [pt(80, 44), pt(81, 44)]], 300, 110))!;
-    expect(web).toBe('{"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44],[81,44]]]}');
+    //
+    // The first stroke travels and the second is a 1 px nudge riding along, which is
+    // the same fixture the Dart test uses — so the two encoders are compared on ink
+    // that exercises the span rule rather than on ink that trivially passes it.
+    const web = encodeSignatureInk(
+      ink([[pt(12, 40.5), pt(13, 41.2), pt(30, 52.4)], [pt(80, 44), pt(81, 44)]], 300, 110),
+    )!;
+    expect(web).toBe('{"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2],[30,52.4]],[[80,44],[81,44]]]}');
 
     // Value-for-value against the Dart output, parsed.
     expect(JSON.parse(web)).toEqual(
-      JSON.parse('{"v":1,"w":300.0,"h":110.0,"s":[[[12.0,40.5],[13.0,41.2]],[[80.0,44.0],[81.0,44.0]]]}'),
+      JSON.parse(
+        '{"v":1,"w":300.0,"h":110.0,"s":[[[12.0,40.5],[13.0,41.2],[30.0,52.4]],[[80.0,44.0],[81.0,44.0]]]}',
+      ),
     );
   });
 
@@ -179,10 +189,48 @@ describe("encodeSignatureInk — the shared wire shape (B-331)", () => {
     expect(encodeSignatureInk(ink([[]]))).toBeNull();
     // Taps only: a single-point stroke is what an accidental click produces.
     expect(encodeSignatureInk(ink([[pt(10, 10)], [pt(20, 20)]]))).toBeNull();
-    // Degenerate viewport: the points could never be re-rendered.
-    expect(encodeSignatureInk(ink([[pt(1, 1), pt(2, 2)]], 0))).toBeNull();
-    expect(encodeSignatureInk(ink([[pt(1, 1), pt(2, 2)]], 300, -5))).toBeNull();
-    expect(encodeSignatureInk(ink([[pt(1, 1), pt(2, 2)]], Number.NaN))).toBeNull();
+    // Degenerate viewport. The stroke here DOES satisfy the span rule, so each null
+    // is caused by the viewport and nothing else — a 1 px fixture would pass this
+    // test with the viewport check deleted.
+    expect(encodeSignatureInk(ink([[pt(1, 1), pt(20, 20)]], 0))).toBeNull();
+    expect(encodeSignatureInk(ink([[pt(1, 1), pt(20, 20)]], 300, -5))).toBeNull();
+    expect(encodeSignatureInk(ink([[pt(1, 1), pt(20, 20)]], Number.NaN))).toBeNull();
+  });
+
+  it("REFUSES a ONE-PIXEL DRAG — the guard is geometry, not a point count (B-357/F2)", () => {
+    // THE REVERT PROBE for the span guard. Under the previous rule — "any stroke with
+    // 2+ points" — this exact ink ENCODED, because both pads thin sub-pixel samples at
+    // 1 px and therefore admit the second point at exactly 1.0 px. The smallest thing
+    // that could close a work order was a one-pixel drag, while the rule was
+    // documented as stopping "an accidental brush against the pad".
+    //
+    // Restore `ink.strokes.some((s) => s.length >= 2)` and this test alone goes red.
+    expect(encodeSignatureInk(ink([[pt(40, 55), pt(41, 55)]]))).toBeNull();
+
+    // Jitter in place: 40 points, each 1 px from the last, all inside a 3 px box. A
+    // point count reads that as a long confident stroke — and it is also why the
+    // measure is the bounding-box diagonal rather than the summed path length, which
+    // here is ~40 px of travelling nowhere.
+    const jitter = Array.from({ length: 40 }, (_, i) => pt(50 + (i % 4), 60 + (i % 3)));
+    expect(encodeSignatureInk(ink([jitter]))).toBeNull();
+
+    // TWO ACCIDENTS DO NOT ADD UP: a 1 px twitch plus a stray dot 200 px away span the
+    // whole pad BETWEEN them, which is why the span is per stroke and never over the
+    // union of the ink.
+    expect(encodeSignatureInk(ink([[pt(10, 10), pt(11, 10)], [pt(210, 80)]]))).toBeNull();
+  });
+
+  it("the span threshold is exact, and both axes count", () => {
+    // Pinned on the constant rather than a literal, so a future change to the
+    // threshold moves this test with it instead of silently invalidating it.
+    const span = SIGNATURE_MIN_STROKE_SPAN;
+    // Axis-aligned: the bounding-box diagonal IS the length.
+    expect(encodeSignatureInk(ink([[pt(10, 20), pt(10 + span, 20)]]))).not.toBeNull();
+    expect(encodeSignatureInk(ink([[pt(10, 20), pt(10 + span - 0.1, 20)]]))).toBeNull();
+    // Diagonal: 6 across / 8 down spans 10 and encodes; 3 across / 4 down spans 5 and
+    // does not, though it moved on both axes.
+    expect(encodeSignatureInk(ink([[pt(10, 20), pt(16, 28)]]))).not.toBeNull();
+    expect(encodeSignatureInk(ink([[pt(10, 20), pt(13, 24)]]))).toBeNull();
   });
 
   it("keeps a dot that sits INSIDE a real signature", () => {
@@ -193,7 +241,7 @@ describe("encodeSignatureInk — the shared wire shape (B-331)", () => {
   });
 
   it("drops a non-finite coordinate rather than writing JSON null", () => {
-    const raw = encodeSignatureInk(ink([[pt(1, 1), pt(Number.NaN, 5), pt(2, 2)]]))!;
+    const raw = encodeSignatureInk(ink([[pt(1, 1), pt(Number.NaN, 5), pt(12, 10)]]))!;
     expect(raw).not.toContain("null");
     expect((JSON.parse(raw) as { s: number[][][] }).s[0]).toHaveLength(2);
   });

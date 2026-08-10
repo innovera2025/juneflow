@@ -66,7 +66,38 @@ const int kSignatureMaxPoints = 10000;
 /// A pointer stream emits many sub-pixel samples while the finger is nearly still;
 /// they add bytes and change no geometry. Thinning at 1 px is invisible on screen and
 /// keeps a normal signature well under a few hundred points.
+///
+/// THIS IS NOT THE GUARD, and reading it as one was the defect B-357/F2 records. It
+/// filters ADJACENT samples for size; it says nothing about how far the mark
+/// travelled. What decides whether ink counts as a signature is
+/// [kSignatureMinStrokeSpan].
 const double kSignatureMinPointGap = 1.0;
+
+/// Minimum SPAN — bounding-box diagonal in logical px — that ONE stroke must cover
+/// before the ink counts as a signature ([SignatureInk.hasSignature]).
+///
+/// WHY A SPAN AND NOT A POINT COUNT. The rule used to be "a stroke with 2+ points",
+/// and [kSignatureMinPointGap] admits the second point at 1.0 px — so the smallest
+/// accepted signature was a ONE-PIXEL DRAG, while the rule was documented as stopping
+/// "an accidental brush against the pad". It did not. Distance travelled is the
+/// property the rule was always about, so it is now the property measured.
+///
+/// WHY 8 AND NOT `kTouchSlop` (Flutter's 18 px, the distance under which a drag is
+/// still classified as a tap). The slop is tuned to classify a GESTURE; borrowing it
+/// here would refuse a legitimately small INTENTIONAL mark — a tick, one initial, the
+/// short final stroke of a name. 8 px sits deliberately under it: well clear of
+/// pointer jitter (sub-pixel to a few px, and it stays in place rather than
+/// travelling) and well under anything a person means to draw.
+///
+/// MEASURED PER STROKE, not over the whole pad, so two unrelated accidents — a 1 px
+/// twitch here and a stray dot 200 px away — cannot add up to a signature between
+/// them. The union's span would call that pair an 8 px mark; neither stroke is one.
+///
+/// WHAT IT STILL DOES NOT STOP, stated because the previous comment overclaimed: a
+/// hand dragged across the pad, or a deliberate scribble, travels far more than 8 px
+/// and is geometrically indistinguishable from a mark. No client-side rule can
+/// separate those from a signature — only the person holding the phone can.
+const double kSignatureMinStrokeSpan = 8.0;
 
 /// One captured point, in the capture viewport's own coordinate space.
 class SignaturePoint {
@@ -115,19 +146,31 @@ class SignatureInk {
   /// encode it at all so there is no way to reach the wire around them.
   bool get hasInk => strokes.any((List<SignaturePoint> s) => s.isNotEmpty);
 
-  /// Whether this ink is a SIGNATURE — at least one stroke that actually moved.
+  /// Whether this ink is a SIGNATURE — at least one stroke that TRAVELLED at least
+  /// [kSignatureMinStrokeSpan] logical px, measured as its bounding-box diagonal.
   ///
-  /// Stricter than [hasInk], and the difference is the whole point: a single-point
-  /// stroke is a TAP, and a tap is precisely the gesture the prototype used to
-  /// fabricate a signature (pototype/mobile-pm.jsx L206 flips a flag and paints a
-  /// hardcoded name). It is also what an accidental brush against the pad produces.
-  /// Since every reader treats a non-empty `customer_sign` as the customer's
-  /// consent, a stray dot must not be able to close a work order.
+  /// Stricter than [hasInk], and the difference is the whole point: every reader in
+  /// the product treats a non-empty `customer_sign` as the customer's consent without
+  /// looking inside, so ink that nobody set out to make must not be able to close a
+  /// work order.
+  ///
+  /// WHAT IT REJECTS, exactly:
+  ///   * a still TAP (one point) — the prototype's own fabrication gesture
+  ///     (pototype/mobile-pm.jsx L206 flips a flag and paints a hardcoded name);
+  ///   * a ONE-PIXEL DRAG, which the previous "2+ points" rule accepted because
+  ///     [kSignatureMinPointGap] admits the second point at exactly 1.0 px;
+  ///   * jitter in place — a finger resting on the pad emits many points, but they
+  ///     stay inside a few px, and a span measures travel rather than sample count.
+  ///
+  /// WHAT IT DOES NOT REJECT, and this is a limit rather than an oversight: a hand
+  /// dragged across the pad while the phone changes hands, or a deliberate scribble.
+  /// Both travel far more than 8 px and are geometrically identical to a small mark.
+  /// The guard makes a still or twitching contact insufficient; it cannot make consent
+  /// verifiable.
   ///
   /// Dots inside a REAL signature are unaffected — the dot over an "i" rides along
-  /// with the strokes that moved; it simply cannot be the only thing on the pad.
-  bool get hasSignature =>
-      strokes.any((List<SignaturePoint> s) => s.length >= 2);
+  /// with the stroke that travelled; it simply cannot be the only thing on the pad.
+  bool get hasSignature => strokes.any(_isSignatureStroke);
 
   /// Total points across every stroke.
   int get pointCount =>
@@ -165,10 +208,11 @@ double roundSignatureCoord(double v) => (v * 10).roundToDouble() / 10;
 ///     be unitless and could never be re-rendered;
 ///   * no point survives (empty ink): see [SignatureInk.hasInk]. Every reader would
 ///     take that as a completed signature;
-///   * nothing but taps was captured: see [SignatureInk.hasSignature]. This is the
-///     ONE choke point for that rule, deliberately — putting it in the encoder rather
-///     than in a screen's button state means no future caller can reach the wire with
-///     a stray dot by wiring a control differently.
+///   * no stroke TRAVELLED [kSignatureMinStrokeSpan] px: see
+///     [SignatureInk.hasSignature]. Taps, one-pixel drags and jitter in place all
+///     land here. This is the ONE choke point for that rule, deliberately — putting
+///     it in the encoder rather than in a screen's button state means no future
+///     caller can reach the wire with a stray mark by wiring a control differently.
 ///
 /// A null return is the honest refusal the close path must respect: the `signature`
 /// key is then OMITTED from the body entirely. Sending it empty would not merely be
@@ -255,6 +299,44 @@ SignatureInk? decodeSignatureInk(String? raw) {
   if (strokes.isEmpty) return null; // valid JSON, but no mark — see [hasInk]
 
   return SignatureInk(width: w, height: h, strokes: strokes);
+}
+
+/// Whether ONE stroke travelled far enough to be a signature stroke.
+///
+/// The measure is the bounding-box DIAGONAL, not the summed path length: a finger
+/// resting on the pad emits a long jittering path inside a few px, and path length
+/// would read that as a mark. A diagonal asks "how far did this get from itself",
+/// which is what "it travelled" means.
+///
+/// NON-FINITE POINTS ARE IGNORED, matching [encodeSignatureInk] — it drops them
+/// before writing, so counting them here would let a stroke qualify on coordinates
+/// that never reach the wire.
+///
+/// Compared squared, so no `dart:math` import is needed for a pure-`dart:convert`
+/// file and no square root runs on a 60 Hz path.
+bool _isSignatureStroke(List<SignaturePoint> stroke) {
+  double? minX;
+  double maxX = 0;
+  double minY = 0;
+  double maxY = 0;
+  for (final SignaturePoint p in stroke) {
+    if (!p.x.isFinite || !p.y.isFinite) continue;
+    if (minX == null) {
+      minX = p.x;
+      maxX = p.x;
+      minY = p.y;
+      maxY = p.y;
+      continue;
+    }
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  if (minX == null) return false;
+  final double dx = maxX - minX;
+  final double dy = maxY - minY;
+  return dx * dx + dy * dy >= kSignatureMinStrokeSpan * kSignatureMinStrokeSpan;
 }
 
 /// A finite, strictly positive viewport dimension, else null.

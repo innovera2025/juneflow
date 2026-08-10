@@ -234,6 +234,33 @@ export const SIGNATURE_INK_VERSION = 1;
  */
 export const SIGNATURE_MAX_POINTS = 10_000;
 
+/**
+ * Minimum SPAN — bounding-box diagonal in CSS px — that ONE stroke must cover before
+ * the ink counts as a signature. Same value and same rule as `kSignatureMinStrokeSpan`
+ * in the Dart encoder, because the two write the same column.
+ *
+ * WHY A SPAN AND NOT A POINT COUNT (B-357/F2). The rule used to be "a stroke with 2+
+ * points", and both clients thin sub-pixel samples at 1 px — so the smallest accepted
+ * signature was a ONE-PIXEL DRAG, while the rule was documented as stopping "an
+ * accidental brush against the pad". It did not. Distance travelled is the property
+ * the rule was always about, so it is now the property measured.
+ *
+ * WHY 8 and not a gesture slop (Flutter's `kTouchSlop` is 18 px): a slop classifies a
+ * GESTURE, and borrowing it here would refuse a legitimately small INTENTIONAL mark —
+ * a tick, one initial, the short final stroke of a name. 8 px is well clear of pointer
+ * jitter (sub-pixel to a few px, and it stays in place rather than travelling) and
+ * well under anything a person means to draw.
+ *
+ * MEASURED PER STROKE, never over the whole pad, so two unrelated accidents — a 1 px
+ * twitch here and a stray dot 200 px away — cannot add up to a signature between them.
+ *
+ * WHAT IT STILL DOES NOT STOP, stated because the previous comment overclaimed: a hand
+ * dragged across the pad, or a deliberate scribble. Both travel far more than 8 px and
+ * are geometrically identical to a small mark. The guard makes a still or twitching
+ * contact insufficient; it cannot make consent verifiable.
+ */
+export const SIGNATURE_MIN_STROKE_SPAN = 8;
+
 /** One captured point, in the capture viewport's own coordinate space. */
 export interface SignaturePoint {
   x: number;
@@ -253,21 +280,58 @@ function roundCoord(v: number): number {
 }
 
 /**
+ * Whether ONE stroke travelled far enough to be a signature stroke.
+ *
+ * The measure is the bounding-box DIAGONAL, not the summed path length: a finger
+ * resting on the pad emits a long jittering path inside a few px, and path length
+ * would read that as a mark. A diagonal asks "how far did this get from itself",
+ * which is what "it travelled" means.
+ *
+ * NON-FINITE POINTS ARE IGNORED, matching [encodeSignatureInk], which drops them
+ * before writing — counting them here would let a stroke qualify on coordinates that
+ * never reach the wire. Compared squared: no square root on a 60 Hz path.
+ */
+function isSignatureStroke(stroke: SignaturePoint[]): boolean {
+  let minX: number | null = null;
+  let maxX = 0;
+  let minY = 0;
+  let maxY = 0;
+  for (const p of stroke) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    if (minX === null) {
+      minX = p.x;
+      maxX = p.x;
+      minY = p.y;
+      maxY = p.y;
+      continue;
+    }
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  if (minX === null) return false;
+  const dx = maxX - minX;
+  const dy = maxY - minY;
+  return dx * dx + dy * dy >= SIGNATURE_MIN_STROKE_SPAN * SIGNATURE_MIN_STROKE_SPAN;
+}
+
+/**
  * Encode captured ink as the string stored in `customer_sign`, or `null` when there
  * is nothing honest to store.
  *
  * Returns null — never an empty-but-present value — for a degenerate viewport, for an
- * empty pad, and for a pad carrying nothing but TAPS (no stroke with 2+ points). That
- * last case is not fussiness: a single-point stroke is exactly what an accidental
- * click produces, and every reader in the product treats a non-empty `customer_sign`
- * as the customer's consent WITHOUT looking inside (wo-rows.ts deriveStatus L206,
- * mobile pm_jobs_agg, api counts.ts). A stray dot must not close a work order. This is
- * the one choke point for that rule, so no caller can route around it.
+ * empty pad, and for a pad on which NO STROKE TRAVELLED `SIGNATURE_MIN_STROKE_SPAN`
+ * px: taps, one-pixel drags and jitter in place all land there. That last case is not
+ * fussiness: every reader in the product treats a non-empty `customer_sign` as the
+ * customer's consent WITHOUT looking inside (wo-rows.ts deriveStatus L206, mobile
+ * pm_jobs_agg, api counts.ts). A stray mark must not close a work order. This is the
+ * one choke point for that rule, so no caller can route around it.
  */
 export function encodeSignatureInk(ink: SignatureInk): string | null {
   if (!Number.isFinite(ink.width) || !Number.isFinite(ink.height)) return null;
   if (ink.width <= 0 || ink.height <= 0) return null;
-  if (!ink.strokes.some((s) => s.length >= 2)) return null;
+  if (!ink.strokes.some(isSignatureStroke)) return null;
 
   const s: number[][][] = [];
   let budget = SIGNATURE_MAX_POINTS;
