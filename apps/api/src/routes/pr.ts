@@ -72,6 +72,7 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
 import { newestFirst } from "./list-order.js";
+import { bestEffortNotify, notifyPrDecided, notifyPrSubmitted } from "./notify.js";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
 
 type PrRow = typeof prs.$inferSelect;
@@ -535,6 +536,16 @@ export function registerPrRoute(app: FastifyInstance): void {
       { status: "pending", submittedAt: new Date() },
       eq(prs.id, id),
     );
+    // B-347: the PR has entered the approval queue → notify the tier that must
+    // sign it (prototype bell "PR-2026-0418 รออนุมัติชั้น 2"). The tier is this
+    // file's OWN requiredApprovalLevel over this file's OWN derived amount — the
+    // same pair the approve handler below enforces and the dashboard inbox filters
+    // on — so the bell can never name a different set of approvers than the inbox.
+    // Best-effort: a failed bell must not 500 a submit that already committed.
+    const { amount: submittedAmount } = await prAmount(db, id);
+    await bestEffortNotify(request.log, "pr.submitted", () =>
+      notifyPrSubmitted(db, id, requiredApprovalLevel(submittedAmount)),
+    );
     return reply.code(200).send(await prWireWithAmount(db, updated!));
   });
 
@@ -595,6 +606,12 @@ export function registerPrRoute(app: FastifyInstance): void {
         message: "only a pending PR can be approved",
       });
     }
+    // B-347: the decision goes back to whoever raised the PR. `requester_id` is
+    // nullable (and the seed leaves it null) — a PR with no recorded requester
+    // emits NOTHING rather than guessing an addressee; there is no created_by.
+    await bestEffortNotify(request.log, "pr.approved", () =>
+      notifyPrDecided(db, id, updated.requesterId),
+    );
     return reply.code(200).send(prWire(updated, amount, currency));
   });
 
@@ -659,6 +676,10 @@ export function registerPrRoute(app: FastifyInstance): void {
         message: "only a pending PR can be rejected",
       });
     }
+    // B-347: same as approve — the requester is told the outcome, and only them.
+    await bestEffortNotify(request.log, "pr.rejected", () =>
+      notifyPrDecided(db, id, updated.requesterId),
+    );
     return reply.code(200).send(await prWireWithAmount(db, updated));
   });
 }

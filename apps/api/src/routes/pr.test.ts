@@ -14,7 +14,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { boqItems, projects, prItems, prs, roles, users, vendors } from "@juneflow/db";
+import {
+  boqItems,
+  notifications,
+  projects,
+  prItems,
+  prs,
+  roles,
+  users,
+  vendors,
+} from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -705,5 +714,157 @@ describe("PR action endpoints — tenant scope", () => {
       });
       expect(res.statusCode).toBe(404);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-347 — the notification EMITTER, at the route
+// ---------------------------------------------------------------------------
+// These are the route-level half of notify.test.ts. They assert not only that a
+// row is written but WHO it is addressed to and — the part that matters for
+// "emit nothing you cannot address" — the emit COUNT, so a fan-out that grew an
+// extra recipient fails here.
+
+/** Every notification row a request wrote (the stub records all inserts). */
+const notifRowsOf = (inserted: Inserted[]) =>
+  inserted
+    .filter((i) => i.table === notifications)
+    .flatMap((i) => i.rows as Record<string, unknown>[]);
+
+describe("PR notifications (B-347)", () => {
+  it("submit notifies EVERY user at or above the tier the amount demands — and nobody else", async () => {
+    const P0 = pr("p0", "N", "draft");
+    const inserted: Inserted[] = [];
+    // 6000 × 100 = 600,000 → over the 500K line → tier 3 (ผจก.โครงการ).
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "p0", "b0", "6000")]],
+            [boqItems, [boqItemPriced("b0", "100.00")]],
+            [
+              roles,
+              [
+                { ...roleRow(2), id: "role-proc" },
+                { ...roleRow(3), id: "role-pm" },
+                { ...roleRow(4), id: "role-md" },
+              ],
+            ],
+            [
+              users,
+              [
+                { ...userRow, id: "u-proc", roleId: "role-proc" },
+                { ...userRow, id: "u-pm", roleId: "role-pm" },
+                { ...userRow, id: "u-md", roleId: "role-md" },
+              ],
+            ],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/submit" });
+
+    expect(res.statusCode).toBe(200);
+    const rows = notifRowsOf(inserted);
+    // level 2 is BELOW the tier this 600,000 PR demands → not an approver of it.
+    expect(rows.map((r) => r.userId).sort()).toEqual(["u-md", "u-pm"]);
+    expect(rows.every((r) => r.type === "approval")).toBe(true);
+    expect(rows.every((r) => r.ref === "pr:p0")).toBe(true);
+  });
+
+  it("approve notifies the requester, exactly one row", async () => {
+    const P0 = pr("p0", "N", "pending", "material", 0, { requesterId: "u-requester" });
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [prItems, [prLine("l0", "p0", "b0", "10")]],
+            [boqItems, [boqItemPriced("b0", "100.00")]],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/approve" });
+
+    expect(res.statusCode).toBe(200);
+    const rows = notifRowsOf(inserted);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: "u-requester", type: "info", ref: "pr:p0" });
+  });
+
+  it("reject notifies the requester too", async () => {
+    const P0 = pr("p0", "N", "pending", "material", 0, { requesterId: "u-requester" });
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [prItems, []],
+            [boqItems, []],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/reject", payload: { reason: "ราคาสูง" } });
+
+    expect(res.statusCode).toBe(200);
+    const rows = notifRowsOf(inserted);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: "u-requester", type: "info" });
+  });
+
+  it("a decision on a PR with NO recorded requester emits nothing (never guesses)", async () => {
+    const P0 = pr("p0", "N", "pending"); // requesterId null — the seed's shape
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [prItems, []],
+            [boqItems, []],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/approve" });
+
+    expect(res.statusCode).toBe(200);
+    expect(notifRowsOf(inserted)).toHaveLength(0);
+  });
+
+  it("a REFUSED transition writes no notification (the 409 path is silent)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[prs, [pr("p0", "N", "pending")]]], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/submit" });
+
+    expect(res.statusCode).toBe(409);
+    expect(notifRowsOf(inserted)).toHaveLength(0);
   });
 });
