@@ -40,7 +40,11 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
-import { listGlPostingDocs } from "./gl-posting.js";
+import {
+  GrNoLongerPostableError,
+  listGlPostingDocs,
+  lockPostableGr,
+} from "./gl-posting.js";
 import {
   POSTING_MAP,
   allocJvNo,
@@ -1038,6 +1042,15 @@ async function postGlDocs(
     const allocThenPost = async (): Promise<void> => {
       jvNo = attempt++ === 0 ? allocNextNo() : await rebaseNextNo();
       await db.transaction(async (tx) => {
+        // B-361: a goods receipt can be RETURNED or CANCELLED by another writer
+        // while this batch runs. `doc.posted` and the `status = 'received'`
+        // enumeration were both read OUTSIDE any transaction, one plain SELECT
+        // each, so neither decides anything under concurrency. Take the receipt's
+        // row lock and re-decide HERE, as the FIRST statement of the transaction
+        // and before the JV exists — the return/cancel side locks the same row
+        // with its own guarded UPDATE, so one of the two always waits for the
+        // other. 0 rows → the receipt moved on → throw → the whole post rolls back.
+        if (doc.source === "gr") await lockPostableGr(tx, doc.id);
         await tx
           .insert(jvs, {
             id: jvId,
@@ -1077,6 +1090,17 @@ async function postGlDocs(
         skipped.push({
           doc_id: doc.id,
           reason: "document-number allocation contended — nothing posted, retry",
+        });
+        continue;
+      }
+      // B-361: a concurrent return/cancel took the receipt out of `received`
+      // before this JV committed. Nothing was written (the transaction rolled
+      // back), and this is deliberately NOT "already posted": it is not posted,
+      // and it is not postable — the goods went back to the vendor.
+      if (err instanceof GrNoLongerPostableError) {
+        skipped.push({
+          doc_id: doc.id,
+          reason: "the receipt was returned or cancelled — no longer postable",
         });
         continue;
       }

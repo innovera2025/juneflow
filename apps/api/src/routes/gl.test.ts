@@ -56,11 +56,15 @@ interface StubOpts {
   inserted?: Inserted[];
   updated?: Updated[];
   updateBase?: Record<string, unknown>;
+  // B-361: an UPDATE … RETURNING that yields 0 rows — a guarded (optimistic-lock)
+  // flip whose folded pre-state matched nothing, i.e. another writer moved the row
+  // first. The posting lock is exactly this shape.
+  updateEmpty?: boolean;
 }
 
 /** Db stub: canned rows per table (reads, incl. selectThrough joins) + write capture. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false } = opts;
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
@@ -103,7 +107,7 @@ function stubDb(opts: StubOpts): Db {
         where: (where: SQL) => ({
           returning: () => {
             updated.push({ table, set, where });
-            return Promise.resolve([{ ...updateBase, ...set }]);
+            return Promise.resolve(updateEmpty ? [] : [{ ...updateBase, ...set }]);
           },
         }),
       }),
@@ -1411,6 +1415,8 @@ const postDb = (
     financeApprove?: boolean;
     inserted?: Inserted[];
     captured?: Captured[];
+    updated?: Updated[];
+    updateEmpty?: boolean;
   } = {},
 ) =>
   stubDb({
@@ -1430,6 +1436,8 @@ const postDb = (
     ],
     inserted: opts.inserted,
     captured: opts.captured,
+    updated: opts.updated,
+    updateEmpty: opts.updateEmpty,
   });
 
 describe("POST /api/v1/gl/post", () => {
@@ -1583,6 +1591,83 @@ describe("POST /api/v1/gl/post", () => {
     expect(lines[1]!.accountId).toBe(ACC_TRADE_AP); // 2010 trade AP
     expect(lines[1]!.dr).toBe("0.00");
     expect(lines[1]!.cr).toBe(total.toFixed(2));
+  });
+
+  // ── B-361: the post takes the receipt's row lock and re-decides ──────────────
+  it("LOCKS the receipt inside the posting transaction, guarded on `received`, BEFORE the JV insert", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          grRows: [{ id: GR_A, no: "GR-2026-0148", status: "received", createdAt: D }],
+          grItemRows: [grLine("gi-0", GR_A, "10", "100.00")],
+          accounts: GR_ACCOUNTS,
+          inserted,
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [GR_A] } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().posted).toHaveLength(1);
+    // The lock is a guarded UPDATE on `gr` — the same row the return/cancel flip
+    // takes — and its WHERE binds both the receipt id and the `received` pre-state.
+    const lock = updated.find((u) => u.table === grs);
+    expect(lock, "the posting tx must take the gr row lock").toBeTruthy();
+    expect(paramsOf(lock!.where)).toEqual(expect.arrayContaining([GR_A, "received"]));
+    // …and it happens BEFORE the JV exists (nothing to roll back if it refuses).
+    expect(inserted.findIndex((i) => i.table === jvs)).toBeGreaterThanOrEqual(0);
+    expect(updated.indexOf(lock!)).toBe(0);
+  });
+
+  it("skips a gr whose row moved on (returned/cancelled) — no JV, and NOT 'already posted'", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          // The enumeration read it as `received` (that read is outside any
+          // transaction), but the guarded UPDATE matches 0 rows — the real shape
+          // of "a concurrent return committed while this batch ran".
+          grRows: [{ id: GR_A, no: "GR-2026-0148", status: "received", createdAt: D }],
+          grItemRows: [grLine("gi-0", GR_A, "10", "100.00")],
+          accounts: GR_ACCOUNTS,
+          updateEmpty: true,
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [GR_A] } });
+
+    expect(res.statusCode).toBe(200); // never a 500
+    const body = res.json();
+    expect(body.posted).toEqual([]);
+    expect(body.skipped).toEqual([
+      {
+        doc_id: GR_A,
+        reason: "the receipt was returned or cancelled — no longer postable",
+      },
+    ]);
+    // The whole post rolled back: no JV header, no legs. And the reason is NOT
+    // "already posted" — that would tell the caller someone else booked this cost.
+    expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
+    expect(inserted.find((i) => i.table === jvLines)).toBeUndefined();
+  });
+
+  it("the lock governs `gr` ONLY — an rv posts with no gr UPDATE at all", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          rvRows: [{ id: RV_A, amount: "100.00", currencyCode: "THB", createdAt: D }],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [RV_A] } });
+    expect(res.json().posted).toHaveLength(1);
+    expect(updated.find((u) => u.table === grs)).toBeUndefined();
   });
 
   it("skips a gr whose priced lines total ZERO — a zero JV would mark it posted forever", async () => {

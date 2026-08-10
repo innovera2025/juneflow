@@ -57,6 +57,85 @@ import { round2 } from "./money.js";
 export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn|ret|dep|petty):([0-9a-fA-F-]{36})(:\d{4}-\d{2}|:\d+)?$/;
 
 /**
+ * The chain the posting inbox reaches a goods receipt through: gr → po → vendor.
+ * `gr` carries no company_id, and this is the ONE definition of its inbox scope —
+ * the enumeration, the per-line money read and the B-361 posting lock all use it,
+ * so the three can never drift on which receipts this tenant may post.
+ * (Carried limitation, unchanged: PO-anchored receipts only — see the enumeration.)
+ */
+const GR_INBOX_HOPS = [
+  { fk: grs.poId, parent: pos },
+  { fk: pos.vendorId, parent: vendors },
+];
+
+/**
+ * B-361 — the posting transaction found the receipt no longer postable: a
+ * concurrent return/cancel got the row first. Thrown from INSIDE the posting
+ * transaction so the whole post rolls back; the caller answers an honest per-doc
+ * skip — never a 500, and never a JV against returned goods.
+ */
+export class GrNoLongerPostableError extends Error {
+  constructor() {
+    super("the receipt left the received state before its JV committed");
+    this.name = "GrNoLongerPostableError";
+  }
+}
+
+/**
+ * B-361 — TAKE THE RECEIPT'S ROW LOCK, THEN RE-DECIDE. Called FIRST inside the
+ * posting transaction, before the JV insert.
+ *
+ * WHAT WAS BROKEN. B-348 froze a POSTED receipt against return/cancel with two
+ * plain SELECTs on `jv` (one before the flip, one inside the transaction), while
+ * the poster read `gr.status` with a plain SELECT of its own — in
+ * listGlPostingDocs, OUTSIDE any transaction, once per batch. Under READ COMMITTED
+ * none of those conflict, so both writers could commit. gr.ts filed it as a
+ * one-statement residual between "humans at operating pace"; measured with two OS
+ * PROCESSES on a 700 ms barrier and a fresh postable receipt each round, it was the
+ * DEFAULT outcome — 5 of 6 rounds committed the post AND the return, leaving a
+ * `returned` receipt with a live Dr 5020 / Cr 2010 standing against it.
+ *
+ * THAT IS NOT A STRAY RACE: this freeze is the ENTIRE mitigation for the
+ * deliberately-deferred reversing-JV ruling. While it leaks, that deferral is not
+ * safe.
+ *
+ * HOW THIS CLOSES IT WITHOUT A NEW LOCK DOOR. `gr` carries no company_id, so
+ * TenantDb.selectForUpdate (company_id-scoped by construction) cannot reach it —
+ * but a guarded UPDATE takes the SAME row-level exclusive lock, and now both
+ * writers take it on the same row:
+ *   · gr.ts return/cancel already flips `gr` with a guarded updateThroughChain,
+ *     which holds that row for the rest of its transaction;
+ *   · this issues the same UPDATE, re-asserting `status = 'received'` on the FINAL
+ *     update's WHERE (the B-149 rule — a guard on the resolve SELECT is a TOCTOU).
+ * Whoever takes the lock decides. Return first → this update re-matches
+ * `id = … AND status = 'received'` against the NEW row version, matches 0 rows, and
+ * the post is refused. Post first → the return's own in-transaction JV re-check
+ * sees the committed JV and rolls back → 409. Every interleaving ends with exactly
+ * one of the two, which is why the in-transaction re-check on the other side stays.
+ *
+ * THE WRITE IS THE LOCK, and `updated_at` is the only column it touches: honest
+ * (the post did touch this receipt) and it invents no state — posted-ness still
+ * derives ONLY from the jv.source_doc ref, so nothing else has to learn a column.
+ *
+ * THE HAZARD, written down because it is invisible at the call site: this is
+ * correct BECAUSE READ COMMITTED re-evaluates a blocked UPDATE's WHERE against the
+ * winner's committed row (EPQ). Under REPEATABLE READ the blocked writer aborts
+ * with a serialization failure instead — safe, but a 500 rather than a skip — so
+ * anyone raising the isolation level must revisit BOTH sides of this pair. The same
+ * warning tenant-db.ts carries over selectForUpdate, for the same reason.
+ */
+export async function lockPostableGr(tx: TenantDb, grId: string): Promise<void> {
+  const [held] = await tx.updateThroughChain(
+    grs,
+    GR_INBOX_HOPS,
+    { updatedAt: new Date() },
+    eq(grs.id, grId),
+    eq(grs.status, "received"),
+  );
+  if (!held) throw new GrNoLongerPostableError();
+}
+
+/**
  * Every source-doc kind the shared source_doc convention can reference. The
  * posting INBOX enumerates the FIVE that have a real backing table here
  * (pv/rv/gr/payroll/petty); fa/cn are valid refs written by their own
@@ -133,14 +212,7 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
     // same function by design, so the list and the badge move together.
     // (The mirror case, POST-then-return, is closed in gr.ts: a posted receipt
     // can no longer be returned or cancelled. See the notes there.)
-    db.selectThrough(
-      grs,
-      [
-        { fk: grs.poId, parent: pos },
-        { fk: pos.vendorId, parent: vendors },
-      ],
-      eq(grs.status, "received"),
-    ),
+    db.selectThrough(grs, GR_INBOX_HOPS, eq(grs.status, "received")),
     // petty (B-233): only CLAIM rows enter the posting inbox (a claim-MVP —
     // clear/topup are out of scope). petty_cash_txn carries company_id → the
     // scoped select() door. Posted-ness derives from the jv source_doc
@@ -184,11 +256,7 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
   if (grIds.length > 0) {
     const lines = await db.selectThrough(
       grItems,
-      [
-        { fk: grItems.grId, parent: grs },
-        { fk: grs.poId, parent: pos },
-        { fk: pos.vendorId, parent: vendors },
-      ],
+      [{ fk: grItems.grId, parent: grs }, ...GR_INBOX_HOPS],
       and(inArray(grItems.grId, grIds), eq(grs.status, "received")),
     );
     for (const line of lines) {
