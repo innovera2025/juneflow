@@ -305,8 +305,10 @@ export function MasterProject() {
               Verified missing, each grepped against all 3701 dict keys and 1108 phrases,
               cited by prototype line rather than quoted (comments stay English, CLAUDE.md).
               Line numbers RE-VERIFIED against master.jsx 2026-08-10 — three of them
-              (L1305/L1306/L1315) previously landed on closing tags, which is an
-              unverifiable citation inside a comment whose whole point is to be checkable:
+              (L1305/L1306/L1315) previously landed on structural JSX carrying no string at
+              all (L1305 a closing div, L1306 a closing fragment, L1315 the
+              `{step === 3 && <>` gate), which is an unverifiable citation inside a comment
+              whose whole point is to be checkable:
                 master.jsx L1288 step counter · L1270 the step-2 and step-3 step labels
                 (2 strings, the stepLabel array) · L1309 step-2 field label · L1310 step-2
                 placeholder · L1312 step-2 skip hint · L1316 step-3 field label · L1321 +
