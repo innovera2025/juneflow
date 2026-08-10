@@ -314,8 +314,13 @@ export function MasterProject() {
                 step-1 type preview · L1279 the created toast.
               (Present and reusable: createProj.* x12, common.cancel, common.back,
               project.createBtn, and pm.fieldProjectType for the L1296 type field label.
-              NOT reusable: pm.toastProjectCreated is a NEAR MISS for the L1279 toast — it
-              omits the short code and the optional phase clause — so reusing it would be
+              NOT reusable, and named here so the next reader does not have to re-find them
+              and mistake this comment for a stale one: TWO near misses survive a keyword
+              grep and neither is a legitimate reuse. pm.toastProjectCreated is close to the
+              L1279 toast but omits the short code and the optional phase clause.
+              block.fieldUnits is close to the L1270 step-3 stepLabel but hardcodes the
+              real-estate unit noun, while the wizard interpolates Lunit and so reads
+              differently for all four project types. Bending either to fit is
               re-translating, forbidden by §0 rule 2.)
 
               The button is a RENDER-ONLY STUB with no onClick — it is in g2/32 so it renders

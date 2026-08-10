@@ -453,8 +453,10 @@ export function LandPipeline() {
               {type, params} -> 202 Job) and :4262 declares GET /exports/{id} (getExport),
               and both are generated into packages/contracts types + a whole Dart client.
               NOTHING MOUNTS THEM: apps/api/src/app.ts registers no exports route (every
-              other door is registered at :227-280) and the only "/exports" anywhere in
-              apps/api/src is a design comment, worker.ts:6. A contract-following caller
+              other door is registered in the one block at :221-284) and the only
+              "/exports" anywhere in apps/api/src is a design comment, worker.ts:6 —
+              a description of the job pipeline that was never built. A contract-following
+              caller
               therefore gets a 404 on the ordinary path — declared-but-never-mounted, the
               same shape as B-282 reset-password, which is the defect class this round
               exists to close. Filed as B-351. The control stays disabled for that reason,
@@ -576,7 +578,7 @@ export function LandPipeline() {
                       // route to the detail, and the detail is the only route to the
                       // advance write — a bare <div onClick> made that whole path
                       // unreachable for keyboard and AT users. Same shape as the merged
-                      // solar-monitor.tsx:341-354 ticket card; the visual stays a div, so
+                      // solar-monitor.tsx:342-354 ticket card; the visual stays a div, so
                       // nothing paints differently at rest.
                       <div
                         key={p.id}

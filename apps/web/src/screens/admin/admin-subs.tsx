@@ -41,8 +41,9 @@
  *     WRONG — corrected 2026-08-10. The contract DOES declare an export: openapi.yaml:4235
  *     POST /exports (createExport, {type,params} -> 202 Job) + :4262 GET /exports/{id}
  *     (getExport), both generated. What is missing is the MOUNT — apps/api/src/app.ts
- *     registers no exports route and the only "/exports" in apps/api/src is a design
- *     comment (worker.ts:6) — so a contract-following caller gets a 404. That is
+ *     registers every other door in one block at :221-284 and no exports route, and the
+ *     only "/exports" in apps/api/src is a design comment (worker.ts:6) describing a job
+ *     pipeline that was never built — so a contract-following caller gets a 404. That is
  *     declared-but-never-mounted, the same shape as the B-282 reset-password defect two
  *     bullets up. Filed as B-351. Separately true and unchanged: there is no
  *     subscriber-SPECIFIC export handler either. Disclosed plainly because this control is
