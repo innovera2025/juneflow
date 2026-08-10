@@ -190,32 +190,149 @@ export function useUpdateChecklist(): UseMutationResult<unknown, unknown, Update
   });
 }
 
-/** Close args — the WO id plus the REAL maintenance-log columns (cause/fix/advice).
- *  No `signature` is sent: the prototype's pad is decorative and captures nothing, so
- *  customer_sign is never fabricated (DEFAULT 5, FLAG — close records the log only). */
+/* ===========================================================================
+ * customer_sign — the stroke-JSON wire encoding (BLOCKERS.md B-331)
+ * ===========================================================================
+ * Wei ruled the encoding on 2026-08-07: an array of stroke point-lists, chosen so it
+ * stays independent of the upload subsystem and re-renders on web and mobile alike
+ * from the same stored value. The Dart half of this contract is
+ * apps/mobile/lib/screens/pm_close/signature_ink.dart — the two MUST agree, so the
+ * shape and the rounding are restated here rather than left to be inferred.
+ *
+ *   {"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44]]]}
+ *
+ *   v  schema version · w/h capture viewport in CSS px · s strokes of [x,y] points
+ *
+ * `w`/`h` are load-bearing: without them the points are unitless and could not be
+ * re-rendered at any other size. `v` is load-bearing because `customer_sign` is a
+ * bare `text` column with no migration path, so a later shape change would otherwise
+ * be undetectable in stored data.
+ *
+ * NOT stored, deliberately: pressure (the Pointer Events spec reports a constant 0.5
+ * on non-force-sensing digitizers), per-point timing (only BIOMETRIC verification
+ * needs it, nothing here verifies a signature, and storing it would turn an inert
+ * mark into PDPA-sensitive behavioural data with no consent surface), stroke
+ * width/colour (render-side — storing it would freeze today's theme into permanent
+ * data), and the signer's name (contractWire stops at customer_id, so it would be
+ * fabricated).
+ */
+
+/** Current stroke-JSON schema version. */
+export const SIGNATURE_INK_VERSION = 1;
+
+/**
+ * Hard ceiling on the points ONE signature may carry — the same value as
+ * `kSignatureMaxPoints` in the Dart encoder, because the two write the same column.
+ *
+ * Not a style limit, a body-size guarantee: apps/api/src/app.ts constructs Fastify
+ * with no `bodyLimit`, so the only bound on this write is Fastify's 1 MiB default,
+ * while the column itself is `text` (~1 GB). At ~14 bytes per encoded point this cap
+ * is ~140 KB — far under that limit and far over any real signature (a 10-second
+ * capture at 60 Hz is ~600 points before sub-pixel thinning). Points past the cap are
+ * IGNORED, so what is stored is always a real PREFIX of what was drawn, never a hole
+ * in the middle of a stroke.
+ */
+export const SIGNATURE_MAX_POINTS = 10_000;
+
+/** One captured point, in the capture viewport's own coordinate space. */
+export interface SignaturePoint {
+  x: number;
+  y: number;
+}
+
+/** A whole captured signature plus the viewport it was drawn in. */
+export interface SignatureInk {
+  width: number;
+  height: number;
+  strokes: SignaturePoint[][];
+}
+
+/** Round to one decimal place — the stored precision, matched to the Dart encoder. */
+function roundCoord(v: number): number {
+  return Math.round(v * 10) / 10;
+}
+
+/**
+ * Encode captured ink as the string stored in `customer_sign`, or `null` when there
+ * is nothing honest to store.
+ *
+ * Returns null — never an empty-but-present value — for a degenerate viewport, for an
+ * empty pad, and for a pad carrying nothing but TAPS (no stroke with 2+ points). That
+ * last case is not fussiness: a single-point stroke is exactly what an accidental
+ * click produces, and every reader in the product treats a non-empty `customer_sign`
+ * as the customer's consent WITHOUT looking inside (wo-rows.ts deriveStatus L206,
+ * mobile pm_jobs_agg, api counts.ts). A stray dot must not close a work order. This is
+ * the one choke point for that rule, so no caller can route around it.
+ */
+export function encodeSignatureInk(ink: SignatureInk): string | null {
+  if (!Number.isFinite(ink.width) || !Number.isFinite(ink.height)) return null;
+  if (ink.width <= 0 || ink.height <= 0) return null;
+  if (!ink.strokes.some((s) => s.length >= 2)) return null;
+
+  const s: number[][][] = [];
+  let budget = SIGNATURE_MAX_POINTS;
+  for (const stroke of ink.strokes) {
+    if (budget <= 0) break;
+    const out: number[][] = [];
+    for (const p of stroke) {
+      if (budget <= 0) break;
+      // Never store a non-finite coordinate: JSON.stringify writes it as `null`, and
+      // no reader could re-render that.
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+      out.push([roundCoord(p.x), roundCoord(p.y)]);
+      budget--;
+    }
+    // A pen-down that produced no usable point is not a stroke.
+    if (out.length > 0) s.push(out);
+  }
+  if (s.length === 0) return null;
+
+  return JSON.stringify({ v: SIGNATURE_INK_VERSION, w: roundCoord(ink.width), h: roundCoord(ink.height), s });
+}
+
+/** Close args — the WO id, the REAL maintenance-log columns (cause/fix/advice), and
+ *  the customer's signature when one was captured.
+ *
+ *  `signature` is OPTIONAL, and the optionality is load-bearing: the close endpoint
+ *  keys off key PRESENCE, and it stores `str(...).trim() || null`, so a present-but-
+ *  blank value would not store a blank — it would store NULL and ERASE a signature
+ *  already on the row, reverting a completed work order to open. An empty pad
+ *  therefore omits the key entirely (see [postCloseWorkorder]). B-331. */
 export interface CloseWorkorderArgs {
   id: string;
   cause: string;
   fix: string;
   advice: string;
+  /** Stroke JSON from [encodeSignatureInk], or undefined when the pad is empty. */
+  signature?: string;
+}
+
+/**
+ * The request the close actually makes — exported so a test can assert what goes ON
+ * THE WIRE, rather than that a hook was called with something.
+ *
+ * The `signature` key is added ONLY for a non-blank captured value. That is the
+ * empty-pad refusal at the request layer, and it is where it belongs: the server
+ * branches on `has(body, "signature")` (apps/api/src/routes/pm.ts L792-794), so an
+ * omitted key leaves `customer_sign` untouched while a blank one clears it.
+ */
+export function postCloseWorkorder({ id, cause, fix, advice, signature }: CloseWorkorderArgs): Promise<unknown> {
+  const body: { cause: string; fix: string; advice: string; signature?: string } = { cause, fix, advice };
+  if (signature != null && signature.trim() !== "") body.signature = signature;
+  return unwrap(apiClient.POST("/pm/workorders/{id}/close", { params: { path: { id } }, body }));
 }
 
 /**
  * POST /pm/workorders/{id}/close — close a work order, persisting the real cause/fix/
- * advice maintenance log (pm3.jsx closeWO). The customer signature is NOT sent (the
- * pad is decorative — sending a fabricated signature would violate PLAN.md §0). The
- * server's LINE cert-push is a no-op stub (B-108b). Invalidates the WO list on success.
+ * advice maintenance log (pm3.jsx closeWO) AND the customer's signature as stroke JSON
+ * (B-331). The server's LINE cert-push is still a no-op stub (B-108b), so nothing here
+ * reports a certificate. Invalidates the WO list on success — the signature is what
+ * flips the row to "done" (wo-rows.ts deriveStatus), so the list must re-read.
  */
 export function useCloseWorkorder(): UseMutationResult<unknown, unknown, CloseWorkorderArgs> {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, cause, fix, advice }: CloseWorkorderArgs) =>
-      unwrap(
-        apiClient.POST("/pm/workorders/{id}/close", {
-          params: { path: { id } },
-          body: { cause, fix, advice },
-        }),
-      ),
+    mutationFn: postCloseWorkorder,
     onSuccess: () => qc.invalidateQueries({ queryKey: PM_WORKORDERS_KEY }),
   });
 }
