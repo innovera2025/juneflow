@@ -10,25 +10,42 @@
  *
  * The screens are .tsx and pull in the shell/router, so they cannot be imported in this
  * node/no-DOM vitest env — router-wiring.test.ts hit the same wall and reads router.tsx
- * from source. Same technique here, scoped to the two controls this round turned on plus
- * ALL SIX retired false claims.
+ * from source. Same technique here, scoped to the two controls this round turned on, the
+ * one display guard it changed, and ALL SEVEN retired false claims.
  *
- * Six, not three — corrected 2026-08-10. The first version of this file pinned three and
- * its own two comments disagreed with each other about the number ("the three retired false
- * claims" against "five flows read as unbuilt"). Under-covering here is not cosmetic: a
- * rebase or a partial revert restores one unpinned comment, the suite stays green, and that
- * screen reads as backend-blocked to every subsequent audit — the exact regression this
- * file exists to prevent.
+ * SEVEN — and the count is now given WITH THE LIST, because stating it as a bare number has
+ * been wrong twice. The first version pinned three while its own two comments disagreed
+ * about how many there were; the second pinned six and mis-sorted one of them (below); this
+ * one pins seven. Under-covering here is not cosmetic: a rebase or a partial revert restores
+ * one unpinned comment, the suite stays green, and that screen reads as backend-blocked to
+ * every subsequent audit — the exact regression this file exists to prevent.
  *
- * The six split into two shapes, and they need different assertions:
- *   - THREE were deleted outright, so `not.toContain` is the right tripwire.
- *   - THREE survive as a QUOTATION inside the correction that retired them ("X" was FALSE).
- *     `not.toContain` is wrong for those — it would fail on the correction itself — so they
+ * The seven split into two shapes, which need different assertions:
+ *   - THREE are deleted outright, so an absence check is the right tripwire: land-pipeline's
+ *     dropped-mock-advance claim, land-pipeline's "Export has no endpoint" HEADER claim
+ *     (retired 2026-08-10 — the correction had reached the button comment and NOT the file
+ *     header, which is where a ported screen declares its write posture, so the screen
+ *     contradicted itself 400 lines apart), and admin-subs'.
+ *   - FOUR survive as a QUOTATION inside the correction that retired them ("X" was FALSE).
+ *     An absence check is wrong for those — it would fail on the correction itself — so they
  *     assert instead that every occurrence of the claim is inside quotes, plus that the
- *     replacement FACT is stated. Matching runs over whitespace-collapsed prose so a claim
- *     that wraps across two comment lines still matches as one sentence; the first version
- *     of the land-dd and sales-crm claims only "passed" a naive not.toContain because the
- *     line wrap and an inserted "is" happened to break the literal.
+ *     replacement FACT is stated.
+ *
+ * master-project MOVED from the first bucket to the second on 2026-08-10, and why it had to
+ * is the whole argument for this file. Its claim was NEVER deleted: it survives verbatim at
+ * master-project.tsx as a quotation, and the absence check "passed" ONLY because the claim
+ * wraps across a line break. Proven by mutation, both directions:
+ *   - revert to dev's exact one-line wording  -> RED, dies correctly;
+ *   - restate the claim as unquoted FACT, wrapped across two lines -> GREEN, SURVIVED.
+ * These comments are hand-wrapped at ~95 columns, so a restored claim wrapping is the likely
+ * case, not the exotic one. The mirror failure is as bad: reflow the correction so the
+ * quotation lands on one line and the suite goes red with no defect present, which trains the
+ * next reader to delete the probe.
+ *
+ * EVERY comparison in this file therefore runs over FLATTENED text, never raw source, and
+ * which flattener matters. A star-gutter block header takes `prose` (strip the gutter, then
+ * collapse). master-project's JSX brace-comments carry no gutter, so they take the plain
+ * `collapse` — running `prose` over them would be a guess about a file it does not describe.
  *
  * These are deliberately narrow string assertions. They are not a substitute for a DOM
  * test; they are a tripwire on the one edit that would silently un-wire a control again.
@@ -42,15 +59,25 @@ function read(rel: string): string {
 }
 
 /**
- * Comment prose with the `*` gutters and line wrapping collapsed, so a sentence that spans
- * two comment lines matches as one. Without this, a claim only has to wrap to escape the
- * tripwire — which is not a property anybody chose, it is an accident of reflow.
+ * All whitespace collapsed to single spaces, so a sentence that wraps across two lines
+ * matches as one. Without this a claim only has to WRAP to escape the tripwire — which is
+ * not a property anybody chose, it is an accident of reflow at ~95 columns.
+ *
+ * This is the right flattener for JSX brace-comments, which carry no gutter to strip.
+ */
+function collapse(src: string): string {
+  return src.replace(/\s+/g, " ");
+}
+
+/**
+ * `collapse`, plus the leading `*` gutter of a star-style block comment. Only for files
+ * whose comments carry that gutter; a file without one takes `collapse` directly.
  */
 function prose(src: string): string {
   // `[ \t]` not `\s` on purpose: a `\s*` would swallow the NEXT line's newline as well and
   // leave that line's `*` gutter behind, which is exactly the kind of almost-right that
   // makes a tripwire report the wrong thing.
-  return src.replace(/\n[ \t]*\*[ \t]?/g, " ").replace(/\s+/g, " ");
+  return collapse(src.replace(/\n[ \t]*\*[ \t]?/g, " "));
 }
 
 /** Every index at which `re` matches `text` (global, non-overlapping). */
@@ -139,28 +166,62 @@ describe("land.pipeline — the card opens the detail and the detail advances th
   });
 });
 
-describe("retired false claims stay retired — deleted outright (3 of 6)", () => {
-  // Each of these sentences asserted a gap that had already closed. They are the reason
-  // six flows read as unbuilt to every later audit. Re-introducing one is a regression.
-  const cases: readonly [string, string][] = [
-    ["./land/land-pipeline.tsx", "the mock detail/advance actions are dropped"],
-    ["./admin/admin-subs.tsx", "reset-password fire faithful ctx.notify"],
-    ["./master/master-project.tsx", "the backend create-project route is unimplemented"],
+describe("retired false claims stay retired — deleted outright (3 of 7)", () => {
+  /*
+   * Each of these sentences asserted a gap that had already closed. They are the reason
+   * seven flows read as unbuilt to every later audit. Re-introducing one is a regression.
+   *
+   * The claim is a RegExp and the check runs over FLATTENED text, not raw source. Both
+   * matter: a literal `not.toContain` over raw source is defeated by a line wrap (that is
+   * the master-project defect, which is why it is no longer in this bucket), and the export
+   * claim shipped in two different wordings on two different lines of one file.
+   *
+   * `fact` is the sentence that REPLACED the claim. Without it an absence check also passes
+   * when someone simply deletes the whole paragraph, which loses the correction.
+   */
+  const cases: readonly { rel: string; label: string; claim: RegExp; fact: string }[] = [
+    {
+      rel: "./land/land-pipeline.tsx",
+      label: "the mock detail/advance actions are dropped",
+      claim: /the mock detail\/advance actions are dropped/,
+      fact: "POST /land/plots/{id}/advance-stage",
+    },
+    {
+      // The 7th, added 2026-08-10. dev's header said "Export has no endpoint (dropped mock,
+      // mirror land-bank)"; this branch's :36 said "Export (no endpoint anywhere)". One
+      // regex covers both wordings, because a revert could restore either.
+      rel: "./land/land-pipeline.tsx",
+      label: "Export has no endpoint",
+      claim: /Export (?:has )?\(?no endpoint/,
+      fact: "mounted NOWHERE in apps/api (B-351)",
+    },
+    {
+      rel: "./admin/admin-subs.tsx",
+      label: "reset-password fire faithful ctx.notify",
+      claim: /reset-password fire faithful ctx\.notify/,
+      fact: "POST /admin/users/{id}/reset-password",
+    },
   ];
 
-  for (const [rel, claim] of cases) {
-    it(`${rel} no longer claims: ${claim}`, () => {
-      expect(read(rel)).not.toContain(claim);
+  for (const { rel, label, claim, fact } of cases) {
+    describe(`${rel} — "${label}"`, () => {
+      it("no longer states the retired claim, however it is wrapped", () => {
+        expect(prose(read(rel))).not.toMatch(claim);
+      });
+
+      it("states the fact that replaced it", () => {
+        expect(prose(read(rel))).toContain(fact);
+      });
     });
   }
 });
 
-describe("retired false claims stay retired — quoted in the correction (3 of 6)", () => {
+describe("retired false claims stay retired — quoted in the correction (4 of 7)", () => {
   /*
-   * These three were left unpinned by the first version of this file. Each survives only as
-   * a QUOTATION inside the sentence that retires it, so the assertion is two-part: the claim
-   * appears nowhere except inside quotes, and the fact that replaced it is stated. A revert
-   * restores the claim UNQUOTED (and drops the fact), so both halves fail.
+   * Each of these survives only as a QUOTATION inside the sentence that retires it, so the
+   * assertion is two-part: the claim appears nowhere except inside quotes, and the fact that
+   * replaced it is stated. A revert restores the claim UNQUOTED (and drops the fact), so
+   * both halves fail.
    *
    * `claim` is a regex, not a literal, because the reverted wording and the quoted wording
    * differ by a word — sales-crm's live comment said "create endpoint not filed" while the
@@ -168,31 +229,54 @@ describe("retired false claims stay retired — quoted in the correction (3 of 6
    * the other, which is how a naive check would pass over a genuine revert. The optional
    * leading article matters too: the quotation opens BEFORE "the", so a regex starting at
    * "create" sees a letter where the quote is and reports its own quotation as a live claim.
+   *
+   * `flatten` is per-case and NOT a detail. Three of these are star-gutter block headers and
+   * take `prose`; master-project's are JSX brace-comments with no gutter and take `collapse`.
    */
-  const cases: readonly { rel: string; label: string; claim: RegExp; fact: string }[] = [
+  const cases: readonly {
+    rel: string;
+    label: string;
+    claim: RegExp;
+    fact: string;
+    flatten: (src: string) => string;
+  }[] = [
     {
       rel: "./master/master-project-type.tsx",
       label: "no backend route yet",
       claim: /no backend route yet/,
       fact: "project-types.ts:117 mounts POST",
+      flatten: prose,
     },
     {
       rel: "./sales/sales-crm.tsx",
       label: "the create endpoint is not filed",
       claim: /(?:the )?create endpoint (?:is )?not filed/,
       fact: "POST /sales/leads is mounted",
+      flatten: prose,
     },
     {
       rel: "./land/land-dd.tsx",
       label: "no DD-status endpoint is merged",
       claim: /no DD-status endpoint is merged/,
       fact: "PUT /land/plots/{id}/dd is mounted",
+      flatten: prose,
+    },
+    {
+      // MOVED here from the deleted-outright bucket 2026-08-10 — it never belonged there.
+      // The claim is alive at master-project.tsx as a quotation, and the absence check only
+      // passed because it wraps. `collapse`, not `prose`: this file's comments are
+      // `{` + block-comment JSX with no `*` gutter.
+      rel: "./master/master-project.tsx",
+      label: "the backend create-project route is unimplemented",
+      claim: /the backend create-project route is unimplemented/,
+      fact: "projects.ts:200 mounts POST /projects",
+      flatten: collapse,
     },
   ];
 
-  for (const { rel, label, claim, fact } of cases) {
+  for (const { rel, label, claim, fact, flatten } of cases) {
     describe(`${rel} — "${label}"`, () => {
-      const text = prose(read(rel));
+      const text = flatten(read(rel));
 
       it("still quotes the retired claim (the correction is present)", () => {
         expect(matchIndexes(text, claim).length).toBeGreaterThan(0);
@@ -242,6 +326,45 @@ describe("load-bearing cache invalidation is pinned where the docstring claims i
     );
     expect(hook).not.toContain("invalidateQueries");
     expect(hook).not.toContain("onSuccess");
+  });
+});
+
+describe("land.pipeline — an unpriced plot never renders a fabricated zero", () => {
+  const src = read("./land/land-pipeline.tsx");
+
+  /*
+   * The one BEHAVIOURAL change this round shipped, and until now the only thing in it that
+   * was unpinned. Mutation P13 — drop `&& plot.totalValue > 0` and the modal renders a
+   * confident "0" again for a plot nobody has priced — left the suite GREEN, in the branch
+   * whose headline artifact is a source-reading tripwire built precisely for .tsx logic the
+   * node env cannot import.
+   *
+   * The card half of the same defect is a pure function and is pinned by value in
+   * land-pipeline-rows.test.ts. What is pinned HERE is that the SCREEN calls it — a correct
+   * helper that no screen calls is the admin-subs defect verbatim, and is why this file
+   * exists at all.
+   */
+  it("the detail modal's total-value row guards on > 0, not merely on null", () => {
+    const grid = block(src, "{/* 8 rows, two columns", "{/* actions (land.jsx");
+    expect(collapse(grid)).toContain("plot.totalValue != null && plot.totalValue > 0");
+    expect(collapse(grid)).toContain(": DASH");
+  });
+
+  it("the price/rai row directly above it uses the SAME guard (they must not disagree)", () => {
+    // The two rows sit in one grid describing one plot. When only one of them guarded on
+    // `> 0` the modal contradicted itself, which is the smaller version of the card-vs-modal
+    // contradiction this round fixed.
+    const grid = block(src, "{/* 8 rows, two columns", "{/* actions (land.jsx");
+    expect(collapse(grid)).toContain("plot.pricePerRai > 0");
+  });
+
+  it("the kanban card's price cell reads the SERVER value through cardValueText", () => {
+    expect(src).toContain("const cardValue = cardValueText(p);");
+    expect(collapse(src)).toContain("{cardValue == null ? DASH :");
+    // The pre-fix shape: a LOCAL areaRai x pricePerRai re-derivation rendered inline, which
+    // printed "0.0M" for the same plot the modal em-dashed. The braces are what separate the
+    // rendered expression from the prose mention of it in the comment beside it.
+    expect(src).not.toContain("{millionsText(plotValue(p))}");
   });
 });
 
