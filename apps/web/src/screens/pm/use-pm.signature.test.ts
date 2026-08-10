@@ -57,7 +57,19 @@ import {
   postCloseWorkorder,
   SIGNATURE_INK_VERSION,
   SIGNATURE_MAX_POINTS,
+  SIGNATURE_MIN_POINT_GAP,
   SIGNATURE_MIN_STROKE_SPAN,
+  clearSignatureCapture,
+  createSignatureCapture,
+  readSignatureCapture,
+  resizeSignatureCapture,
+  signatureCaptureHasInk,
+  signaturePadCancel,
+  signaturePadDown,
+  signaturePadMove,
+  signaturePadUp,
+  type PadPointer,
+  type PadRect,
   type SignatureInk,
   type SignaturePoint,
 } from "./use-pm";
@@ -298,5 +310,305 @@ describe("postCloseWorkorder — what reaches the wire", () => {
       postCloseWorkorder({ ...base, signature: encodeSignatureInk(SIGNED)! }),
     );
     expect(Object.keys(bodies[0]!).sort()).toEqual(["advice", "cause", "fix", "signature"]);
+  });
+});
+
+/* ===========================================================================
+ * THE PAD → REQUEST SEAM (B-357/F1)
+ * ===========================================================================
+ * The defect this whole round exists to fix is "a pad that drew and discarded", and
+ * until this group the seam carrying a stroke out of the pad was the ONE part of the
+ * path with no coverage: the node environment has no canvas and no DOM, and the
+ * workspace has no jsdom to add one (B-358). The gate demonstrated the cost by
+ * mutating the pad's wiring to throw every stroke away — 1776 tests stayed green.
+ *
+ * So the seam is no longer in JSX. `wo-detail.tsx` holds a plain SignatureCapture and
+ * calls the pure functions below on each pointer event; the confirm handler reads the
+ * SAME object. What is left un-pinned is React's own event dispatch — and the discard
+ * mutation that started this no longer type-checks, because the pad has no callback
+ * prop to hand a discarding function to.
+ *
+ * Every test here is written to die on a "drew and discarded" cut: make
+ * signaturePadMove or signaturePadUp a no-op, or have readSignatureCapture ignore the
+ * strokes, and this group goes red.
+ */
+
+/** A pad occupying [rect] on screen, producing pointer events in PAGE coordinates. */
+function fakePad(rect: PadRect) {
+  const captured: number[] = [];
+  const target = {
+    getBoundingClientRect: () => rect,
+    setPointerCapture: (id: number) => captured.push(id),
+  };
+  return {
+    captured,
+    /** Resize the box under the pointer — a rotation, or a resized window. */
+    resize(width: number, height: number) {
+      rect = { ...rect, width, height };
+    },
+    /** A pointer event at PAGE coordinates (rect.left + x, rect.top + y). */
+    at(x: number, y: number, pointerId = 7): PadPointer {
+      return { pointerId, clientX: rect.left + x, clientY: rect.top + y, currentTarget: target };
+    },
+  };
+}
+
+/** Draw one stroke: pen-down at the first point, moves through the rest, pen-up. */
+function draw(capture: ReturnType<typeof createSignatureCapture>, pad: ReturnType<typeof fakePad>, pts: [number, number][]) {
+  signaturePadDown(capture, pad.at(pts[0]![0], pts[0]![1]));
+  for (const [x, y] of pts.slice(1)) signaturePadMove(capture, pad.at(x, y));
+  signaturePadUp(capture);
+}
+
+describe("the pad → request seam (B-357/F1)", () => {
+  // The pad is 300x90 CSS px (pm3.jsx L137) and sits 20px in / 100px down the page, so
+  // a passing test cannot be one that ignores the rect origin.
+  const RECT: PadRect = { left: 20, top: 100, width: 300, height: 90 };
+
+  it("a drawn stroke reaches the request as parseable stroke JSON", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+
+    draw(capture, pad, [
+      [10, 70],
+      [30, 40],
+      [60, 62],
+      [95, 25],
+    ]);
+
+    const signature = readSignatureCapture(capture);
+    expect(signature).not.toBeNull();
+    const parsed = JSON.parse(signature!) as { v: number; w: number; h: number; s: number[][][] };
+
+    expect(parsed.v).toBe(SIGNATURE_INK_VERSION);
+    // The viewport is the box the points were MEASURED in — not a constant, and not
+    // whatever the box happens to be later (B-357/F6).
+    expect(parsed.w).toBe(300);
+    expect(parsed.h).toBe(90);
+    // PAD coordinates, so the rect origin was subtracted. Page coordinates would put
+    // this stroke at x≈30 / y≈170 and the stored mark would be off the pad.
+    expect(parsed.s).toEqual([
+      [
+        [10, 70],
+        [30, 40],
+        [60, 62],
+        [95, 25],
+      ],
+    ]);
+  });
+
+  it("and that value is what the close REQUEST carries", async () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+    draw(capture, pad, [
+      [10, 70],
+      [40, 30],
+      [80, 55],
+    ]);
+
+    // The whole path, end to end: pointer events → capture → encode → wire.
+    const signature = readSignatureCapture(capture) ?? undefined;
+    const bodies = await captureRequests(() =>
+      postCloseWorkorder({ id: "wo-1", cause: "c", fix: "f", advice: "a", signature }),
+    );
+    expect(bodies[0]!.signature).toBe(signature);
+    const parsed = JSON.parse(String(bodies[0]!.signature)) as { s: number[][][] };
+    expect(parsed.s[0]).toHaveLength(3);
+  });
+
+  it("captures the pointer on pen-down and CLAMPS a finger that slides off the pad", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+
+    signaturePadDown(capture, pad.at(10, 70));
+    // Without the capture the canvas stops receiving moves the moment the finger
+    // crosses the edge, and the stroke ends there.
+    expect(pad.captured).toEqual([7]);
+
+    signaturePadMove(capture, pad.at(400, -60)); // well outside the box
+    signaturePadUp(capture);
+
+    const parsed = JSON.parse(readSignatureCapture(capture)!) as { s: number[][][] };
+    // Clamped into the viewport: ink outside w×h could not be re-rendered without
+    // either clipping it or shrinking the whole signature to fit an excursion.
+    expect(parsed.s[0]![1]).toEqual([300, 0]);
+  });
+
+  it("thins sub-pixel samples but keeps everything that moved", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+
+    signaturePadDown(capture, pad.at(10, 70));
+    // Ten samples inside one pixel — a nearly-still finger. They add bytes and change
+    // no geometry.
+    for (let i = 1; i <= 10; i++) signaturePadMove(capture, pad.at(10 + i * 0.05, 70));
+    expect(capture.active).toHaveLength(1);
+    // A move past the gap is kept.
+    signaturePadMove(capture, pad.at(10 + SIGNATURE_MIN_POINT_GAP, 70));
+    expect(capture.active).toHaveLength(2);
+    signaturePadUp(capture);
+  });
+
+  it("a tap reads null, and so does a pad nobody touched", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+
+    expect(readSignatureCapture(capture)).toBeNull();
+    expect(signatureCaptureHasInk(capture)).toBe(false);
+
+    signaturePadDown(capture, pad.at(120, 45));
+    signaturePadUp(capture);
+
+    // There IS ink (the dot is drawn, so the customer sees what they made) — but it
+    // travelled nowhere, so nothing may be sent.
+    expect(signatureCaptureHasInk(capture)).toBe(true);
+    expect(readSignatureCapture(capture)).toBeNull();
+  });
+
+  it("a CANCELLED stroke is discarded, not completed", () => {
+    // The OS took the pointer (a system gesture, an incoming call). The customer never
+    // finished the mark, so a half-stroke the pad tore off itself is not theirs.
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+
+    signaturePadDown(capture, pad.at(10, 70));
+    signaturePadMove(capture, pad.at(60, 30));
+    signaturePadCancel(capture);
+
+    expect(capture.strokes).toEqual([]);
+    expect(signatureCaptureHasInk(capture)).toBe(false);
+    expect(readSignatureCapture(capture)).toBeNull();
+  });
+
+  it("clear takes back a mis-stroke and leaves nothing to send", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+    draw(capture, pad, [
+      [10, 70],
+      [90, 20],
+    ]);
+    expect(readSignatureCapture(capture)).not.toBeNull();
+
+    clearSignatureCapture(capture);
+
+    expect(signatureCaptureHasInk(capture)).toBe(false);
+    expect(readSignatureCapture(capture)).toBeNull();
+  });
+
+  it("an in-progress stroke is already readable — the confirm cannot miss the last stroke", () => {
+    // The customer lifts a finger and the technician taps confirm in the same instant;
+    // on a touch device the pointerup can arrive after the click. Reading the capture
+    // includes the open stroke, so the mark is never dropped for being unfinished.
+    const capture = createSignatureCapture();
+    const pad = fakePad(RECT);
+    signaturePadDown(capture, pad.at(10, 70));
+    signaturePadMove(capture, pad.at(50, 30));
+    signaturePadMove(capture, pad.at(90, 60));
+
+    const parsed = JSON.parse(readSignatureCapture(capture)!) as { s: number[][][] };
+    expect(parsed.s[0]).toHaveLength(3);
+  });
+});
+
+describe("the stored viewport describes the strokes it labels (B-357/F6)", () => {
+  it("a rotation MID-SIGNATURE rescales what is already drawn", () => {
+    // The scenario: the first stroke is made in portrait, the phone rotates while it
+    // is handed across, the customer finishes in landscape. Before this fix the
+    // encoder stamped the LANDSCAPE width onto points measured in the portrait box —
+    // arithmetically perfect, and the picture came back at roughly half size, offset.
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 360, height: 90 });
+
+    draw(capture, pad, [
+      [20, 70],
+      [100, 20],
+      [180, 70],
+    ]);
+
+    pad.resize(780, 90);
+    draw(capture, pad, [
+      [400, 30],
+      [500, 60],
+    ]);
+
+    const parsed = JSON.parse(readSignatureCapture(capture)!) as { w: number; h: number; s: number[][][] };
+    expect(parsed.w).toBe(780);
+    expect(parsed.h).toBe(90);
+
+    // The transform is the one the painters use to re-render stored ink: uniform
+    // min-scale plus centring. min(780/360, 90/90) = 1, so the portrait stroke keeps
+    // its size and shape and is re-centred by (780 - 360)/2 = 210.
+    expect(parsed.s[0]).toEqual([
+      [230, 70],
+      [310, 20],
+      [390, 70],
+    ]);
+    // …and the landscape stroke is stored as drawn.
+    expect(parsed.s[1]).toEqual([
+      [400, 30],
+      [500, 60],
+    ]);
+  });
+
+  it("a scale change is applied uniformly, so the mark is never stretched", () => {
+    // A pad that genuinely grows (a phone handed to a tablet-sized layout): both axes
+    // double, so every point doubles and nothing is centred away.
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 300, height: 90 });
+    draw(capture, pad, [
+      [10, 10],
+      [70, 40],
+    ]);
+
+    resizeSignatureCapture(capture, 600, 180);
+
+    const parsed = JSON.parse(readSignatureCapture(capture)!) as { w: number; h: number; s: number[][][] };
+    expect(parsed.w).toBe(600);
+    expect(parsed.h).toBe(180);
+    expect(parsed.s[0]).toEqual([
+      [20, 20],
+      [140, 80],
+    ]);
+  });
+
+  it("a degenerate resize is refused rather than making the points unitless", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 300, height: 90 });
+    draw(capture, pad, [
+      [10, 10],
+      [70, 40],
+    ]);
+    const before = readSignatureCapture(capture);
+
+    for (const [w, h] of [
+      [0, 90],
+      [300, -1],
+      [Number.NaN, 90],
+      [300, Number.POSITIVE_INFINITY],
+    ] as [number, number][]) {
+      resizeSignatureCapture(capture, w, h);
+    }
+
+    expect(readSignatureCapture(capture)).toBe(before);
+  });
+
+  it("the ACTIVE stroke rescales too — a rotation mid-stroke does not tear it in half", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 300, height: 90 });
+
+    signaturePadDown(capture, pad.at(10, 10));
+    signaturePadMove(capture, pad.at(70, 40));
+    // The box doubles while the finger is still down. signaturePadMove syncs first, so
+    // the point it is about to push lands in the same space as the ones already there.
+    pad.resize(600, 180);
+    signaturePadMove(capture, pad.at(300, 120));
+    signaturePadUp(capture);
+
+    const parsed = JSON.parse(readSignatureCapture(capture)!) as { s: number[][][] };
+    expect(parsed.s[0]).toEqual([
+      [20, 20],
+      [140, 80],
+      [300, 120],
+    ]);
   });
 });

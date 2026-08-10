@@ -235,6 +235,18 @@ export const SIGNATURE_INK_VERSION = 1;
 export const SIGNATURE_MAX_POINTS = 10_000;
 
 /**
+ * Minimum CSS-px distance between two consecutive points of one stroke — the same
+ * 1.0 px `kSignatureMinPointGap` the Dart pad thins at, so the two clients produce
+ * comparable point densities for the same gesture.
+ *
+ * THIS IS NOT THE GUARD, and reading it as one was the defect B-357/F2 records. It
+ * filters ADJACENT samples for size (a nearly-still finger emits many sub-pixel
+ * samples that add bytes and change no geometry); it says nothing about how far the
+ * mark travelled. That is `SIGNATURE_MIN_STROKE_SPAN`.
+ */
+export const SIGNATURE_MIN_POINT_GAP = 1;
+
+/**
  * Minimum SPAN — bounding-box diagonal in CSS px — that ONE stroke must cover before
  * the ink counts as a signature. Same value and same rule as `kSignatureMinStrokeSpan`
  * in the Dart encoder, because the two write the same column.
@@ -352,6 +364,198 @@ export function encodeSignatureInk(ink: SignatureInk): string | null {
   if (s.length === 0) return null;
 
   return JSON.stringify({ v: SIGNATURE_INK_VERSION, w: roundCoord(ink.width), h: roundCoord(ink.height), s });
+}
+
+/* ===========================================================================
+ * The pad's DOM-FREE half — the capture seam (B-357/F1)
+ * ===========================================================================
+ * WHY THIS LIVES HERE RATHER THAN INSIDE THE PAD COMPONENT. The pad used to own its
+ * strokes in refs and hand the modal an ENCODED string through an `onChange` prop.
+ * That put the one seam that historically WAS the defect — "a pad that drew and
+ * discarded" — entirely inside JSX, where apps/web's node test environment (no canvas,
+ * no DOM, and no jsdom in the workspace: see BLOCKERS.md B-358) cannot reach it. The
+ * gate proved the point by mutating the wiring to `onChange={() => onChange(null)}`:
+ * every stroke silently discarded, the close still fired, 1776 tests still green.
+ *
+ * So the pad no longer TRANSFORMS anything on its way out. It mutates a plain
+ * [SignatureCapture] object that the confirm handler reads directly, and every rule
+ * between a pointer event and the wire — rect-to-CSS-px, clamping, thinning, the
+ * viewport, stroke assembly, the encode — is a pure function here, pinned in
+ * use-pm.signature.test.ts. What is left in JSX is `<SignaturePad capture={…} />`,
+ * which carries no callback to sabotage: the gate's mutation no longer type-checks,
+ * because there is no `onChange` prop to hand a discarding function to.
+ *
+ * The Dart pad keeps its own callback shape (SignaturePadState is directly drivable
+ * in a widget test — disabling one line there turns 5 screen tests red), so this is a
+ * web-side answer to a web-side test-environment limit, not a contract change.
+ */
+
+/** The pad's live capture: completed strokes, the stroke in progress, and the
+ *  viewport the points were measured in. Plain mutable data — the pad writes it, the
+ *  confirm handler reads it, and nothing transforms it in between. */
+export interface SignatureCapture {
+  /** Capture viewport width in CSS px, 0 before the pad has been touched. */
+  width: number;
+  /** Capture viewport height in CSS px, 0 before the pad has been touched. */
+  height: number;
+  /** Completed strokes, in draw order. */
+  strokes: SignaturePoint[][];
+  /** The stroke being drawn right now, or null between pen-up and the next pen-down. */
+  active: SignaturePoint[] | null;
+}
+
+/** An empty capture. */
+export function createSignatureCapture(): SignatureCapture {
+  return { width: 0, height: 0, strokes: [], active: null };
+}
+
+/** The part of a DOMRect this seam uses. */
+export interface PadRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The part of a React PointerEvent this seam uses — structural, so a test drives it
+ *  with a plain object and no DOM is required. `React.PointerEvent<HTMLCanvasElement>`
+ *  is assignable to it. */
+export interface PadPointer {
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+  currentTarget: {
+    getBoundingClientRect(): PadRect;
+    setPointerCapture(pointerId: number): void;
+  };
+}
+
+/**
+ * Adopt a new capture viewport, RESCALING everything already drawn into it (B-357/F6).
+ *
+ * The defect this closes: one `w`/`h` is recorded and read back at render time, and
+ * nothing used to reconcile the two. Sign the first stroke in portrait (360 px wide),
+ * the phone rotates while it is handed across, the customer finishes in landscape
+ * (780 px) — the encoder then stamped `w: 780` onto points measured in a 360 px space,
+ * and every re-render scaled the pre-rotation half against the wrong unit. The round
+ * trip was arithmetically perfect and the picture was wrong.
+ *
+ * The transform is the SAME one the painters use to re-render stored ink — uniform
+ * `min` scale plus centring (SignatureInk.fit / SignatureInkPainter) — so the mark
+ * that was on the pad before the resize is the mark on it afterwards, just drawn in
+ * the new box. A non-uniform stretch would make it a different signature.
+ *
+ * A degenerate old viewport (nothing captured yet) simply adopts the new one; a
+ * degenerate NEW viewport is ignored, because points measured against 0 would be
+ * unitless and unrecoverable.
+ *
+ * The stroke arrays are rewritten IN PLACE rather than replaced. That is load-bearing,
+ * not a style choice: this runs from inside [signaturePadMove], which is holding the
+ * open stroke, and swapping the array out from under it would leave the rest of that
+ * stroke being appended to a detached copy — the mark would simply stop at the
+ * rotation.
+ */
+export function resizeSignatureCapture(c: SignatureCapture, width: number, height: number): void {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+  if (c.width === width && c.height === height) return;
+  if (c.width <= 0 || c.height <= 0) {
+    c.width = width;
+    c.height = height;
+    return;
+  }
+  const scale = Math.min(width / c.width, height / c.height);
+  const dx = (width - c.width * scale) / 2;
+  const dy = (height - c.height * scale) / 2;
+  const remap = (s: SignaturePoint[]): void => {
+    for (let i = 0; i < s.length; i++) {
+      const p = s[i]!;
+      s[i] = { x: dx + p.x * scale, y: dy + p.y * scale };
+    }
+  };
+  for (const s of c.strokes) remap(s);
+  if (c.active) remap(c.active);
+  c.width = width;
+  c.height = height;
+}
+
+/** Pointer position in CSS px, clamped into the pad.
+ *
+ *  A pointer that leaves the box mid-stroke keeps reporting (that is the whole point
+ *  of the pointer capture taken on pen-down); storing those points would put ink
+ *  outside the w×h viewport that DEFINES the stored coordinate space, and any
+ *  re-render would then clip it or shrink the whole signature to fit an excursion. */
+function padPoint(rect: PadRect, e: PadPointer): SignaturePoint {
+  return {
+    x: Math.min(Math.max(e.clientX - rect.left, 0), rect.width),
+    y: Math.min(Math.max(e.clientY - rect.top, 0), rect.height),
+  };
+}
+
+/** Pen down: adopt the box's current size (rescaling anything already drawn) and open
+ *  a stroke. The pointer is CAPTURED so a finger that slides off the canvas keeps
+ *  delivering moves — without it a stroke ends wherever the edge is. */
+export function signaturePadDown(c: SignatureCapture, e: PadPointer): void {
+  const rect = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.setPointerCapture(e.pointerId);
+  resizeSignatureCapture(c, rect.width, rect.height);
+  c.active = [padPoint(rect, e)];
+}
+
+/** Pen move: extend the open stroke, thinning sub-pixel samples
+ *  (SIGNATURE_MIN_POINT_GAP) that add bytes and change no geometry. No open stroke
+ *  means the pointer went down somewhere else, so nothing is recorded. */
+export function signaturePadMove(c: SignatureCapture, e: PadPointer): void {
+  const stroke = c.active;
+  if (!stroke) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  // The box can change size DURING a stroke (rotation, a resized window). Rescale
+  // first, so the point about to be pushed lands in the same space as the ones
+  // already there — B-357/F6.
+  resizeSignatureCapture(c, rect.width, rect.height);
+  const next = padPoint(rect, e);
+  const last = stroke[stroke.length - 1]!;
+  if ((next.x - last.x) ** 2 + (next.y - last.y) ** 2 < SIGNATURE_MIN_POINT_GAP ** 2) return;
+  stroke.push(next);
+}
+
+/** Pen up: the open stroke becomes a completed one. A pen-down that produced no point
+ *  is not a stroke. */
+export function signaturePadUp(c: SignatureCapture): void {
+  const stroke = c.active;
+  c.active = null;
+  if (stroke && stroke.length > 0) c.strokes.push(stroke);
+}
+
+/** The pointer was cancelled (the OS took it, e.g. a system gesture). The in-progress
+ *  stroke is DISCARDED rather than completed: the customer did not finish it, and a
+ *  half-stroke the pad tore off itself is not a mark they made. */
+export function signaturePadCancel(c: SignatureCapture): void {
+  c.active = null;
+}
+
+/** Drop every stroke. The viewport is kept — it describes the box, not the ink. */
+export function clearSignatureCapture(c: SignatureCapture): void {
+  c.strokes = [];
+  c.active = null;
+}
+
+/** Whether anything at all has been drawn (drives the clear affordance only — what
+ *  may be SENT is decided by [readSignatureCapture]). */
+export function signatureCaptureHasInk(c: SignatureCapture): boolean {
+  return c.strokes.some((s) => s.length > 0) || (c.active?.length ?? 0) > 0;
+}
+
+/** What is on the pad right now, as the value `customer_sign` would store, or null.
+ *
+ *  Null covers an empty pad, a taps-only pad and a pad whose marks never travelled
+ *  (SIGNATURE_MIN_STROKE_SPAN) — [encodeSignatureInk] is the single place that rule
+ *  lives, and this is the only path from the pad to the request. */
+export function readSignatureCapture(c: SignatureCapture): string | null {
+  return encodeSignatureInk({
+    width: c.width,
+    height: c.height,
+    strokes: c.active ? [...c.strokes, c.active] : c.strokes,
+  });
 }
 
 /** Close args — the WO id, the REAL maintenance-log columns (cause/fix/advice), and

@@ -81,8 +81,15 @@ import {
   useCheckinWorkorder,
   useUpdateChecklist,
   useCloseWorkorder,
-  encodeSignatureInk,
-  type SignaturePoint,
+  createSignatureCapture,
+  clearSignatureCapture,
+  readSignatureCapture,
+  signatureCaptureHasInk,
+  signaturePadCancel,
+  signaturePadDown,
+  signaturePadMove,
+  signaturePadUp,
+  type SignatureCapture,
 } from "./use-pm";
 import { ChecklistPicker } from "./checklist-picker";
 
@@ -744,23 +751,29 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
  * had signed when nothing has been drawn, which is the exact class of claim this
  * screen's other DEFAULTs em-dash. The empty pad is simply empty; the label above it
  * already says what it is, which also keeps this change ZERO-MINT.
+ *
+ * WHAT IS LEFT IN THIS FILE, AND WHY (B-357/F1). Only the PAINTING and the JSX. Every
+ * rule between a pointer event and the wire — rect-to-CSS-px, clamping, thinning, the
+ * capture viewport, stroke assembly, the encode — lives in use-pm.ts as pure functions
+ * over a plain [SignatureCapture], because apps/web's test environment is node (no
+ * canvas, no DOM, and no jsdom in the workspace — BLOCKERS.md B-358) and anything left
+ * in JSX here is unreachable by a test. The gate demonstrated exactly that: mutating
+ * the old `onChange` wiring to discard every stroke left the whole suite green.
+ *
+ * The pad therefore no longer TRANSFORMS anything on its way out — it mutates the very
+ * object the confirm handler reads. There is no callback prop left to hand a
+ * discarding function to, so that mutation no longer type-checks.
  */
-
-/** A stroke being drawn, or a completed one. */
-type Stroke = SignaturePoint[];
 
 /**
- * A real signature pad: pointer events into strokes, strokes onto a canvas, canvas
- * into the B-331 stroke JSON.
+ * A real signature pad: pointer events into [capture], [capture] onto a canvas.
  *
- * [onChange] fires after each completed stroke and after a clear, with the encoded
- * value or null. Null covers an empty pad AND a pad carrying only clicks — see
- * encodeSignatureInk, which is the single place that rule lives.
+ * It reports nothing. What may be SENT is read straight off the same capture at
+ * confirm time (readSignatureCapture → encodeSignatureInk, the single place the
+ * refusal rules live).
  */
-function SignaturePad({ onChange }: { onChange: (signature: string | null) => void }) {
+function SignaturePad({ capture }: { capture: SignatureCapture }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const strokes = useRef<Stroke[]>([]);
-  const active = useRef<Stroke | null>(null);
   /** Resolved `--text`, cached — see redraw(). */
   const inkColor = useRef<string | null>(null);
   /** Mirrors whether anything is drawn, so the clear affordance can render. */
@@ -799,7 +812,7 @@ function SignaturePad({ onChange }: { onChange: (signature: string | null) => vo
     ctx2d.lineWidth = 2;
     ctx2d.lineCap = "round";
     ctx2d.lineJoin = "round";
-    const all = active.current ? [...strokes.current, active.current] : strokes.current;
+    const all = capture.active ? [...capture.strokes, capture.active] : capture.strokes;
     for (const stroke of all) {
       if (stroke.length === 0) continue;
       ctx2d.beginPath();
@@ -811,69 +824,39 @@ function SignaturePad({ onChange }: { onChange: (signature: string | null) => vo
       if (stroke.length === 1) ctx2d.lineTo(stroke[0]!.x + 0.01, stroke[0]!.y);
       ctx2d.stroke();
     }
-  }, []);
-
-  /** Pointer position in CSS px, clamped into the pad. A pointer that leaves the box
-   *  mid-stroke keeps reporting; storing those points would put ink outside the w×h
-   *  viewport that defines the stored coordinate space. */
-  const at = (e: React.PointerEvent<HTMLCanvasElement>): SignaturePoint => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.min(Math.max(e.clientX - rect.left, 0), rect.width),
-      y: Math.min(Math.max(e.clientY - rect.top, 0), rect.height),
-    };
-  };
-
-  /** Encode what is on the pad and report it. */
-  const report = useCallback(() => {
-    const canvas = canvasRef.current;
-    const rect = canvas?.getBoundingClientRect();
-    onChange(
-      rect
-        ? encodeSignatureInk({ width: rect.width, height: rect.height, strokes: strokes.current })
-        : null,
-    );
-  }, [onChange]);
+  }, [capture]);
 
   const clear = () => {
-    strokes.current = [];
-    active.current = null;
+    clearSignatureCapture(capture);
     setHasInk(false);
     redraw();
-    onChange(null);
   };
 
   return (
     <div style={{ position: "relative" }}>
       <canvas
         ref={canvasRef}
+        // Each handler is one call into the pure seam plus a repaint. Nothing decides
+        // anything here: the rules are in use-pm.ts, where a node test can reach them
+        // (B-357/F1). `React.PointerEvent<HTMLCanvasElement>` satisfies PadPointer
+        // structurally, so no adapter object is built on a 60 Hz path.
         onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          active.current = [at(e)];
+          signaturePadDown(capture, e);
           redraw();
         }}
         onPointerMove={(e) => {
-          const stroke = active.current;
-          if (!stroke) return;
-          const next = at(e);
-          const last = stroke[stroke.length - 1]!;
-          // Thin sub-pixel samples: they add bytes and change no geometry.
-          if ((next.x - last.x) ** 2 + (next.y - last.y) ** 2 < 1) return;
-          stroke.push(next);
+          signaturePadMove(capture, e);
           redraw();
         }}
         onPointerUp={() => {
-          const stroke = active.current;
-          active.current = null;
-          if (stroke && stroke.length > 0) strokes.current.push(stroke);
-          setHasInk(strokes.current.length > 0);
+          signaturePadUp(capture);
+          setHasInk(signatureCaptureHasInk(capture));
           redraw();
-          report();
         }}
         onPointerCancel={() => {
-          active.current = null;
+          signaturePadCancel(capture);
+          setHasInk(signatureCaptureHasInk(capture));
           redraw();
-          report();
         }}
         style={{
           display: "block",
@@ -924,11 +907,17 @@ function SignaturePad({ onChange }: { onChange: (signature: string | null) => vo
  * The close modal's body (pm3.jsx closeWO L128-147): the completeness banner, the
  * signature pad, and the two buttons.
  *
- * A component rather than inline JSX so the pad's captured value can be held in state
- * and handed to [onConfirm]. `signature` is `undefined` until something is drawn, and
- * the confirm button passes it through unchanged — postCloseWorkorder then omits the
- * key entirely, so an unsigned close still records the maintenance log without
- * touching `customer_sign`.
+ * A component rather than inline JSX because it owns the CAPTURE: modal-host calls the
+ * body render prop as a plain function on every host render, so a hook written inline
+ * at the call site would belong to the host.
+ *
+ * The capture is a ref rather than state, and that is not an optimisation: the confirm
+ * button is always enabled (the prototype's is, and a close genuinely records the
+ * cause/fix/advice log with or without a signature), so nothing about the pad's
+ * contents drives this component's rendering. Holding the encoded value in state
+ * bought nothing and cost the seam its testability — see the pad's own header and
+ * B-357/F1. `readSignatureCapture` returns null for an empty, taps-only or
+ * never-travelled pad, and postCloseWorkorder then omits the key entirely.
  */
 function CloseWoModalBody({
   everyDone,
@@ -944,8 +933,7 @@ function CloseWoModalBody({
   onConfirm: (signature: string | undefined) => void;
 }) {
   const { t } = useI18n();
-  const [signature, setSignature] = useState<string | null>(null);
-  const onChange = useCallback((next: string | null) => setSignature(next), []);
+  const capture = useRef(createSignatureCapture());
 
   return (
     <div>
@@ -969,7 +957,7 @@ function CloseWoModalBody({
       </div>
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>{t("pm.signatureLabel")}</div>
-        <SignaturePad onChange={onChange} />
+        <SignaturePad capture={capture.current} />
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <Btn kind="outline" size="md" onClick={onCancel}>
@@ -981,9 +969,10 @@ function CloseWoModalBody({
           icon="check"
           // The prototype's confirm is always enabled and the close genuinely records
           // the cause/fix/advice log with or without a signature, so it stays enabled.
-          // What is refused is a FABRICATED signature: `signature ?? undefined` sends
-          // the key only when real ink was captured.
-          onClick={() => onConfirm(signature ?? undefined)}
+          // What is refused is a FABRICATED signature: readSignatureCapture returns
+          // null for an empty, taps-only or never-travelled pad, and the key is then
+          // omitted rather than sent blank (which would ERASE a stored signature).
+          onClick={() => onConfirm(readSignatureCapture(capture.current) ?? undefined)}
         >
           {t("pm.confirmCloseBtn")}
         </Btn>
