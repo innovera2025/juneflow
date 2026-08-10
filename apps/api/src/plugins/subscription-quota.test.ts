@@ -123,6 +123,59 @@ describe("SubscriptionQuotaResolver — the seat override (B-349)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// B-363 — WHICH subscription, when a company has more than one
+// ---------------------------------------------------------------------------
+// `subs.find(active|trial) ?? subs[0]` over an UNORDERED select left the choice to
+// the scan order, so the same tenant could be metered against a different row on
+// two requests — and packages/db/src/quota-preflight.ts, which reports what the
+// meter will do, ordered by created_at and could name a third answer. A billing
+// input must not depend on a join plan. The key is the preflight's: active/trial
+// first, then oldest, then id.
+describe("SubscriptionQuotaResolver — the subscription pick is deterministic (B-363)", () => {
+  const at = (iso: string) => new Date(iso);
+  const sub = (id: string, status: string, created: string, seats: number) => ({
+    ...subRow,
+    id,
+    status,
+    seats,
+    createdAt: at(created),
+  });
+  const withSubs = (subs: unknown[]) =>
+    stubDb([
+      [subscriptions, subs],
+      [packages, [{ id: "pkg-m", size: "M", name: "Professional", limits: LIMITS, menus: [], subRules: {} }]],
+      [users, [{ id: "u1" }, { id: "u2" }]],
+    ]);
+
+  const cancelled = sub("s-cancelled", "cancelled", "2020-01-01T00:00:00Z", 99);
+  const oldActive = sub("s-old", "active", "2024-01-01T00:00:00Z", 7);
+  const newActive = sub("s-new", "active", "2026-01-01T00:00:00Z", 8);
+
+  it("prefers an active/trial subscription over any other, whatever order the rows arrive in", async () => {
+    for (const order of [[cancelled, oldActive], [oldActive, cancelled]]) {
+      const r = new SubscriptionQuotaResolver(withSubs(order));
+      expect((await r.resolve(COMPANY, "users")).limit).toBe(7); // never the 99
+    }
+  });
+
+  it("breaks a tie between two ACTIVE subscriptions on created_at — same answer either way round", async () => {
+    for (const order of [[newActive, oldActive], [oldActive, newActive]]) {
+      const r = new SubscriptionQuotaResolver(withSubs(order));
+      expect((await r.resolve(COMPANY, "users")).limit).toBe(7); // the older one
+    }
+  });
+
+  it("falls back to `id` when status AND created_at tie — a total order, never a scan order", async () => {
+    const a = sub("s-aaa", "active", "2025-06-01T00:00:00Z", 4);
+    const b = sub("s-bbb", "active", "2025-06-01T00:00:00Z", 5);
+    for (const order of [[b, a], [a, b]]) {
+      const r = new SubscriptionQuotaResolver(withSubs(order));
+      expect((await r.resolve(COMPANY, "users")).limit).toBe(4); // s-aaa
+    }
+  });
+});
+
 describe("SubscriptionQuotaResolver — enforcement + fail-closed", () => {
   it("blocks once usage reaches the limit (real 402 path)", async () => {
     const r = new SubscriptionQuotaResolver(dbWith({ ...LIMITS, projects: 3 }));

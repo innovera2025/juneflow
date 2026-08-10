@@ -60,9 +60,27 @@ export class SubscriptionQuotaResolver implements QuotaResolver {
 
   /** The tenant's package limit for a dimension, or null when unresolvable. */
   async #limit(db: TenantDb, key: QuotaKey): Promise<number | null> {
-    const subs = await db.select(subscriptions);
-    const sub =
-      subs.find((s) => s.status === "active" || s.status === "trial") ?? subs[0];
+    // B-363 — WHICH subscription, decided rather than left to the join plan.
+    // This used to be `subs.find(active|trial) ?? subs[0]` over an UNORDERED
+    // select: for a company with 2+ subscriptions the fallback (and the `find`,
+    // among several active ones) picked whatever row Postgres happened to return
+    // first, so the SAME tenant could be metered against different rows on two
+    // requests — and packages/db/src/quota-preflight.ts, which reports what the
+    // meter will do, orders by `created_at` and could name a different one again.
+    // A billing input must not depend on a scan order. The key is the preflight's:
+    // active/trial first, then oldest, then id as the total-order tie-break.
+    // Latent on today's data (no company has two subscriptions — checked), which is
+    // exactly why it is pinned before one does.
+    const subs = [...(await db.select(subscriptions))].sort((a, b) => {
+      const live = (s: typeof a): number =>
+        s.status === "active" || s.status === "trial" ? 0 : 1;
+      if (live(a) !== live(b)) return live(a) - live(b);
+      const at = a.createdAt?.getTime() ?? 0;
+      const bt = b.createdAt?.getTime() ?? 0;
+      if (at !== bt) return at - bt;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    const sub = subs[0];
     if (!sub) return null;
     const pkgRows = await db.selectReference(
       packages,
