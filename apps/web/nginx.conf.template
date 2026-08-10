@@ -1,0 +1,104 @@
+# Juneflow web — nginx server config.
+#
+# This is a TEMPLATE: the official nginx image runs envsubst over every
+# /etc/nginx/templates/*.template at container start and writes the result to
+# /etc/nginx/conf.d/. envsubst only touches ${BRACED} names, so nginx's own
+# $variables ($uri, $request_uri, $host …) pass through untouched.
+#
+# Substituted at start: ${API_UPSTREAM} (default set in apps/web/Dockerfile).
+
+# Docker's embedded DNS. Needed because the /api/ proxy_pass below uses a
+# VARIABLE, which defers name resolution to request time — so nginx boots even
+# when the api container is not up yet, instead of failing config load and
+# taking the whole web service down with it. Outside a Docker network this
+# address does not exist; that is the deployment this image is built for.
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+gzip on;
+gzip_vary on;
+gzip_min_length 1024;
+gzip_proxied any;
+gzip_types
+  text/plain text/css text/javascript
+  application/javascript application/json application/xml
+  image/svg+xml font/woff font/woff2;
+
+server {
+  listen 80;
+  server_name _;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # `always` so the headers survive error responses too. NOTE the nginx rule
+  # that bites here: add_header does NOT inherit into a location that declares
+  # its own add_header, which is why the ones below repeat these three. Deleting
+  # a repeat silently drops the headers for that path only.
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+  # No Content-Security-Policy. A CSP that has not been tested against the built
+  # bundle breaks the app in the browser while every server-side check stays
+  # green, and this image has no such test. It is a real gap, recorded here
+  # rather than papered over with a policy nobody measured.
+
+  server_tokens off;
+
+  # ── the API, and the reason this block exists ──────────────────────────────
+  # apps/web/src/api-client.ts:23 falls back to a SAME-ORIGIN "/api/v1", so
+  # without this block the SPA fallback below answers every API call with
+  # index.html and HTTP **200** — not a 404. A failure shaped exactly like a
+  # success: the client gets HTML where JSON should be, and nothing in the
+  # response status says anything is wrong. That has already cost this repo a
+  # full debugging round.
+  #
+  # In prod the `edge` (Caddy) service is the ingress and may route /api itself,
+  # in which case this block is simply never reached — harmless either way.
+  location /api/ {
+    set $api_upstream "${API_UPSTREAM}";
+    # $request_uri is appended because a proxy_pass with a variable does NOT
+    # forward the URI implicitly — omitting it would send every call to "/".
+    proxy_pass $api_upstream$request_uri;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
+  }
+
+  # Container health. Deliberately ABOVE the SPA fallback and matched exactly,
+  # so it answers 200 from nginx itself rather than being served index.html —
+  # which would make the probe green whatever state the app is in.
+  location = /healthz {
+    access_log off;
+    add_header Content-Type text/plain;
+    add_header X-Content-Type-Options "nosniff" always;
+    return 200 "ok\n";
+  }
+
+  # Vite emits content-hashed filenames into assets/, so these are safe to cache
+  # forever; a rebuild changes the name. =404 rather than the SPA fallback: a
+  # missing asset must fail as a missing asset, not silently return HTML that
+  # the browser then tries to parse as JavaScript.
+  location /assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+    add_header X-Content-Type-Options "nosniff" always;
+    try_files $uri =404;
+  }
+
+  # index.html carries the hashed asset references, so caching it pins the whole
+  # app to an old build. Never cache it.
+  location = /index.html {
+    add_header Cache-Control "no-store";
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+  }
+
+  # SPA fallback: client-side routing via TanStack Router.
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
