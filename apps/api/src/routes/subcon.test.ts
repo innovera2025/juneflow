@@ -74,11 +74,17 @@ interface StubOpts {
   updateBase?: Record<string, unknown>;
   /** Counts transaction() invocations — proves multi-write atomicity (one tx). */
   tx?: { count: number };
+  /**
+   * B-351: make this table's UPDATE … RETURNING yield 0 rows — models an
+   * optimistic guard whose folded pre-state matched nothing because a concurrent
+   * caller already moved the row.
+   */
+  updateEmptyFor?: unknown;
 }
 
 /** Base Db stub: canned rows per table for reads; capture of write ops. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmptyFor } = opts;
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
@@ -117,6 +123,7 @@ function stubDb(opts: StubOpts): Db {
         where: (where: SQL) => ({
           returning: () => {
             updated.push({ table, set, where });
+            if (updateEmptyFor === table) return Promise.resolve([]);
             return Promise.resolve([{ ...updateBase, ...set }]);
           },
         }),
@@ -636,6 +643,145 @@ describe("POST /api/v1/periods/:id/deliver", () => {
       payload: { docs: [], photos: [] },
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  // ── B-351: `rejected` is no longer a dead end ────────────────────────────────
+  //
+  // Every work_period.status write in subcon.ts is deliver / inspect(pass) /
+  // inspect(reject) / approve-payment. Exactly one wrote `rejected` and NOTHING
+  // left it, so a period the foreman turned back could never be re-inspected and
+  // its money never reached AP. The prototype's own button for that row sets
+  // `state: "requested"` (subcon-accept2.jsx:106), which maps to the wire's
+  // delivered/inspecting — this door, not a new one.
+  it("RE-DELIVERS a rejected period (200 → delivered) — the contractor resubmits after the fix", async () => {
+    const P = period(PERIOD, "rejected");
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [P]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            // A rejected period ALWAYS has one (the reject handler ensures it so
+            // the Defect List has a parent), so this is the upsert's UPDATE branch.
+            [acceptances, [acceptance(ACCEPTANCE, PERIOD)]],
+            [projects, [project]],
+          ],
+          inserted,
+          updated,
+          updateBase: P,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/periods/${PERIOD}/deliver`,
+      payload: { docs: ["fixed-v2.pdf"], photos: ["after.jpg"] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("delivered");
+    expect(updated.find((u) => u.table === workPeriods)!.set.status).toBe("delivered");
+    // The existing acceptance is refreshed, never duplicated.
+    expect(inserted.find((w) => w.table === acceptances)).toBeFalsy();
+    expect(updated.find((u) => u.table === acceptances)!.set).toMatchObject({
+      docs: ["fixed-v2.pdf"],
+      photos: ["after.jpg"],
+    });
+  });
+
+  it("does NOT open the OTHER states: delivered / inspecting / passed / paid all 409", async () => {
+    for (const status of ["delivered", "inspecting", "passed", "paid"] as const) {
+      const updated: Updated[] = [];
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [
+              [workPeriods, [period(PERIOD, status)]],
+              [subconContracts, [contract(CONTRACT, "WO-1")]],
+            ],
+            updated,
+          }),
+        })
+      ).inject({
+        method: "POST",
+        url: `/api/v1/periods/${PERIOD}/deliver`,
+        payload: { docs: [], photos: [] },
+      });
+      expect(res.statusCode, `deliver from ${status}`).toBe(409);
+      expect(res.json().code).toBe("INVALID_STATE");
+      expect(updated, `deliver from ${status} must not mutate`).toHaveLength(0);
+    }
+  });
+
+  it("folds the deliverable pre-state into the FINAL UPDATE's WHERE, not just the resolve (B-149)", async () => {
+    // THE PROBE THAT ACTUALLY DISCRIMINATES PLACEMENT. The 0-row → 409 test below
+    // does NOT: the stub has no real BEGIN/COMMIT, so an UPDATE returning nothing
+    // looks identical whether the guard sits in the resolve SELECT or in the final
+    // UPDATE — and a guard only in the resolve is exactly the TOCTOU B-149 was
+    // filed for (updateThroughChain resolves then updates in two round-trips).
+    // What IS observable is the WHERE the final UPDATE carries: tenant-db.ts
+    // builds `and(idScope, guard)` when a guard is passed and bare `idScope` when
+    // it is not. So assert the status values are bound there.
+    const P = period(PERIOD, "rejected");
+    const updated: Updated[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [P]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            [acceptances, []],
+            [projects, [project]],
+          ],
+          updated,
+          updateBase: P,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/periods/${PERIOD}/deliver`,
+      payload: { docs: [], photos: [] },
+    });
+    const flip = updated.find((u) => u.table === workPeriods);
+    expect(flip).toBeTruthy();
+    const bound = paramsOf(flip!.where);
+    expect(bound).toContain("pending");
+    expect(bound).toContain("rejected");
+  });
+
+  it("409s via the ATOMIC guard when a concurrent inspect already moved the period (B-149 shape)", async () => {
+    // The JS pre-check reads `rejected` and passes, but the guarded UPDATE
+    // (…AND status IN ('pending','rejected')) matches 0 rows because a concurrent
+    // inspect committed first. The whole transaction — the acceptance write
+    // included — must roll back rather than leave a refreshed acceptance behind.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [workPeriods, [period(PERIOD, "rejected")]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+            [acceptances, []],
+            [projects, [project]],
+          ],
+          inserted,
+          updateEmptyFor: workPeriods, // the guarded UPDATE matched nothing
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: `/api/v1/periods/${PERIOD}/deliver`,
+      payload: { docs: [], photos: [] },
+    });
+    // 409, never 500: sync_processor.dart dead-letters a 4xx but DEFERS a 5xx and
+    // stops the drain, so a 500 here would wedge a field worker's offline queue.
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
   });
 });
 
