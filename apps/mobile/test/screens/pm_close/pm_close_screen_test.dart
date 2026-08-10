@@ -785,6 +785,76 @@ void main() {
       // collapsing it.
       expect(sent.hasSignature, isTrue);
     });
+
+    testWidgets(
+      'a COMPACT signature survives a narrowing that used to unsign it (B-357/F4)',
+      (WidgetTester tester) async {
+        // The rescale is asymmetric — the pad's height is fixed, so min(w/cw, h/ch)
+        // shrinks the ink when the box narrows and never grows it back. A small but
+        // real signature therefore fell UNDER kSignatureMinStrokeSpan after a rotation
+        // to portrait, and the CTA it had already lit went quiet: the customer's mark
+        // was on the pad, visibly, and the screen refused to send it.
+        final _FakeRepo repo = _FakeRepo(workOrders: <PmCloseEnt>[_wo('wo-1')]);
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+
+        await _pump(tester, repo);
+        final double wide = tester.getSize(find.byType(SignaturePad)).width;
+
+        // ~12.5 px of travel: comfortably a mark, and small enough that a narrowing
+        // puts it under the guard.
+        final Offset origin = tester.getCenter(find.byType(SignaturePad));
+        final TestGesture g = await tester.startGesture(origin);
+        await g.moveBy(const Offset(7.5, 10));
+        await g.up();
+        await tester.pumpAndSettle();
+
+        // It is a signature BEFORE the resize.
+        GestureDetector bar() => tester.widget<GestureDetector>(
+          find
+              .ancestor(
+                of: find.text('ปิดงาน + ลายเซ็น'),
+                matching: find.byType(GestureDetector),
+              )
+              .first,
+        );
+        expect(bar().onTap, isNotNull);
+
+        await tester.binding.setSurfaceSize(const Size(360, 900));
+        await tester.pumpAndSettle();
+        final double narrow = tester.getSize(find.byType(SignaturePad)).width;
+        expect(
+          narrow,
+          lessThan(wide),
+          reason: 'the fixture must actually resize',
+        );
+
+        // …and it still is.
+        expect(bar().onTap, isNotNull);
+        await tester.tap(find.text('ปิดงาน + ลายเซ็น'));
+        await tester.pumpAndSettle();
+        expect(repo.submitted, hasLength(1));
+
+        final SignatureInk sent = decodeSignatureInk(
+          repo.submitted.single['signature']! as String,
+        )!;
+        // The condition that used to refuse it: measured in the space it is STORED in,
+        // the mark is now under the threshold. It passes on provenance, not on luck.
+        final SignaturePoint a = sent.strokes.single.first;
+        final SignaturePoint b = sent.strokes.single.last;
+        final double dx = b.x - a.x;
+        final double dy = b.y - a.y;
+        expect(
+          dx * dx + dy * dy,
+          lessThan(kSignatureMinStrokeSpan * kSignatureMinStrokeSpan),
+          reason: 'the fixture must actually push the mark under the guard',
+        );
+        expect(
+          sent.hasSignature,
+          isFalse,
+          reason: 'stored ink carries no provenance',
+        );
+      },
+    );
   });
 
   group('honest-empty', () {

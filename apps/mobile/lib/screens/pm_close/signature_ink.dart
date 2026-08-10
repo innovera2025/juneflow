@@ -123,6 +123,7 @@ class SignatureInk {
     required this.width,
     required this.height,
     required this.strokes,
+    this.strokeScale,
   });
 
   /// Capture viewport width in logical px (> 0 for any ink [encodeSignatureInk]
@@ -134,6 +135,39 @@ class SignatureInk {
 
   /// The strokes, in draw order. Each is a pen-down → pen-up run of points.
   final List<List<SignaturePoint>> strokes;
+
+  /// Aligned with [strokes]: for `strokes[i]`, the factor between the space it was
+  /// DRAWN in and the space it is expressed in HERE. Null, or a missing element,
+  /// means 1 — the two spaces are the same.
+  ///
+  /// WHY IT EXISTS (B-357/F4). [rescaleSignatureStrokes] re-expresses ink when the pad
+  /// changes size, and because the pad has a FIXED height the transform is asymmetric:
+  /// a narrowed pad scales the mark DOWN, a widened one leaves it alone. A legitimate
+  /// ~11.7 px stroke captured at width 400 became ~5.85 px after a narrowing to 200,
+  /// and [hasSignature] — which measures [kSignatureMinStrokeSpan] — then refused a
+  /// signature that had already been made. A compact signature plus a rotation back to
+  /// portrait was silently unsigned.
+  ///
+  /// PER STROKE, not per capture, because those are different rules: one factor for
+  /// the whole capture would ALSO relax the threshold for strokes drawn AFTER the
+  /// resize, making the guard more permissive exactly where its job is to refuse a
+  /// twitch. Carrying provenance instead means a resize changes the picture's size and
+  /// nothing about what qualifies, in either direction.
+  ///
+  /// NEVER WRITTEN TO THE WIRE — [encodeSignatureInk] emits only v/w/h/s — and
+  /// [decodeSignatureInk] leaves it null: stored ink is expressed in the space it was
+  /// stored in.
+  final List<double>? strokeScale;
+
+  /// [strokeScale] for `strokes[i]`, defaulting to 1. A non-finite or non-positive
+  /// value is treated as 1 rather than trusted: this is the consent guard, and a bad
+  /// number must not be able to loosen it.
+  double drawScaleAt(int i) {
+    final List<double>? scales = strokeScale;
+    if (scales == null || i < 0 || i >= scales.length) return 1;
+    final double s = scales[i];
+    return s.isFinite && s > 0 ? s : 1;
+  }
 
   /// Whether this ink carries any actual mark.
   ///
@@ -170,7 +204,16 @@ class SignatureInk {
   ///
   /// Dots inside a REAL signature are unaffected — the dot over an "i" rides along
   /// with the stroke that travelled; it simply cannot be the only thing on the pad.
-  bool get hasSignature => strokes.any(_isSignatureStroke);
+  ///
+  /// Each stroke is measured in the space it was DRAWN in, via [strokeScale]
+  /// (B-357/F4), so a pad that was later narrowed cannot retroactively unsign a real
+  /// mark — and a mark made after that narrowing is still held to the full threshold.
+  bool get hasSignature {
+    for (int i = 0; i < strokes.length; i++) {
+      if (_isSignatureStroke(strokes[i], drawScaleAt(i))) return true;
+    }
+    return false;
+  }
 
   /// Total points across every stroke.
   int get pointCount =>
@@ -183,12 +226,24 @@ class SignatureInk {
   /// `min` (not `max`, and not two independent axis scales): a signature stretched
   /// unevenly is a different mark. Returns 0 for a degenerate target or viewport,
   /// which draws nothing rather than dividing by zero.
+  ///
+  /// NON-FINITE DIMENSIONS ARE REFUSED HERE, not left to the callers (B-357/F4). Every
+  /// comparison against NaN is false, so `sx < sy ? sx : sy` used to fall THROUGH a NaN
+  /// axis and return the other axis's scale — a plausible-looking number that makes
+  /// every offset derived from it NaN — and an infinite dimension did the same to the
+  /// centring term. Both callers happened to pre-guard, and `decodeSignatureInk`
+  /// rejects non-finite dims, so it was unreachable today; it was still a trap armed
+  /// for the next caller, and this branch has twice been bitten by exactly that
+  /// reasoning. The result is checked too, so a subnormal ratio cannot leak either.
   double fit(double targetWidth, double targetHeight) {
+    if (!width.isFinite || !height.isFinite) return 0;
+    if (!targetWidth.isFinite || !targetHeight.isFinite) return 0;
     if (width <= 0 || height <= 0) return 0;
     if (targetWidth <= 0 || targetHeight <= 0) return 0;
     final double sx = targetWidth / width;
     final double sy = targetHeight / height;
-    return sx < sy ? sx : sy;
+    final double s = sx < sy ? sx : sy;
+    return s.isFinite && s > 0 ? s : 0;
   }
 }
 
@@ -223,10 +278,11 @@ bool rescaleSignatureStrokes(
   required double toHeight,
 }) {
   if (fromWidth == toWidth && fromHeight == toHeight) return false;
-  // Checked HERE rather than left to [SignatureInk.fit]: `fit` compares with `<`, and
-  // any comparison against NaN is false, so a NaN dimension falls through it as the
-  // OTHER axis's scale — a plausible-looking 1.0 that then makes every offset NaN.
-  // An infinite dimension does the same to the centring term.
+  // Kept even though [SignatureInk.fit] now refuses non-finite dimensions itself
+  // (B-357/F4). This guard is about the CENTRING term, which is computed here from the
+  // raw dimensions rather than from `fit`: an infinite `toWidth` makes `dx` non-finite
+  // no matter how safe the scale is. Belt and braces on the caller side of a transform
+  // that rewrites points in place.
   if (!fromWidth.isFinite ||
       !fromHeight.isFinite ||
       !toWidth.isFinite ||
@@ -373,9 +429,15 @@ SignatureInk? decodeSignatureInk(String? raw) {
 /// before writing, so counting them here would let a stroke qualify on coordinates
 /// that never reach the wire.
 ///
+/// [drawScale] is the factor between the space this stroke was DRAWN in and the space
+/// its points are expressed in (see [SignatureInk.strokeScale]). The threshold moves
+/// WITH the ink, so 8 px always means 8 px as the customer drew it — a pad that was
+/// later narrowed does not retroactively unsign a real mark, and a stroke made after
+/// that narrowing is still held to the full 8 px (B-357/F4).
+///
 /// Compared squared, so no `dart:math` import is needed for a pure-`dart:convert`
 /// file and no square root runs on a 60 Hz path.
-bool _isSignatureStroke(List<SignaturePoint> stroke) {
+bool _isSignatureStroke(List<SignaturePoint> stroke, [double drawScale = 1]) {
   double? minX;
   double maxX = 0;
   double minY = 0;
@@ -397,7 +459,9 @@ bool _isSignatureStroke(List<SignaturePoint> stroke) {
   if (minX == null) return false;
   final double dx = maxX - minX;
   final double dy = maxY - minY;
-  return dx * dx + dy * dy >= kSignatureMinStrokeSpan * kSignatureMinStrokeSpan;
+  final double s = drawScale.isFinite && drawScale > 0 ? drawScale : 1;
+  final double min = kSignatureMinStrokeSpan * s;
+  return dx * dx + dy * dy >= min * min;
 }
 
 /// A finite, strictly positive viewport dimension, else null.

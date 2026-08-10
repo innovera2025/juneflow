@@ -284,6 +284,30 @@ export interface SignatureInk {
   width: number;
   height: number;
   strokes: SignaturePoint[][];
+  /**
+   * Aligned with [strokes]: for `strokes[i]`, the factor between the space it was
+   * DRAWN in and the space it is expressed in HERE. Absent, or an absent element,
+   * means 1 — the two spaces are the same.
+   *
+   * WHY IT EXISTS (B-357/F4). [resizeSignatureCapture] re-expresses ink when the pad
+   * changes size, and because the pads have a FIXED height the transform is
+   * asymmetric: a narrowed pad scales the mark DOWN, a widened one leaves it alone.
+   * A legitimate ~11.7 px stroke captured at width 400 therefore became ~5.85 px after
+   * a narrowing to 200, and [isSignatureStroke] — which measures 8 px — refused a
+   * signature that had already been made. A compact signature plus a window resize was
+   * silently unsigned.
+   *
+   * So the guard is applied in the space the stroke was DRAWN in, per stroke. Per
+   * STROKE rather than per capture, because those are not the same rule: a capture-wide
+   * factor would also relax the threshold for strokes drawn AFTER the resize, making
+   * the guard more permissive exactly where its whole job is to refuse a twitch. This
+   * carries the provenance instead, so a resize changes nothing about what qualifies.
+   *
+   * It is NEVER written to the wire — [encodeSignatureInk] emits only v/w/h/s — and
+   * [decodeSignatureInk]'s equivalent has no reason to reconstruct it: stored ink is
+   * expressed in the space it was stored in.
+   */
+  strokeScale?: number[];
 }
 
 /** Round to one decimal place — the stored precision, matched to the Dart encoder. */
@@ -302,8 +326,16 @@ function roundCoord(v: number): number {
  * NON-FINITE POINTS ARE IGNORED, matching [encodeSignatureInk], which drops them
  * before writing — counting them here would let a stroke qualify on coordinates that
  * never reach the wire. Compared squared: no square root on a 60 Hz path.
+ *
+ * [drawScale] is the factor between the space this stroke was DRAWN in and the space
+ * its points are expressed in (see [SignatureInk.strokeScale]). The threshold moves
+ * WITH the ink, so 8 px always means 8 px as the customer drew it — a pad that was
+ * later narrowed does not retroactively unsign a real mark, and a stroke drawn after
+ * that narrowing is still held to the full 8 px. A non-finite or non-positive value
+ * is treated as 1 rather than trusted: this is the consent guard, and it must not be
+ * loosened by a bad number.
  */
-function isSignatureStroke(stroke: SignaturePoint[]): boolean {
+function isSignatureStroke(stroke: SignaturePoint[], drawScale = 1): boolean {
   let minX: number | null = null;
   let maxX = 0;
   let minY = 0;
@@ -325,7 +357,9 @@ function isSignatureStroke(stroke: SignaturePoint[]): boolean {
   if (minX === null) return false;
   const dx = maxX - minX;
   const dy = maxY - minY;
-  return dx * dx + dy * dy >= SIGNATURE_MIN_STROKE_SPAN * SIGNATURE_MIN_STROKE_SPAN;
+  const s = Number.isFinite(drawScale) && drawScale > 0 ? drawScale : 1;
+  const min = SIGNATURE_MIN_STROKE_SPAN * s;
+  return dx * dx + dy * dy >= min * min;
 }
 
 /**
@@ -339,11 +373,15 @@ function isSignatureStroke(stroke: SignaturePoint[]): boolean {
  * customer's consent WITHOUT looking inside (wo-rows.ts deriveStatus L206, mobile
  * pm_jobs_agg, api counts.ts). A stray mark must not close a work order. This is the
  * one choke point for that rule, so no caller can route around it.
+ *
+ * [SignatureInk.strokeScale] is a MEASUREMENT the caller supplies, never a verdict:
+ * the rule itself still runs here, so no caller can hand this function a boolean and
+ * be believed (B-357/F4).
  */
 export function encodeSignatureInk(ink: SignatureInk): string | null {
   if (!Number.isFinite(ink.width) || !Number.isFinite(ink.height)) return null;
   if (ink.width <= 0 || ink.height <= 0) return null;
-  if (!ink.strokes.some(isSignatureStroke)) return null;
+  if (!ink.strokes.some((s, i) => isSignatureStroke(s, ink.strokeScale?.[i] ?? 1))) return null;
 
   const s: number[][][] = [];
   let budget = SIGNATURE_MAX_POINTS;
@@ -422,13 +460,21 @@ export interface SignatureCapture {
   height: number;
   /** Completed strokes, in draw order. */
   strokes: SignaturePoint[][];
+  /** Aligned with [strokes] — see [SignatureInk.strokeScale] (B-357/F4). Maintained
+   *  in lock step with `strokes` by the four functions that touch it: `signaturePadUp`
+   *  appends, `clearSignatureCapture` empties, `resizeSignatureCapture` multiplies
+   *  every entry, and nothing else writes either array. */
+  strokeScale: number[];
   /** The stroke being drawn right now, or null between pen-up and the next pen-down. */
   active: SignaturePoint[] | null;
+  /** [strokeScale] for the stroke in progress: 1 at pen-down, multiplied by any resize
+   *  that happens while it is open. */
+  activeScale: number;
 }
 
 /** An empty capture. */
 export function createSignatureCapture(): SignatureCapture {
-  return { width: 0, height: 0, strokes: [], active: null };
+  return { width: 0, height: 0, strokes: [], strokeScale: [], active: null, activeScale: 1 };
 }
 
 /** The part of a DOMRect this seam uses. */
@@ -476,6 +522,14 @@ export interface PadPointer {
  * open stroke, and swapping the array out from under it would leave the rest of that
  * stroke being appended to a detached copy — the mark would simply stop at the
  * rotation.
+ *
+ * IT ALSO RECORDS THE FACTOR IT APPLIED (B-357/F4). Because the pad has a FIXED
+ * height, `min` makes this transform asymmetric — a narrowed pad shrinks the ink, a
+ * widened one does not grow it — so a rescale can move a real mark below the 8 px the
+ * consent guard measures. Every affected stroke's [SignatureCapture.strokeScale] is
+ * multiplied by the same factor, and [isSignatureStroke] measures against the space
+ * the stroke was DRAWN in. A resize therefore changes the picture's size and nothing
+ * about what counts as a signature — in either direction.
  */
 export function resizeSignatureCapture(c: SignatureCapture, width: number, height: number): void {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
@@ -496,6 +550,8 @@ export function resizeSignatureCapture(c: SignatureCapture, width: number, heigh
   };
   for (const s of c.strokes) remap(s);
   if (c.active) remap(c.active);
+  for (let i = 0; i < c.strokeScale.length; i++) c.strokeScale[i]! *= scale;
+  c.activeScale *= scale;
   c.width = width;
   c.height = height;
 }
@@ -521,6 +577,9 @@ export function signaturePadDown(c: SignatureCapture, e: PadPointer): void {
   e.currentTarget.setPointerCapture(e.pointerId);
   resizeSignatureCapture(c, rect.width, rect.height);
   c.active = [padPoint(rect, e)];
+  // This stroke is being drawn in the CURRENT box, so its points are already in the
+  // space it is drawn in — no rescale has touched it yet (B-357/F4).
+  c.activeScale = 1;
 }
 
 /** Pen move: extend the open stroke, thinning sub-pixel samples
@@ -540,12 +599,17 @@ export function signaturePadMove(c: SignatureCapture, e: PadPointer): void {
   stroke.push(next);
 }
 
-/** Pen up: the open stroke becomes a completed one. A pen-down that produced no point
- *  is not a stroke. */
+/** Pen up: the open stroke becomes a completed one, carrying the draw scale it
+ *  accumulated while it was open. A pen-down that produced no point is not a stroke. */
 export function signaturePadUp(c: SignatureCapture): void {
   const stroke = c.active;
+  const scale = c.activeScale;
   c.active = null;
-  if (stroke && stroke.length > 0) c.strokes.push(stroke);
+  c.activeScale = 1;
+  if (stroke && stroke.length > 0) {
+    c.strokes.push(stroke);
+    c.strokeScale.push(scale);
+  }
 }
 
 /** The pointer was cancelled (the OS took it, e.g. a system gesture). The in-progress
@@ -553,12 +617,15 @@ export function signaturePadUp(c: SignatureCapture): void {
  *  half-stroke the pad tore off itself is not a mark they made. */
 export function signaturePadCancel(c: SignatureCapture): void {
   c.active = null;
+  c.activeScale = 1;
 }
 
 /** Drop every stroke. The viewport is kept — it describes the box, not the ink. */
 export function clearSignatureCapture(c: SignatureCapture): void {
   c.strokes = [];
+  c.strokeScale = [];
   c.active = null;
+  c.activeScale = 1;
 }
 
 /** Whether anything at all has been drawn (drives the clear affordance only — what
@@ -577,6 +644,9 @@ export function readSignatureCapture(c: SignatureCapture): string | null {
     width: c.width,
     height: c.height,
     strokes: c.active ? [...c.strokes, c.active] : c.strokes,
+    // Composed the same way and in the same order, so the two stay aligned when the
+    // OPEN stroke rides along (B-357/F4).
+    strokeScale: c.active ? [...c.strokeScale, c.activeScale] : c.strokeScale,
   });
 }
 

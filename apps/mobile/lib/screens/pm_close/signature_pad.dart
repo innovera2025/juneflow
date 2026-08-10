@@ -67,8 +67,17 @@ class SignaturePadState extends State<SignaturePad> {
   /// Completed strokes, in draw order.
   final List<List<SignaturePoint>> _strokes = <List<SignaturePoint>>[];
 
+  /// Aligned with [_strokes] — see [SignatureInk.strokeScale] (B-357/F4). Kept in lock
+  /// step by the four places that touch either list: [_up] appends, [clear] empties,
+  /// [_adoptSize] multiplies every entry, and nothing else writes them.
+  final List<double> _strokeScale = <double>[];
+
   /// The stroke being drawn right now, or null between pen-up and the next pen-down.
   List<SignaturePoint>? _active;
+
+  /// [_strokeScale] for the stroke in progress: 1 at pen-down, multiplied by any
+  /// resize that lands while it is still open.
+  double _activeScale = 1;
 
   /// The pad's own size, captured at paint time. This is the `w`/`h` written into the
   /// stroke JSON, so it must be the box the points were actually measured in — never
@@ -83,14 +92,21 @@ class SignaturePadState extends State<SignaturePad> {
   bool get hasInk => _strokes.any((List<SignaturePoint> s) => s.isNotEmpty);
 
   /// Everything drawn so far, including the in-progress stroke, as re-renderable ink.
-  SignatureInk get ink => SignatureInk(
-    width: _size.width,
-    height: _size.height,
-    strokes: <List<SignaturePoint>>[
-      ..._strokes,
-      if (_active != null && _active!.isNotEmpty) _active!,
-    ],
-  );
+  ///
+  /// The two lists are composed the SAME way and in the same order, so they stay
+  /// aligned when the open stroke rides along (B-357/F4).
+  SignatureInk get ink {
+    final bool withActive = _active != null && _active!.isNotEmpty;
+    return SignatureInk(
+      width: _size.width,
+      height: _size.height,
+      strokes: <List<SignaturePoint>>[
+        ..._strokes,
+        if (withActive) _active!,
+      ],
+      strokeScale: <double>[..._strokeScale, if (withActive) _activeScale],
+    );
+  }
 
   /// Drop every stroke. Reports the now-empty ink so a listener that had enabled a
   /// submit control disables it again.
@@ -98,7 +114,9 @@ class SignaturePadState extends State<SignaturePad> {
     if (_strokes.isEmpty && _active == null) return;
     setState(() {
       _strokes.clear();
+      _strokeScale.clear();
       _active = null;
+      _activeScale = 1;
     });
     widget.onChanged(ink);
   }
@@ -129,6 +147,20 @@ class SignaturePadState extends State<SignaturePad> {
       toHeight: next.height,
     );
     if (!remapped) return;
+    // The SAME factor rescaleSignatureStrokes just applied — both are [SignatureInk.fit]
+    // over the same two viewports, so they cannot disagree — recorded per stroke so the
+    // consent guard keeps measuring the space each mark was DRAWN in (B-357/F4).
+    final double factor = SignatureInk(
+      width: previous.width,
+      height: previous.height,
+      strokes: const <List<SignaturePoint>>[],
+    ).fit(next.width, next.height);
+    if (factor > 0) {
+      for (int i = 0; i < _strokeScale.length; i++) {
+        _strokeScale[i] *= factor;
+      }
+      _activeScale *= factor;
+    }
     WidgetsBinding.instance.addPostFrameCallback((Duration _) {
       if (mounted) widget.onChanged(ink);
     });
@@ -147,7 +179,12 @@ class SignaturePadState extends State<SignaturePad> {
 
   void _down(Offset p) {
     if (!widget.enabled || _size.isEmpty) return;
-    setState(() => _active = <SignaturePoint>[_clamp(p)]);
+    setState(() {
+      _active = <SignaturePoint>[_clamp(p)];
+      // Drawn in the CURRENT box, so its points are already in the space it is drawn
+      // in — no rescale has touched this stroke yet (B-357/F4).
+      _activeScale = 1;
+    });
   }
 
   void _move(Offset p) {
@@ -168,11 +205,16 @@ class SignaturePadState extends State<SignaturePad> {
   void _up() {
     final List<SignaturePoint>? active = _active;
     if (active == null) return;
+    final double scale = _activeScale;
     setState(() {
       // A tap with no movement is a single point — a dot IS a mark a person can make,
       // so it is kept. An empty run is not a stroke and is dropped.
-      if (active.isNotEmpty) _strokes.add(active);
+      if (active.isNotEmpty) {
+        _strokes.add(active);
+        _strokeScale.add(scale);
+      }
       _active = null;
+      _activeScale = 1;
     });
     widget.onChanged(ink);
   }
@@ -193,7 +235,10 @@ class SignaturePadState extends State<SignaturePad> {
   /// enabled over ink that is no longer there.
   void _cancel() {
     if (_active == null) return;
-    setState(() => _active = null);
+    setState(() {
+      _active = null;
+      _activeScale = 1;
+    });
     widget.onChanged(ink);
   }
 

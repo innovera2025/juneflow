@@ -207,6 +207,203 @@ void main() {
         expect(ink.fit(100, 0), 0);
       },
     );
+
+    test('fit REFUSES a non-finite dimension instead of falling through it', () {
+      // B-357/F4. `sx < sy ? sx : sy` cannot see a NaN — every comparison against NaN
+      // is false — so a NaN axis used to fall THROUGH as the OTHER axis's scale: a
+      // plausible-looking number that then made every offset derived from it NaN. An
+      // infinite dimension did the same to the centring term. Both callers happened to
+      // pre-guard and decodeSignatureInk rejects non-finite dims, so it was unreachable
+      // — it was a trap armed for a third caller.
+      const SignatureInk ink = SignatureInk(
+        width: 300,
+        height: 110,
+        strokes: <List<SignaturePoint>>[
+          <SignaturePoint>[SignaturePoint(10, 10), SignaturePoint(80, 60)],
+        ],
+      );
+      expect(ink.fit(double.nan, 180), 0);
+      expect(ink.fit(640, double.nan), 0);
+      expect(ink.fit(double.infinity, 180), 0);
+      expect(ink.fit(640, double.negativeInfinity), 0);
+
+      // …and from the OTHER side: a viewport that is not a number.
+      const SignatureInk nanInk = SignatureInk(
+        width: double.nan,
+        height: 110,
+        strokes: <List<SignaturePoint>>[],
+      );
+      expect(nanInk.fit(640, 180), 0);
+      const SignatureInk infInk = SignatureInk(
+        width: 300,
+        height: double.infinity,
+        strokes: <List<SignaturePoint>>[],
+      );
+      expect(infInk.fit(640, 180), 0);
+    });
+  });
+
+  group('a resize does not change what counts as a signature (B-357/F4)', () {
+    // rescaleSignatureStrokes uses min(w/cw, h/ch) and the pad has a FIXED height, so
+    // the transform is ASYMMETRIC: a narrowed pad scales the ink down, a widened one
+    // leaves it alone. That put a legitimate small signature under the 8 px the consent
+    // guard measures — captured at width 400 it encoded, and after a narrowing to 200
+    // the SAME mark returned null. SignatureInk.strokeScale carries each stroke's
+    // provenance so the guard runs in the space that stroke was DRAWN in.
+
+    /// A stroke spanning [span] px on the diagonal, as a 3-4-5 triangle.
+    List<SignaturePoint> mark(double span) => <SignaturePoint>[
+      const SignaturePoint(100, 40),
+      SignaturePoint(100 + span * 0.6, 40 + span * 0.8),
+    ];
+
+    test('a real mark survives a narrowing that used to unsign it', () {
+      // ~11.7 px at width 400; a narrowing to 200 halves it to ~5.85, under the guard.
+      final List<List<SignaturePoint>> strokes = <List<SignaturePoint>>[
+        mark(11.7),
+      ];
+      expect(
+        SignatureInk(width: 400, height: 90, strokes: strokes).hasSignature,
+        isTrue,
+      );
+
+      rescaleSignatureStrokes(
+        strokes,
+        fromWidth: 400,
+        fromHeight: 90,
+        toWidth: 200,
+        toHeight: 90,
+      );
+
+      // The ink really did shrink — this is not a test that the rescale stopped working.
+      expect(
+        SignatureInk(width: 200, height: 90, strokes: strokes).hasSignature,
+        isFalse,
+        reason: 'without provenance the mark is now under the threshold',
+      );
+      // …and with provenance it is still the signature it was when it was made.
+      expect(
+        SignatureInk(
+          width: 200,
+          height: 90,
+          strokes: strokes,
+          strokeScale: const <double>[0.5],
+        ).hasSignature,
+        isTrue,
+      );
+    });
+
+    test('a twitch that predates the narrowing is still refused', () {
+      // Provenance must not launder a bad stroke: 3 px at width 400 is 3 px as drawn,
+      // and no amount of rescaling makes it a mark.
+      final List<List<SignaturePoint>> strokes = <List<SignaturePoint>>[
+        mark(3),
+      ];
+      rescaleSignatureStrokes(
+        strokes,
+        fromWidth: 400,
+        fromHeight: 90,
+        toWidth: 200,
+        toHeight: 90,
+      );
+      expect(
+        SignatureInk(
+          width: 200,
+          height: 90,
+          strokes: strokes,
+          strokeScale: const <double>[0.5],
+        ).hasSignature,
+        isFalse,
+      );
+    });
+
+    test('a twitch drawn AFTER the narrowing is still refused', () {
+      // The reason the scale is per STROKE rather than per capture. A capture-wide
+      // factor would drop the threshold to 8 x scale for EVERYTHING, so this 5 px
+      // twitch — made on the already-narrowed pad, scale 1 — would sign the work order.
+      // 5 discriminates on purpose: over the capture-wide threshold, under the real one.
+      final SignatureInk ink = SignatureInk(
+        width: 200,
+        height: 90,
+        strokes: <List<SignaturePoint>>[mark(11.7), mark(5)],
+        // The old mark carries 0.5; the new one was drawn here and carries 1.
+        strokeScale: const <double>[0.5, 1],
+      );
+      expect(ink.hasSignature, isTrue); // the OLD mark still qualifies
+
+      // On its own, the new twitch does not.
+      expect(
+        SignatureInk(
+          width: 200,
+          height: 90,
+          strokes: <List<SignaturePoint>>[mark(5)],
+          strokeScale: const <double>[1],
+        ).hasSignature,
+        isFalse,
+      );
+    });
+
+    test('a bad scale is treated as 1 rather than believed', () {
+      // strokeScale is a MEASUREMENT the caller supplies, never a verdict. A NaN, a
+      // negative, a zero or an infinity must not be able to loosen the consent guard.
+      for (final double bad in <double>[
+        double.nan,
+        -2,
+        0,
+        double.infinity,
+        double.negativeInfinity,
+      ]) {
+        expect(
+          SignatureInk(
+            width: 200,
+            height: 90,
+            strokes: <List<SignaturePoint>>[mark(5)],
+            strokeScale: <double>[bad],
+          ).hasSignature,
+          isFalse,
+          reason: 'scale $bad must fall back to 1, not admit a 5 px twitch',
+        );
+      }
+
+      // A short list, an over-long one and a null all mean "1" for the missing entries.
+      expect(
+        SignatureInk(
+          width: 200,
+          height: 90,
+          strokes: <List<SignaturePoint>>[mark(5), mark(5)],
+          strokeScale: const <double>[0.5],
+        ).hasSignature,
+        isTrue,
+        reason: 'strokes[0] carries 0.5, so its 5 px clears a threshold of 4',
+      );
+      expect(
+        SignatureInk(
+          width: 200,
+          height: 90,
+          strokes: <List<SignaturePoint>>[mark(5)],
+        ).hasSignature,
+        isFalse,
+      );
+    });
+
+    test('provenance never reaches the wire', () {
+      // The encoder emits v/w/h/s and nothing else, and the decoder does not invent a
+      // scale on the way back: stored ink is expressed in the space it was stored in.
+      final String encoded = encodeSignatureInk(
+        SignatureInk(
+          width: 200,
+          height: 90,
+          strokes: <List<SignaturePoint>>[mark(11.7)],
+          strokeScale: const <double>[0.5],
+        ),
+      )!;
+      expect(encoded.contains('strokeScale'), isFalse);
+      expect(
+        (jsonDecode(encoded) as Map<String, Object?>).keys.toSet(),
+        <String>{'v', 'w', 'h', 's'},
+      );
+      expect(decodeSignatureInk(encoded)!.strokeScale, isNull);
+    });
   });
 
   group('the viewport is kept honest when the box changes size (B-357/F6)', () {

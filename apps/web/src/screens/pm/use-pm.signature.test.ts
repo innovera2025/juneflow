@@ -882,3 +882,154 @@ describe("the stored viewport describes the strokes it labels (B-357/F6)", () =>
     ]);
   });
 });
+
+/* ===========================================================================
+ * A RESIZE MUST NOT RETRO-REJECT A REAL SIGNATURE (B-357/F4)
+ * ===========================================================================
+ * resizeSignatureCapture uses `min(w/cw, h/ch)`, and the pad has a FIXED height, so
+ * the transform is ASYMMETRIC: a narrowed pad scales the ink down, a widened one
+ * leaves it alone. That put a legitimate small signature under the 8 px the consent
+ * guard measures — captured at width 400 it encoded; after a narrowing to 200 the very
+ * same mark returned null, and on web (before B-357/F3) it was then closed silently.
+ *
+ * The fix carries per-stroke provenance (SignatureCapture.strokeScale), so the guard
+ * runs in the space the stroke was DRAWN in. The pair of tests that matter are the two
+ * DIRECTIONS: a real mark survives a narrowing, and a twitch drawn AFTER one still
+ * fails. A single capture-wide factor would pass the first and fail the second.
+ */
+describe("a resize does not change what counts as a signature (B-357/F4)", () => {
+  it("a real mark survives a narrowing that used to unsign it", () => {
+    // The gate's reproduction: an ~11.7 px stroke on a 400 px pad, then the window
+    // narrows to 200. The stored span halves to ~5.85, under SIGNATURE_MIN_STROKE_SPAN.
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 400, height: 90 });
+    draw(capture, pad, [
+      [100, 40],
+      [109, 47.5],
+    ]);
+    const beforeResize = readSignatureCapture(capture);
+    expect(beforeResize).not.toBeNull();
+
+    resizeSignatureCapture(capture, 200, 90);
+
+    // The ink really did shrink — this is not a test that the rescale stopped working.
+    const parsed = JSON.parse(readSignatureCapture(capture)!) as { w: number; s: number[][][] };
+    expect(parsed.w).toBe(200);
+    const [p0, p1] = parsed.s[0]! as [number[], number[]];
+    const span = Math.hypot(p1![0]! - p0![0]!, p1![1]! - p0![1]!);
+    expect(span).toBeLessThan(SIGNATURE_MIN_STROKE_SPAN);
+
+    // …and it is still a signature, because it was one when it was made.
+    expect(readSignatureCapture(capture)).not.toBeNull();
+  });
+
+  it("a twitch drawn AFTER the narrowing is still refused", () => {
+    // The other direction, and the reason the scale is per STROKE rather than per
+    // capture. A capture-wide factor would drop the threshold to 8 x scale for
+    // EVERYTHING, including marks made after the resize — so this 5 px twitch, made on
+    // the already-narrowed pad, would clear a threshold of 4 and sign the work order.
+    // 5 discriminates on purpose: over the capture-wide threshold, under the real one.
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 200, height: 90 });
+    // The pad was 400 wide and has narrowed to 200 — established without drawing, so
+    // the only ink in this test is the twitch itself.
+    resizeSignatureCapture(capture, 400, 90);
+    resizeSignatureCapture(capture, 200, 90);
+
+    draw(capture, pad, [
+      [40, 40],
+      [43, 44],
+    ]);
+
+    expect(signatureCaptureHasInk(capture)).toBe(true);
+    expect(capture.strokeScale).toEqual([1]);
+    expect(readSignatureCapture(capture)).toBeNull();
+  });
+
+  it("a twitch that predates the narrowing is still refused", () => {
+    // Provenance must not launder a bad stroke either: 3 px at width 400 is 3 px as
+    // drawn, and no amount of rescaling makes it a mark.
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 400, height: 90 });
+    draw(capture, pad, [
+      [100, 40],
+      [102, 42],
+    ]);
+    expect(readSignatureCapture(capture)).toBeNull();
+
+    resizeSignatureCapture(capture, 200, 90);
+    expect(readSignatureCapture(capture)).toBeNull();
+  });
+
+  it("the scale accumulates across repeated narrowings", () => {
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 400, height: 90 });
+    draw(capture, pad, [
+      [100, 40],
+      [109, 47.5],
+    ]);
+
+    resizeSignatureCapture(capture, 200, 90);
+    resizeSignatureCapture(capture, 100, 90);
+    // ~11.7 px is now ~2.9 px — a quarter, far under the guard.
+    expect(capture.strokeScale[0]).toBeCloseTo(0.25, 10);
+    expect(readSignatureCapture(capture)).not.toBeNull();
+  });
+
+  it("a stroke open ACROSS a narrowing carries the factor with it", () => {
+    // The finger is still down when the box shrinks. The whole stroke — the part drawn
+    // before and the part drawn after — is one mark, and it is measured as one.
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 400, height: 90 });
+    signaturePadDown(capture, pad.at(100, 40));
+    signaturePadMove(capture, pad.at(105, 44));
+    pad.resize(200, 90);
+    signaturePadMove(capture, pad.at(55, 24));
+    signaturePadUp(capture);
+
+    expect(capture.strokeScale).toHaveLength(1);
+    expect(capture.strokeScale[0]).toBeCloseTo(0.5, 10);
+    expect(capture.activeScale).toBe(1);
+    expect(readSignatureCapture(capture)).not.toBeNull();
+  });
+
+  it("strokeScale stays aligned with strokes through up / clear / cancel", () => {
+    // The one invariant the parallel array can break. Every writer is exercised here.
+    const capture = createSignatureCapture();
+    const pad = fakePad({ left: 0, top: 0, width: 400, height: 90 });
+
+    draw(capture, pad, [
+      [10, 70],
+      [60, 30],
+    ]);
+    draw(capture, pad, [
+      [80, 70],
+      [130, 30],
+    ]);
+    expect(capture.strokeScale).toHaveLength(capture.strokes.length);
+
+    // A pen-down that produced nothing is not a stroke — and must not push a scale.
+    signaturePadDown(capture, pad.at(200, 40));
+    signaturePadCancel(capture);
+    expect(capture.strokeScale).toHaveLength(capture.strokes.length);
+    expect(capture.activeScale).toBe(1);
+
+    clearSignatureCapture(capture);
+    expect(capture.strokes).toEqual([]);
+    expect(capture.strokeScale).toEqual([]);
+    expect(capture.activeScale).toBe(1);
+  });
+
+  it("a bad scale is treated as 1 rather than believed", () => {
+    // strokeScale is a MEASUREMENT the caller supplies. A NaN, a negative or a zero
+    // must not loosen the consent guard — encodeSignatureInk falls back to 1.
+    const twitch = ink([
+      [pt(100, 40), pt(103, 43)],
+    ]);
+    for (const bad of [Number.NaN, -2, 0, Number.POSITIVE_INFINITY]) {
+      expect(encodeSignatureInk({ ...twitch, strokeScale: [bad] })).toBeNull();
+    }
+    // …and a real mark is unaffected by the same bad value.
+    expect(encodeSignatureInk({ ...SIGNED, strokeScale: [Number.NaN, Number.NaN] })).not.toBeNull();
+  });
+});
