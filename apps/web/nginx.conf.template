@@ -31,8 +31,16 @@ server {
 
   # `always` so the headers survive error responses too. NOTE the nginx rule
   # that bites here: add_header does NOT inherit into a location that declares
-  # its own add_header, which is why the ones below repeat these three. Deleting
-  # a repeat silently drops the headers for that path only.
+  # ANY add_header of its own — it replaces the whole inherited set rather than
+  # merging. So a location that adds one header loses all three of these, while a
+  # location that adds none (the /api/ proxy) keeps all three.
+  #
+  # That is counter-intuitive enough that the first version of this file got it
+  # backwards: /healthz and /assets/ each declared only X-Content-Type-Options
+  # and silently dropped X-Frame-Options and Referrer-Policy, which gate 4.5
+  # found by probing the responses rather than reading the config. Every location
+  # below now repeats the full set, and deleting one repeat drops all three for
+  # that path alone — invisibly, since nothing errors.
   add_header X-Content-Type-Options "nosniff" always;
   add_header X-Frame-Options "DENY" always;
   add_header Referrer-Policy "strict-origin-when-cross-origin" always;
@@ -72,8 +80,13 @@ server {
   # which would make the probe green whatever state the app is in.
   location = /healthz {
     access_log off;
-    add_header Content-Type text/plain;
+    # default_type, not add_header: `return` would otherwise emit its own
+    # application/octet-stream AND the added one, so the probe answered with two
+    # Content-Type headers.
+    default_type text/plain;
     add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     return 200 "ok\n";
   }
 
@@ -82,9 +95,12 @@ server {
   # missing asset must fail as a missing asset, not silently return HTML that
   # the browser then tries to parse as JavaScript.
   location /assets/ {
-    expires 1y;
-    add_header Cache-Control "public, immutable";
+    # One Cache-Control, not two: `expires 1y` emits its own max-age alongside
+    # the added directive, so these responses carried the header twice.
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
     add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     try_files $uri =404;
   }
 

@@ -15,20 +15,30 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /app
 
-# ---- deps: warm the pnpm store from the LOCKFILE ALONE -----------------------
-# `pnpm fetch` reads pnpm-lock.yaml and nothing else, so this layer is invalidated
-# by a dependency change and by no other edit. Before this, `COPY . .` came before
-# the install, which meant editing one line of one route re-resolved and re-
-# downloaded the entire workspace on every single build.
+# ---- deps: warm the pnpm store from the LOCKFILE + THE PIN -------------------
+# `pnpm fetch` reads pnpm-lock.yaml, so this layer is invalidated by a dependency
+# change and by no other source edit. Before this, `COPY . .` came before the
+# install, which meant editing one line of one route re-resolved and re-downloaded
+# the entire workspace on every single build.
+#
+# package.json comes along ONLY for its `packageManager` pin. Copying the lockfile
+# alone looked tidier and was wrong: corepack could not see the pin here, so this
+# stage ran a different pnpm from the one the next stage used — and the next stage
+# then downloaded the pinned version from the registry at install time, which is
+# precisely the network round-trip `--offline` below claims to have removed.
+# Caught by gate 4.5 with `--network none`: EAI_AGAIN registry.npmjs.org.
+# The cost of including it is that a root package.json edit re-runs the fetch.
+# That is correct — the pin lives there.
 FROM base AS deps
-COPY pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml ./
 RUN pnpm fetch --store-dir=/pnpm/store
 
 # ---- build: install workspace deps + compile TypeScript ---------------------
 FROM deps AS build
 COPY . .
-# --offline: everything is already in the store from the deps layer, so a network
-# hiccup here can no longer produce a half-installed build.
+# --offline: every tarball is already in the store, and the pinned pnpm itself is
+# already in the deps layer, so this step needs no network at all. Verified by
+# running it under `--network none`.
 RUN pnpm install --frozen-lockfile --offline --store-dir=/pnpm/store
 # Compile @juneflow/db to dist/ FIRST: the prod deploy packs it under
 # node_modules, where node refuses to type-strip raw .ts

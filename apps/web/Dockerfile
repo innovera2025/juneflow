@@ -16,11 +16,13 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /repo
 
-# ---- deps: warm the pnpm store from the LOCKFILE ALONE ----------------------
-# Same reasoning as apps/api/Dockerfile: `pnpm fetch` reads only pnpm-lock.yaml,
-# so a source edit no longer invalidates the dependency layer.
+# ---- deps: warm the pnpm store from the LOCKFILE + THE PIN ------------------
+# Same reasoning as apps/api/Dockerfile, including why package.json is here: it
+# carries the `packageManager` pin, and without it this stage and the next run
+# different pnpm versions — with the next one fetching its pinned pnpm from the
+# registry, defeating the `--offline` on the line below.
 FROM base AS deps
-COPY pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml ./
 RUN pnpm fetch --store-dir=/pnpm/store
 
 # ---- build ------------------------------------------------------------------
