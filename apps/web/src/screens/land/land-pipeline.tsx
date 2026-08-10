@@ -11,9 +11,12 @@
  * (title/tambon/amphoe/prov/owner = the merged LA-2 display columns). This screen ships the
  * honest kanban:
  *   - breadcrumb / title / subtitle are the prototype's (land.pipeline.* dict keys);
- *   - the two header actions (Export / add-plot) are honest-DISABLED — Export has no
- *     endpoint (dropped mock, mirror land-bank) and the add-plot form is out of this read
- *     scope (POST /land/plots exists but the write round wires the form later);
+ *   - the two header actions (Export / add-plot) are honest-DISABLED, but NEITHER is
+ *     disabled for a missing endpoint — that reason was FALSE and is retired: Export is
+ *     contract-DECLARED (POST /exports) and mounted NOWHERE in apps/api (B-351), and
+ *     POST /land/plots IS mounted, so what blocks add-plot is the unported LandPlotForm.
+ *     The evidence, with its exact line citations, lives on the two button comments below
+ *     and is deliberately NOT restated here — one site, so the two cannot drift apart;
  *   - the 4 KPI cards are REAL, client-derived from the loaded plots (in-pipeline count =
  *     stage != close, total area in rai, total budget = summed value over non-closed plots,
  *     pending deals = stage in {nego, deal, dd});
@@ -33,8 +36,9 @@
  * labels the stage the SERVER returned, never a client-predicted next stage; the register is
  * invalidated so the card actually moves columns. The action is not rendered at the terminal
  * stage (land.jsx L311 `plot.stage !== "close"`).
- * STILL honest-DISABLED, and each for its own reason: Export (no endpoint anywhere) and
- * add-plot (POST /land/plots exists, but LandPlotForm is a separate port).
+ * STILL honest-DISABLED, and each for its own reason — neither of which is a missing
+ * endpoint: Export is declared in the contract and mounted nowhere (B-351); add-plot has a
+ * mounted POST /land/plots and an unported LandPlotForm. See the two button comments.
  *
  * Detail rows with NO wire source render an em-dash, never a plausible default: the project
  * name resolves through GET /projects (never a raw uuid) and the plot id is the server uuid,
