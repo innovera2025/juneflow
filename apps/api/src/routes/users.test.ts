@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { users, roles } from "@juneflow/db";
+import { users, roles, subscriptions } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import type { ResetDeliveryMessage } from "../auth-provisioning.js";
@@ -35,6 +35,12 @@ interface Deleted {
   table: unknown;
   where: SQL | undefined;
 }
+interface Locked {
+  table: unknown;
+  mode: string;
+  /** How many writes had already been recorded when the lock was taken. */
+  writesBefore: number;
+}
 
 // Realistic stub: rows keyed by table, filtered by the captured WHERE. The
 // company_id predicate is always present; a non-company param (id/email/role_id)
@@ -46,6 +52,10 @@ function stubDb(
   captured: Captured[] = [],
   inserted: Inserted[] = [],
   deleted: Deleted[] = [],
+  // B-363: every `SELECT … FOR <mode>` the request took, in order — the seat lock
+  // is a row lock, so a test has to be able to see it was taken AT ALL and on WHICH
+  // table (the shape `selectForUpdate` compiles to: .where().orderBy().for("update")).
+  locked: Locked[] = [],
 ): Db {
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
@@ -63,13 +73,27 @@ function stubDb(
       );
     });
   };
+  // A read result that is awaitable AND carries the locking tail
+  // (`.orderBy(...).for("update")`) TenantDb.selectForUpdate appends.
+  const resultFor = (table: unknown, where: SQL | undefined) => {
+    const result = {
+      orderBy: () => result,
+      for: (mode: string) => {
+        locked.push({ table, mode, writesBefore: inserted.length + deleted.length });
+        return result;
+      },
+      then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) =>
+        Promise.resolve(selectFrom(table, where)).then(onOk, onErr),
+    };
+    return result;
+  };
   const builderFor = (table: unknown) => {
     const builder = {
       $dynamic: () => builder,
       innerJoin: () => builder,
       where: (where: SQL) => {
         captured.push({ table, where });
-        return Promise.resolve(selectFrom(table, where));
+        return resultFor(table, where);
       },
       then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
         captured.push({ table, where: undefined });
@@ -79,7 +103,7 @@ function stubDb(
     return builder;
   };
   let seq = 0;
-  return {
+  const handle: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
       values: (values: Record<string, unknown>) => ({
@@ -97,7 +121,18 @@ function stubDb(
         return Promise.resolve([]);
       },
     }),
-  } as unknown as Db;
+  };
+  // B-363: the seat decision + the `user` insert now run inside ONE transaction.
+  // The stub runs the callback against ITSELF (the gr.test.ts / inventory.test.ts
+  // precedent), so every write still lands in the capture arrays.
+  //
+  // BE CLEAR ABOUT WHAT THIS MODELS. It gives the handler a transaction SHAPE and a
+  // lock SHAPE. It does NOT roll back and it does not block, so NO test in this file
+  // can prove the exactly-one-winner property — that is the live harness's job
+  // (4 concurrent invites, separate OS processes, one free seat), reported in the
+  // commit rather than implied here.
+  handle.transaction = (cb: (tx: unknown) => unknown) => cb(handle);
+  return handle as unknown as Db;
 }
 
 function paramsOf(where: SQL | undefined): unknown[] {
@@ -560,5 +595,132 @@ describe("POST /api/v1/users — B-349 seat quota", () => {
     const res = await inviteWith(guardWith(5, 5), [[roles, [roleRow]], [users, [caller, existing]]]);
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("DUPLICATE_EMAIL");
+  });
+});
+
+// --- B-363: the seat meter is no longer a TOCTOU ---------------------------
+// B-349 shipped `quota.check` -> INSERT with nothing between them. Live, 4
+// concurrent invites against ONE free seat produced `cap=16 before=15 after=17`
+// — two 201s for one seat. ai-qto.ts consumeAiCredit had already solved exactly
+// this (lock the meter row, re-decide under it) in the same commit; only one of
+// the two sold dimensions got the treatment.
+describe("POST /api/v1/users — B-363 the seat lock", () => {
+  const guardCounting = (limit: number, used: () => number, calls: number[] = []) =>
+    new QuotaGuard({
+      resolver: {
+        async resolve() {
+          calls.push(Date.now());
+          return { limit, used: used() };
+        },
+      },
+      upgradeUrl: "https://upgrade.test",
+    });
+
+  const invite = async (opts: {
+    quota: QuotaGuard;
+    /** The tenant's user rows — what the count UNDER THE LOCK will see. */
+    seated?: unknown[];
+    inserted?: Inserted[];
+    locked?: Locked[];
+    deleted?: Deleted[];
+  }) =>
+    (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(
+          [[roles, [roleRow]], [users, opts.seated ?? [caller]]],
+          COMPANY,
+          [],
+          opts.inserted ?? [],
+          opts.deleted ?? [],
+          opts.locked ?? [],
+        ),
+        quota: opts.quota,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+  it("takes a FOR UPDATE lock on `subscription` BEFORE any row is written", async () => {
+    const inserted: Inserted[] = [];
+    const locked: Locked[] = [];
+    const res = await invite({ quota: guardCounting(5, () => 4), inserted, locked });
+    expect(res.statusCode).toBe(201);
+
+    const lock = locked.find((l) => l.table === subscriptions);
+    expect(lock, "the invite must lock the subscription row").toBeTruthy();
+    expect(lock!.mode).toBe("update"); // FOR UPDATE — not a plain read
+    // …and it is taken before the `user` INSERT, so the decision that follows it
+    // is the one the winner's commit is measured against.
+    expect(lock!.writesBefore).toBe(0);
+    expect(inserted.find((i) => i.table === users)).toBeTruthy();
+  });
+
+  /**
+   * THE LOSER'S VIEW, which is the whole point of the lock: the pre-check saw a
+   * free seat (`limit 2, used 1`), and by the time this request holds the
+   * subscription row the tenant really has 2 users — the winner committed while we
+   * waited. The count that decides is the one taken UNDER the lock; decide from the
+   * pre-check instead and this invite is a 201 for a seat that is already sold.
+   */
+  const loserSetup = {
+    quota: guardCounting(2, () => 1),
+    seated: [caller, { ...caller, id: "u-winner", email: "winner@juneflow.co.th" }],
+  };
+
+  it("decides from the count taken UNDER the lock, not from the pre-check", async () => {
+    const inserted: Inserted[] = [];
+    const res = await invite({ ...loserSetup, inserted });
+    expect(res.statusCode).toBe(402);
+    expect(res.json().code).toBe("QUOTA_EXCEEDED");
+    expect(inserted.find((i) => i.table === users)).toBeUndefined();
+  });
+
+  it("a refusal under the lock writes NOTHING — no dictionary row, no credential, no token", async () => {
+    const inserted: Inserted[] = [];
+    const locked: Locked[] = [];
+    const res = await invite({ ...loserSetup, inserted, locked });
+    expect(res.statusCode).toBe(402);
+    expect(res.json()).toEqual({
+      code: "QUOTA_EXCEEDED",
+      message: "Quota exceeded for users",
+      upgrade_url: "https://upgrade.test",
+    });
+    // The lock WAS taken (the refusal is a decision, not a skipped path)…
+    expect(locked.find((l) => l.table === subscriptions)).toBeTruthy();
+    // …and the transaction wrote nothing.
+    expect(inserted.find((i) => i.table === users)).toBeUndefined();
+    expect(credentials.accounts.size).toBe(0);
+    expect(credentials.tokens.size).toBe(0);
+    expect(delivered).toHaveLength(0);
+  });
+
+  it("asks the RESOLVER exactly once — never a second pooled connection inside the transaction", async () => {
+    // Measured hazard, not style: SubscriptionQuotaResolver builds its own TenantDb
+    // over the ROOT POOLED handle. Calling it inside the transaction makes a request
+    // that already holds one connection wait for another; at 12 concurrent invites
+    // the first cut of this fix deadlocked the pool (pg_stat_activity: 11 active +
+    // 1 "idle in transaction"). The limit is read ONCE, before the transaction.
+    const calls: unknown[] = [];
+    const quota = new QuotaGuard({
+      resolver: {
+        async resolve() {
+          calls.push(1);
+          return { limit: 5, used: 1 };
+        },
+      },
+      upgradeUrl: "https://upgrade.test",
+    });
+    const res = await invite({ quota });
+    expect(res.statusCode).toBe(201);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("the seat lock governs `users` only — it never locks another tenant table", async () => {
+    const locked: Locked[] = [];
+    await invite({ quota: guardCounting(-1, () => 0), locked });
+    expect(locked.every((l) => l.table === subscriptions)).toBe(true);
   });
 });
