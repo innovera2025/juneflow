@@ -15,11 +15,12 @@
 //     cannot be made true: there is no certificate column on pm_workorder, the close
 //     handler's own comment says close never invents one (apps/api/src/routes/pm.ts
 //     L753-760), and LINE is a verified no-op stub (lineNotifyStub, B-108b). The
-//     confirmation here is the STATE CHANGE — the pad shows the accepted signature
-//     and the bar reads pm.closedNote, "closed · the customer signed for the work",
-//     which is now literally what happened — plus a pop back to the job list. That
-//     is the merged st-receive (B-266) precedent: "confirmation is the state change
-//     plus Navigator.maybePop, not a screen announcing effects nobody performs".
+//     confirmation here is the STATE CHANGE, and nothing else: the pad renders the
+//     accepted signature and the bar reads pm.closedNote ("closed - the customer
+//     signed for the work"), which is now literally what happened. That follows the
+//     merged st-receive (B-266) precedent — "confirmation is the state change, not a
+//     screen announcing effects nobody performs" — without its pop; see _resolve for
+//     why the pop does not carry over.
 //   * the CTA (L213) reads "close PM job + send report" — close **and send a
 //     report**. The report half is that same LINE promise, so the prototype's label
 //     stays dropped the way pm-notes dropped its own (B-285). What ships in its place
@@ -316,6 +317,18 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
     await _resolve(opId, report);
   }
 
+  /// Settle where the write stands and show it.
+  ///
+  /// NOTHING is navigated. The st-receive (B-266) precedent pops on success —
+  /// "confirmation is the state change plus Navigator.maybePop, not a screen
+  /// announcing effects nobody performs" — but the reason it pops does not hold here,
+  /// on two counts. First, that screen had nothing TRUE to show, whereas this one now
+  /// does: the pad renders the accepted signature and the bar reads pm.closedNote.
+  /// Second, popping would not deliver the prototype's "back to the job list"
+  /// (mobile-pm.jsx L191) at all — this screen is pushed from pm-notes, so a pop lands
+  /// on the maintenance-log form for the job just closed, which is less useful than
+  /// staying. Staying also keeps all three outcomes consistent: closed, queued and
+  /// failed each leave the technician looking at the result.
   Future<void> _resolve(String opId, DrainReport report) async {
     final List<SyncOperation> due = await widget.repo.due();
     final PmCloseState next = resolveCloseState(opId, report, due);
@@ -336,13 +349,6 @@ class _PmCloseScreenState extends State<PmCloseScreen> {
         }
       }
     });
-    if (next == PmCloseState.closed) {
-      // The prototype's success takeover is dropped (see the file header); the
-      // confirmation is this state change plus a return to the job list. If there is
-      // nothing to pop (the bare-tab route), the screen simply stays on its own
-      // accepted state, which is equally true.
-      await Navigator.maybePop(context);
-    }
   }
 
   @override
