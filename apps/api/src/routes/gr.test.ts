@@ -31,6 +31,9 @@ import {
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { isUniqueViolation, violatedConstraint } from "./gl-post.js";
+// B-TBD-QTY: the over-receipt tolerance is asserted THROUGH the constant, never
+// against a literal — Wei's final figure must cost one line, not a test sweep.
+import { GR_OVER_RECEIPT_TOLERANCE_PCT } from "./gr.js";
 import { IDEMPOTENCY_KEY_TYPE_MESSAGE, readIdempotencyKey } from "./procurement.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
@@ -887,6 +890,198 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(row.price).toBe("0.00");
   });
 
+  // ── B-TBD-QTY: the QUANTITY has a ceiling, because it posts to the ledger ─────
+  //
+  // B-360 made the server own the receipt's PRICE and the set of lines it may price
+  // from, and left the QUANTITY wide open. Measured live at 80084a7: an order of
+  // 10,000 × 142 received with qty_ok 99,999,999 answered 201 and posted JV-2026-0435
+  // Dr 5020 / Cr 2010 14,199,999,858.00 — 14.2 BILLION on a 1,420,000 order.
+  //
+  // Every assertion here is written against GR_OVER_RECEIPT_TOLERANCE_PCT and never
+  // against a literal, so Wei's final figure changes the tests with the constant.
+  // ORDERED is 100 throughout, which makes the ceiling a whole number for any
+  // sensible percentage.
+  const ORDERED = 100;
+  const CEILING = (ORDERED * (100 + GR_OVER_RECEIPT_TOLERANCE_PCT)) / 100;
+  /** The fixture every over-receipt test shares: an order for ORDERED units @300. */
+  const overReceiptDb = (opts: {
+    prior?: unknown[];
+    inserted?: Inserted[];
+    captured?: Captured[];
+    orderedQty?: string;
+  }) =>
+    stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        // THE BASIS. pr_item.qty is the only SERVER-owned ordered quantity — the
+        // `ordered_qty` on the wire is the client's own number and falls back to its
+        // own qty_ok, so a guard reading that would compare a claim to itself.
+        [prItems, [prLine("l0", opts.orderedQty ?? String(ORDERED))]],
+        [grs, [gr("new-0", { poId: PO, received: 0 })]],
+        [grItems, cumulativeGrItems(opts.prior ?? [], [])],
+        [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
+        [vendors, [vendorRow]],
+      ],
+      inserted: opts.inserted,
+      captured: opts.captured,
+    });
+  const receipt = (qtyOk: number, claimedOrdered = qtyOk) => ({
+    po_id: PO,
+    lines: [
+      {
+        qty_ok: qtyOk,
+        name: "ปูนซีเมนต์",
+        ordered_qty: claimedOrdered,
+        boq_item_id: BOQ_ITEM,
+      },
+    ],
+  });
+  /** A prior receipt's line against the same BOQ item (what is already received). */
+  const priorLine = (id: string, received: number) => ({
+    ...grItem(id, `g-${id}`, ORDERED, received, "300.00"),
+    boqItemId: BOQ_ITEM,
+  });
+
+  it("THE EXPLOIT, closed: 99,999,999 against an order of 100 is 400, and NOTHING is written", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: overReceiptDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      // THE DISCRIMINATOR: the body claims it ordered 99,999,999 too. A guard reading
+      // gr_item.ordered_qty would compare the client's number to the client's number
+      // and pass this unchanged — which is why the basis has to be pr_item.qty.
+      payload: receipt(99_999_999, 99_999_999),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("over-receipt tolerance");
+    // No priced line and no stock movement — both are written AFTER the ceiling, so
+    // their absence is a real property this stub can see.
+    expect(inserted.find((w) => w.table === grItems)).toBeFalsy();
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+    // THE `gr` HEADER ROW IS A STUB ARTEFACT HERE, and saying so is the point. The
+    // ceiling is checked AFTER the header insert (it must be — the insert is what
+    // trips gr_idempotency_uq, so moving the check in front of it would answer a
+    // concurrent B-261 replay with a 400 instead of the storekeeper's own receipt).
+    // The throw rolls that insert back on real Postgres; this stub's
+    // `transaction = (cb) => cb(handle)` gives a transaction SHAPE and does NOT roll
+    // back, exactly as this file's header says, so the capture still holds the row.
+    // "No gr row exists" is therefore the LIVE spec's assertion, read back out of
+    // Postgres, and is deliberately NOT claimed here.
+    expect(inserted.find((w) => w.table === grs)).toBeTruthy();
+  });
+
+  it("a legitimate receipt still works: 3 against an order of 100 is 201, priced by the server", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: overReceiptDb({ inserted }) })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(3) });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().money).toBe(900); // 3 × 300.00, the server's price
+    expect(inserted.find((w) => w.table === grItems)).toBeTruthy();
+  });
+
+  it("AT the ceiling is 201 — the tolerance PERMITS over-receipt, it is not a hard cap", async () => {
+    // The prototype deliberately allows over-receipt: mobile-field.jsx:46 clamps only
+    // the LOWER bound, :76 renders `เกิน {n}` in INFO tone, and an over-receipt takes
+    // the green "ยืนยันรับของครบ" path. A hard cap at ORDERED would contradict that.
+    expect(CEILING).toBeGreaterThan(ORDERED); // the probe is discriminating
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: overReceiptDb({}) })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(CEILING) });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("ONE UNIT over the ceiling is 400 — the boundary, from the other side", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: overReceiptDb({}) })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(CEILING + 1) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("over-receipt tolerance");
+  });
+
+  it("CUMULATIVE, not per-request: 40 already received + 40 more clears, + the rest does not", async () => {
+    // A per-request check would pass BOTH of these. `PO → N GR` is the spec's own
+    // cardinality (data-dictionary.html:65) and gr.create.balanceRemaining draws the
+    // balance down per line across receipts, so partial receipts are the normal case.
+    const under = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: overReceiptDb({ prior: [priorLine("p0", 40)] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(40) });
+    expect(under.statusCode).toBe(201); // 40 + 40 = 80, well under
+
+    const over = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: overReceiptDb({ prior: [priorLine("p0", 40)] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(CEILING - 40 + 1) });
+    expect(over.statusCode).toBe(400); // 40 + (ceiling − 40 + 1) = ceiling + 1
+    expect(over.json().message).toContain("over-receipt tolerance");
+  });
+
+  it("splitting one line in two does not evade the ceiling — a request is summed per boq_item", async () => {
+    const half = CEILING / 2;
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: overReceiptDb({}) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [
+          { qty_ok: half + 1, name: "a", ordered_qty: half + 1, boq_item_id: BOQ_ITEM },
+          { qty_ok: half + 1, name: "b", ordered_qty: half + 1, boq_item_id: BOQ_ITEM },
+        ],
+      },
+    });
+    // Neither line alone exceeds the ceiling; together they do by 2.
+    expect(half + 1).toBeLessThan(CEILING);
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("only ACTIVE receipts count — the cumulative read filters on gr.status, so a return frees its quantity", async () => {
+    // A returned/cancelled receipt has had its stock reversed and its goods have gone
+    // back to the vendor. The row source here is where-BLIND, so it cannot prove the
+    // filter by returning fewer rows — the proof is the COLUMN in the compiled SQL
+    // (the B-362 shape: a value-only fixture cannot tell "no predicate" from "a
+    // different predicate").
+    const captured: Captured[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: overReceiptDb({ captured, prior: [] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(CEILING) });
+    expect(res.statusCode).toBe(201);
+    const cumulative = captured.filter(
+      (c) => c.table === grItems && sqlOf(c.where).includes('"status"'),
+    );
+    expect(cumulative).toHaveLength(1);
+    expect(paramsOf(cumulative[0]!.where)).toContain("received");
+  });
+
+  it("an UN-QUANTIFIED line (pr_item.qty = 0) has NO ceiling — a tolerance on 0 would make it unreceivable", async () => {
+    // pr_item.qty defaults to '0' and a WO's lump-sum งานเหมา has no BOQ qty source at
+    // all. 0 × (1 + tol) = 0, so a naive guard would refuse EVERY receipt against such
+    // an order — a worse break than the hole. Same answer the auto-close already gives
+    // ("an un-quantified order never auto-closes", GAP 3). THE RESIDUAL IS REAL and is
+    // pinned here rather than hidden: this line has no quantity ceiling.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: overReceiptDb({ orderedQty: "0" }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(99_999_999) });
+    expect(res.statusCode).toBe(201);
+  });
+
   // ── B-323 round 2: the PRODUCTION tie the seed can never reproduce ────────────
   //
   // The seed hands every gr_item a distinct created_at (seed/stamp.ts), so a
@@ -1718,6 +1913,24 @@ const keyedGrs =
     return unkeyed;
   };
 
+/**
+ * B-TBD-QTY: a gr_item row source that can tell the create path's CUMULATIVE read
+ * — "everything already received against this anchor", whose predicate names
+ * `gr.status` — from a read of ONE receipt's own lines (grItemsFor / the replay
+ * envelope), whose predicate names `gr_item.gr_id`.
+ *
+ * WHY IT HAD TO EXIST. The row-blind stub returns one row set per table, so a single
+ * `[grItems, …]` entry served BOTH reads. A fixture that meant "this is the first
+ * receipt against the order" was therefore silently also saying "1000 units have
+ * already been received against it" — which the over-receipt ceiling then, correctly,
+ * refused. Reading the COLUMN out of the compiled SQL is how the fixture sees the
+ * difference (the B-362 precedent, and the reason sqlOf exists).
+ */
+const cumulativeGrItems =
+  (prior: unknown[], own: unknown[]) =>
+  (where: SQL | undefined): unknown[] =>
+    sqlOf(where).includes('"status"') ? prior : own;
+
 /** Every grs read this request made whose WHERE bound the client key. */
 const keyedReads = (captured: Captured[], key = IDEMP_KEY): Captured[] =>
   captured.filter((c) => c.table === grs && paramsOf(c.where).includes(key));
@@ -1938,7 +2151,10 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
         [projects, [project]],
         [prItems, [prLine("l0", "1000")]], // ordered 1000 → a 1000 receipt is FULL
         [grs, keyedGrs({ [IDEMP_KEY]: stored }, [original])],
-        [grItems, [originalItem]],
+        // B-TBD-QTY: NOTHING has been received against this order yet (request 1 is
+        // the first receipt) — `originalItem` is what the REPLAY re-reads back as
+        // its own line, and must not double as "already received".
+        [grItems, cumulativeGrItems([], [originalItem])],
         [defectReports, [originalDefect]],
         [vendors, [vendorRow]],
         [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
@@ -1966,9 +2182,18 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     expect(res1.statusCode).toBe(201);
     expect(res1.json().partial).toBe(false); // the order is fully received…
     // …so this very handler closed the PO — the state that used to strand the replay.
-    const closes = updated.filter((u) => u.table === pos);
+    // B-TBD-QTY: `po` now takes TWO writes on a priced receipt — the ANCHOR LOCK
+    // (updated_at only) and the auto-close — so the close is selected by the column
+    // it sets rather than by being the only po write.
+    const closes = updated.filter((u) => u.table === pos && "status" in u.set);
     expect(closes).toHaveLength(1);
     expect(closes[0]!.set).toEqual({ status: "closed" });
+    // …and the lock is the FIRST of the two. Order is the whole guarantee: it has to
+    // precede the gr insert, whose FK takes KEY SHARE on this same row (upgrading
+    // that from two transactions at once is a deadlock, not a wait).
+    const poWrites = updated.filter((u) => u.table === pos);
+    expect(poWrites).toHaveLength(2);
+    expect(Object.keys(poWrites[0]!.set)).toEqual(["updatedAt"]);
 
     // The response never reached the client (the SyncProcessor's lost 201). The
     // world moved on exactly as the handler left it: the PO is closed, the receipt
@@ -1988,7 +2213,10 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     expect(inserted.filter((w) => w.table === grs)).toHaveLength(1);
     expect(inserted.filter((w) => w.table === grItems)).toHaveLength(1);
     expect(inserted.filter((w) => w.table === defectReports)).toHaveLength(1);
-    expect(updated.filter((u) => u.table === pos)).toHaveLength(1); // no second close
+    // B-TBD-QTY: the CLOSE, selected by column — the replay takes no anchor lock at
+    // all (it never enters the transaction), so the po write count would otherwise
+    // conflate "no second close" with "no second lock".
+    expect(updated.filter((u) => u.table === pos && "status" in u.set)).toHaveLength(1);
   });
 
   it("the same key against a DIFFERENT PO does NOT hand back the first PO's receipt (409, never someone else's document)", async () => {

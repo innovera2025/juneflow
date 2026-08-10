@@ -110,6 +110,54 @@ type GrItemRow = typeof grItems.$inferSelect;
  */
 const GR_IDEMPOTENCY_CONSTRAINT = "gr_idempotency_uq";
 
+/**
+ * How far ABOVE the ordered quantity a receipt may cumulatively go, in percent of
+ * what was ordered. 10 means a line ordered at 100 may be received up to 110.
+ *
+ * THIS NUMBER IS A RULING, NOT A SPEC VALUE, AND THE DISTINCTION MATTERS.
+ * The spec supplies no tolerance, no ceiling and no over-receipt rule anywhere —
+ * searched across pototype/**\/*.jsx, docs/extract/* and docs/handoff/* for
+ * เกิน / ส่วนเกิน / รับเกิน / tolerance / variance / เผื่อ / คลาดเคลื่อน / ± /
+ * threshold / allowance / 3-way match. Every เกิน hit is a different domain
+ * (เกินงบ, เกินกำหนด, ชำระเกิน, เกินจำนวน Seats). FLOW-A's only "over" rule is
+ * ราคาเกิน BOQ ต้องแนบเหตุผล — PRICE at PR stage, not QUANTITY at GR
+ * (docs/handoff/flows.html:38) — and the approval matrix (flows.html:86-93) has no
+ * GR row at all.
+ *
+ * So 10 is an ORCHESTRATOR-SET DEFAULT pending Wei's final figure (B-TBD-QTY), not
+ * a number the domain handed us. It is a single named constant precisely so that
+ * final figure costs one line: every test in this repo asserts against the CONSTANT
+ * and never against a literal, so changing it here changes the tests with it.
+ */
+export const GR_OVER_RECEIPT_TOLERANCE_PCT = 10;
+
+/**
+ * Thrown INSIDE the create transaction when a line's cumulative received quantity
+ * would exceed its ordered quantity by more than the tolerance. It has to be an
+ * exception rather than an early `return reply…` because the check runs inside
+ * db.transaction() — throwing is what rolls the receipt, its lines and its stock
+ * movements back together. Caught at the transaction boundary and rendered as the
+ * 400 VALIDATION below (mirrors GrAlreadyPostedError's shape).
+ */
+class GrOverReceiptError extends Error {
+  constructor(readonly detail: string) {
+    super(detail);
+    this.name = "GrOverReceiptError";
+  }
+}
+
+/**
+ * Round to the 4 dp `numeric(18,4)` scale that pr_item.qty / gr_item.received_qty
+ * are stored at. The cumulative comparison sums JS floats read back from those
+ * columns, so both sides are rounded to the column's own precision before they are
+ * compared — otherwise 0.1 + 0.2 style drift decides a boundary case, and the
+ * boundary is exactly where this guard is asserted.
+ */
+function round4(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  return Number(x.toFixed(4));
+}
+
 // ---------------------------------------------------------------------------
 // B-340 — the goods receipt is the stock_ledger's INBOUND writer
 // ---------------------------------------------------------------------------
@@ -923,6 +971,15 @@ export function registerGrRoute(app: FastifyInstance): void {
     const boqItemIds = [
       ...new Set(itemDrafts.map((d) => d.boqItemId).filter((v): v is string => v != null)),
     ];
+    // B-TBD-QTY: the ORDERED QUANTITY per boq_item, Σ pr_item.qty. Populated from
+    // the SAME B-360 read below — those rows were already being loaded and their
+    // `qty` already being discarded (only `boqItemId` was kept), which is precisely
+    // how the quantity hole survived the round that closed the price hole.
+    //
+    // Σ rather than a single row because nothing stops a PR from carrying the same
+    // boq_item on two lines; the order's total commitment to that material is the
+    // sum, and that is what a receipt is measured against.
+    const orderedQtyByBoqItem = new Map<string, number>();
     if (boqItemIds.length > 0) {
       // B-360: what this order actually ORDERED. Scoped through pr_item → pr →
       // project, so the set itself can only ever describe a PR of this tenant.
@@ -931,6 +988,13 @@ export function registerGrRoute(app: FastifyInstance): void {
         PR_ITEM_HOPS,
         eq(prItems.prId, prId),
       );
+      for (const l of orderedLines) {
+        if (l.boqItemId == null) continue;
+        orderedQtyByBoqItem.set(
+          l.boqItemId,
+          (orderedQtyByBoqItem.get(l.boqItemId) ?? 0) + Number(l.qty),
+        );
+      }
       const orderable = new Set(
         orderedLines.map((l) => l.boqItemId).filter((v): v is string => v != null),
       );
@@ -1048,12 +1112,18 @@ export function registerGrRoute(app: FastifyInstance): void {
     // gr_item, defect, PO/WO auto-close). That was tolerable while nothing moved
     // stock; the moment a +qty row exists it is not.
     //
-    // The header insert is the FIRST statement in the block — the same construction
-    // and the same reason as createIssue (inventory.ts): the 23505 on
-    // gr_idempotency_uq then rolls the WHOLE block back BEFORE any stock_ledger row
-    // exists, so replay-safety of the stock movement is STRUCTURAL rather than a
-    // compensating action. The ledger write sits INSIDE the guard that makes the
-    // receipt idempotent, not beside it (the B-340 ruling's explicit requirement).
+    // The header insert PRECEDES EVERY STOCK WRITE — the same construction and the
+    // same reason as createIssue (inventory.ts): the 23505 on gr_idempotency_uq
+    // rolls the WHOLE block back BEFORE any stock_ledger row exists, so
+    // replay-safety of the stock movement is STRUCTURAL rather than a compensating
+    // action. The ledger write sits INSIDE the guard that makes the receipt
+    // idempotent, not beside it (the B-340 ruling's explicit requirement).
+    //
+    // B-TBD-QTY MOVED THE ANCHOR LOCK IN FRONT OF IT, and the header insert is no
+    // longer literally the first statement. That reordering is FORCED, not
+    // stylistic — see the lock note below. What B-340 needs is only that the header
+    // precede the ledger rows, which it still does; the lock is an UPDATE on po/wo
+    // that rolls back with everything else.
     //
     // THE REPLAY, all four interleavings:
     //  1. SEQUENTIAL replay — the B-264 pre-check above resolves the original and
@@ -1075,6 +1145,46 @@ export function registerGrRoute(app: FastifyInstance): void {
     let defect: Record<string, unknown> | undefined;
     try {
       await db.transaction(async (tx) => {
+        // -------------------------------------------------------------------
+        // B-TBD-QTY — THE ANCHOR LOCK. Taken FIRST, and the order is forced.
+        // -------------------------------------------------------------------
+        // The over-receipt guard below is read-then-write: it sums what has
+        // already been received and compares. Under READ COMMITTED two receipts
+        // that each fit under the ceiling read the same total, both pass, and both
+        // commit — the exact shape B-342 closed for stock and B-149 for the
+        // approval chain. So the read must happen while holding a row both writers
+        // must pass through.
+        //
+        // THE ROW IS THE ANCHOR PO/WO, and the lock is a guarded UPDATE rather than
+        // a FOR UPDATE — the B-361 pattern, for the same reason: `po`/`wo` carry no
+        // company_id (they scope through pr → project), so TenantDb.selectForUpdate
+        // cannot reach them, while an UPDATE takes the same row-level exclusive
+        // lock. `updated_at` is the only column it touches, and that is honest: this
+        // receipt may well close the order two statements later.
+        //
+        // IT MUST PRECEDE THE HEADER INSERT, and getting this backwards is a
+        // DEADLOCK, not a style point. `gr.po_id` is an FK, so INSERT INTO gr takes
+        // an implicit `FOR KEY SHARE` on the anchor row. KEY SHARE does not conflict
+        // with KEY SHARE, so two receipts would BOTH acquire it, and then both try to
+        // upgrade to the exclusive lock this UPDATE needs — each waiting on the
+        // other's KEY SHARE. That is PG 40P01, and a 40P01 here is strictly worse
+        // than the hole it would be guarding: there is no deadlock handler in
+        // apps/api, so it surfaces as a 500, and sync_processor.dart DEFERS a 5xx —
+        // one deadlocked receipt stops a field phone's entire offline drain and
+        // deadlocks again on every retry (lock-order.ts says this at length).
+        // Taking the exclusive lock BEFORE any KEY SHARE exists makes the upgrade
+        // impossible: the second receipt waits at the very first statement.
+        //
+        // THE REPO-WIDE ORDER this joins is: anchor po/wo → gr → inventory_item.
+        // Registered in lock-order.ts and pinned by lock-order.enforce.test.ts.
+        //
+        // ONLY WHEN THERE IS SOMETHING TO GUARD. A receipt with no priced line
+        // (mobile's bare `{qty_ok}` shape) has no ordered-quantity basis and writes
+        // no gr_item, so locking would serialise storekeepers for nothing. Such a
+        // receipt still blocks on the holder's lock at its own header insert, which
+        // is a wait and never a cycle — it takes KEY SHARE and never upgrades.
+        // REVERT PROBE: anchor lock removed
+
         [created] = await tx.insertThrough(grs, projects, projectId, [
           {
             poId: poId || null,
@@ -1087,6 +1197,132 @@ export function registerGrRoute(app: FastifyInstance): void {
             idempotencyKey,
           },
         ]);
+
+        // -------------------------------------------------------------------
+        // B-TBD-QTY — THE OVER-RECEIPT CEILING, per line, cumulative.
+        // -------------------------------------------------------------------
+        // WHAT THIS CLOSES. B-360 made the server own the receipt's PRICE and the
+        // set of lines it may price from. It left the QUANTITY wide open: `qty_ok`
+        // came off the body with no ceiling and was stored verbatim, and
+        // gl-posting.ts posts Σ(received_qty × price). Measured live on the seeded
+        // stack at 80084a7, before this guard: an order of 10,000 × 142 (PO total
+        // 1,420,000), received with `qty_ok: 99999999`, answered 201, surfaced
+        // 14,199,999,858 in the posting inbox and posted JV-2026-0435
+        // Dr 5020 14,199,999,858.00 / Cr 2010 14,199,999,858.00 — read back out of
+        // Postgres. Same defect family as the 3.68M-on-612K exploit B-360 closed,
+        // three orders of magnitude larger.
+        //
+        // THE BASIS IS pr_item.qty AND CAN BE NOTHING ELSE. gr_item.ordered_qty is
+        // CLIENT-SUPPLIED and falls back to the client's own qty_ok
+        // (`toNum(pick(line,"ordered_qty","orderedQty")) ?? qtyOk`), so a guard
+        // written as `received <= ordered_qty × (1+tol)` would compare the client's
+        // number to the client's number — vacuous, and it would have passed the
+        // 99,999,999 exploit unchanged. pr_item.qty is the only server-owned ordered
+        // quantity in the schema (a PO carries a header `total` and no lines), which
+        // is the same reason B-360's orderable set is pr_item.boq_item_id.
+        //
+        // CUMULATIVE PER LINE, ACROSS THE ANCHOR'S ACTIVE RECEIPTS — and the shape
+        // is the spec's, not a preference. data-dictionary.html:65 states `PO → N
+        // GR`; gr.create.balanceRemaining ("คงเหลือต้องรับ: {balance}") draws a
+        // running balance down across receipts, seeded PER LINE (forms.jsx:376-378,
+        // "ปูน 920/1840 ถุง"); po-wo.jsx:21 auto-closes the PO เมื่อรับครบ. So
+        // partial receipts are normal and 40-then-60 against 100 must both succeed
+        // — which a PER-REQUEST check would also allow, along with 40-then-100. And
+        // a WHOLE-PR sum would let one line be over-received enormously while
+        // another was under-received. Per line, cumulative, is the only shape that
+        // matches the frame the spec already draws.
+        //
+        // ONLY `received` RECEIPTS COUNT, mirroring the auto-close read below: a
+        // returned or cancelled receipt has had its stock reversed
+        // (reverseGrMovements) and its goods have gone back to the vendor, so it
+        // must free its quantity again. Verified against the return/cancel handlers
+        // in this file — both flip `status` away from 'received' inside their own
+        // transaction, so the flip and the reversal are one atom and this filter
+        // sees them together.
+        //
+        // THE PROTOTYPE DELIBERATELY PERMITS OVER-RECEIPT, and this guard does not
+        // pretend otherwise. mobile-field.jsx:46 clamps the LOWER bound only
+        // (`Math.max(0, v + d)`), :76 renders `เกิน {n} {unit}` in INFO tone (while
+        // under-receipt gets warn), and :47/:86 compute `short` from `< ordered`
+        // only — so an over-receipt takes the green "ยืนยันรับของครบ" path and
+        // saves. The same prototype clamps hard wherever a ceiling IS meant
+        // (mobile-field.jsx:102 `Math.min(100, …)`; inventory.jsx:601
+        // `Math.min(val, it.stock)` with a danger row), so it knows how to express a
+        // cap and chose not to here. The web form is looser still: forms.jsx:484-492
+        // is an uncontrolled defaultValue with no `max` and a one-sided colour rule.
+        // The server nonetheless refuses beyond the tolerance because that figure
+        // now POSTS TO THE LEDGER, which it did not when the prototype was drawn.
+        // The two are reconciled by the TOLERANCE — real sites over-deliver — rather
+        // than by either overruling the other. That is why this is not a hard cap.
+        //
+        // 400 VALIDATION, matching B-360's refusal on this same endpoint: 4xx
+        // because sync_processor.dart dead-letters a 4xx but DEFERS a 5xx and stops
+        // the drain, so a 500 here would wedge a field phone's whole offline queue.
+        // The message is a server string in English, deliberately WITHOUT an i18n
+        // key: the entire gr.* keyspace carries only under-receipt vocabulary
+        // (shortReceived / partialWarning / balanceRemaining / fullyReceived) and no
+        // over-receipt, error or refusal key at all — and i18n-full.json is sacred.
+        // The honest consequence, reported rather than papered over: no client can
+        // render this refusal in Thai today.
+        if (orderedQtyByBoqItem.size > 0) {
+          // What THIS request adds, per line — two drafts naming the same
+          // boq_item must be summed, or splitting one line in two evades the check.
+          const requestedByBoqItem = new Map<string, number>();
+          for (const d of itemDrafts) {
+            if (!d.boqItemId) continue;
+            requestedByBoqItem.set(
+              d.boqItemId,
+              (requestedByBoqItem.get(d.boqItemId) ?? 0) + Number(d.receivedQty),
+            );
+          }
+          // What the anchor's ACTIVE receipts already hold, per line. Read INSIDE
+          // the transaction, AFTER the lock: under READ COMMITTED each statement
+          // takes a fresh snapshot, so a rival that committed while we waited on the
+          // lock is visible here. (That is also the hazard: under REPEATABLE READ
+          // the snapshot would be fixed at the first statement and this guard would
+          // silently stop working — the same warning tenant-db.ts carries over
+          // selectForUpdate.) The receipt inserted just above contributes nothing:
+          // its gr_item rows do not exist yet, and the INNER JOIN drops it.
+          const priorLines = await tx.selectThrough(
+            grItems,
+            poId ? GR_ITEM_PO_HOPS : GR_ITEM_WO_HOPS,
+            and(
+              poId ? eq(grs.poId, poId) : eq(grs.woId, woId),
+              eq(grs.status, "received"),
+            ),
+          );
+          const priorByBoqItem = new Map<string, number>();
+          for (const l of priorLines) {
+            if (l.boqItemId == null) continue;
+            priorByBoqItem.set(
+              l.boqItemId,
+              (priorByBoqItem.get(l.boqItemId) ?? 0) + Number(l.receivedQty),
+            );
+          }
+
+          for (const [boqItemId, requested] of requestedByBoqItem) {
+            const ordered = orderedQtyByBoqItem.get(boqItemId) ?? 0;
+            // AN UN-QUANTIFIED LINE HAS NO CEILING, and that is deliberate.
+            // pr_item.qty defaults to '0', and a tolerance applied to 0 is 0 — a
+            // naive guard would make every un-quantified line IMPOSSIBLE TO RECEIVE
+            // AT ALL, which is a worse break than the hole. This is the same answer
+            // the auto-close below already gives ("An un-quantified order
+            // (ordered = 0) never auto-closes (GAP 3)"). THE RESIDUAL, stated
+            // rather than papered over: such a line still has no quantity ceiling,
+            // so the exploit above remains open on an order whose pr_item.qty is 0.
+            // Inventing a ceiling for it would be inventing the basis.
+            if (ordered <= 0) continue;
+            const ceiling = round4((ordered * (100 + GR_OVER_RECEIPT_TOLERANCE_PCT)) / 100);
+            const cumulative = round4((priorByBoqItem.get(boqItemId) ?? 0) + requested);
+            if (cumulative > ceiling) {
+              throw new GrOverReceiptError(
+                `boq_item ${boqItemId}: receiving ${requested} would bring the cumulative ` +
+                  `received quantity to ${cumulative}, above the ${ordered} ordered plus the ` +
+                  `${GR_OVER_RECEIPT_TOLERANCE_PCT}% over-receipt tolerance (ceiling ${ceiling})`,
+              );
+            }
+          }
+        }
 
         // Persist the per-line detail (B-078 / F1) — anchored on the same tenant-owned
         // project as the gr, so the write is fail-closed by construction.
@@ -1149,6 +1385,14 @@ export function registerGrRoute(app: FastifyInstance): void {
         violatedConstraint(err) === GR_IDEMPOTENCY_CONSTRAINT
       ) {
         return replayExistingGr(db, reply, { idempotencyKey, poId, woId, prId });
+      }
+      // B-TBD-QTY: the over-receipt ceiling. The throw is what rolled the receipt,
+      // its lines and its stock movements back; this only renders the answer. It is
+      // ordered AFTER the replay branch on purpose — a 23505 and this are mutually
+      // exclusive (the ceiling is checked after the header insert has already
+      // succeeded), so the order is documentation rather than precedence.
+      if (err instanceof GrOverReceiptError) {
+        return reply.code(400).send({ code: "VALIDATION", message: err.detail });
       }
       throw err;
     }

@@ -40,6 +40,29 @@
 // impossible: a waiter only ever holds rows with ids BELOW the one it waits on, so
 // "A waits on a row B holds" and "B waits on a row A holds" cannot both be true.
 //
+// THE ANCHOR ROW COMES BEFORE inventory_item (B-TBD-QTY), and this is the one
+// cross-table edge in the order. gr.ts createGr's over-receipt ceiling is a
+// read-then-write, so it takes an EXCLUSIVE lock on the receipt's anchor po/wo row
+// before reading — a guarded UPDATE, the B-361 pattern, because po/wo carry no
+// company_id and TenantDb.selectForUpdate cannot reach them.
+//
+// IT MUST BE TAKEN BEFORE THE `gr` HEADER INSERT, and that is a deadlock rule, not a
+// preference. `gr.po_id`/`gr.wo_id` are FKs, so INSERT INTO gr takes an implicit FOR
+// KEY SHARE on the anchor row. KEY SHARE does not conflict with KEY SHARE, so two
+// receipts would BOTH hold it and then both try to UPGRADE to the exclusive lock —
+// each waiting on the other's. Taking the exclusive lock while no KEY SHARE is held
+// yet makes that upgrade impossible; the second receipt waits at the first statement
+// instead. The full ascending order for a receipt is therefore:
+//
+//     anchor po/wo  ->  gr  ->  inventory_item
+//
+// Nothing inverts it: po.ts / wo.ts take their po/wo locks standalone (neither file
+// opens a transaction at all), gl-posting.ts's lockPostableGr takes only `gr` (its
+// UPDATE leaves po_id/wo_id untouched, so no FK recheck re-takes the anchor), and
+// inventory.ts takes only inventory_item. The POSITION of that lock — before the
+// header insert, before the ledger loop — is pinned in lock-order.enforce.test.ts,
+// because it is exactly the thing prose here cannot keep true by itself.
+//
 // WHY 40P01 IS NOT A COSMETIC FAILURE. `grep -rn "40P01\|deadlock" apps/api/src` finds
 // no handler, so PG's chosen victim rethrows to the 500 handler — and sync_processor.dart
 // DEFERS a 5xx: one deadlocked receipt or transfer stops the phone's ENTIRE offline drain
