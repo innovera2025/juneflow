@@ -6,6 +6,12 @@
  * tenure badge tone/label + location composition. The reused money/area helpers
  * (plotValue / totalRai / raiText / millionsText) are covered by land-bank-rows.test.ts;
  * a couple of assertions here confirm the re-export wiring only.
+ *
+ * The last five describes cover the write round that turned the card back on: the stage
+ * resolution the toast labels with, the terminal guard that decides whether the advance
+ * control renders at all, the detail-modal composition (which must produce "" — an em-dash
+ * in the view — rather than a dangling separator or a confident zero), and the rejection
+ * classifier that keeps a failed advance from being reported as the terminal case.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -18,8 +24,17 @@ import {
   pendingCount,
   totalBudget,
   tenureToneHex,
+  detailTenureToneHex,
   tenureLabelKey,
   locationText,
+  stageById,
+  stageLabelKey,
+  canAdvance,
+  detailTitle,
+  detailSubtitle,
+  areaDetailText,
+  advanceErrorKind,
+  advanceErrorMessage,
   plotValue,
   totalRai,
   raiText,
@@ -50,6 +65,8 @@ function plot(over: Partial<PipelinePlot> = {}): PipelinePlot {
     title: "Plot Bangbuathong Zone C",
     amphoe: "Bangbuathong",
     prov: "Nonthaburi",
+    tambon: "Bangrakphatthana",
+    owner: "Somying Sapthawi",
     ...over,
   };
 }
@@ -68,8 +85,10 @@ describe("toPipelinePlot", () => {
         stage: "dd",
         tenure: "buy",
         title: "Plot Ratchaphruek Phase 4",
+        tambon: "Bangkhanun",
         amphoe: "Bangkruai",
         prov: "Nonthaburi",
+        owner: "Thidin Rungruang Co.",
         total_value: 163200000,
         deal_deposit: 16320000,
         transfer_fee: 3264000,
@@ -87,8 +106,10 @@ describe("toPipelinePlot", () => {
       stage: "dd",
       tenure: "buy",
       title: "Plot Ratchaphruek Phase 4",
+      tambon: "Bangkhanun",
       amphoe: "Bangkruai",
       prov: "Nonthaburi",
+      owner: "Thidin Rungruang Co.",
       totalValue: 163200000,
       dealDeposit: 16320000,
       transferFee: 3264000,
@@ -108,6 +129,8 @@ describe("toPipelinePlot", () => {
     expect(r.title).toBe("");
     expect(r.amphoe).toBe("");
     expect(r.prov).toBe("");
+    expect(r.tambon).toBe("");
+    expect(r.owner).toBe("");
   });
 
   it("does not consume created_at (not a card field)", () => {
@@ -253,5 +276,103 @@ describe("re-exported display helpers (wiring check)", () => {
   it("totalRai / raiText / millionsText render the prototype display strings", () => {
     expect(raiText(totalRai([plot({ areaSqm: 29760 }), plot({ areaSqm: 38400 })]))).toBe("42.6");
     expect(millionsText(78120000)).toBe("78.1");
+  });
+});
+
+/* --------------------------------------------------------------------------- */
+/* Plot-detail modal + advance-stage (land.jsx openPlotDetail L279-317)          */
+/* Added with the write wire: the detail drawer + POST advance-stage.            */
+/* --------------------------------------------------------------------------- */
+
+describe("stageById / stageLabelKey", () => {
+  it("resolves each of the 7 stage codes to its definition and dict key", () => {
+    for (const s of LAND_STAGES) {
+      expect(stageById(s.id)).toBe(s);
+      expect(stageLabelKey(s.id)).toBe(s.labelKey);
+    }
+  });
+
+  it("returns undefined/null for a stage code that is not one of the 7", () => {
+    // The advance toast labels the stage the SERVER returned; a stage the client does not
+    // know must render raw, never be silently mapped onto a neighbouring label.
+    expect(stageById("archived")).toBeUndefined();
+    expect(stageLabelKey("archived")).toBeNull();
+    expect(stageLabelKey("")).toBeNull();
+  });
+});
+
+describe("canAdvance", () => {
+  it("is true for every non-terminal stage", () => {
+    for (const s of LAND_STAGES.filter((x) => x.id !== CLOSE_STAGE)) {
+      expect(canAdvance(s.id)).toBe(true);
+    }
+  });
+
+  it("is false at the terminal stage (the action is not rendered, land.jsx L311)", () => {
+    expect(canAdvance(CLOSE_STAGE)).toBe(false);
+  });
+});
+
+describe("detailTitle / detailSubtitle", () => {
+  it("composes 'id · title' and 'tambon · amphoe · prov' (land.jsx L282-283)", () => {
+    const p = plot();
+    expect(detailTitle(p)).toBe("L-068 · Plot Bangbuathong Zone C");
+    expect(detailSubtitle(p)).toBe("Bangrakphatthana · Bangbuathong · Nonthaburi");
+  });
+
+  it("drops absent parts so no dangling middot is rendered", () => {
+    expect(detailTitle({ id: "L-1", title: "" })).toBe("L-1");
+    expect(detailSubtitle({ tambon: "", amphoe: "A", prov: "" })).toBe("A");
+  });
+
+  it("returns '' when nothing is wire-backed (view falls back to an em-dash)", () => {
+    expect(detailTitle({ id: "", title: "" })).toBe("");
+    expect(detailSubtitle({ tambon: "", amphoe: "", prov: "" })).toBe("");
+  });
+});
+
+describe("areaDetailText", () => {
+  it("renders 'rai-ngan-wa (rai)' from area_sqm alone (land.jsx L300)", () => {
+    expect(areaDetailText(29760, "rai")).toBe("18-2-40 (18.6 rai)");
+  });
+
+  it("returns '' for a plot with no area — the view renders an em-dash, not '0-0-0 (0.0)'", () => {
+    expect(areaDetailText(0, "rai")).toBe("");
+    expect(areaDetailText(Number.NaN, "rai")).toBe("");
+    expect(areaDetailText(-1, "rai")).toBe("");
+  });
+});
+
+describe("detailTenureToneHex", () => {
+  it("is the DETAIL two-branch mapping (land.jsx L296), not the card's three-branch one", () => {
+    expect(detailTenureToneHex("lease")).toBe("#B45309");
+    expect(detailTenureToneHex("buy")).toBe("#0F766E");
+    // The divergence that must NOT be "unified": negotiate is teal in the detail modal and
+    // violet on the card.
+    expect(detailTenureToneHex("negotiate")).toBe("#0F766E");
+    expect(tenureToneHex("negotiate")).toBe("#7C3AED");
+  });
+});
+
+describe("advanceErrorKind / advanceErrorMessage", () => {
+  it("reads the terminal case off the server's own 409 code", () => {
+    expect(
+      advanceErrorKind({ code: "INVALID_STATE", message: "land plot is already at the final stage (closed)" }),
+    ).toBe("terminal");
+  });
+
+  it("classifies every other rejection as an error (never dressed up as terminal)", () => {
+    expect(advanceErrorKind({ code: "NOT_FOUND", message: "land plot x not found" })).toBe("error");
+    expect(advanceErrorKind({ code: "FORBIDDEN" })).toBe("error");
+    expect(advanceErrorKind(new Error("network down"))).toBe("error");
+    expect(advanceErrorKind(undefined)).toBe("error");
+    expect(advanceErrorKind(null)).toBe("error");
+    expect(advanceErrorKind("boom")).toBe("error");
+  });
+
+  it("surfaces the server message, and '' when there is none", () => {
+    expect(advanceErrorMessage({ message: "land plot x not found" })).toBe("land plot x not found");
+    expect(advanceErrorMessage({ code: "FORBIDDEN" })).toBe("");
+    expect(advanceErrorMessage(null)).toBe("");
   });
 });

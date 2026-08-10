@@ -67,3 +67,39 @@ export function useCreatePlot(): UseMutationResult<Entity, unknown, Entity> {
     onSuccess: () => qc.invalidateQueries({ queryKey: LAND_PLOTS_KEY }),
   });
 }
+
+/**
+ * POST /land/plots/{id}/advance-stage — the plot-detail modal's "next stage" action
+ * (land.jsx openPlotDetail L311 -> LandPipeline advance L69-75).
+ *
+ * The contract declares NO request body for this op (generated types
+ * `advanceLandPlotStage.requestBody?: never`), so the call carries the plot id in the
+ * PATH and NOTHING else. That is deliberate, not an omission: the SERVER owns which stage
+ * comes next (apps/api land-sales.ts walks its own LAND_STAGES) and answers 409 at the
+ * terminal stage. The browser never names a target stage, exactly as it never names a
+ * money amount — the prototype's client-side `next = LAND_STAGES[idx + 1]` is a dropped
+ * mock (§0 rule 3). The 200 body is `{ id, stage }`: the stage the server MOVED the plot
+ * to, which is what the toast labels.
+ *
+ * Exported as a plain function (not only as a hook) so G3 can assert the exact call shape
+ * — path, params, and the ABSENCE of a body — without a React tree.
+ */
+export async function advancePlotStageRequest(id: string): Promise<Record<string, unknown>> {
+  const res = await unwrap(
+    apiClient.POST("/land/plots/{id}/advance-stage", { params: { path: { id } } }),
+  );
+  return (res ?? {}) as Record<string, unknown>;
+}
+
+/**
+ * The advance-stage mutation. Invalidates the plot register on success — the kanban IS
+ * the stage axis, so a card that did not move columns would leave the control claiming a
+ * change the screen never shows: the same lie-shaped defect this round closes.
+ */
+export function useAdvancePlotStage(): UseMutationResult<Record<string, unknown>, unknown, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: advancePlotStageRequest,
+    onSuccess: () => qc.invalidateQueries({ queryKey: LAND_PLOTS_KEY }),
+  });
+}

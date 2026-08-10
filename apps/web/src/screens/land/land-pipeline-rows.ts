@@ -23,7 +23,7 @@
  * server-derived (client DISPLAY math over server money, like land-bank's totalValue KPI);
  * nothing is fabricated and no write lives here (read/display port).
  */
-import { toPlotRow, plotValue, type PlotRow } from "./land-bank-rows";
+import { toPlotRow, plotValue, areaRai, areaText, type PlotRow } from "./land-bank-rows";
 import type { DictKey } from "@juneflow/i18n";
 
 // Re-export the shared display helpers the pipeline view also consumes (from the same
@@ -31,11 +31,13 @@ import type { DictKey } from "@juneflow/i18n";
 export {
   toPlotRow,
   areaRai,
+  areaText,
   totalRai,
   plotValue,
   raiText,
   millionsText,
   formatMoney,
+  projectNameById,
   type PlotRow,
 } from "./land-bank-rows";
 
@@ -54,6 +56,10 @@ export interface PipelinePlot extends PlotRow {
   amphoe: string;
   /** Province — card location line, right of the middot ("" when absent). */
   prov: string;
+  /** Tambon (sub-district) — detail-modal subtitle only ("" when absent). LA-2 wire. */
+  tambon: string;
+  /** Former owner — detail-modal row (land.detail.rowFormerOwner); "" when absent. LA-2 wire. */
+  owner: string;
 }
 
 /** Read a string field off an opaque row ({ [k]: unknown }); "" when absent. */
@@ -73,6 +79,8 @@ export function toPipelinePlot(e: Record<string, unknown>): PipelinePlot {
     title: str(e.title),
     amphoe: str(e.amphoe),
     prov: str(e.prov),
+    tambon: str(e.tambon),
+    owner: str(e.owner),
   };
 }
 
@@ -156,6 +164,17 @@ export function tenureToneHex(tenure: string): string {
  * prototype's TENURE_LABEL[code] would be undefined -> blank, which the view renders as an
  * em-dash rather than fabricating a label).
  */
+/**
+ * DETAIL-modal tenure-badge tone (land.jsx openPlotDetail L296). Deliberately NOT the same
+ * mapping as the card's (tenureToneHex): the detail badge is a two-branch
+ * `lease ? amber : teal` — `negotiate` renders TEAL there and VIOLET on the card. Kept
+ * separate rather than "unified" because unifying them would silently redesign one of the
+ * two (§0 rule 1).
+ */
+export function detailTenureToneHex(tenure: string): string {
+  return tenure === "lease" ? "#B45309" : "#0F766E";
+}
+
 export function tenureLabelKey(tenure: string): DictKey | null {
   switch (tenure) {
     case "buy":
@@ -187,4 +206,93 @@ const MIDDOT = "·";
  */
 export function locationText(p: { amphoe: string; prov: string }): string {
   return [p.amphoe, p.prov].filter(Boolean).join(` ${MIDDOT} `);
+}
+
+/* --------------------------------------------------------------------------- */
+/* Plot-detail modal + advance-stage (land.jsx openPlotDetail L279-317 /        */
+/* LandPipeline advance L69-75) — the card-click drawer this port now wires.    */
+/* --------------------------------------------------------------------------- */
+
+/**
+ * The stage definition for a stored stage code, or undefined for a code that is not one
+ * of the 7 (the stage pill then falls back to the first stage's colour and renders the
+ * raw code, never a fabricated label). Mirrors land.jsx openPlotDetail L280.
+ */
+export function stageById(stageId: string): LandStage | undefined {
+  return LAND_STAGES.find((s) => s.id === stageId);
+}
+
+/**
+ * Which land.stage.* dict key labels a stage code, or null when the code is unknown.
+ * Used by the stage pill AND by the advance toast, which labels the stage the SERVER
+ * returned (never a client-predicted next stage) — an unknown code renders raw.
+ */
+export function stageLabelKey(stageId: string): DictKey | null {
+  return stageById(stageId)?.labelKey ?? null;
+}
+
+/**
+ * Whether the plot-detail modal renders the advance action (land.jsx L311:
+ * `opts.onAdvance && plot.stage !== "close"`). The terminal stage has nowhere to go —
+ * the backend answers 409 there (land-sales.ts advanceLandPlotStage) — so the control is
+ * not rendered rather than rendered-and-rejected.
+ */
+export function canAdvance(stage: string): boolean {
+  return stage !== CLOSE_STAGE;
+}
+
+/**
+ * Detail-modal title (land.jsx L282: `${plot.id} · ${plot.title}`). A plot with no title
+ * renders the id alone — never a bare separator and never a fabricated name.
+ */
+export function detailTitle(p: { id: string; title: string }): string {
+  return [p.id, p.title].filter(Boolean).join(` ${MIDDOT} `);
+}
+
+/**
+ * Detail-modal subtitle (land.jsx L283: `${tambon} · ${amphoe} · ${prov}`), composed from
+ * the LA-2 wire fields. Absent parts drop out so a missing tambon never leaves a dangling
+ * middot; "" when all three are absent (the view falls back to an em-dash).
+ */
+export function detailSubtitle(p: { tambon: string; amphoe: string; prov: string }): string {
+  return [p.tambon, p.amphoe, p.prov].filter(Boolean).join(` ${MIDDOT} `);
+}
+
+/**
+ * The area row's value (land.jsx L300: `${areaText(plot)} (${plotArea(plot).toFixed(1)} <rai>)`),
+ * composed from area_sqm alone — areaText is the EXACT rai-ngan-wa reconstruction, so no
+ * wire field is missing here. "" when the plot carries no area (the view renders an em-dash
+ * rather than a confident "0-0-0 (0.0)").
+ */
+export function areaDetailText(areaSqm: number, raiUnit: string): string {
+  if (!Number.isFinite(areaSqm) || areaSqm <= 0) return "";
+  return `${areaText(areaSqm)} (${areaRai(areaSqm).toFixed(1)} ${raiUnit})`;
+}
+
+/**
+ * Classify an advance-stage rejection so the toast reports what the SERVER said.
+ *
+ * The handler emits exactly ONE 409 on this route — `conflict(reply, "land plot is already
+ * at the final stage (closed)")`, flat body `{ code: "INVALID_STATE", message }` — so an
+ * INVALID_STATE rejection means "already terminal" and nothing else. That is the prototype's
+ * land.pipeline.toastClosed branch (land.jsx L70 ctx.notify), reached here from the
+ * server's answer instead of the prototype's client-side `idx >= LAND_STAGES.length - 1`
+ * guess: the card in front of the user can be stale, the database cannot.
+ *
+ * Everything else ("error") is surfaced with the server's own message — never swallowed,
+ * and never dressed up as the terminal case.
+ */
+export function advanceErrorKind(err: unknown): "terminal" | "error" {
+  const code =
+    typeof err === "object" && err !== null && "code" in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+  return code === "INVALID_STATE" ? "terminal" : "error";
+}
+
+/** Server error message off an unknown rejection ("" when none) — land-bank plotErr precedent. */
+export function advanceErrorMessage(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
 }
