@@ -81,6 +81,7 @@ import {
   useCheckinWorkorder,
   useUpdateChecklist,
   useCloseWorkorder,
+  closeToastText,
   createSignatureCapture,
   clearSignatureCapture,
   readSignatureCapture,
@@ -429,7 +430,13 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
               {
                 onSuccess: () => {
                   close();
-                  ctx.notify(t("pm.toastClosed").replace("{no}", DASH));
+                  // The report-send half of pm.toastClosed is DROPPED rather than
+                  // rendered: lineNotifyStub is a verified no-op (B-108b) and no
+                  // certificate exists, so this toast was telling the technician a
+                  // report had gone to the customer while mobile's own sidecar test
+                  // names this very key as the live example of a forbidden claim.
+                  // See closeToastText (B-357/F5) — zero-mint, nothing re-translated.
+                  ctx.notify(closeToastText(t("pm.toastClosed"), DASH));
                 },
                 onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
               },

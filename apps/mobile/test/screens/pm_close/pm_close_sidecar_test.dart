@@ -181,6 +181,17 @@ void main() {
     // reads 'closed · the report was sent to the customer', and its second half is
     // exactly the LINE promise, so no slot may resolve to it.
     //
+    // THE WEB SCREEN NO LONGER CONTRADICTS THIS (B-357/F5). Until that round
+    // apps/web/src/screens/pm/wo-detail.tsx rendered pm.toastClosed WHOLE on the same
+    // close this screen performs, so the two clients stated opposite things about one
+    // event: mobile 'the customer signed', web 'the report was sent'. One of them was
+    // false, and it was the one in a file this test forbids. Web now drops the clause
+    // at render (closeToastText, the merged st-receive B-266 omit-the-unbacked-clause
+    // ruling), so NO surface prints it on any platform. What is still true is what
+    // this list asserts: the KEY's stored value carries the claim, which is why no
+    // slot here may resolve to it. Retiring the clause from the dict itself needs a
+    // sacred i18n round — B-359.
+    //
     // TWO WORDS LEFT THIS LIST UNDER B-331, and neither left quietly:
     //   * 'ปิดงานแล้ว' — pm.closedNote. Under B-288 it was forbidden because nothing
     //     could ever make it true; the close now really happens, so it is the

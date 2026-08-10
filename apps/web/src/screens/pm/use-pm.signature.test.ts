@@ -53,6 +53,7 @@ const net = vi.hoisted(() => {
 });
 
 import {
+  closeToastText,
   encodeSignatureInk,
   postCloseWorkorder,
   SIGNATURE_INK_VERSION,
@@ -310,6 +311,42 @@ describe("postCloseWorkorder — what reaches the wire", () => {
       postCloseWorkorder({ ...base, signature: encodeSignatureInk(SIGNED)! }),
     );
     expect(Object.keys(bodies[0]!).sort()).toEqual(["advice", "cause", "fix", "signature"]);
+  });
+});
+
+describe("the close toast states only what happened (B-357/F5)", () => {
+  // The stored value of pm.toastClosed, byte-for-byte from docs/extract/i18n-full.json
+  // (all four languages carry this same Thai string). Thai literals are legitimate in
+  // a *.test.ts — the i18n-guard skips test files, and pinning the REAL value is the
+  // whole point: a test written against a paraphrase would not notice the key drifting
+  // out from under the clause-drop.
+  const STORED = "ปิดงาน {no} เรียบร้อย · ส่งรายงานให้ลูกค้าแล้ว";
+
+  it("drops the report-send clause and keeps the close", () => {
+    // "the report has been sent to the customer" — lineNotifyStub is a verified no-op
+    // (B-108b) and there is no certificate column for it to have sent.
+    expect(closeToastText(STORED, "—")).toBe("ปิดงาน — เรียบร้อย");
+    expect(closeToastText(STORED, "—")).not.toContain("ส่งรายงาน");
+  });
+
+  it("says the same thing about a signed close and an unsigned one", () => {
+    // The web close is legitimately available WITHOUT a signature (it records the
+    // cause/fix/advice log too), so the toast must not assert the customer signed —
+    // which is why pm.closedNote, the sentence mobile prints, is not borrowed here.
+    const text = closeToastText(STORED, "—");
+    expect(text).not.toContain("ลงนาม");
+  });
+
+  it("is zero-mint: the surviving text is a PREFIX of the stored value", () => {
+    // Nothing is re-translated and no key is minted. The output must be characters the
+    // dict already carries, in the order it carries them — the same class of operation
+    // the screen already performs on this value ({no} -> em-dash).
+    expect(STORED.startsWith(closeToastText(STORED, "{no}"))).toBe(true);
+  });
+
+  it("leaves a single-claim value untouched", () => {
+    // A key with no separator has no unbacked tail to drop, and must survive whole.
+    expect(closeToastText("ปิดงาน {no} เรียบร้อย", "WO-9")).toBe("ปิดงาน WO-9 เรียบร้อย");
   });
 });
 

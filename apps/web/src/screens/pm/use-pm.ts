@@ -558,6 +558,43 @@ export function readSignatureCapture(c: SignatureCapture): string | null {
   });
 }
 
+/**
+ * The separator dict values use to chain independent claims into one line: an ASCII
+ * middot (U+00B7) with a space either side. Written as an escape so this file stays
+ * pure ASCII — the i18n-guard forbids Thai literals in apps/web/src, and a bare glyph
+ * invites a lookalike (U+2022, U+30FB) to be pasted over it later.
+ */
+const CLAIM_SEPARATOR = " · ";
+
+/**
+ * The close toast, with its unbacked clause dropped (B-357/F5).
+ *
+ * `pm.toastClosed` chains two claims: "work order {no} closed" AND "THE REPORT HAS
+ * BEEN SENT TO THE CUSTOMER". The second is false — the close handler's only outward
+ * action is `lineNotifyStub`, a verified no-op (B-108b), and no certificate column
+ * exists for it to have sent. Rendering the key whole made the two clients state
+ * opposite things about the same event: mobile prints pm.closedNote ("closed, the
+ * customer signed") while its own pm_close_sidecar_test.dart names THIS key as the
+ * live example of a forbidden claim and blocks the report-send phrase on that
+ * platform.
+ *
+ * So the clause is OMITTED — the merged st-receive ruling applied verbatim (B-266,
+ * first option: "omit every unbacked clause"). What remains is "{no} closed", which is
+ * exactly what happened, on a signed close and an unsigned one alike. That matters:
+ * the web close is legitimately available WITHOUT a signature (it also records the
+ * cause/fix/advice log, which pm-notes owns on mobile), so borrowing pm.closedNote
+ * here would be the mirror-image lie on every unsigned close.
+ *
+ * ZERO-MINT. Nothing is keyed and docs/extract/i18n-full.json is untouched; this is
+ * the same class of operation the screen already performs on this value (`{no}` →
+ * em-dash), not a re-translation. The key's STORED value still carries the clause and
+ * can only be retired in a sacred i18n round — filed as B-359.
+ */
+export function closeToastText(template: string, no: string): string {
+  const cut = template.indexOf(CLAIM_SEPARATOR);
+  return (cut === -1 ? template : template.slice(0, cut)).replace("{no}", no);
+}
+
 /** Close args — the WO id, the REAL maintenance-log columns (cause/fix/advice), and
  *  the customer's signature when one was captured.
  *
