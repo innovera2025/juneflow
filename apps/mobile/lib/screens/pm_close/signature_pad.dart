@@ -35,9 +35,9 @@ import 'signature_ink.dart';
 /// A capture pad that reports its ink on every change.
 ///
 /// The widget owns the strokes; the screen owns the decision of what to do with
-/// them. [onChanged] fires with the CURRENT ink after every stroke and after a clear
-/// — never with a partially-drawn stroke, so a listener never sees a mark the
-/// customer has not finished making.
+/// them. [onChanged] fires with the CURRENT ink after every completed stroke, after a
+/// clear, and after a CANCEL that dropped one (B-357/F5) — never with a partially-drawn
+/// stroke, so a listener never sees a mark the customer has not finished making.
 class SignaturePad extends StatefulWidget {
   const SignaturePad({
     super.key,
@@ -46,8 +46,9 @@ class SignaturePad extends StatefulWidget {
     this.enabled = true,
   });
 
-  /// Called with the pad's ink after each completed stroke and after a clear. The
-  /// ink is empty (`hasInk == false`) after a clear.
+  /// Called with the pad's ink after each completed stroke, after a clear, and after
+  /// a pointer CANCEL that discarded an open stroke. The ink is empty
+  /// (`hasInk == false`) after a clear.
   final ValueChanged<SignatureInk> onChanged;
 
   /// Pad height in logical px (mobile-pm.jsx L206: 110).
@@ -176,6 +177,26 @@ class SignaturePadState extends State<SignaturePad> {
     widget.onChanged(ink);
   }
 
+  /// The OS took the pointer — a notification-shade pull, an incoming call, a gesture
+  /// the platform claimed. The in-progress stroke is DISCARDED rather than completed.
+  ///
+  /// RECONCILED WITH WEB (B-357/F5). This used to call [_up], which COMMITTED the torn
+  /// stroke; `signaturePadCancel` in apps/web/src/screens/pm/use-pm.ts has always
+  /// discarded it, and documented why: "a half-stroke the pad tore off itself is not a
+  /// mark they made". The two clients cannot both be right about the same event, and
+  /// web's is the argument that survives — so mobile adopts it. Concretely, a shade
+  /// pull during a >= kSignatureMinStrokeSpan swipe no longer becomes a committed
+  /// signature stroke that satisfies `hasSignature` and lights the CTA.
+  ///
+  /// It still REPORTS. The parent holds the encoded value (`_pending`), and a cancel
+  /// can remove the only stroke that qualified — staying silent would leave the CTA
+  /// enabled over ink that is no longer there.
+  void _cancel() {
+    if (_active == null) return;
+    setState(() => _active = null);
+    widget.onChanged(ink);
+  }
+
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -215,7 +236,9 @@ class SignaturePadState extends State<SignaturePad> {
         onPointerDown: (PointerDownEvent e) => _down(e.localPosition),
         onPointerMove: (PointerMoveEvent e) => _move(e.localPosition),
         onPointerUp: (PointerUpEvent _) => _up(),
-        onPointerCancel: (PointerCancelEvent _) => _up(),
+        // NOT _up() — the OS tearing a stroke off is not the customer finishing it
+        // (B-357/F5, reconciled with the web pad's long-standing behaviour).
+        onPointerCancel: (PointerCancelEvent _) => _cancel(),
         child: CustomPaint(
           painter: SignatureInkPainter(
             strokes: ink.strokes,

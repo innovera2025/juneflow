@@ -539,6 +539,69 @@ void main() {
       expect(find.text('ปิดงาน + ลายเซ็น'), findsOneWidget);
     });
 
+    testWidgets(
+      'a stroke the OS tore off is not a signature — pointer CANCEL discards it',
+      (WidgetTester tester) async {
+        // B-357/F5. onPointerCancel used to call _up(), which COMMITTED the torn
+        // stroke: a notification-shade pull or an incoming call during a swipe became
+        // a signature stroke, satisfied hasSignature and lit the CTA. The web pad has
+        // always discarded it ("a half-stroke the pad tore off itself is not a mark
+        // they made"), and the two clients may not disagree about one event.
+        //
+        // The gesture below is the SAME travel _sign() makes — the only difference is
+        // that the OS takes the pointer instead of the customer lifting it.
+        final _FakeRepo repo = _FakeRepo(workOrders: <PmCloseEnt>[_wo('wo-1')]);
+        await _pump(tester, repo);
+
+        final Offset origin = tester.getCenter(find.byType(SignaturePad));
+        final TestGesture g = await tester.startGesture(
+          origin - const Offset(60, 0),
+        );
+        for (int i = 1; i <= 6; i++) {
+          await g.moveBy(Offset(20, i.isEven ? 12 : -12));
+        }
+        await g.cancel();
+        await tester.pumpAndSettle();
+
+        // Back to the EMPTY-pad case: a null onTap, and nothing sent.
+        final GestureDetector bar = tester.widget<GestureDetector>(
+          find
+              .ancestor(
+                of: find.text('ปิดงาน + ลายเซ็น'),
+                matching: find.byType(GestureDetector),
+              )
+              .first,
+        );
+        expect(bar.onTap, isNull);
+        await tester.tap(find.text('ปิดงาน + ลายเซ็น'), warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(repo.submitted, isEmpty);
+      },
+    );
+
+    testWidgets(
+      'a cancel AFTER a finished stroke keeps the finished one (B-357/F5)',
+      (WidgetTester tester) async {
+        // The other half of the rule: cancel drops the OPEN stroke only. A signature
+        // already completed is the customer's mark and survives an interruption that
+        // arrives afterwards — otherwise the fix would trade one lost signature for
+        // another.
+        final _FakeRepo repo = _FakeRepo(workOrders: <PmCloseEnt>[_wo('wo-1')]);
+        await _pump(tester, repo);
+        await _sign(tester);
+
+        final Offset origin = tester.getCenter(find.byType(SignaturePad));
+        final TestGesture g = await tester.startGesture(origin);
+        await g.cancel();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('ปิดงาน + ลายเซ็น'));
+        await tester.pumpAndSettle();
+        expect(repo.submitted, hasLength(1));
+        expect(repo.submitted.single['signature'], isNotNull);
+      },
+    );
+
     testWidgets('the prototype success view never appears, signed or not', (
       WidgetTester tester,
     ) async {
