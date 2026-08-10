@@ -31,9 +31,15 @@
  *     the users read (the roster is a pure derivation of it, no local copy). The "Save settings"
  *     write is REAL too (W1c): PUT /admin/subscribers/{id}/package writes the selected package_id
  *     + a seat override onto the subscription row (money = SERVER; the seat stepper edits LOCAL
- *     state the Save button then persists) and invalidates the subscribers read. The remaining
- *     writes stay MOCK (no merged handler): export / reset-password fire faithful ctx.notify
- *     toasts; invite-user is honest-DISABLED (the invite form is a dropped mock write path).
+ *     state the Save button then persists) and invalidates the subscribers read.
+ *   - reset-password is REAL too (B-282): POST /admin/users/{id}/reset-password, bodiless,
+ *     owner-gated. It writes credential state only, so NO read is invalidated. Until
+ *     2026-08-10 this confirm dialog fired the "link sent to {email}" toast and called
+ *     nothing — a success claim, made to a platform owner, about somebody else's account.
+ *     The endpoint had in fact been mounted since B-282; the comment here said MOCK.
+ *   - EXPORT stays MOCK (a faithful ctx.notify): grep of apps/api/src/routes finds no
+ *     subscriber-export handler and the contract declares none. invite-user stays
+ *     honest-DISABLED (the invite form is a dropped mock write path).
  *
  * i18n (rule 2): every visible string is an admin.subs.* / admin.common.* dict key (t). No
  * Thai literal in source (B-073); tokens back every colour except the prototype-verbatim
@@ -88,6 +94,7 @@ import {
   useBlockUser,
   useUnblockUser,
   useSetSubscriberPackage,
+  useResetUserPassword,
 } from "./use-admin";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
@@ -227,6 +234,8 @@ function CompanyControl({
   const block = useBlockUser();
   const unblock = useUnblockUser();
   const setPkg = useSetSubscriberPackage(sub.id);
+  // reset takes the USER id (u.id) and writes credential state only — no read is invalidated.
+  const reset = useResetUserPassword();
 
   const [tab, setTab] = useState<"control" | "users">("control");
   const [pkgId, setPkgId] = useState(sub.packageId);
@@ -303,9 +312,20 @@ function CompanyControl({
               kind="primary"
               size="md"
               icon="mail"
+              disabled={reset.isPending || !canManageUser(u.id)}
               onClick={() => {
+                // REAL owner-gated write (B-282): POST /admin/users/{id}/reset-password,
+                // no body. close() unmounts this dialog before the POST settles (single
+                // modal slot), so the toast fires off the SETTLED promise (fireWithToast,
+                // B-200b) — never before the server answered. A rejection (403 non-owner,
+                // 404 no-credential) shows the failure toast instead of the success one:
+                // this button used to claim a link had been mailed while calling nothing.
                 close();
-                ctx.notify(t("admin.subs.resetPwToast").replace("{email}", u.email || DASH));
+                fireWithToast(
+                  () => reset.mutateAsync(u.id),
+                  () => ctx.notify(t("admin.subs.resetPwToast").replace("{email}", u.email || DASH)),
+                  () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                );
               }}
             >
               {t("admin.subs.resetPwSend")}
