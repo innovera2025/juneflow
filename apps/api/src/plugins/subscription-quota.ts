@@ -23,11 +23,22 @@ import {
 } from "@juneflow/db/schema";
 import type { Db } from "@juneflow/db/client";
 import { TenantDb } from "../db/tenant-db.js";
+import { byOldestThenId } from "../routes/list-order.js";
 import type { QuotaKey, QuotaResolver } from "./quota.js";
 
 /** Current month key (YYYY-MM) in UTC — matches loadPackageUsage / ai_usage. */
 function currentMonthUtc(): string {
   return new Date().toISOString().slice(0, 7);
+}
+
+/**
+ * B-363 sort key: a live (active|trial) subscription sorts before any other. MODULE
+ * scope on purpose — a comparator that closes over a FUNCTION-local helper cannot be
+ * lifted by the B-323 comparator probe (list-order.enforce.test.ts blind spot 4) and
+ * would have to buy a registry exemption instead of being checked.
+ */
+function liveFirst(s: { status: string }): number {
+  return s.status === "active" || s.status === "trial" ? 0 : 1;
 }
 
 /**
@@ -71,15 +82,15 @@ export class SubscriptionQuotaResolver implements QuotaResolver {
     // active/trial first, then oldest, then id as the total-order tie-break.
     // Latent on today's data (no company has two subscriptions — checked), which is
     // exactly why it is pinned before one does.
-    const subs = [...(await db.select(subscriptions))].sort((a, b) => {
-      const live = (s: typeof a): number =>
-        s.status === "active" || s.status === "trial" ? 0 : 1;
-      if (live(a) !== live(b)) return live(a) - live(b);
-      const at = a.createdAt?.getTime() ?? 0;
-      const bt = b.createdAt?.getTime() ?? 0;
-      if (at !== bt) return at - bt;
-      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-    });
+    //
+    // The tail is `byOldestThenId` — routes/list-order.ts, the repo's own total
+    // order (created_at ASC, then the id FLOOR). Reused rather than hand-rolled:
+    // its `msOf` tolerates a Date, an ISO string or an epoch number (a hand-rolled
+    // `createdAt.getTime()` throws on the others, which the B-323 comparator probe
+    // in list-order.enforce.test.ts catches immediately — it did).
+    const subs = [...(await db.select(subscriptions))].sort(
+      (a, b) => liveFirst(a) - liveFirst(b) || byOldestThenId(a, b),
+    );
     const sub = subs[0];
     if (!sub) return null;
     const pkgRows = await db.selectReference(

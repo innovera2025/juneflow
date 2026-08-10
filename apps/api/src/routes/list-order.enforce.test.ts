@@ -369,7 +369,14 @@ function materialise(site: Site): Comparator | null {
       continue;
     }
     const from = imports.get(name);
-    if (from === "./list-order.js" && name in listOrder) {
+    // B-363: match the MODULE, not one relative spelling of it. This was
+    // `from === "./list-order.js"`, which is how a routes/ sibling imports it. The
+    // first caller from outside routes/ (plugins/subscription-quota.ts, importing
+    // "../routes/list-order.js") therefore came out UNANALYSABLE and would have had
+    // to buy a registry exemption for a comparator this probe can analyse perfectly
+    // well. It is the same module object either way — the binding below is
+    // `listOrder`, the real import at the top of this file.
+    if (/(^|\/)list-order\.js$/.test(from ?? "") && name in listOrder) {
       injected.set(name, (listOrder as Record<string, unknown>)[name]);
       continue;
     }
