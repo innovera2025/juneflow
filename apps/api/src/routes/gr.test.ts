@@ -179,6 +179,17 @@ function paramsOf(where: SQL | undefined): unknown[] {
   return new PgDialect().sqlToQuery(where).params;
 }
 
+/**
+ * The SQL text a predicate compiles to. B-362: a row source that filters on a
+ * bound VALUE alone cannot tell "the predicate is absent" from "the predicate
+ * bound something else", so a where-blindness mutation would slip through it.
+ * Reading the compiled SQL is how the fixture sees the COLUMN.
+ */
+function sqlOf(where: SQL | undefined): string {
+  if (!where) return "";
+  return new PgDialect().sqlToQuery(where).sql;
+}
+
 let app: FastifyInstance;
 afterEach(async () => {
   await app?.close();
@@ -1412,6 +1423,31 @@ describe("GR return/cancel state machine", () => {
     sourceDoc: `gr:${grId}`,
   });
 
+  /**
+   * B-362 — jv rows answered THE WAY A DATABASE WOULD, i.e. by the WHERE.
+   *
+   * The base stub's `rowsFor` is where-BLIND: whatever a `[jvs, rows]` entry holds
+   * comes back for every jv read. So the two freeze tests each injected their own
+   * answer — one supplied the posting JV, the other supplied `[]` and called that
+   * "a jv posting a DIFFERENT receipt". Neither could see the predicate, and the
+   * mutation `db.select(jvs, eq(jvs.sourceDoc, …))` -> `db.select(jvs)` passed
+   * 85/85. Live that regression is a total outage of the return path: the seeded
+   * tenant carries many jv rows, so EVERY return and cancel would 409, with the api
+   * suite green.
+   *
+   * This models the real filter: a read whose SQL mentions `source_doc` returns only
+   * the rows carrying a bound value; a read that does NOT (the where-blind mutation)
+   * returns the tenant's WHOLE jv set — which is exactly what Postgres would hand
+   * back, and exactly what makes the freeze fire on somebody else's JV.
+   */
+  const jvsByWhere =
+    (rows: ReturnType<typeof postedJv>[]) =>
+    (where: SQL | undefined): unknown[] => {
+      if (!sqlOf(where).includes("source_doc")) return rows; // where-blind read
+      const params = paramsOf(where);
+      return rows.filter((r) => params.includes(r.sourceDoc));
+    };
+
   for (const verb of ["return", "cancel"] as const) {
     it(`${verb}: 409 when a JV has already posted this receipt (B-348)`, async () => {
       const updated: Updated[] = [];
@@ -1421,7 +1457,7 @@ describe("GR return/cancel state machine", () => {
         await buildTestApp({
           resolveTenant: async () => SESSION,
           db: stubDb({
-            rows: [[grs, [G]], [jvs, [postedJv("g0")]]],
+            rows: [[grs, [G]], [jvs, jvsByWhere([postedJv("g0")])]],
             updated,
             inserted,
             updateBase: G,
@@ -1436,20 +1472,94 @@ describe("GR return/cancel state machine", () => {
       expect(inserted.find((i) => i.table === stockLedgers)).toBeUndefined();
     });
 
-    it(`${verb}: a jv posting a DIFFERENT receipt does not freeze this one (B-348)`, async () => {
+    it(`${verb}: a jv posting a DIFFERENT receipt does not freeze this one (B-348/B-362)`, async () => {
+      const updated: Updated[] = [];
       const G = gr("g0", { poId: PO, status: "received" });
       const res = await (
         await buildTestApp({
           resolveTenant: async () => SESSION,
           db: stubDb({
-            // The scoped read is `jv.source_doc = 'gr:g0'`; a jv for another
-            // receipt simply does not match it.
-            rows: [[grs, [G]], [jvs, []]],
+            // A jv that REALLY EXISTS in this tenant and posts ANOTHER receipt.
+            // The predicate `jv.source_doc = 'gr:g0'` is what excludes it; drop the
+            // predicate and this row comes back and freezes g0.
+            rows: [[grs, [G]], [jvs, jvsByWhere([postedJv("g-other")])]],
+            updated,
             updateBase: G,
           }),
         })
       ).inject({ method: "POST", url: `/api/v1/gr/g0/${verb}` });
       expect(res.statusCode).toBe(200);
+      expect(updated.find((u) => u.table === grs)).toBeTruthy(); // the flip happened
+    });
+
+    it(`${verb}: the freeze read BINDS this receipt's source_doc (B-362)`, async () => {
+      // The predicate itself, asserted rather than inferred from an outcome: every
+      // jv read this request issues is scoped to `gr:<this id>`.
+      const captured: Captured[] = [];
+      const G = gr("g0", { poId: PO, status: "received" });
+      await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [[grs, [G]], [jvs, jvsByWhere([])]],
+            captured,
+            updateBase: G,
+          }),
+        })
+      ).inject({ method: "POST", url: `/api/v1/gr/g0/${verb}` });
+      const jvReads = captured.filter((c) => c.table === jvs);
+      expect(jvReads.length).toBeGreaterThan(0);
+      for (const read of jvReads) {
+        expect(sqlOf(read.where)).toContain("source_doc");
+        expect(paramsOf(read.where)).toContain("gr:g0");
+      }
+    });
+
+    // ── B-362: the IN-TRANSACTION re-check, which had no coverage at all ────────
+    it(`${verb}: a JV that lands BETWEEN the pre-check and the transaction still freezes it (B-362)`, async () => {
+      // The real interleaving the in-tx re-check exists for: /gl/post commits after
+      // this handler's pre-check read and before its own COMMIT. Deleting that
+      // re-check used to kill NOTHING (85/85 green) — the pre-check answered every
+      // freeze test on its own.
+      const updated: Updated[] = [];
+      const inserted: Inserted[] = [];
+      const G = gr("g0", { poId: PO, status: "received" });
+      const landed: ReturnType<typeof postedJv>[] = [];
+      let jvReads = 0;
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [
+              [grs, [G]],
+              [
+                jvs,
+                (where: SQL | undefined) => {
+                  // 1st read = the pre-check: nothing posted yet.
+                  // 2nd read = inside the transaction, AFTER the guarded flip: by
+                  // then the concurrent post has committed its JV.
+                  if (++jvReads === 1) return [];
+                  if (landed.length === 0) landed.push(postedJv("g0"));
+                  return jvsByWhere(landed)(where);
+                },
+              ],
+            ],
+            updated,
+            inserted,
+            updateBase: G,
+          }),
+        })
+      ).inject({ method: "POST", url: `/api/v1/gr/g0/${verb}` });
+
+      expect(jvReads).toBeGreaterThanOrEqual(2); // the pre-check AND the re-check ran
+      expect(res.statusCode).toBe(409); // never 500 — sync_processor defers 5xx
+      expect(res.json().code).toBe("INVALID_STATE");
+      expect(res.json().message).toContain("posted");
+      // The guarded flip was ATTEMPTED (that is what takes the row lock) and the
+      // stock reversal never ran — the throw happens between them, so the real
+      // transaction rolls the flip back with it.
+      expect(updated.find((u) => u.table === grs)).toBeTruthy();
+      expect(inserted.find((i) => i.table === stockLedgers)).toBeUndefined();
     });
   }
 
