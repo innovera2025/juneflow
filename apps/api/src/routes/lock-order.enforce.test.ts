@@ -351,6 +351,84 @@ describe("B-340 · every lock taker on inventory_item acquires ascending", () =>
     ).toEqual([]);
   });
 
+  it("keeps the receipt's PR lock AHEAD of its gr insert and its ledger writes (B-372)", () => {
+    // THE ONE CROSS-TABLE EDGE, and the only one this file models: a receipt locks
+    // its SOURCE PR row (a guarded UPDATE — the B-361 pattern, since `pr` carries no
+    // company_id) before it reads what has already been received against that order.
+    // The PR and not the anchor: the ceiling's basis and its accumulator are both
+    // PR-grained, and two POs raised from one PR are two different anchor rows that
+    // would never block each other. The ORDER of the three statements is the whole
+    // guarantee and none of it is visible at the call site:
+    //
+    //   · PR lock BEFORE the `gr` insert — because `gr.po_id` is an FK, so the
+    //     insert takes an implicit FOR KEY SHARE on the anchor. KEY SHARE does not
+    //     conflict with KEY SHARE, so two receipts would both take it and then both
+    //     try to UPGRADE to the exclusive lock, each waiting on the other. Reversing
+    //     these two lines turns a serialised wait into PG 40P01 -> 500 -> a field
+    //     phone's whole offline drain wedged (lock-order.ts, at length).
+    //   · anchor lock BEFORE the stock_ledger loop — so the ascending order is
+    //     anchor -> gr -> inventory_item repo-wide.
+    //
+    // Blind spot 1 applies here as everywhere in this file: this proves the ORDER of
+    // the statements in the source, not that the lock covers the rows the read used.
+    // That much is read-and-believe, and gr.ts states it.
+    const grPath = "apps/api/src/routes/gr.ts";
+    const text = readFileSync(join(REPO_ROOT, grPath), "utf8");
+    const sf = ts.createSourceFile(grPath, text, ts.ScriptTarget.ES2022, true);
+
+    // The createGr transaction callback = the one whose body writes stock_ledger.
+    let body: string | undefined;
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "transaction" &&
+        node.arguments.length === 1
+      ) {
+        const arg = codeOnly(node.arguments[0]!.getText(sf));
+        // ALL whitespace removed, not collapsed: the three statements below are
+        // formatted differently (one-liners vs multi-line argument lists) and a
+        // prettier pass may re-wrap any of them. Position is what this test reads;
+        // layout must not be able to decide it.
+        if (arg.includes("stockLedgers")) body = arg.replace(/\s+/g, "");
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    expect(
+      body,
+      "no db.transaction callback in gr.ts writes stock_ledger — createGr was " +
+        "restructured, so the lock-order claim below has to be re-read, not re-run",
+    ).toBeDefined();
+
+    const prLock = body!.indexOf("updateThroughChain(prs,");
+    const grInsert = body!.indexOf("insertThrough(grs,");
+    const ledger = body!.indexOf("insert(stockLedgers,");
+    expect(
+      prLock,
+      "createGr no longer locks its source PR row before reading what has been " +
+        "received. The over-receipt ceiling is a read-then-write; without this lock " +
+        "two receipts that each fit under it both pass and both commit (B-342's " +
+        "shape). It must be the PR and not the anchor po/wo: the basis and the " +
+        "accumulator are both PR-grained, and two POs of one PR are two different " +
+        "anchor rows that would never block each other.",
+    ).toBeGreaterThan(-1);
+    expect(grInsert, "createGr's gr header insert was not found").toBeGreaterThan(-1);
+    expect(ledger, "createGr's stock_ledger insert was not found").toBeGreaterThan(-1);
+    expect(
+      prLock,
+      "the PR lock must precede the `gr` INSERT. That insert takes FOR KEY SHARE on " +
+        "the anchor via gr.po_id, and INSERT INTO po takes one on the PR via po.pr_id; " +
+        "upgrading a KEY SHARE to the exclusive lock from two transactions at once is " +
+        "a deadlock, not a wait.",
+    ).toBeLessThan(grInsert);
+    expect(
+      prLock,
+      "the PR lock must precede the stock_ledger writes — the repo-wide order is " +
+        "pr -> gr -> inventory_item.",
+    ).toBeLessThan(ledger);
+  });
+
   it("probes inLockOrder: the guard token names a real ascending sort", () => {
     // The registry's `guard: "sort"` entries are only worth the token if the token still
     // sorts. A comparator emptied out would leave every one of them passing.

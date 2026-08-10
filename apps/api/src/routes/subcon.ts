@@ -194,6 +194,47 @@ class StaleStateError extends Error {
   }
 }
 
+/**
+ * The work_period states POST /periods/{id}/deliver accepts as a SOURCE.
+ *
+ * `rejected` joined `pending` in B-371 — see the long note on the handler for
+ * why this door rather than a new /reinspect one. Everything else is 409:
+ * `delivered` / `inspecting` are already with the foreman, and `passed` / `paid`
+ * are past the point of delivery.
+ *
+ * ---------------------------------------------------------------------------
+ * THE REST OF THIS STATE MACHINE, honestly (B-371 recon; named, not fixed)
+ * ---------------------------------------------------------------------------
+ * The enum is pending|delivered|inspecting|passed|rejected|paid (schema/subcon.ts).
+ *
+ *  · `inspecting` — a valid enum value that NO handler ever writes. It is accepted
+ *    as an inspect SOURCE and queued by counts.ts, and the file header already
+ *    admits "Wave-0 never auto-produces it". Not stuck; permanently EMPTY, and
+ *    every guard in this file pays for it.
+ *
+ *  · `defect.recheck` — the exact mirror one level down. It is accepted as a `fix`
+ *    source, but the only writer of a non-closed recheck outcome writes `open`
+ *    (RECHECK_PASS_LIKE ? "closed" : "open"), so the dictionary's
+ *    open→fixing→recheck→closed is really open⇄fixing→closed. An enum value no
+ *    code path can produce.
+ *
+ *  · `passed` — A GENUINE SECOND DEAD END OF THE SAME SHAPE AS THE ONE THIS ROUND
+ *    CLOSES. approve-payment requires `passed`; there is no un-pass and no
+ *    re-inspect, so a mistaken pass strands the period at `passed` forever. It is
+ *    NOT opened here: `paid` writes an AP billing row AND a retention HELD row, so
+ *    reversing a pass is money-adjacent and needs its own ruling (filed, B-371).
+ *
+ *  · `paid` — terminal by design, with money behind it. Correct as-is.
+ *
+ *  · OPEN DEFECT ROWS ON A PASSED PERIOD — B-364, DECIDED (see the inspect(pass)
+ *    handler for the full reasoning). Re-opening `rejected` made a `passed`/`paid`
+ *    period with `open` defect rows reachable for the first time. The decision is
+ *    ACCEPT: the pass neither closes nor requires the closure of defect rows, they
+ *    keep their own open→fixing→closed loop, and the money that follows withholds
+ *    retention precisely for outstanding work.
+ */
+const DELIVERABLE_FROM: readonly WorkPeriodRow["status"][] = ["pending", "rejected"];
+
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -742,6 +783,49 @@ export function registerSubconRoute(app: FastifyInstance): void {
   // (flows.html L46 "ผู้รับเหมาส่งมอบ + เอกสาร/รูป (เข้า DMS)"). pending → delivered;
   // upsert the period's single acceptance with {docs, photos}. Both writes are
   // one transaction (the acceptance write must land with the status flip).
+  //
+  // ---------------------------------------------------------------------------
+  // B-371 — `rejected` IS NOW A SOURCE HERE, and that is the whole fix
+  // ---------------------------------------------------------------------------
+  // Every work_period.status write in this file is at :deliver / :inspect(pass) /
+  // :inspect(reject) / :approve-payment. Exactly one of them wrote `rejected` and
+  // NOTHING left it: a period the foreman turned back could never be re-inspected,
+  // so its money never reached AP and the contractor's fixed work had no door back
+  // in. That is a dead end, not a terminal state.
+  //
+  // WHY THIS DOOR RATHER THAN A NEW `POST /periods/{id}/reinspect`:
+  //   · the PROTOTYPE says the target is the awaiting-inspection state, literally.
+  //     pototype/subcon-accept2.jsx:106 — the rejected row's button sets
+  //     `{state: "requested", inspectCount: +1}` — and `requested` is the display
+  //     state that maps to wire `delivered|inspecting`
+  //     (apps/web subcon-accept-rows.ts). flows.html FLOW-B is the same loop:
+  //     ตีกลับ + Defect List → ผู้รับเหมาแก้ไข → ตรวจซ้ำ → ผ่าน.
+  //   · deliver's own meaning ALREADY covers it — "the contractor delivers a
+  //     period + its docs/photos" is exactly what a post-fix resubmission is, and
+  //     its acceptance UPSERT branch below was written for "a row already exists",
+  //     which is precisely the rejected case (a reject always ensures one).
+  //   · it needs NO contract change (`grep reinspect packages/contracts` = 0 hits;
+  //     the only three declared period ops are deliver / inspect / approve-payment)
+  //     and NO new enum value, i.e. no SACRED edit in either file. Minting
+  //     `/reinspect` would need both a new operationId and Wei.
+  //
+  // THE TRADE, stated: `deliver` now carries two meanings on one door, and the
+  // response cannot distinguish a first delivery from a re-delivery. If a screen
+  // needs that distinction it is a WIRE FIELD, not a second endpoint.
+  //
+  // NOT DELIVERABLE, and not faked: the prototype's "ขอตรวจซ้ำ · ครั้งที่ N"
+  // counter (subcon-accept2.jsx:98). `work_period` has no such column, `acceptance`
+  // is one row per period, and defect rows do not correspond 1:1 to inspection
+  // rounds. A column is a migration → SACRED. It is NOT derived from audit_log.
+  //
+  // TWO LANES INHERIT THIS and are untouchable from here:
+  //   · apps/web subcon-accept.tsx:618 — the "ขอตรวจซ้ำ" button already exists and
+  //     is `disabled` with a FLAG naming this exact gap. It stays dark until the
+  //     web lane un-disables it; the backend lands alone.
+  //   · apps/mobile fm_accept_agg.dart hard-codes the terminality as a PREMISE
+  //     ("`rejected` is a TERMINAL state … there is no transition OUT of
+  //     `rejected`") and withholds an affordance because of it. That reasoning is
+  //     now outlived and must be REVISED, not silently left standing.
   app.post("/periods/:id/deliver", async (request, reply) => {
     const db = request.db;
     if (!db) {
@@ -755,11 +839,14 @@ export function registerSubconRoute(app: FastifyInstance): void {
     if (!resolved) {
       return reply.code(404).send({ code: "NOT_FOUND", message: `work period ${id} not found` });
     }
-    // C3 guard: only a not-yet-delivered (pending) period can be delivered.
-    if (resolved.period.status !== "pending") {
+    // C3 guard: a not-yet-delivered (pending) period, or — B-371 — one the foreman
+    // turned back (rejected), which is the contractor re-submitting after the fix.
+    // Everything else is still 409: a delivered/inspecting period is already with
+    // the foreman, and passed/paid are past the point of delivery.
+    if (!DELIVERABLE_FROM.includes(resolved.period.status)) {
       return reply.code(409).send({
         code: "INVALID_STATE",
-        message: "only a pending work period can be delivered",
+        message: "only a pending or rejected work period can be delivered",
       });
     }
 
@@ -769,29 +856,57 @@ export function registerSubconRoute(app: FastifyInstance): void {
     const projectId = resolved.contract.projectId;
     const existing = await findAcceptance(db, id);
 
-    const { acc, period } = await db.transaction(async (tx) => {
-      // Upsert the acceptance (one per period): update the existing row's
-      // docs/photos, else create it — both scoped through the period chain.
-      const acc = existing
-        ? (
-            await tx.updateThroughChain(
-              acceptances,
-              ACCEPTANCE_HOPS,
-              { docs, photos },
-              eq(acceptances.id, existing.id),
-            )
-          )[0]!
-        : (await tx.insertThrough(acceptances, projects, projectId, [{ periodId: id, docs, photos }]))[0]!;
-      const [period] = await tx.updateThroughChain(
-        workPeriods,
-        PERIOD_HOPS,
-        { status: "delivered" },
-        eq(workPeriods.id, id),
-      );
-      return { acc, period: period! };
-    });
+    let result: { acc: AcceptanceRow; period: WorkPeriodRow };
+    try {
+      result = await db.transaction(async (tx) => {
+        // Upsert the acceptance (one per period): update the existing row's
+        // docs/photos, else create it — both scoped through the period chain.
+        // B-371: the UPDATE branch is the one a re-delivery takes — a rejected
+        // period always has an acceptance (the reject handler ensures one so its
+        // Defect List has something to hang off), so a resubmission refreshes the
+        // docs/photos it already had rather than creating a second row.
+        const acc = existing
+          ? (
+              await tx.updateThroughChain(
+                acceptances,
+                ACCEPTANCE_HOPS,
+                { docs, photos },
+                eq(acceptances.id, existing.id),
+              )
+            )[0]!
+          : (await tx.insertThrough(acceptances, projects, projectId, [{ periodId: id, docs, photos }]))[0]!;
+        // B-371 + B-149: the deliverable pre-state is folded into the FINAL UPDATE
+        // (5th arg), not left in the JS pre-check above. updateThroughChain resolves
+        // then updates in two round-trips, so a guard only in the resolve `where`
+        // is a TOCTOU. It matters more now than it did: before this round the only
+        // source was `pending`, which nothing else raced; `rejected` is produced by
+        // the inspect handler, so a re-delivery and a concurrent inspect can now
+        // both be in flight over one period. The loser matches 0 rows → the whole
+        // transaction (acceptance write included) rolls back → 409.
+        const [period] = await tx.updateThroughChain(
+          workPeriods,
+          PERIOD_HOPS,
+          { status: "delivered" },
+          and(eq(workPeriods.id, id), inArray(workPeriods.status, DELIVERABLE_FROM)),
+          inArray(workPeriods.status, DELIVERABLE_FROM),
+        );
+        if (!period) {
+          throw new StaleStateError(
+            "only a pending or rejected work period can be delivered",
+          );
+        }
+        return { acc, period };
+      });
+    } catch (err) {
+      if (err instanceof StaleStateError) {
+        return reply.code(409).send({ code: "INVALID_STATE", message: err.message });
+      }
+      throw err;
+    }
 
-    return reply.code(200).send({ ...periodWire(period), acceptance: acceptanceWire(acc) });
+    return reply
+      .code(200)
+      .send({ ...periodWire(result.period), acceptance: acceptanceWire(result.acc) });
   });
 
   // POST /periods/:id/inspect — the foreman inspects (subcon-accept2.jsx
@@ -832,6 +947,50 @@ export function registerSubconRoute(app: FastifyInstance): void {
     // in the prototype — "อนุมัติจ่ายงวด → AP" — is the Wave-2 approve-payment op).
     // The %-gate ADVISORY (B-107c) rides the response as an honest, never-blocking
     // flag derived from the contract's own periods (the hard gate is FE-only).
+    //
+    // -----------------------------------------------------------------------
+    // B-364 — A PASS WITH OPEN DEFECT ROWS. DECIDED: ACCEPT, and here is why.
+    // -----------------------------------------------------------------------
+    // B-371 made this state reachable for the first time. Before it, `rejected` was
+    // a dead end, so the only way to a `passed` period was a first inspection that
+    // never recorded a defect. Now: reject a period with 2 defects (both `open`) →
+    // re-deliver → inspect(pass) → the period is `passed` with `open,open` still
+    // hanging off its acceptance, and approve-payment will write AP billing plus a
+    // retention HELD row off exactly that period. Verified live on the seeded stack,
+    // not reasoned about.
+    //
+    // THE THREE COHERENT ANSWERS WERE: require closure (409 until every defect is
+    // closed), reset them on re-delivery, or accept. ACCEPT, because:
+    //
+    //  1. THE PROTOTYPE DOES THIS, literally. subcon-accept2.jsx:106 — the rejected
+    //     row's "ขอตรวจซ้ำ" button sets `{state: "requested", inspectCount: +1}` and
+    //     TOUCHES NOTHING ELSE; the period keeps its `defect` text. AcceptForm's
+    //     accept is gated on `failN === 0` over THAT round's checklist (in-form
+    //     state), never on stored defect rows. A pass with recorded defects is what
+    //     the mock does, and pototype is law (PLAN.md §0).
+    //  2. THE DEFECT LOOP HAS ITS OWN DOOR. flows.html FLOW-B closes a defect on ITS
+    //     OWN recheck — "ตรวจซ้ำ → ผ่าน (Defect ปิด)" = POST /defects/{id}/recheck —
+    //     not on the period's pass. Two loops by design, at different granularities
+    //     (defect rows are not 1:1 with inspection rounds).
+    //  3. RESETTING OR AUTO-CLOSING THEM WOULD DESTROY THE RECORD. The Defect List is
+    //     what was wrong, with before/after photos; rewriting it as a side effect of
+    //     an unrelated pass is a data write nothing asked for (C10).
+    //  4. REQUIRING CLOSURE WOULD BE A NEW REFUSAL, i.e. a spec decision. It would
+    //     strand every period whose defects were fixed in the field without anyone
+    //     driving the per-defect recheck endpoint — and that endpoint is reachable
+    //     from no shipped screen today.
+    //  5. THE DOMAIN ALREADY CARRIES THE MONEY ANSWER. approve-payment withholds
+    //     `contract.retention_pct` as a retention HELD row (เงินประกันผลงาน) — money
+    //     kept back precisely to cover outstanding work. Accepting the pass does not
+    //     pay out the defect risk; it holds it.
+    //
+    // WHAT IS THEREFORE TRUE AND IS NOT HIDDEN: a `passed` (and later `paid`) period
+    // can carry `open` defect rows, and once it leaves `delivered|inspecting|rejected`
+    // it also leaves the acceptance-centre queue, so those defects are visible only
+    // through the defect list itself. That is the accepted cost of this decision, not
+    // an oversight, and reversing it is a ruling (B-364) rather than an
+    // implementer's call. The behaviour is pinned by a test so it cannot drift
+    // silently in either direction.
     if (result === "pass") {
       const siblings = await db.selectThrough(
         workPeriods,

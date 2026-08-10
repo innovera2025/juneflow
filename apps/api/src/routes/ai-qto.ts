@@ -29,8 +29,10 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
-import { boqDocs, boqGroups, boqItems, projects } from "@juneflow/db/schema";
+import { aiUsage, boqDocs, boqGroups, boqItems, projects } from "@juneflow/db/schema";
+import type { TenantDb } from "../db/tenant-db.js";
 import { QuotaGuard, sendQuotaExceeded } from "../plugins/quota.js";
+import { isUniqueViolation } from "./gl-post.js";
 import { stampEntryOrder } from "./list-order.js";
 
 // boq_doc is scoped through its project (boq.ts DOC_HOPS).
@@ -38,6 +40,72 @@ const DOC_HOPS = [{ fk: boqDocs.projectId, parent: projects }];
 
 /** The stub take-off handle prefix — GET /ai-qto/{job} only recognizes these. */
 const STUB_JOB_PREFIX = "aiqto-stub-";
+
+/** Current month key (YYYY-MM, UTC) — the ai_usage row key, same as the resolver's. */
+function currentMonthUtc(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+/**
+ * Consume ONE AI credit for this tenant's current month. Returns false when the
+ * allowance is already exhausted (→ 402), true when the credit was recorded.
+ *
+ * WHY A LOCK AND NOT `onConflictDoUpdate`. `quota.check` READS the meter and this
+ * writes it, which is a TOCTOU: two uploads arriving at limit−1 both read
+ * `used = limit − 1`, both pass, and both increment — the tenant gets one free
+ * run per unit of concurrency, forever, on a PRICED dimension. An upsert would
+ * make the WRITE atomic and leave that hole exactly as wide, because the decision
+ * would still have been taken outside it.
+ *
+ * So the decision moves INSIDE the transaction, onto a locked row:
+ *   · the row exists → `selectForUpdate` holds it; the value re-read after the
+ *     lock wait is the winner's committed one, so a loser at the cap refuses.
+ *   · the row does not exist → INSERT. `ai_usage_company_month_uq`
+ *     (unique(company_id, month), platform.ts) makes a concurrent first insert a
+ *     23505; the loser retries once and takes the lock path, which by then finds
+ *     a row. FOR UPDATE cannot be used here because there is no row to lock yet —
+ *     the unique index is what serialises the first writer, exactly as the B-336
+ *     shape does elsewhere in this repo.
+ *
+ * THE HAZARD, written down because it is invisible at the call site: this is
+ * correct BECAUSE READ COMMITTED takes a fresh snapshot per statement, so the
+ * SELECT issued after the lock wait sees the winner's commit. Under REPEATABLE
+ * READ or SERIALIZABLE the snapshot is fixed at the first statement and THIS
+ * GUARD SILENTLY STOPS WORKING — the same warning tenant-db.ts carries over
+ * selectForUpdate for the stock guard, and for the same reason.
+ *
+ * `limit === -1` is unlimited (PackageLimits convention): the meter still rises
+ * — the owner's usage reporting reads it (GET /me, GET /subscription) — but no
+ * ceiling is applied.
+ */
+async function consumeAiCredit(db: TenantDb, limit: number): Promise<boolean> {
+  const month = currentMonthUtc();
+  const bump = async (): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const [locked] = await tx.selectForUpdate(aiUsage, eq(aiUsage.month, month));
+      if (!locked) {
+        // No row yet: the unique index is the serialiser (nothing to lock).
+        await tx.insert(aiUsage, { month, used: 1 }).returning();
+        return true;
+      }
+      // Re-read UNDER the lock — this is the decision, not the check above.
+      if (limit !== -1 && locked.used >= limit) return false;
+      await tx
+        .update(aiUsage, { used: locked.used + 1 }, eq(aiUsage.id, locked.id))
+        .returning();
+      return true;
+    });
+
+  try {
+    return await bump();
+  } catch (err) {
+    // A concurrent FIRST insert for this (company, month) → 23505 on
+    // ai_usage_company_month_uq. Retry once: the row now exists, so the retry
+    // takes the lock path and either increments or refuses on the cap.
+    if (!isUniqueViolation(err)) throw err;
+    return bump();
+  }
+}
 
 /** Human-readable disclaimer stamped on every AI-QTO response. */
 const STUB_NOTE =
@@ -140,8 +208,9 @@ export function registerAiQtoRoute(
   // parse: the job is "done" immediately with the canned take-off available via
   // GET below. The `ai_per_month` quota gates it → 402 QUOTA_EXCEEDED when over.
   app.post("/ai-qto/upload", async (request, reply) => {
+    const db = request.db;
     const companyId = request.tenant?.companyId;
-    if (!companyId) {
+    if (!db || !companyId) {
       return reply
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
@@ -150,6 +219,22 @@ export function registerAiQtoRoute(
     // "deducts AI credit" → the ai_per_month quota gates the upload (contract 402).
     const status = await options.quota.check(companyId, "ai_per_month");
     if (!status.ok) {
+      return sendQuotaExceeded(reply, "ai_per_month", options.quota.upgradeUrl);
+    }
+
+    // -----------------------------------------------------------------------
+    // B-369 — THE METER TURNS. Until now it could not.
+    // -----------------------------------------------------------------------
+    // `aiUsage` appeared at exactly three sites — subscription-quota.ts:86,
+    // profile-data.ts:80, subscription.ts:103 — and ALL THREE were `select`. Zero
+    // writes existed anywhere in apps/api, so `used` sat at whatever the seed
+    // wrote, the gate above could never trip, and the priced AI allowance was
+    // effectively unlimited on every package.
+    //
+    // A "deducted credit" that no statement deducts is the whole defect, so the
+    // increment is the load-bearing change here and the 402 above is what it makes
+    // reachable.
+    if (!(await consumeAiCredit(db, status.limit))) {
       return sendQuotaExceeded(reply, "ai_per_month", options.quota.upgradeUrl);
     }
 

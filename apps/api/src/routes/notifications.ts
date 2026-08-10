@@ -19,6 +19,7 @@ import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { notifications } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { loadUserByEmail } from "./profile-data.js";
 
 type NotificationRow = typeof notifications.$inferSelect;
@@ -57,7 +58,26 @@ export function registerNotificationsRoute(app: FastifyInstance): void {
 
     // company_id auto-injected by select(); narrowed to THIS user's rows.
     const rows = await db.select(notifications, eq(notifications.userId, user.id));
-    return reply.code(200).send(listEnvelope(rows.map(notificationWire)));
+    // B-367 — ORDERING, and this is a PRECONDITION of the emitter, not a tidy-up.
+    //
+    // This read had NO ordering of any kind. It was stable only by accident: the
+    // sole writer was the seed, which inserts all 22 rows in one statement, so the
+    // heap order it happened to return WAS the seed array order. Both shipped
+    // readers depend on that order and neither sorts: apps/web's groupByDay
+    // ("Sections appear in the order their first row appears") and the shell bell,
+    // which renders the list exactly as returned. The moment apps/api gained a
+    // second writer (notify.ts), a real event could land anywhere in the heap — so
+    // "ยกเลิก" could render above "วันนี้" and the notifications G5 baseline would
+    // drift for reasons no diff explains.
+    //
+    // newestFirst is created_at DESC then id ASC — TOTAL, so two runs can never
+    // disagree (list-order.ts). It reproduces the seeded order exactly rather than
+    // changing it: the seed's stamp ladder (packages/db/src/seed/stamp.ts) gives
+    // row i `SEED_NOW - i * 1s`, i.e. array index 0 is the NEWEST, which is what
+    // this comparator puts first.
+    return reply
+      .code(200)
+      .send(listEnvelope(newestFirst(rows).map(notificationWire)));
   });
 
   // POST /notifications/:id/read — mark one of the session user's notifications
