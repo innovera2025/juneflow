@@ -1183,7 +1183,13 @@ export function registerGrRoute(app: FastifyInstance): void {
         // no gr_item, so locking would serialise storekeepers for nothing. Such a
         // receipt still blocks on the holder's lock at its own header insert, which
         // is a wait and never a cycle — it takes KEY SHARE and never upgrades.
-        // REVERT PROBE: anchor lock removed
+        if (orderedQtyByBoqItem.size > 0) {
+          if (poId) {
+            await tx.updateThroughChain(pos, PO_HOPS, { updatedAt: new Date() }, eq(pos.id, poId));
+          } else {
+            await tx.updateThroughChain(wos, WO_HOPS, { updatedAt: new Date() }, eq(wos.id, woId));
+          }
+        }
 
         [created] = await tx.insertThrough(grs, projects, projectId, [
           {
