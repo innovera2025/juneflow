@@ -572,9 +572,23 @@ export function LandPipeline() {
                     return (
                       // Card click opens the plot-detail modal (land.jsx L113 onClick ->
                       // openPlotDetail), whose primary action posts the real advance-stage.
+                      // role=button + tabIndex + Enter/Space (B-354): the card is the ONLY
+                      // route to the detail, and the detail is the only route to the
+                      // advance write — a bare <div onClick> made that whole path
+                      // unreachable for keyboard and AT users. Same shape as the merged
+                      // solar-monitor.tsx:341-354 ticket card; the visual stays a div, so
+                      // nothing paints differently at rest.
                       <div
                         key={p.id}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => openDetail(p)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openDetail(p);
+                          }
+                        }}
                         style={{
                           background: "var(--surface)",
                           border: "1px solid var(--border)",
