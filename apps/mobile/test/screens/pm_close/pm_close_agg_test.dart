@@ -334,7 +334,7 @@ void main() {
     test('a drain that never reached the op falls back to the QUEUE', () {
       // The op can be blocked behind a stuck one, or a re-entrant drain skipped, so
       // "no attempt" is not evidence of anything on its own.
-      final DrainReport empty = const DrainReport(<SyncAttempt>[]);
+      const DrainReport empty = DrainReport(<SyncAttempt>[]);
       expect(
         resolveCloseState('op-1', empty, <SyncOperation>[
           op(SyncOpStatus.pending),
@@ -358,8 +358,8 @@ void main() {
       expect(
         resolveCloseState(
           'op-1',
-          DrainReport(<SyncAttempt>[
-            const SyncAttempt(id: 'op-OTHER', outcome: SyncOutcome.synced),
+          const DrainReport(<SyncAttempt>[
+            SyncAttempt(id: 'op-OTHER', outcome: SyncOutcome.synced),
           ]),
           <SyncOperation>[op(SyncOpStatus.pending)],
         ),

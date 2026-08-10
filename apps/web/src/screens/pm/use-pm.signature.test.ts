@@ -116,14 +116,26 @@ describe("encodeSignatureInk — the shared wire shape (B-331)", () => {
     }
   });
 
-  it("matches the Dart encoder byte for byte", () => {
-    // The two clients write the SAME column, and nothing in the stack validates its
-    // shape, so drift would only surface as a signature that will not render on the
-    // other platform. This literal is the exact output of
-    // apps/mobile/lib/screens/pm_close/signature_ink.dart for the same input, with
-    // Dart's doubles normalised the way JSON.stringify writes them.
-    expect(encodeSignatureInk(ink([[pt(12, 40.5), pt(13, 41.2)], [pt(80, 44), pt(81, 44)]], 300, 110))).toBe(
-      '{"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44],[81,44]]]}',
+  it("produces the same VALUES as the Dart encoder — bytes differ, and that is fine", () => {
+    // The two clients write the SAME column and nothing in the stack validates its
+    // shape, so this is where drift would have to be caught.
+    //
+    // They are NOT byte-identical, and claiming they were would be wrong: Dart's
+    // jsonEncode writes a whole double as `300.0`, JSON.stringify writes `300`. Run
+    // against apps/mobile/lib/screens/pm_close/signature_ink.dart, the same input
+    // gives
+    //   Dart: {"v":1,"w":300.0,"h":110.0,"s":[[[12.0,40.5],[13.0,41.2]],[[80.0,44.0],[81.0,44.0]]]}
+    //   here: {"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44],[81,44]]]}
+    // Byte-identity is not the property that matters — nothing anywhere compares these
+    // strings. What matters is that each side's DECODER accepts the other's output,
+    // which is why decodeSignatureInk takes any `num` and why signature_ink_test.dart
+    // decodes this exact integer-valued string.
+    const web = encodeSignatureInk(ink([[pt(12, 40.5), pt(13, 41.2)], [pt(80, 44), pt(81, 44)]], 300, 110))!;
+    expect(web).toBe('{"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44],[81,44]]]}');
+
+    // Value-for-value against the Dart output, parsed.
+    expect(JSON.parse(web)).toEqual(
+      JSON.parse('{"v":1,"w":300.0,"h":110.0,"s":[[[12.0,40.5],[13.0,41.2]],[[80.0,44.0],[81.0,44.0]]]}'),
     );
   });
 

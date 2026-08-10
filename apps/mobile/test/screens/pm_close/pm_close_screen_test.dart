@@ -459,13 +459,13 @@ void main() {
       'stored STROKE JSON is re-rendered as real ink — no check-icon fallback',
       (WidgetTester tester) async {
         final String stored = encodeSignatureInk(
-          SignatureInk(
+          const SignatureInk(
             width: 300,
             height: 110,
             strokes: <List<SignaturePoint>>[
               <SignaturePoint>[
-                const SignaturePoint(10, 10),
-                const SignaturePoint(60, 40),
+                SignaturePoint(10, 10),
+                SignaturePoint(60, 40),
               ],
             ],
           ),

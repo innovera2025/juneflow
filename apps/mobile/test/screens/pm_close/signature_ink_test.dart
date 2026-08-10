@@ -268,14 +268,14 @@ void main() {
       // jsonEncode turns NaN/Infinity handling into a trap: a point that survived as
       // `null` would decode to nothing renderable.
       final String raw = encodeSignatureInk(
-        SignatureInk(
+        const SignatureInk(
           width: 300,
           height: 110,
           strokes: <List<SignaturePoint>>[
             <SignaturePoint>[
-              const SignaturePoint(1, 1),
+              SignaturePoint(1, 1),
               SignaturePoint(double.nan, 5),
-              const SignaturePoint(2, 2),
+              SignaturePoint(2, 2),
             ],
           ],
         ),
@@ -303,6 +303,45 @@ void main() {
         expect(back.strokes.single.first, const SignaturePoint(0, 0));
       },
     );
+  });
+
+  group('cross-platform: the WEB encoder writes the same column', () {
+    test("Dart decodes the web encoder's INTEGER-valued output", () {
+      // Not a hypothetical difference. Dart's jsonEncode writes a whole double as
+      // `300.0`; JSON.stringify writes `300`. Both are the same NUMBER, and nothing
+      // anywhere compares these strings — but a decoder that only accepted doubles
+      // would refuse every signature captured on the web, and the failure mode would
+      // be silent (the pad falls back to a check icon, which reads as "signed but not
+      // drawable"). This is the literal output of encodeSignatureInk in
+      // apps/web/src/screens/pm/use-pm.ts for the same input.
+      const String fromWeb =
+          '{"v":1,"w":300,"h":110,"s":[[[12,40.5],[13,41.2]],[[80,44],[81,44]]]}';
+      final SignatureInk ink = decodeSignatureInk(fromWeb)!;
+
+      expect(ink.width, 300);
+      expect(ink.height, 110);
+      expect(ink.strokes, <List<SignaturePoint>>[
+        <SignaturePoint>[
+          const SignaturePoint(12, 40.5),
+          const SignaturePoint(13, 41.2),
+        ],
+        <SignaturePoint>[
+          const SignaturePoint(80, 44),
+          const SignaturePoint(81, 44),
+        ],
+      ]);
+      // …and it re-renders like any other ink.
+      expect(ink.fit(600, 220), closeTo(2, 1e-9));
+    });
+
+    test('and the DART encoder round-trips its own doubles', () {
+      // The other direction, so neither encoder is only ever read by itself.
+      const String fromDart =
+          '{"v":1,"w":300.0,"h":110.0,"s":[[[12.0,40.5],[13.0,41.2]]]}';
+      final SignatureInk ink = decodeSignatureInk(fromDart)!;
+      expect(ink.width, 300);
+      expect(ink.strokes.single, hasLength(2));
+    });
   });
 
   group('the decoder REFUSES rather than half-drawing', () {
