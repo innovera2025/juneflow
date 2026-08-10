@@ -489,3 +489,76 @@ describe("POST /api/v1/users — F1 authorization", () => {
     expect(res.json().code).toBe("FORBIDDEN");
   });
 });
+
+// --- B-349: the seat meter -------------------------------------------------
+// `quota.check(` had exactly three call sites in apps/api — ai-qto, projects,
+// files — and NO `users` one, so the sold seat cap (starter 5 / pro 25 /
+// business 60, PACKAGE-RULES §1) was never enforced anywhere.
+describe("POST /api/v1/users — B-349 seat quota", () => {
+  /** A resolver reporting a fixed dimension state (the prod resolver's shape). */
+  const guardWith = (limit: number, used: number) =>
+    new QuotaGuard({
+      resolver: { async resolve() { return { limit, used }; } },
+      upgradeUrl: "https://upgrade.test",
+    });
+
+  const inviteWith = async (
+    quota: QuotaGuard,
+    rows: Array<[unknown, unknown[]]> = [[roles, [roleRow]], [users, [caller]]],
+    inserted: Inserted[] = [],
+  ) =>
+    (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb(rows, COMPANY, [], inserted),
+        quota,
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/users",
+      payload: { name: "นภา ศรีสุข", email: "napha@juneflow.co.th", role_id: "role-pm" },
+    });
+
+  it("402s the contract QuotaExceededError once the seats are full", async () => {
+    const inserted: Inserted[] = [];
+    const res = await inviteWith(guardWith(5, 5), undefined, inserted);
+    expect(res.statusCode).toBe(402);
+    expect(res.json()).toEqual({
+      code: "QUOTA_EXCEEDED",
+      message: "Quota exceeded for users",
+      upgrade_url: "https://upgrade.test",
+    });
+    // NOTHING is written: no dictionary row…
+    expect(inserted.find((i) => i.table === users)).toBeUndefined();
+    // …and no orphaned auth credential / invite token either. The two live behind
+    // different handles and cannot share a transaction (B-282), so the 402 has to
+    // land before either exists.
+    expect(credentials.accounts.size).toBe(0);
+    expect(credentials.tokens.size).toBe(0);
+    expect(delivered).toHaveLength(0);
+  });
+
+  it("admits the invite while a seat remains", async () => {
+    const res = await inviteWith(guardWith(5, 4));
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("an unlimited (-1) seat allowance never 402s", async () => {
+    const res = await inviteWith(guardWith(-1, 9999));
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("403 BEATS 402 — a caller who may not administer users is not sold seats", async () => {
+    const lowRole = { ...roleRow, id: "role-low", perms: { pr: { view: true, create: false, edit: false, approve: false, cancel: false } } };
+    const lowUser = { ...caller, id: "u-low", roleId: "role-low" };
+    const res = await inviteWith(guardWith(5, 5), [[roles, [lowRole]], [users, [lowUser]]]);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("409 BEATS 402 — re-inviting an existing member is the more specific answer", async () => {
+    const existing = { ...caller, id: "u-dup", email: "napha@juneflow.co.th" };
+    const res = await inviteWith(guardWith(5, 5), [[roles, [roleRow]], [users, [caller, existing]]]);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("DUPLICATE_EMAIL");
+  });
+});

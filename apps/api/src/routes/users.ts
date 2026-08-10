@@ -47,12 +47,15 @@ import {
 } from "../auth-provisioning.js";
 import { listEnvelope } from "./list-envelope.js";
 import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
+import { QuotaGuard, sendQuotaExceeded } from "../plugins/quota.js";
 
 export interface UsersRouteOptions {
   /** Credential/reset seam (prod: DbCredentialStore over the base handle). */
   credentials: CredentialStore;
   /** Invite-token delivery seam (default: no-op — see auth-provisioning.ts). */
   deliverReset: ResetDelivery;
+  /** B-349: the seat meter. `users` was the one SOLD dimension with no call site. */
+  quota: QuotaGuard;
 }
 
 /** Department codes accepted on invite (master.jsx:1025 UserAddForm dropdown). */
@@ -191,6 +194,47 @@ export function registerUsersRoute(
         code: "DUPLICATE_EMAIL",
         message: `a user with email ${email} already exists`,
       });
+    }
+
+    // -----------------------------------------------------------------------
+    // B-349 — THE SEAT METER. `users` is a SOLD dimension that never turned.
+    // -----------------------------------------------------------------------
+    // `quota.check(` resolved to exactly three call sites before this round —
+    // ai-qto.ts (ai_per_month), projects.ts (projects) and files.ts (storage_gb).
+    // There was NO `users` site at all: the package tables price a seat cap
+    // (starter 5 / pro 25 / business 60 / enterprise unlimited, PACKAGE-RULES §1),
+    // the resolver has always been able to count seats
+    // (subscription-quota.ts #used), and nothing ever asked it.
+    //
+    // WHERE THIS SITS, and each neighbour is deliberate:
+    //   · AFTER the master.create authz gate — a caller who may not administer
+    //     users gets 403, not a 402 inviting them to buy seats they cannot use.
+    //   · AFTER validation and the duplicate check — a malformed body is still
+    //     400 and re-inviting an existing member is still the more specific 409.
+    //   · BEFORE the `user` INSERT and before credential provisioning — this
+    //     handler writes a dictionary row AND provisions an auth_user +
+    //     auth_account + reset token across two handles that cannot share a
+    //     transaction (B-282), so a 402 must land before any of it exists.
+    //
+    // CONTRACT GAP, REPORTED NOT PAPERED OVER: openapi.yaml declares only 201 and
+    // 401 for POST /users, so this 402 is an UNDECLARED status — as are the 400,
+    // 403 and 409 the handler already returns. Declaring them is a SACRED
+    // openapi.yaml edit and is filed for Wei (B-350) rather than taken here. The
+    // body is the contract's canonical QuotaExceededError shape either way
+    // (plugins/quota.ts sendQuotaExceeded), so a client that handles 402 anywhere
+    // handles it here.
+    //
+    // DEPLOYMENT: SubscriptionQuotaResolver is production-only (index.ts gates it;
+    // non-prod keeps the unlimited resolver), so this check CANNOT fail in dev or
+    // CI — it fails first in production, against real tenants that may already sit
+    // over a limit nothing was enforcing. `scripts/quota-preflight.ts` reports
+    // exactly who, and PUT /admin/subscribers/{id}/package raises their `seats`.
+    // Run it BEFORE this ships. Also note `#used` counts EVERY user row including
+    // `blocked` and `invited`; whether a blocked ex-employee should consume a paid
+    // seat is a billing definition, not an implementer's call, and is on B-350.
+    const seats = await options.quota.check(db.companyId, "users");
+    if (!seats.ok) {
+      return sendQuotaExceeded(reply, "users", options.quota.upgradeUrl);
     }
 
     // NO platform-wide pre-check here, deliberately — see B-283. auth_user.email

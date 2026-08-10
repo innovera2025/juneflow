@@ -70,6 +70,26 @@ export class SubscriptionQuotaResolver implements QuotaResolver {
     );
     const pkg = pkgRows[0];
     if (!pkg) return null;
+    // B-349 — the SEAT OVERRIDE, and it governs `users` ONLY.
+    //
+    // packages/db/src/schema/platform.ts is explicit about what this column is:
+    // "a per-subscriber seat-cap OVERRIDE the owner may set… NULL = no override
+    // (fall back to the package's `limits.users`); -1 = unlimited", and admin.ts
+    // validates it as -1 or >= 1 on PUT /admin/subscribers/{id}/package. It was
+    // recorded there as a follow-up and never wired, so an owner could set a seat
+    // cap and nothing ever read it.
+    //
+    // THE GATE ON `key` IS LOAD-BEARING, not defensive tidiness. A generic
+    // `sub.seats ?? pkg.limits[key]` would let a seat override silently cap
+    // projects, storage_gb AND ai_per_month too — nothing in the schema or in
+    // admin.ts says seats governs anything but users, so a tenant granted 3 extra
+    // seats would find itself limited to 3 projects and 3 AI runs a month.
+    //
+    // Resolved AFTER the package deliberately: a subscription carrying `seats` but
+    // no resolvable package is broken data, and honouring half of it is how
+    // billing goes wrong quietly. That case falls through the `!pkg` return above
+    // to the fail-closed deny, seats or no seats.
+    if (key === "users" && sub.seats != null) return sub.seats;
     const limit = pkg.limits[key];
     return typeof limit === "number" ? limit : null;
   }

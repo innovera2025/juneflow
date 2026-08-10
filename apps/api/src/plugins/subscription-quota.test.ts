@@ -71,6 +71,58 @@ describe("SubscriptionQuotaResolver — real limit + real usage", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// B-349 — the seat OVERRIDE (subscription.seats), and its blast radius
+// ---------------------------------------------------------------------------
+const dbWithSeats = (limits: Record<string, number>, seats: number | null) =>
+  stubDb([
+    [subscriptions, [{ ...subRow, seats }]],
+    [packages, [{ id: "pkg-m", size: "M", name: "Professional", limits, menus: [], subRules: {} }]],
+    [projects, [{ id: "p1" }, { id: "p2" }, { id: "p3" }]],
+    [users, [{ id: "u1" }, { id: "u2" }]],
+    [aiUsage, [{ month, used: 3 }, { month, used: 4 }]],
+  ]);
+
+describe("SubscriptionQuotaResolver — the seat override (B-349)", () => {
+  it("subscription.seats OVERRIDES the package's users limit", async () => {
+    const r = new SubscriptionQuotaResolver(dbWithSeats(LIMITS, 3));
+    expect(await r.resolve(COMPANY, "users")).toEqual({ limit: 3, used: 2 });
+  });
+
+  it("seats = -1 means unlimited seats (and skips the count)", async () => {
+    const r = new SubscriptionQuotaResolver(dbWithSeats(LIMITS, -1));
+    expect(await r.resolve(COMPANY, "users")).toEqual({ limit: -1, used: 0 });
+  });
+
+  it("NULL seats falls back to the package limit (no override)", async () => {
+    const r = new SubscriptionQuotaResolver(dbWithSeats(LIMITS, null));
+    expect(await r.resolve(COMPANY, "users")).toEqual({ limit: 25, used: 2 });
+  });
+
+  // The whole reason the override is gated on `key === "users"`: a generic
+  // `sub.seats ?? pkg.limits[key]` would cap every other dimension at the seat
+  // count, so a tenant granted 3 seats would also get 3 projects and 3 AI runs.
+  it("does NOT touch projects / ai_per_month / storage_gb", async () => {
+    const r = new SubscriptionQuotaResolver(dbWithSeats(LIMITS, 3));
+    expect(await r.resolve(COMPANY, "projects")).toEqual({ limit: 10, used: 3 });
+    expect(await r.resolve(COMPANY, "ai_per_month")).toEqual({ limit: 50, used: 7 });
+    expect(await r.resolve(COMPANY, "storage_gb")).toEqual({ limit: 100, used: 0 });
+  });
+
+  it("seats WITHOUT a resolvable package still fails closed (broken data is denied)", async () => {
+    const r = new SubscriptionQuotaResolver(
+      stubDb([
+        [subscriptions, [{ ...subRow, seats: 50 }]],
+        [packages, []], // the package the subscription points at is gone
+        [users, [{ id: "u1" }]],
+      ]),
+    );
+    const status = await r.resolve(COMPANY, "users");
+    expect(status).toEqual({ limit: 0, used: 1 });
+    expect(isWithinQuota(status.limit, status.used)).toBe(false);
+  });
+});
+
 describe("SubscriptionQuotaResolver — enforcement + fail-closed", () => {
   it("blocks once usage reaches the limit (real 402 path)", async () => {
     const r = new SubscriptionQuotaResolver(dbWith({ ...LIMITS, projects: 3 }));

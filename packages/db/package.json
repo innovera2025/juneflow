@@ -32,6 +32,7 @@
     "migrate": "drizzle-kit migrate",
     "migration:check": "drizzle-kit check",
     "seed": "tsx src/seed/index.ts",
+    "quota:preflight": "tsx src/quota-preflight.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

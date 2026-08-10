@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { boqDocs, boqGroups, boqItems, projects } from "@juneflow/db";
+import { aiUsage, boqDocs, boqGroups, boqItems, projects } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import {
@@ -38,40 +38,67 @@ interface Inserted {
   rows: unknown[];
 }
 
+interface Updated {
+  table: unknown;
+  set: Record<string, unknown>;
+  where: SQL | undefined;
+}
+/** Rows a table answers with — a function when the answer must change per call. */
+type RowSource = unknown[] | (() => unknown[]);
+
 interface StubOpts {
-  rows: Array<[unknown, unknown[]]>;
+  rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
   inserted?: Inserted[];
+  updated?: Updated[];
+  /** B-349: make the nth insert into a table throw (models a 23505 on a unique index). */
+  insertThrows?: (table: unknown, nth: number) => unknown;
+  /** Records every table a FOR UPDATE row lock was taken on. */
+  locked?: unknown[];
 }
 
-/** Base Db stub: canned rows per table for reads; capture of insert ops. */
+/** Base Db stub: canned rows per table for reads; capture of write ops. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [] } = opts;
+  const { rows, captured = [], inserted = [], updated = [], insertThrows, locked = [] } = opts;
   const rowsFor = (table: unknown): unknown[] => {
-    for (const [t, r] of rows) if (t === table) return r;
+    for (const [t, r] of rows) if (t === table) return typeof r === "function" ? r() : r;
     return [];
   };
+  // A CHAINABLE thenable: drizzle's selectForUpdate door is
+  // `.where(...).orderBy(...).for("update")`, so `where` must return the builder
+  // rather than a promise, and the builder itself resolves when awaited.
   const builderFor = (table: unknown) => {
+    let seen: SQL | undefined;
     const builder = {
       $dynamic: () => builder,
       innerJoin: () => builder,
+      orderBy: () => builder,
+      for: (_mode: string) => {
+        locked.push(table);
+        return builder;
+      },
       where: (where: SQL) => {
-        captured.push({ table, where });
-        return Promise.resolve(rowsFor(table));
+        seen = where;
+        return builder;
       },
       then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
-        captured.push({ table, where: undefined });
+        captured.push({ table, where: seen });
         return Promise.resolve(rowsFor(table)).then(onOk, onErr);
       },
     };
     return builder;
   };
   let seq = 0;
-  return {
+  const insertCalls = new Map<unknown, number>();
+  const handle: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
       values: (values: unknown) => ({
         returning: () => {
+          const nth = insertCalls.get(table) ?? 0;
+          insertCalls.set(table, nth + 1);
+          const thrown = insertThrows?.(table, nth);
+          if (thrown) return Promise.reject(thrown);
           const list = Array.isArray(values) ? values : [values];
           inserted.push({ table, rows: list });
           return Promise.resolve(
@@ -80,7 +107,24 @@ function stubDb(opts: StubOpts): Db {
         },
       }),
     }),
-  } as unknown as Db;
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            updated.push({ table, set, where });
+            return Promise.resolve([set]);
+          },
+        }),
+      }),
+    }),
+  };
+  // The transaction door runs its callback against this SAME stub (the
+  // inventory.test.ts / gr.test.ts precedent). It gives the handler a transaction
+  // SHAPE and nothing more: there is no real BEGIN/COMMIT, so no test here can
+  // prove the rollback — only that the writes go through the scoped doors in the
+  // right order. The lock's actual behaviour under concurrency is a live claim.
+  handle.transaction = (cb: (tx: unknown) => unknown) => cb(handle);
+  return handle as unknown as Db;
 }
 
 function paramsOf(where: SQL | undefined): unknown[] {
@@ -151,6 +195,156 @@ describe("POST /api/v1/ai-qto/upload — stub job + AI credit", () => {
       url: "/api/v1/ai-qto/upload",
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-349 — the meter TURNS. Before this, `aiUsage` had three readers and zero
+// writers anywhere in apps/api, so `used` never moved and the 402 above could
+// never fire on a real tenant: a "deducted AI credit" that no statement deducts.
+// ---------------------------------------------------------------------------
+
+const usageRow = (used: number) => ({
+  id: "aiu-0",
+  companyId: COMPANY,
+  month: new Date().toISOString().slice(0, 7),
+  used,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+});
+
+describe("POST /api/v1/ai-qto/upload — B-349 ai_usage is written", () => {
+  it("INSERTS the month's meter row at 1 when none exists yet", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        quota: quotaGuard(50, 0),
+        db: stubDb({ rows: [[aiUsage, []]], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/ai-qto/upload" });
+
+    expect(res.statusCode).toBe(202);
+    const write = inserted.find((i) => i.table === aiUsage);
+    expect(write).toBeTruthy();
+    expect(write!.rows[0]).toMatchObject({
+      used: 1,
+      month: new Date().toISOString().slice(0, 7),
+      // the scoped insert door force-sets the tenant
+      companyId: COMPANY,
+    });
+  });
+
+  it("INCREMENTS an existing month row by exactly one", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        quota: quotaGuard(50, 7),
+        db: stubDb({ rows: [[aiUsage, [usageRow(7)]]], updated }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/ai-qto/upload" });
+
+    expect(res.statusCode).toBe(202);
+    const write = updated.find((u) => u.table === aiUsage);
+    expect(write).toBeTruthy();
+    expect(write!.set).toEqual({ used: 8 });
+  });
+
+  it("takes the meter row's ROW LOCK before deciding — the check above is a TOCTOU", async () => {
+    // quota.check READS the meter and this WRITES it. Two uploads at limit-1 both
+    // read limit-1 and both pass, so the decision has to be retaken on a locked
+    // row or the tenant gets one free run per unit of concurrency, on a PRICED
+    // dimension. An upsert would make the write atomic and leave the hole open.
+    const locked: unknown[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        quota: quotaGuard(50, 7),
+        db: stubDb({ rows: [[aiUsage, [usageRow(7)]]], locked }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/ai-qto/upload" });
+    expect(locked).toContain(aiUsage);
+  });
+
+  it("402s WITHOUT incrementing when the locked row is already at the cap", async () => {
+    // The loser of a race: it passed the pre-check at limit-1, then waited on the
+    // lock and re-read the winner's committed value.
+    const updated: Updated[] = [];
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        quota: quotaGuard(10, 9), // the stale pre-check: one credit left
+        db: stubDb({ rows: [[aiUsage, [usageRow(10)]]], updated, inserted }), // …but not any more
+      })
+    ).inject({ method: "POST", url: "/api/v1/ai-qto/upload" });
+
+    expect(res.statusCode).toBe(402);
+    expect(res.json().code).toBe("QUOTA_EXCEEDED");
+    expect(updated.find((u) => u.table === aiUsage)).toBeUndefined();
+    expect(inserted.find((i) => i.table === aiUsage)).toBeUndefined();
+  });
+
+  it("an UNLIMITED (-1) allowance still meters, and never refuses", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        quota: quotaGuard(-1, 0),
+        db: stubDb({ rows: [[aiUsage, [usageRow(9999)]]], updated }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/ai-qto/upload" });
+    expect(res.statusCode).toBe(202);
+    expect(updated.find((u) => u.table === aiUsage)!.set).toEqual({ used: 10000 });
+  });
+
+  it("retries once through the LOCK path when a concurrent first insert wins (23505)", async () => {
+    // No row exists, so there is nothing to lock and the unique index
+    // (ai_usage_company_month_uq) is the serialiser. The loser's INSERT trips it;
+    // by the retry a row exists, so the retry increments instead of inserting.
+    const updated: Updated[] = [];
+    const inserted: Inserted[] = [];
+    let attempts = 0;
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        quota: quotaGuard(50, 0),
+        db: stubDb({
+          // First read: empty (no row). After the failed insert: the winner's row.
+          rows: [[aiUsage, () => (attempts++ === 0 ? [] : [usageRow(1)])]],
+          inserted,
+          updated,
+          insertThrows: (table, nth) =>
+            table === aiUsage && nth === 0
+              ? Object.assign(new Error("duplicate key"), {
+                  code: "23505",
+                  constraint: "ai_usage_company_month_uq",
+                })
+              : null,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/ai-qto/upload" });
+
+    expect(res.statusCode).toBe(202);
+    // The insert was attempted and rejected; the retry took the increment path.
+    expect(inserted.find((i) => i.table === aiUsage)).toBeUndefined();
+    expect(updated.find((u) => u.table === aiUsage)!.set).toEqual({ used: 2 });
+  });
+
+  it("does NOT meter a request the quota pre-check already refused", async () => {
+    const updated: Updated[] = [];
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        quota: quotaGuard(5, 5),
+        db: stubDb({ rows: [[aiUsage, [usageRow(5)]]], updated, inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/ai-qto/upload" });
+    expect(res.statusCode).toBe(402);
+    expect(updated).toHaveLength(0);
+    expect(inserted).toHaveLength(0);
   });
 });
 
