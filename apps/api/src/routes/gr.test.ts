@@ -22,6 +22,11 @@ import {
   projects,
   wos,
   vendors,
+  boqItems,
+  boqGroups,
+  boqDocs,
+  jvs,
+  stockLedgers,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
@@ -37,6 +42,10 @@ const PR = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const PO = "dddddddd-dddd-dddd-dddd-dddddddddddd";
 const WO = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
 const VENDOR = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+// B-348: gr_item.price is DERIVED from these BOQ lines, never from the body.
+const BOQ_ITEM = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+const BOQ_ITEM_USD = "ffffffff-ffff-ffff-ffff-fffffffffffe";
+const BOQ_ITEM_FOREIGN = "ffffffff-ffff-ffff-ffff-fffffffffff0";
 const D = new Date(1_700_000_000_000);
 
 const SESSION = {
@@ -292,6 +301,28 @@ const grItem = (
 });
 
 const vendorRow = { id: VENDOR, companyId: COMPANY, name: "บจก. รุ่งเรืองก่อสร้าง" };
+
+/**
+ * B-348 — the SERVER's price source. gr.ts resolves a line's `boq_item_id`
+ * through boq_item -> group -> doc -> project and takes `price` + `currency_code`
+ * from the row it finds; a line whose id resolves to nothing is refused.
+ */
+const boqItemPriced = (id: string, price: string, currencyCode = "THB") => ({
+  id,
+  groupId: "g0",
+  code: `C-${id}`,
+  name: `boq ${id}`,
+  cat: "M",
+  qty: "0",
+  unit: "ถุง",
+  price,
+  currencyCode,
+  ccId: null,
+  remainQty: "0",
+  elementId: null,
+  createdAt: D,
+  updatedAt: D,
+});
 
 // ---------------------------------------------------------------------------
 // GET /gr — list (PO + WO chains UNIONed) + tenant scope
@@ -571,6 +602,7 @@ describe("POST /api/v1/gr — create receipt", () => {
             [projects, [project]],
             [prItems, [prLine("l0", "1000")]],
             [grs, [gr("new-0", { poId: PO, received: 90 })]],
+            [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
           ],
           inserted,
         }),
@@ -583,7 +615,8 @@ describe("POST /api/v1/gr — create receipt", () => {
         no: "GR-2026-0151",
         lines: [
           // widened detail line → one gr_item; ordered 100, received (qty_ok) 90.
-          { qty_ok: 90, qty_rejected: 0, name: "ปูนซีเมนต์", ordered_qty: 100, unit: "ถุง", price: 300 },
+          // B-348: the price comes from BOQ_ITEM (300.00), NOT from this body.
+          { qty_ok: 90, qty_rejected: 0, name: "ปูนซีเมนต์", ordered_qty: 100, unit: "ถุง", boq_item_id: BOQ_ITEM },
           // bare qty-only line → no gr_item (per-line detail honestly absent).
           { qty_ok: 10, qty_rejected: 0 },
         ],
@@ -603,6 +636,120 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(row.orderedQty).toBe("100");
     expect(row.receivedQty).toBe("90"); // = qty_ok
     expect(row.price).toBe("300.00");
+  });
+
+  // ── B-348: money = SERVER, on the line ───────────────────────────────────────
+  it("IGNORES a client `price` and takes the line's money from its BOQ item (B-348)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]],
+            [grs, [gr("new-0", { poId: PO, received: 90 })]],
+            // The SERVER's price for this BOQ line.
+            [boqItems, [boqItemPriced(BOQ_ITEM, "1200.00", "THB")]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [
+          {
+            qty_ok: 90,
+            name: "ปูนซีเมนต์",
+            ordered_qty: 100,
+            unit: "ถุง",
+            boq_item_id: BOQ_ITEM,
+            // A client trying to originate the receipt's monetary value.
+            price: 999999,
+            currency_code: "USD",
+          },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const row = inserted.find((w) => w.table === grItems)!.rows[0] as {
+      price: string;
+      currencyCode: string;
+    };
+    expect(row.price).toBe("1200.00"); // the BOQ line's price, not 999999
+    expect(row.currencyCode).toBe("THB"); // and its currency, not the body's USD
+    // …and the SAME figure reaches the wire the GL inbox will agree with.
+    expect(res.json().money).toBe(108000); // 90 × 1200
+  });
+
+  it("400s on a boq_item_id this tenant cannot see — an id that CHOOSES a price is resolved (B-348)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]],
+            [grs, [gr("new-0", { poId: PO, received: 90 })]],
+            // The scoped read returns NOTHING for the foreign id.
+            [boqItems, []],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [
+          { qty_ok: 90, name: "ปูนซีเมนต์", ordered_qty: 90, boq_item_id: BOQ_ITEM_FOREIGN },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("boq_item");
+    // Nothing persisted — not the receipt, not the line.
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
+    expect(inserted.find((w) => w.table === grItems)).toBeFalsy();
+  });
+
+  it("a named line with NO boq_item_id stores 0.00 — 'unknown', never the body's number (B-348)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000")]],
+            [grs, [gr("new-0", { poId: PO, received: 90 })]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [{ qty_ok: 90, name: "ปูนซีเมนต์", ordered_qty: 90, price: 300 }],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const row = inserted.find((w) => w.table === grItems)!.rows[0] as { price: string };
+    expect(row.price).toBe("0.00");
   });
 
   // ── B-323 round 2: the PRODUCTION tie the seed can never reproduce ────────────
@@ -742,6 +889,15 @@ describe("POST /api/v1/gr — create receipt", () => {
             [projects, [project]],
             [prItems, [prLine("l0", "1000")]],
             [grs, [gr("new-0", { poId: PO, received: 5 })]],
+            // B-348: the currencies compared are the BOQ lines' own, not the body's
+            // — the handler no longer reads a client currency_code at all.
+            [
+              boqItems,
+              [
+                boqItemPriced(BOQ_ITEM, "300.00", "THB"),
+                boqItemPriced(BOQ_ITEM_USD, "400.00", "USD"),
+              ],
+            ],
           ],
           inserted,
         }),
@@ -752,8 +908,8 @@ describe("POST /api/v1/gr — create receipt", () => {
       payload: {
         po_id: PO,
         lines: [
-          { qty_ok: 3, name: "ปูนซีเมนต์", ordered_qty: 3, unit: "ถุง", price: 300, currency_code: "THB" },
-          { qty_ok: 2, name: "steel", ordered_qty: 2, unit: "ton", price: 400, currency_code: "USD" },
+          { qty_ok: 3, name: "ปูนซีเมนต์", ordered_qty: 3, unit: "ถุง", boq_item_id: BOQ_ITEM },
+          { qty_ok: 2, name: "steel", ordered_qty: 2, unit: "ton", boq_item_id: BOQ_ITEM_USD },
         ],
       },
     });
@@ -1117,6 +1273,60 @@ describe("POST /api/v1/gr — partial vs full receipt", () => {
 // ---------------------------------------------------------------------------
 
 describe("GR return/cancel state machine", () => {
+  // ── B-348: a POSTED receipt is frozen ────────────────────────────────────────
+  //
+  // These exist because THIS round created the hazard: until gr carried a money
+  // value, return/cancel had no JV to contradict. A return after the post would
+  // leave Dr 5020 / Cr 2010 standing for goods that went back to the vendor, and
+  // nothing in the return path touches `jv`.
+  const postedJv = (grId: string) => ({
+    id: "jv-posted",
+    companyId: COMPANY,
+    no: "JV-2026-0500",
+    sourceDoc: `gr:${grId}`,
+  });
+
+  for (const verb of ["return", "cancel"] as const) {
+    it(`${verb}: 409 when a JV has already posted this receipt (B-348)`, async () => {
+      const updated: Updated[] = [];
+      const inserted: Inserted[] = [];
+      const G = gr("g0", { poId: PO, status: "received" });
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [[grs, [G]], [jvs, [postedJv("g0")]]],
+            updated,
+            inserted,
+            updateBase: G,
+          }),
+        })
+      ).inject({ method: "POST", url: `/api/v1/gr/g0/${verb}` });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("INVALID_STATE");
+      expect(res.json().message).toContain("posted");
+      // The status is never flipped and NO stock reversal is written.
+      expect(updated.find((u) => u.table === grs)).toBeUndefined();
+      expect(inserted.find((i) => i.table === stockLedgers)).toBeUndefined();
+    });
+
+    it(`${verb}: a jv posting a DIFFERENT receipt does not freeze this one (B-348)`, async () => {
+      const G = gr("g0", { poId: PO, status: "received" });
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            // The scoped read is `jv.source_doc = 'gr:g0'`; a jv for another
+            // receipt simply does not match it.
+            rows: [[grs, [G]], [jvs, []]],
+            updateBase: G,
+          }),
+        })
+      ).inject({ method: "POST", url: `/api/v1/gr/g0/${verb}` });
+      expect(res.statusCode).toBe(200);
+    });
+  }
+
   it("return: received → returned", async () => {
     const updated: Updated[] = [];
     const G = gr("g0", { poId: PO, status: "received" });
@@ -1465,7 +1675,9 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     const originalItem = {
       id: "new-1",
       grId: "new-0",
-      boqItemId: null,
+      // B-348: the line prices off a real BOQ item, so the replay rebuilds the
+      // same envelope from the same SERVER-owned number.
+      boqItemId: BOQ_ITEM,
       name: "ปูนซีเมนต์",
       orderedQty: "1000",
       receivedQty: "1000",
@@ -1493,6 +1705,7 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
         [grItems, [originalItem]],
         [defectReports, [originalDefect]],
         [vendors, [vendorRow]],
+        [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
       ],
       inserted,
       updated,
@@ -1508,7 +1721,7 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
           qty_ok: 1000, // the whole order — st-receive's default recv = ordered
           qty_rejected: 50,
           unit: "ถุง",
-          price: 300,
+          boq_item_id: BOQ_ITEM,
         },
       ],
     };

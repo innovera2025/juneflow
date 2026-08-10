@@ -13,6 +13,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import {
   accountingPeriods,
   glAccounts,
+  grItems,
   grs,
   jvLines,
   jvs,
@@ -674,6 +675,101 @@ describe("GET /api/v1/gl/posting-inbox", () => {
     expect(pvB.jv_no).toBeNull();
   });
 
+  // ── B-348: the receipt's money reaches the inbox ─────────────────────────────
+  it("gr amount is the SERVER-derived Sigma(received_qty x price), matching the GR list wire", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pvs, []],
+            [rvs, []],
+            [payrolls, []],
+            [grs, [{ id: GR_A, no: "GR-2026-0148", status: "received", createdAt: D }]],
+            [
+              grItems,
+              [grLine("gi-0", GR_A, "480", "168.50"), grLine("gi-1", GR_A, "240", "142.00")],
+            ],
+            [jvs, []],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/posting-inbox" });
+
+    const row = res.json().data.find((r: { id: string }) => r.id === GR_A);
+    // 480 × 168.50 + 240 × 142.00 — computed from the stored lines, not asserted
+    // against the impl's own arithmetic path.
+    expect(row.amount).toBe(480 * 168.5 + 240 * 142);
+    expect(row.currency_code).toBe("THB");
+    expect(row.doc_no).toBe("GR-2026-0148");
+  });
+
+  it("gr amount is NULL when the receipt has no priced lines (the mobile shape — 'unknown', not zero baht)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pvs, []],
+            [rvs, []],
+            [payrolls, []],
+            [grs, [{ id: GR_A, no: "GR-2026-0148", status: "received", createdAt: D }]],
+            [grItems, []], // st_receive posts bare {qty_ok} lines — no gr_item at all
+            [jvs, []],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/posting-inbox" });
+
+    const row = res.json().data.find((r: { id: string }) => r.id === GR_A);
+    expect(row.amount).toBeNull();
+    expect(row.currency_code).toBeNull();
+  });
+
+  it("gr amount is NULL when the lines carry MORE THAN ONE currency (never a cross-currency sum)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pvs, []],
+            [rvs, []],
+            [payrolls, []],
+            [grs, [{ id: GR_A, no: "GR-2026-0148", status: "received", createdAt: D }]],
+            [
+              grItems,
+              [
+                grLine("gi-0", GR_A, "10", "100.00", "THB"),
+                grLine("gi-1", GR_A, "10", "100.00", "USD"),
+              ],
+            ],
+            [jvs, []],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/posting-inbox" });
+
+    expect(res.json().data.find((r: { id: string }) => r.id === GR_A).amount).toBeNull();
+  });
+
+  it("reads the gr rows RECEIVED-only — a returned/cancelled receipt is not awaiting posting", async () => {
+    const captured: Captured[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[pvs, []], [rvs, []], [payrolls, []], [grs, []], [jvs, []]],
+          captured,
+        }),
+      })
+    ).inject({ url: "/api/v1/gl/posting-inbox" });
+    const grRead = captured.find((c) => c.table === grs);
+    expect(grRead).toBeTruthy();
+    // The status predicate is bound on the read itself, so the LIST and the
+    // gl.inbox BADGE (which derives from the same function) move together.
+    expect(paramsOf(grRead!.where)).toContain("received");
+  });
+
   it("binds company_id on the pv/rv reads (tenant scope)", async () => {
     const captured: Captured[] = [];
     await (
@@ -1281,6 +1377,24 @@ describe("POST /api/v1/gl/close-period", () => {
 const GR_A = "dddd0000-0000-0000-0000-0000000000dd";
 const UNKNOWN_ID = "eeee0000-0000-0000-0000-0000000000ee";
 
+// B-348: gr_item rows are the receipt's money. price/currency are SERVER-owned
+// (gr.ts derives them from boq_item at create); this fixture just stores them.
+const grLine = (
+  id: string,
+  grId: string,
+  receivedQty: string,
+  price: string,
+  currencyCode = "THB",
+) => ({ id, grId, boqItemId: null, name: `line ${id}`, orderedQty: receivedQty, receivedQty, unit: "ถุง", price, currencyCode, createdAt: D, updatedAt: D });
+
+/** The gr posting rule's two COA accounts (gl-post.ts POSTING_MAP.gr = 5020 / 2010). */
+const ACC_MATCOST = "9999aaaa-0000-0000-0000-00000000aaaa";
+const ACC_TRADE_AP = "9999bbbb-0000-0000-0000-00000000bbbb";
+const GR_ACCOUNTS = [
+  glAcc(ACC_MATCOST, "5020", "ต้นทุนวัสดุ", null),
+  glAcc(ACC_TRADE_AP, "2010", "เจ้าหนี้การค้า", null),
+];
+
 // A stub carrying: the loadCaller/authz rows (users + roles), the posting-inbox
 // source rows (pv/rv/gr/payroll), the jvs the inbox resolver + allocJvNo +
 // insertThrough ownership all read, and the gl_account rows resolveAccountIds
@@ -1290,6 +1404,7 @@ const postDb = (
     rvRows?: unknown[];
     pvRows?: unknown[];
     grRows?: unknown[];
+    grItemRows?: unknown[];
     payrollRows?: unknown[];
     jvRows?: unknown[];
     accounts?: unknown[];
@@ -1305,6 +1420,8 @@ const postDb = (
       [pvs, opts.pvRows ?? []],
       [rvs, opts.rvRows ?? []],
       [grs, opts.grRows ?? []],
+      // B-348: the receipt's postable money is Sigma(received_qty x price) over these.
+      [grItems, opts.grItemRows ?? []],
       [payrolls, opts.payrollRows ?? []],
       // default: one owned jv with a free-text source_doc — references nothing by
       // the convention (so no inbox doc reads posted) and seeds allocJvNo at 0001.
@@ -1407,12 +1524,16 @@ describe("POST /api/v1/gl/post", () => {
     expect(lineIns!.values[1]!.cr).toBe("2148000.00");
   });
 
-  it("skips a gr doc — no postable money amount (gr carries quantity, C10 honest gap)", async () => {
+  it("skips a gr doc with NO priced lines — no postable money amount (the mobile shape)", async () => {
     const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: postDb({ grRows: [{ id: GR_A, no: "GR-001", createdAt: D }], inserted }),
+        db: postDb({
+          grRows: [{ id: GR_A, no: "GR-001", status: "received", createdAt: D }],
+          grItemRows: [], // st_receive posts bare {qty_ok} lines — no per-line detail
+          inserted,
+        }),
       })
     ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [GR_A] } });
     expect(res.statusCode).toBe(200);
@@ -1420,6 +1541,68 @@ describe("POST /api/v1/gl/post", () => {
     expect(body.posted).toHaveLength(0);
     expect(body.skipped).toEqual([{ doc_id: GR_A, reason: "no postable money amount" }]);
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // nothing posted
+  });
+
+  // ── B-348: the receipt finally posts a COST ──────────────────────────────────
+  it("POSTS a priced gr: Dr 5020 / Cr 2010 for the SERVER-derived Sigma(received x price)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          grRows: [{ id: GR_A, no: "GR-2026-0148", status: "received", createdAt: D }],
+          grItemRows: [
+            grLine("gi-0", GR_A, "480", "168.50"),
+            grLine("gi-1", GR_A, "240", "142.00"),
+          ],
+          accounts: GR_ACCOUNTS,
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [GR_A] } });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.skipped).toHaveLength(0);
+    const total = 480 * 168.5 + 240 * 142;
+    expect(body.posted).toEqual([
+      { doc_id: GR_A, source: "gr", jv_no: expect.any(String), amount: total },
+    ]);
+
+    // The JV records the source doc by the shared "<table>:<uuid>" convention, so
+    // the inbox reads it back as posted (and the 0037 UNIQUE index dedups a race).
+    const jvIns = inserted.find((i) => i.table === jvs);
+    expect(jvIns!.values[0]!.sourceDoc).toBe(`gr:${GR_A}`);
+
+    // A BALANCED two-leg JV at the derived amount.
+    const lines = inserted.find((i) => i.table === jvLines)!.values;
+    expect(lines).toHaveLength(2);
+    expect(lines[0]!.accountId).toBe(ACC_MATCOST); // 5020 material cost
+    expect(lines[0]!.dr).toBe(total.toFixed(2));
+    expect(lines[0]!.cr).toBe("0.00");
+    expect(lines[1]!.accountId).toBe(ACC_TRADE_AP); // 2010 trade AP
+    expect(lines[1]!.dr).toBe("0.00");
+    expect(lines[1]!.cr).toBe(total.toFixed(2));
+  });
+
+  it("skips a gr whose priced lines total ZERO — a zero JV would mark it posted forever", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: postDb({
+          grRows: [{ id: GR_A, no: "GR-001", status: "received", createdAt: D }],
+          // Lines exist, but none has a server price source (no boq_item_id at create).
+          grItemRows: [grLine("gi-0", GR_A, "90", "0.00")],
+          accounts: GR_ACCOUNTS,
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gl/post", payload: { doc_ids: [GR_A] } });
+    expect(res.json().skipped).toEqual([
+      { doc_id: GR_A, reason: "no postable money amount" },
+    ]);
+    expect(inserted.find((i) => i.table === jvs)).toBeUndefined();
   });
 
   it("skips an already-posted doc (idempotent) — a jv already carries its rv:<uuid> ref", async () => {

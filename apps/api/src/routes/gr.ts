@@ -47,12 +47,30 @@
 // State machine (return/cancel):
 //   received --return--> returned      received --cancel--> cancelled
 // A GR that is already returned/cancelled cannot be re-actioned → 409.
+//
+// B-348 — THE RECEIPT NOW CARRIES MONEY, AND THE MONEY IS THE SERVER'S.
+//   1. `gr_item.price` is DERIVED at create from `boq_item.price` through the
+//      line's own `boq_item_id`, resolved via the scoped BOQ_ITEM_HOPS door. Any
+//      `price` / `currency_code` in the body is IGNORED. Before this, both came
+//      straight off the request, which was harmless only while the column fed a
+//      display field; gl-posting.ts now derives a POSTED GL amount from these
+//      rows, so a client value would originate a money figure.
+//   2. A named line with no `boq_item_id` has no server price source and stores
+//      0.00 — "unknown", not "zero baht" — and gl-posting refuses to post a
+//      receipt whose measurable total is 0.
+//   3. A POSTED receipt can no longer be returned or cancelled (409). See the
+//      note above GrAlreadyPostedError for why, what it costs, and the residual
+//      race that is filed rather than hidden.
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   grs,
   grItems,
+  boqDocs,
+  boqGroups,
+  boqItems,
   defectReports,
+  jvs,
   pos,
   wos,
   prs,
@@ -251,6 +269,17 @@ const WO_HOPS = [
   { fk: prs.projectId, parent: projects },
 ];
 const PR_HOPS = [{ fk: prs.projectId, parent: projects }];
+/**
+ * B-348: boq_item → group → doc → project — the SAME chain pr.ts / dashboard.ts
+ * price a PR through. gr_item.price is derived from `boq_item.price` reached this
+ * way, so the price a receipt posts can only ever come from a BOQ line THIS tenant
+ * owns (a foreign id resolves to nothing → 400, never a silently-priced receipt).
+ */
+const BOQ_ITEM_HOPS = [
+  { fk: boqItems.groupId, parent: boqGroups },
+  { fk: boqGroups.boqId, parent: boqDocs },
+  { fk: boqDocs.projectId, parent: projects },
+];
 
 /** The opaque Entity wire shape for one GR received line (real gr_item columns). */
 function grItemWire(it: GrItemRow): Record<string, unknown> {
@@ -332,6 +361,54 @@ async function grVendorName(db: TenantDb, gr: GrRow): Promise<string | null> {
 async function grItemsFor(db: TenantDb, gr: GrRow): Promise<GrItemRow[]> {
   const hops = gr.poId ? GR_ITEM_PO_HOPS : GR_ITEM_WO_HOPS;
   return entryOrder(await db.selectThrough(grItems, hops, eq(grItems.grId, gr.id)));
+}
+
+// ---------------------------------------------------------------------------
+// B-348 — a POSTED receipt can no longer be returned or cancelled
+// ---------------------------------------------------------------------------
+// This guard exists because THIS ROUND created the hazard. Until now a gr row
+// carried `amount: null` and could never post, so return/cancel had nothing to
+// contradict. Now that a receipt posts Dr 5020 / Cr 2010 for what arrived, a
+// return AFTER the post would leave a standing JV booking cost and an AP
+// liability for goods that went back to the vendor — and nothing in the
+// return/cancel path touches `jv`.
+//
+// Two coherent answers existed: (i) refuse the return once posted, or (ii)
+// auto-write a REVERSING JV. (ii) is a NEW money write needing its own
+// idempotency key and its own posting rule, so it is a ruling, not an
+// implementer's call — filed rather than guessed. (i) ships because it makes the
+// contradictory state unreachable and is fully reversible once (ii) is ruled.
+//
+// The OPERATIONAL COST is real and is not hidden: a receipt that has been posted
+// can no longer have its stock reversed through this door either (B-340 put the
+// ledger reversal in the same transaction). A warehouse that must return posted
+// goods is blocked until (ii) lands. That is why the refusal is a 409 with a
+// message naming the reason, not a silent no-op.
+//
+// THE RESIDUAL RACE, stated rather than papered over. The check runs BEFORE the
+// flip and AGAIN inside the transaction after the guarded UPDATE, which closes
+// the ordering "the post committed first". It does NOT close the mirror: under
+// READ COMMITTED a concurrent /gl/post issues a plain SELECT that still sees
+// `received` while this transaction's UPDATE is uncommitted, so it can post
+// between the in-transaction re-check and the COMMIT. Closing that needs a row
+// lock on `gr`, and `gr` carries no company_id, so TenantDb has no
+// selectForUpdate door for it (selectForUpdate is company_id-scoped by
+// construction). Both actors are humans at operating pace and the window is one
+// statement wide; it is recorded on the blocker with option (ii) rather than
+// bought with a new unscoped lock door.
+
+/** A GR whose posting JV already exists (thrown from inside the return/cancel tx). */
+class GrAlreadyPostedError extends Error {}
+
+/**
+ * The posting JV of this receipt, if any — resolved through the SAME
+ * `jv.source_doc = "gr:<uuid>"` convention gl-posting.ts reads posted-ness from,
+ * so the two can never disagree about whether a receipt has posted. `jv` carries
+ * company_id → the scoped select() door.
+ */
+async function grPostingJvNo(db: TenantDb, grId: string): Promise<string | null> {
+  const [jv] = await db.select(jvs, eq(jvs.sourceDoc, `gr:${grId}`));
+  return jv ? (jv.no ?? "") : null;
 }
 
 /**
@@ -653,7 +730,6 @@ export function registerGrRoute(app: FastifyInstance): void {
       const name = str(pick(line, "name")).trim();
       if (name) {
         const orderedQty = toNum(pick(line, "ordered_qty", "orderedQty")) ?? qtyOk;
-        const price = toNum(pick(line, "price")) ?? 0;
         const unit = has(line, "unit") ? str(pick(line, "unit")).trim() || null : null;
         itemDrafts.push({
           boqItemId: uuidOrNull(pick(line, "boq_item_id", "boqItemId")),
@@ -662,24 +738,12 @@ export function registerGrRoute(app: FastifyInstance): void {
           // received_qty of the line = its good-received quantity (qty_ok).
           receivedQty: String(qtyOk),
           unit,
-          price: price.toFixed(2),
-          currencyCode:
-            str(pick(line, "currency_code", "currencyCode")).trim() || "THB",
+          // B-348: price + currency are NOT read from the body — they are DERIVED
+          // below from this line's boq_item. See the block after the anchor resolve.
+          price: "0.00",
+          currencyCode: "THB",
         });
       }
-    }
-
-    // Mixed-currency guard (B-085 fix 4): grWire sums Σ(received_qty × price)
-    // across ALL lines but labels the receipt with items[0].currency_code — so a
-    // receipt whose lines carry more than one currency would silently sum across
-    // currencies under a single (wrong) label. One receipt = one currency: reject
-    // at create rather than emit a meaningless cross-currency total.
-    const currencies = new Set(itemDrafts.map((d) => d.currencyCode));
-    if (currencies.size > 1) {
-      return reply.code(400).send({
-        code: "VALIDATION",
-        message: "all received lines must share one currency_code (one receipt = one currency)",
-      });
     }
 
     // Resolve the anchor doc (scoped) + its source PR — a foreign/absent id
@@ -745,6 +809,94 @@ export function registerGrRoute(app: FastifyInstance): void {
           });
         }
       }
+    }
+
+    // -----------------------------------------------------------------------
+    // B-348 — THE LINE'S MONEY IS SERVER-OWNED. Here, and only here.
+    // -----------------------------------------------------------------------
+    // What this replaces: `const price = toNum(pick(line, "price")) ?? 0`, taken
+    // straight from the request body and persisted verbatim. That was tolerable
+    // only for as long as gr_item.price fed nothing but a display column. It now
+    // feeds a GL accrual (gl-posting.ts derives the receipt's postable amount from
+    // exactly these rows), so a client-supplied `price` would ORIGINATE a posted
+    // money figure — the shape that once let an approver settle 3,000,000 by
+    // sending 500,000. The mobile lane already refused to send one and wrote down
+    // why (apps/mobile/lib/screens/st_receive/st_receive_agg.dart: "There is no
+    // server-side price source in that path, so a client that sends `price`
+    // originates the receipt's monetary value"). The API now refuses to READ one.
+    //
+    // THE SERVER'S PRICE SOURCE is `boq_item.price`, reached through the line's own
+    // `boq_item_id`. It is the ONLY per-line price in the schema — there is no
+    // `po_item` table; a PO carries a header `total` and nothing else — and it is
+    // the same source the seed derives its gr_item prices from
+    // (packages/db/src/seed/index.ts:1322) and the same one pr.ts prices a PR with.
+    //
+    // AND THE ID IS RESOLVED THROUGH THE SCOPED DOOR. `boq_item_id` used to be
+    // `uuidOrNull(body)` with no resolution at all, which is harmless while it is a
+    // display link and NOT harmless the moment it selects a price: a client could
+    // otherwise price its receipt off another project's — or another tenant's — BOQ
+    // line. An id is not an amount, but here it CHOOSES one. A line naming a
+    // boq_item this tenant cannot see is 400, and (like the stock axes above) that
+    // is a 400 REGARDLESS of any idempotency key, which is why this sits BEFORE the
+    // pre-check: a replay against something that is not ours must never be answered
+    // from our data.
+    //
+    // A NAMED LINE WITH NO boq_item_id keeps price 0.00. That is "unknown", not
+    // "zero baht" — the same reading apps/web already applies to a zero
+    // (gr-rows.ts hasLineDetail, "Those zeroes mean 'unknown', not 'zero baht'") —
+    // and gl-posting.ts refuses to post a receipt whose measurable total is 0
+    // rather than booking a meaningless balanced pair of zero legs. It is NOT
+    // rejected here, because the contract declares a bare `{name, qty}` line and no
+    // shipped client sends `price` at all (apps/web buildLines sends only
+    // qty_ok/qty_rejected; mobile sends neither name nor price), so refusing it
+    // would break a documented shape to fix a hole that closing the READ already
+    // closes.
+    const boqItemIds = [
+      ...new Set(itemDrafts.map((d) => d.boqItemId).filter((v): v is string => v != null)),
+    ];
+    if (boqItemIds.length > 0) {
+      const priced = await db.selectThrough(
+        boqItems,
+        BOQ_ITEM_HOPS,
+        inArray(boqItems.id, boqItemIds),
+      );
+      const byId = new Map(priced.map((b) => [b.id, b]));
+      for (const id of boqItemIds) {
+        if (!byId.has(id)) {
+          return reply.code(400).send({
+            code: "VALIDATION",
+            message: `boq_item ${id} not found in this tenant`,
+          });
+        }
+      }
+      for (const draft of itemDrafts) {
+        const source = draft.boqItemId ? byId.get(draft.boqItemId) : undefined;
+        if (!source) continue;
+        // Both fields come from the SAME row: a price without its own currency is
+        // not a money value, and taking the amount from the server while taking its
+        // label from the client is the same defect one field down.
+        draft.price = Number(source.price).toFixed(2);
+        draft.currencyCode = source.currencyCode;
+      }
+    }
+
+    // Mixed-currency guard (B-085 fix 4): grWire sums Σ(received_qty × price)
+    // across ALL lines but labels the receipt with items[0].currency_code — so a
+    // receipt whose lines carry more than one currency would silently sum across
+    // currencies under a single (wrong) label. One receipt = one currency: reject
+    // at create rather than emit a meaningless cross-currency total.
+    //
+    // B-348 MOVED IT HERE, after the derivation, and that is what makes it mean
+    // anything now: it used to compare currencies the CLIENT chose, which the
+    // handler no longer reads. It now compares the currencies of the BOQ lines the
+    // receipt actually prices from. (Lines with no boq_item are all "THB" by
+    // default and contribute 0 to the total, so they cannot trip it alone.)
+    const currencies = new Set(itemDrafts.map((d) => d.currencyCode));
+    if (currencies.size > 1) {
+      return reply.code(400).send({
+        code: "VALIDATION",
+        message: "all received lines must share one currency_code (one receipt = one currency)",
+      });
     }
 
     // B-264: the idempotency PRE-CHECK, deliberately placed BEFORE the anchor
@@ -986,6 +1138,14 @@ export function registerGrRoute(app: FastifyInstance): void {
         message: "only a received GR can be returned",
       });
     }
+    // B-348: a receipt whose cost is already in the ledger cannot be returned —
+    // see the note above GrAlreadyPostedError.
+    if ((await grPostingJvNo(db, found.id)) != null) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "a posted GR cannot be returned (its JV would stand against returned goods)",
+      });
+    }
     const hops = found.poId ? GR_PO_HOPS : GR_WO_HOPS;
     // B-156: fold the 'received' pre-state into the FINAL update (5th guard arg) so a
     // concurrent return/cancel of the same GR re-matches 0 rows → 409 (atomic; the
@@ -998,17 +1158,31 @@ export function registerGrRoute(app: FastifyInstance): void {
     // once. Without this a returned delivery would stay on the shelf forever,
     // removable only by issuing it to a project.
     let updated: GrRow | undefined;
-    await db.transaction(async (tx) => {
-      [updated] = await tx.updateThroughChain(
-        grs,
-        hops,
-        { status: "returned" },
-        eq(grs.id, id),
-        eq(grs.status, "received"),
-      );
-      if (!updated) return;
-      await reverseGrMovements(tx, id, "gr-return");
-    });
+    try {
+      await db.transaction(async (tx) => {
+        [updated] = await tx.updateThroughChain(
+          grs,
+          hops,
+          { status: "returned" },
+          eq(grs.id, id),
+          eq(grs.status, "received"),
+        );
+        if (!updated) return;
+        // B-348: re-ask INSIDE the transaction. A /gl/post that committed between
+        // the pre-check and here must roll this whole return back — the stock
+        // reversal included — rather than leave the JV standing alone.
+        if ((await grPostingJvNo(tx, found.id)) != null) throw new GrAlreadyPostedError();
+        await reverseGrMovements(tx, id, "gr-return");
+      });
+    } catch (err) {
+      if (err instanceof GrAlreadyPostedError) {
+        return reply.code(409).send({
+          code: "INVALID_STATE",
+          message: "a posted GR cannot be returned (its JV would stand against returned goods)",
+        });
+      }
+      throw err;
+    }
     if (!updated) {
       return reply.code(409).send({
         code: "INVALID_STATE",
@@ -1044,23 +1218,42 @@ export function registerGrRoute(app: FastifyInstance): void {
         message: "only a received GR can be cancelled",
       });
     }
+    // B-348: identical to return — a posted receipt's cost is in the ledger.
+    if ((await grPostingJvNo(db, found.id)) != null) {
+      return reply.code(409).send({
+        code: "INVALID_STATE",
+        message: "a posted GR cannot be cancelled (its JV would stand against cancelled goods)",
+      });
+    }
     const hops = found.poId ? GR_PO_HOPS : GR_WO_HOPS;
     // B-156: 'received' pre-state folded into the FINAL update (atomic guard).
     // B-340: same shape as return — guarded UPDATE first, then the stock reversal,
     // both in one transaction. A cancelled receipt's goods leave the shelf too;
     // the only difference is the ref_doc that records why.
     let updated: GrRow | undefined;
-    await db.transaction(async (tx) => {
-      [updated] = await tx.updateThroughChain(
-        grs,
-        hops,
-        { status: "cancelled" },
-        eq(grs.id, id),
-        eq(grs.status, "received"),
-      );
-      if (!updated) return;
-      await reverseGrMovements(tx, id, "gr-cancel");
-    });
+    try {
+      await db.transaction(async (tx) => {
+        [updated] = await tx.updateThroughChain(
+          grs,
+          hops,
+          { status: "cancelled" },
+          eq(grs.id, id),
+          eq(grs.status, "received"),
+        );
+        if (!updated) return;
+        // B-348: re-ask INSIDE the transaction (see the return handler).
+        if ((await grPostingJvNo(tx, found.id)) != null) throw new GrAlreadyPostedError();
+        await reverseGrMovements(tx, id, "gr-cancel");
+      });
+    } catch (err) {
+      if (err instanceof GrAlreadyPostedError) {
+        return reply.code(409).send({
+          code: "INVALID_STATE",
+          message: "a posted GR cannot be cancelled (its JV would stand against cancelled goods)",
+        });
+      }
+      throw err;
+    }
     if (!updated) {
       return reply.code(409).send({
         code: "INVALID_STATE",

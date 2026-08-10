@@ -90,7 +90,16 @@ export interface PostingRule {
 /** doc-type → account-code posting map (derived from seed JV_BOOKS · B-122 Q2). */
 export const POSTING_MAP: Record<GlPostableKind, PostingRule> = {
   rv: { dr: "1020", cr: "1030", basis: "amount", real: true, note: "JV-2026-0418 REM" },
-  gr: { dr: "5020", cr: "2010", basis: "amount", real: true, note: "JV-2026-0416 GR auto; gr.amount is null → not postable" },
+  // B-348: gr is now POSTABLE — its amount is derived server-side as
+  // Σ(gr_item.received_qty × gr_item.price), the same figure GET /gr shows.
+  //
+  // THE ADJACENCY THAT MUST NOT BE LOST, recorded here because this is where a
+  // future change would be made: this Dr 5020 is the ACCRUAL (cost + AP liability
+  // at receipt). POST /ap/billing (ap.ts) writes NO JV, and `pv` below is
+  // Dr 2010 / Cr 1020 — the SETTLEMENT of that liability, not a second accrual. If
+  // AP billing ever starts posting a JV of its own it must NOT debit 5020, or one
+  // delivery's cost is counted twice.
+  gr: { dr: "5020", cr: "2010", basis: "amount", real: true, note: "JV-2026-0416 GR auto — the ACCRUAL; pv Dr 2010/Cr 1020 settles it (never a 2nd Dr 5020)" },
   pv: { dr: "2010", cr: "1020", basis: "net", real: false, note: "extrapolated — no PV exemplar in JV_BOOKS" },
   payroll: { dr: "1140", cr: "1020", basis: "amount", real: false, note: "B-144: realigned 5030→1140 WIP-labor to match the dedicated POST /labor/payroll/{id}/post (B-140)" },
   // petty (B-233, Wei C-177): a petty-cash CLAIM debits the admin-expense (5100)
