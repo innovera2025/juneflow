@@ -154,7 +154,7 @@ describe("GET /api/v1/notifications", () => {
     expect(Object.keys(n0).sort()).toEqual(["created_at", "id", "read", "ref", "type"]);
   });
 
-  it("orders NEWEST-FIRST regardless of the order the read returned (B-347)", async () => {
+  it("orders NEWEST-FIRST regardless of the order the read returned (B-367)", async () => {
     // The seed used to be the only writer — one INSERT, so the heap order WAS the
     // seed array order and this endpoint's total lack of ordering was invisible.
     // With apps/api emitting real rows the read can return them in any order, and
@@ -185,7 +185,7 @@ describe("GET /api/v1/notifications", () => {
     ]);
   });
 
-  it("breaks a created_at TIE by id, so two runs can never disagree (B-347)", async () => {
+  it("breaks a created_at TIE by id, so two runs can never disagree (B-367)", async () => {
     // The real tie case: rows written by ONE statement share its now(). Without a
     // total order that pair falls straight back to whatever the read produced.
     const b = { ...notif("n-b", "info", false), createdAt: D };

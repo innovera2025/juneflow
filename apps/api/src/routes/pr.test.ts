@@ -399,7 +399,7 @@ describe("POST /api/v1/pr — create", () => {
     expect(foreign.json().message).toBe("project not found");
   });
 
-  // ── B-TBD-QTY (Wei, ก): an ordered line must carry a quantity ────────────────
+  // ── B-372 (Wei, ก): an ordered line must carry a quantity ────────────────
   //
   // `qty: 0` was accepted here, and gr.ts skips its over-receipt ceiling for a line
   // ordered at 0 (a ceiling of 0 would make an un-quantified line unreceivable). That
@@ -417,7 +417,7 @@ describe("POST /api/v1/pr — create", () => {
     payload: { no: "PR-QTY", type: "material", project_id: PROJECT, items },
   });
 
-  it("400s a BOQ line ordered at qty 0 — the receipt ceiling's off switch (B-TBD-QTY)", async () => {
+  it("400s a BOQ line ordered at qty 0 — the receipt ceiling's off switch (B-372)", async () => {
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
     ).inject(prCreate([{ boq_item_id: "b0", qty: 0 }]));
@@ -770,7 +770,7 @@ describe("PR action endpoints — tenant scope", () => {
 });
 
 // ---------------------------------------------------------------------------
-// B-347 — the notification EMITTER, at the route
+// B-367 — the notification EMITTER, at the route
 // ---------------------------------------------------------------------------
 // These are the route-level half of notify.test.ts. They assert not only that a
 // row is written but WHO it is addressed to and — the part that matters for
@@ -783,7 +783,7 @@ const notifRowsOf = (inserted: Inserted[]) =>
     .filter((i) => i.table === notifications)
     .flatMap((i) => i.rows as Record<string, unknown>[]);
 
-describe("PR notifications (B-347)", () => {
+describe("PR notifications (B-367)", () => {
   it("submit notifies EVERY user at or above the tier the amount demands — and nobody else", async () => {
     const P0 = pr("p0", "N", "draft");
     const inserted: Inserted[] = [];

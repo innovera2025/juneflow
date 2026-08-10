@@ -1,4 +1,4 @@
-// B-351 (G4, live seeded stack) — a REJECTED work period is no longer stranded.
+// B-371 (G4, live seeded stack) — a REJECTED work period is no longer stranded.
 //
 // WHAT THIS CLOSES, measured on the seeded stack before the change: every
 // `work_period.status` write in apps/api lives in subcon.ts's deliver /
@@ -18,7 +18,7 @@
 // exercise one handler each and the thing that was broken is the CYCLE:
 //   pending → deliver → inspect(reject) → deliver AGAIN → inspect(pass)
 //
-// E2E_LIVE-gated + F4-safe (login 429 → graceful skip), mirroring b340/b342/b348.
+// E2E_LIVE-gated + F4-safe (login 429 → graceful skip), mirroring b340/b342/b368.
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { clientFor, isRateLimited, okJson, USER_MD_L4 } from "./_api-client.js";
 
@@ -30,7 +30,7 @@ const rowsOf = (b: Record<string, unknown>): Array<Record<string, unknown>> => {
   return Array.isArray(d) ? (d as Array<Record<string, unknown>>) : [];
 };
 
-liveDescribe("B-351 — a rejected work period can be re-inspected", () => {
+liveDescribe("B-371 — a rejected work period can be re-inspected", () => {
   let md: APIRequestContext;
   let rateLimited = false;
 
@@ -91,7 +91,7 @@ liveDescribe("B-351 — a rejected work period can be re-inspected", () => {
 
     // 1. the contractor delivers.
     const delivered = await md.post(`/api/v1/periods/${id}/deliver`, {
-      data: { docs: ["b351-round1.pdf"], photos: ["before.jpg"] },
+      data: { docs: ["b371-round1.pdf"], photos: ["before.jpg"] },
     });
     expect(delivered.status()).toBe(200);
     expect((await delivered.json()).status).toBe("delivered");
@@ -108,7 +108,7 @@ liveDescribe("B-351 — a rejected work period can be re-inspected", () => {
 
     // 3. THE STEP THAT DID NOT EXIST: the contractor resubmits after the fix.
     const redelivered = await md.post(`/api/v1/periods/${id}/deliver`, {
-      data: { docs: ["b351-round2.pdf"], photos: ["after.jpg"] },
+      data: { docs: ["b371-round2.pdf"], photos: ["after.jpg"] },
     });
     expect(redelivered.status()).toBe(200);
     const body = await redelivered.json();
@@ -116,7 +116,7 @@ liveDescribe("B-351 — a rejected work period can be re-inspected", () => {
     // The acceptance is REFRESHED, not duplicated — a rejected period always has
     // one already (the reject handler ensures it so the defects have a parent).
     expect(body.acceptance).toBeTruthy();
-    expect(body.acceptance.docs).toEqual(["b351-round2.pdf"]);
+    expect(body.acceptance.docs).toEqual(["b371-round2.pdf"]);
 
     // 4. …and the re-inspection can now pass, so the period reaches AP at last.
     const passed = await md.post(`/api/v1/periods/${id}/inspect`, { data: { result: "pass" } });
@@ -128,7 +128,7 @@ liveDescribe("B-351 — a rejected work period can be re-inspected", () => {
   test("the SEEDED rejected period — immovable before this change — re-delivers", async () => {
     const id = await oneIn("rejected");
     const res = await md.post(`/api/v1/periods/${id}/deliver`, {
-      data: { docs: ["b351-seeded-fix.pdf"], photos: [] },
+      data: { docs: ["b371-seeded-fix.pdf"], photos: [] },
     });
     expect(res.status()).toBe(200);
     expect((await res.json()).status).toBe("delivered");

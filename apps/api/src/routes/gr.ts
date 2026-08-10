@@ -48,7 +48,7 @@
 //   received --return--> returned      received --cancel--> cancelled
 // A GR that is already returned/cancelled cannot be re-actioned → 409.
 //
-// B-348 — THE RECEIPT NOW CARRIES MONEY, AND THE MONEY IS THE SERVER'S.
+// B-368 — THE RECEIPT NOW CARRIES MONEY, AND THE MONEY IS THE SERVER'S.
 //   1. `gr_item.price` is DERIVED at create from `boq_item.price` through the
 //      line's own `boq_item_id`, resolved via the scoped BOQ_ITEM_HOPS door. Any
 //      `price` / `currency_code` in the body is IGNORED. Before this, both came
@@ -124,7 +124,7 @@ const GR_IDEMPOTENCY_CONSTRAINT = "gr_idempotency_uq";
  * (docs/handoff/flows.html:38) — and the approval matrix (flows.html:86-93) has no
  * GR row at all.
  *
- * So 10 is an ORCHESTRATOR-SET DEFAULT pending Wei's final figure (B-TBD-QTY), not
+ * So 10 is an ORCHESTRATOR-SET DEFAULT pending Wei's final figure (B-372), not
  * a number the domain handed us. It is a single named constant precisely so that
  * final figure costs one line: every test in this repo asserts against the CONSTANT
  * and never against a literal, so changing it here changes the tests with it.
@@ -332,7 +332,7 @@ const PR_ITEM_HOPS = [
   { fk: prs.projectId, parent: projects },
 ];
 /**
- * B-348: boq_item → group → doc → project — the SAME chain pr.ts / dashboard.ts
+ * B-368: boq_item → group → doc → project — the SAME chain pr.ts / dashboard.ts
  * price a PR through. gr_item.price is derived from `boq_item.price` reached this
  * way, so the price a receipt posts can only ever come from a BOQ line THIS tenant
  * owns (a foreign id resolves to nothing → 400, never a silently-priced receipt).
@@ -430,7 +430,7 @@ async function grItemsFor(db: TenantDb, gr: GrRow): Promise<GrItemRow[]> {
 }
 
 // ---------------------------------------------------------------------------
-// B-348 — a POSTED receipt can no longer be returned or cancelled
+// B-368 — a POSTED receipt can no longer be returned or cancelled
 // ---------------------------------------------------------------------------
 // This guard exists because THIS ROUND created the hazard. Until now a gr row
 // carried `amount: null` and could never post, so return/cancel had nothing to
@@ -454,7 +454,7 @@ async function grItemsFor(db: TenantDb, gr: GrRow): Promise<GrItemRow[]> {
 // THE RACE THIS ONCE LEAKED, and how the pair closes it now (B-361).
 //
 // The JV check runs BEFORE the flip and AGAIN inside the transaction after the
-// guarded UPDATE, which closes the ordering "the post committed first". B-348
+// guarded UPDATE, which closes the ordering "the post committed first". B-368
 // shipped ONLY that half and filed the mirror as a one-statement residual between
 // "humans at operating pace": a concurrent /gl/post read `gr.status` with a plain
 // SELECT (in listGlPostingDocs, outside any transaction), so under READ COMMITTED
@@ -818,7 +818,7 @@ export function registerGrRoute(app: FastifyInstance): void {
           // received_qty of the line = its good-received quantity (qty_ok).
           receivedQty: String(qtyOk),
           unit,
-          // B-348: price + currency are NOT read from the body — they are DERIVED
+          // B-368: price + currency are NOT read from the body — they are DERIVED
           // below from this line's boq_item. See the block after the anchor resolve.
           price: "0.00",
           currencyCode: "THB",
@@ -892,7 +892,7 @@ export function registerGrRoute(app: FastifyInstance): void {
     }
 
     // -----------------------------------------------------------------------
-    // B-348 — THE LINE'S MONEY IS SERVER-OWNED. Here, and only here.
+    // B-368 — THE LINE'S MONEY IS SERVER-OWNED. Here, and only here.
     // -----------------------------------------------------------------------
     // What this replaces: `const price = toNum(pick(line, "price")) ?? 0`, taken
     // straight from the request body and persisted verbatim. That was tolerable
@@ -914,7 +914,7 @@ export function registerGrRoute(app: FastifyInstance): void {
     // AND THE ID IS RESOLVED AGAINST THIS ORDER'S OWN LINES — B-360, and the
     // TENANT DOOR ALONE WAS NOT ENOUGH.
     //
-    // B-348 resolved `boq_item_id` through BOQ_ITEM_HOPS, which proves only that the
+    // B-368 resolved `boq_item_id` through BOQ_ITEM_HOPS, which proves only that the
     // line belongs to THIS TENANT. That closed cross-tenant pricing and left
     // cross-ORDER pricing wide open, which is the same defect one indirection down:
     // the client no longer TYPES the price, it PICKS which of the tenant's prices to
@@ -971,7 +971,7 @@ export function registerGrRoute(app: FastifyInstance): void {
     const boqItemIds = [
       ...new Set(itemDrafts.map((d) => d.boqItemId).filter((v): v is string => v != null)),
     ];
-    // B-TBD-QTY: the ORDERED QUANTITY per boq_item, Σ pr_item.qty. Populated from
+    // B-372: the ORDERED QUANTITY per boq_item, Σ pr_item.qty. Populated from
     // the SAME B-360 read below — those rows were already being loaded and their
     // `qty` already being discarded (only `boqItemId` was kept), which is precisely
     // how the quantity hole survived the round that closed the price hole.
@@ -1037,7 +1037,7 @@ export function registerGrRoute(app: FastifyInstance): void {
     // currencies under a single (wrong) label. One receipt = one currency: reject
     // at create rather than emit a meaningless cross-currency total.
     //
-    // B-348 MOVED IT HERE, after the derivation, and that is what makes it mean
+    // B-368 MOVED IT HERE, after the derivation, and that is what makes it mean
     // anything now: it used to compare currencies the CLIENT chose, which the
     // handler no longer reads. It now compares the currencies of the BOQ lines the
     // receipt actually prices from. (Lines with no boq_item are all "THB" by
@@ -1119,7 +1119,7 @@ export function registerGrRoute(app: FastifyInstance): void {
     // action. The ledger write sits INSIDE the guard that makes the receipt
     // idempotent, not beside it (the B-340 ruling's explicit requirement).
     //
-    // B-TBD-QTY MOVED THE ANCHOR LOCK IN FRONT OF IT, and the header insert is no
+    // B-372 MOVED THE ANCHOR LOCK IN FRONT OF IT, and the header insert is no
     // longer literally the first statement. That reordering is FORCED, not
     // stylistic — see the lock note below. What B-340 needs is only that the header
     // precede the ledger rows, which it still does; the lock is an UPDATE on po/wo
@@ -1146,7 +1146,7 @@ export function registerGrRoute(app: FastifyInstance): void {
     try {
       await db.transaction(async (tx) => {
         // -------------------------------------------------------------------
-        // B-TBD-QTY — THE PR LOCK. Taken FIRST, and the order is forced.
+        // B-372 — THE PR LOCK. Taken FIRST, and the order is forced.
         // -------------------------------------------------------------------
         // The over-receipt guard below is read-then-write: it sums what has
         // already been received and compares. Under READ COMMITTED two receipts
@@ -1212,7 +1212,7 @@ export function registerGrRoute(app: FastifyInstance): void {
         ]);
 
         // -------------------------------------------------------------------
-        // B-TBD-QTY — THE OVER-RECEIPT CEILING, per line, cumulative.
+        // B-372 — THE OVER-RECEIPT CEILING, per line, cumulative.
         // -------------------------------------------------------------------
         // WHAT THIS CLOSES. B-360 made the server own the receipt's PRICE and the
         // set of lines it may price from. It left the QUANTITY wide open: `qty_ok`
@@ -1419,7 +1419,7 @@ export function registerGrRoute(app: FastifyInstance): void {
       ) {
         return replayExistingGr(db, reply, { idempotencyKey, poId, woId, prId });
       }
-      // B-TBD-QTY: the over-receipt ceiling. The throw is what rolled the receipt,
+      // B-372: the over-receipt ceiling. The throw is what rolled the receipt,
       // its lines and its stock movements back; this only renders the answer. It is
       // ordered AFTER the replay branch on purpose — a 23505 and this are mutually
       // exclusive (the ceiling is checked after the header insert has already
@@ -1502,7 +1502,7 @@ export function registerGrRoute(app: FastifyInstance): void {
         message: "only a received GR can be returned",
       });
     }
-    // B-348: a receipt whose cost is already in the ledger cannot be returned —
+    // B-368: a receipt whose cost is already in the ledger cannot be returned —
     // see the note above GrAlreadyPostedError.
     if ((await grPostingJvNo(db, found.id)) != null) {
       return reply.code(409).send({
@@ -1532,7 +1532,7 @@ export function registerGrRoute(app: FastifyInstance): void {
           eq(grs.status, "received"),
         );
         if (!updated) return;
-        // B-348: re-ask INSIDE the transaction. A /gl/post that committed between
+        // B-368: re-ask INSIDE the transaction. A /gl/post that committed between
         // the pre-check and here must roll this whole return back — the stock
         // reversal included — rather than leave the JV standing alone.
         if ((await grPostingJvNo(tx, found.id)) != null) throw new GrAlreadyPostedError();
@@ -1582,7 +1582,7 @@ export function registerGrRoute(app: FastifyInstance): void {
         message: "only a received GR can be cancelled",
       });
     }
-    // B-348: identical to return — a posted receipt's cost is in the ledger.
+    // B-368: identical to return — a posted receipt's cost is in the ledger.
     if ((await grPostingJvNo(db, found.id)) != null) {
       return reply.code(409).send({
         code: "INVALID_STATE",
@@ -1605,7 +1605,7 @@ export function registerGrRoute(app: FastifyInstance): void {
           eq(grs.status, "received"),
         );
         if (!updated) return;
-        // B-348: re-ask INSIDE the transaction (see the return handler).
+        // B-368: re-ask INSIDE the transaction (see the return handler).
         if ((await grPostingJvNo(tx, found.id)) != null) throw new GrAlreadyPostedError();
         await reverseGrMovements(tx, id, "gr-cancel");
       });

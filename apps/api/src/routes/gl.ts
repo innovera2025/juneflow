@@ -997,7 +997,7 @@ async function postGlDocs(
     if (doc.amount == null || doc.amount <= 0) {
       // A doc with no real money value is NOT postable (never invent one).
       //
-      // B-348 WIDENED THIS FROM `== null` TO `<= 0`, and it is defence in depth
+      // B-368 WIDENED THIS FROM `== null` TO `<= 0`, and it is defence in depth
       // rather than the primary guard. gl-posting.ts already returns null for a
       // receipt whose measurable total is 0 (no gr_item rows = the mobile shape;
       // or lines carrying no server price source). But `gr` is the first inbox

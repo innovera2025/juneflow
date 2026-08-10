@@ -679,7 +679,7 @@ describe("GET /api/v1/gl/posting-inbox", () => {
     expect(pvB.jv_no).toBeNull();
   });
 
-  // ── B-348: the receipt's money reaches the inbox ─────────────────────────────
+  // ── B-368: the receipt's money reaches the inbox ─────────────────────────────
   it("gr amount is the SERVER-derived Sigma(received_qty x price), matching the GR list wire", async () => {
     const res = await (
       await buildTestApp({
@@ -1381,7 +1381,7 @@ describe("POST /api/v1/gl/close-period", () => {
 const GR_A = "dddd0000-0000-0000-0000-0000000000dd";
 const UNKNOWN_ID = "eeee0000-0000-0000-0000-0000000000ee";
 
-// B-348: gr_item rows are the receipt's money. price/currency are SERVER-owned
+// B-368: gr_item rows are the receipt's money. price/currency are SERVER-owned
 // (gr.ts derives them from boq_item at create); this fixture just stores them.
 const grLine = (
   id: string,
@@ -1426,7 +1426,7 @@ const postDb = (
       [pvs, opts.pvRows ?? []],
       [rvs, opts.rvRows ?? []],
       [grs, opts.grRows ?? []],
-      // B-348: the receipt's postable money is Sigma(received_qty x price) over these.
+      // B-368: the receipt's postable money is Sigma(received_qty x price) over these.
       [grItems, opts.grItemRows ?? []],
       [payrolls, opts.payrollRows ?? []],
       // default: one owned jv with a free-text source_doc — references nothing by
@@ -1551,7 +1551,7 @@ describe("POST /api/v1/gl/post", () => {
     expect(inserted.find((i) => i.table === jvs)).toBeUndefined(); // nothing posted
   });
 
-  // ── B-348: the receipt finally posts a COST ──────────────────────────────────
+  // ── B-368: the receipt finally posts a COST ──────────────────────────────────
   it("POSTS a priced gr: Dr 5020 / Cr 2010 for the SERVER-derived Sigma(received x price)", async () => {
     const inserted: Inserted[] = [];
     const res = await (

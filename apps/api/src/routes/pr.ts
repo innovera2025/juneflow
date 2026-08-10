@@ -434,7 +434,7 @@ export function registerPrRoute(app: FastifyInstance): void {
           message: "boq_item_id must be a BOQ item of this tenant",
         });
       }
-      // B-TBD-QTY (Wei, ก) — AN ORDERED LINE MUST CARRY A QUANTITY.
+      // B-372 (Wei, ก) — AN ORDERED LINE MUST CARRY A QUANTITY.
       //
       // WHY THIS IS A MONEY GUARD AND NOT TIDINESS. gr.ts prices a receipt from
       // pr_item and bounds its quantity by pr_item.qty; a line ordered at 0 has a
@@ -568,7 +568,7 @@ export function registerPrRoute(app: FastifyInstance): void {
       { status: "pending", submittedAt: new Date() },
       eq(prs.id, id),
     );
-    // B-347: the PR has entered the approval queue → notify the tier that must
+    // B-367: the PR has entered the approval queue → notify the tier that must
     // sign it (prototype bell "PR-2026-0418 รออนุมัติชั้น 2"). The tier is this
     // file's OWN requiredApprovalLevel over this file's OWN derived amount — the
     // same pair the approve handler below enforces and the dashboard inbox filters
@@ -638,7 +638,7 @@ export function registerPrRoute(app: FastifyInstance): void {
         message: "only a pending PR can be approved",
       });
     }
-    // B-347: the decision goes back to whoever raised the PR. `requester_id` is
+    // B-367: the decision goes back to whoever raised the PR. `requester_id` is
     // nullable (and the seed leaves it null) — a PR with no recorded requester
     // emits NOTHING rather than guessing an addressee; there is no created_by.
     await bestEffortNotify(request.log, "pr.approved", () =>
@@ -708,7 +708,7 @@ export function registerPrRoute(app: FastifyInstance): void {
         message: "only a pending PR can be rejected",
       });
     }
-    // B-347: same as approve — the requester is told the outcome, and only them.
+    // B-367: same as approve — the requester is told the outcome, and only them.
     await bestEffortNotify(request.log, "pr.rejected", () =>
       notifyPrDecided(db, id, updated.requesterId),
     );

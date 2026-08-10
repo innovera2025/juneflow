@@ -525,11 +525,11 @@ describe("POST /api/v1/users — F1 authorization", () => {
   });
 });
 
-// --- B-349: the seat meter -------------------------------------------------
+// --- B-369: the seat meter -------------------------------------------------
 // `quota.check(` had exactly three call sites in apps/api — ai-qto, projects,
 // files — and NO `users` one, so the sold seat cap (starter 5 / pro 25 /
 // business 60, PACKAGE-RULES §1) was never enforced anywhere.
-describe("POST /api/v1/users — B-349 seat quota", () => {
+describe("POST /api/v1/users — B-369 seat quota", () => {
   /** A resolver reporting a fixed dimension state (the prod resolver's shape). */
   const guardWith = (limit: number, used: number) =>
     new QuotaGuard({
@@ -599,7 +599,7 @@ describe("POST /api/v1/users — B-349 seat quota", () => {
 });
 
 // --- B-363: the seat meter is no longer a TOCTOU ---------------------------
-// B-349 shipped `quota.check` -> INSERT with nothing between them. Live, 4
+// B-369 shipped `quota.check` -> INSERT with nothing between them. Live, 4
 // concurrent invites against ONE free seat produced `cap=16 before=15 after=17`
 // — two 201s for one seat. ai-qto.ts consumeAiCredit had already solved exactly
 // this (lock the meter row, re-decide under it) in the same commit; only one of

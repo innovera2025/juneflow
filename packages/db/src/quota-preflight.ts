@@ -1,4 +1,4 @@
-// B-349 — the SEAT-QUOTA PREFLIGHT. Read-only. Run it BEFORE the users quota
+// B-369 — the SEAT-QUOTA PREFLIGHT. Read-only. Run it BEFORE the users quota
 // check reaches production.
 //
 // WHY THIS EXISTS. `quota.check(companyId, "users")` on POST /users refuses an
@@ -28,7 +28,7 @@
 // the count larger than an operator expects:
 //   · every user row counts, INCLUDING `blocked` and `invited`. Whether a blocked
 //     ex-employee should consume a paid seat is a billing definition, not an
-//     implementer's call (filed on B-350) — so this reports the breakdown instead
+//     implementer's call (filed on B-370) — so this reports the breakdown instead
 //     of quietly choosing.
 //   · a subscription with NO resolvable package is fail-closed by the resolver
 //     (limit 0 → every invite 402), so it is reported as BLOCKED here too.

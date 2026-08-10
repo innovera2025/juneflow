@@ -223,7 +223,7 @@ export function registerAiQtoRoute(
     }
 
     // -----------------------------------------------------------------------
-    // B-349 — THE METER TURNS. Until now it could not.
+    // B-369 — THE METER TURNS. Until now it could not.
     // -----------------------------------------------------------------------
     // `aiUsage` appeared at exactly three sites — subscription-quota.ts:86,
     // profile-data.ts:80, subscription.ts:103 — and ALL THREE were `select`. Zero

@@ -1,4 +1,4 @@
-// B-348 (G4, live seeded stack, money = SERVER) — the goods receipt carries a COST
+// B-368 (G4, live seeded stack, money = SERVER) — the goods receipt carries a COST
 // onto the GL, that cost is the server's, and a posted receipt is frozen.
 //
 // WHAT THIS CLOSES, measured on the seeded stack before any code changed:
@@ -44,7 +44,7 @@ const rowsOf = (b: Record<string, unknown>): Array<Record<string, unknown>> => {
 
 const RUN = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
-liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the server's", () => {
+liveDescribe("B-368 — the goods receipt posts a real cost, and the cost is the server's", () => {
   let md: APIRequestContext;
   let rateLimited = false;
   /** A priced BOQ line of this tenant — the ONLY server price source for a gr line. */
@@ -144,7 +144,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
     suffix: string,
   ): Promise<{ id: string; body: Record<string, unknown> }> => {
     const res = await md.post("/api/v1/gr", {
-      data: { po_id: orderedPo, idempotency_key: `b348-${RUN}-${suffix}`, lines },
+      data: { po_id: orderedPo, idempotency_key: `b368-${RUN}-${suffix}`, lines },
     });
     const body = await okJson(res, `POST /gr (${suffix})`);
     expect(res.status()).toBe(201);
@@ -179,7 +179,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
   test("a priced receipt reaches the GL inbox with the SAME figure the GR screen shows", async () => {
     const qty = 7;
     const { id, body } = await createGr(
-      [{ qty_ok: qty, qty_rejected: 0, name: "b348 cement", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
+      [{ qty_ok: qty, qty_rejected: 0, name: "b368 cement", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
       "priced",
     );
 
@@ -206,7 +206,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
         {
           qty_ok: qty,
           qty_rejected: 0,
-          name: "b348 forged",
+          name: "b368 forged",
           ordered_qty: qty,
           unit: "ถุง",
           boq_item_id: boq.id,
@@ -230,11 +230,11 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
     const res = await md.post("/api/v1/gr", {
       data: {
         po_id: orderedPo,
-        idempotency_key: `b348-${RUN}-foreign`,
+        idempotency_key: `b368-${RUN}-foreign`,
         lines: [
           {
             qty_ok: 1,
-            name: "b348 foreign",
+            name: "b368 foreign",
             ordered_qty: 1,
             // A well-formed uuid that is no BOQ item at all.
             boq_item_id: "00000000-0000-4000-8000-000000000348",
@@ -256,7 +256,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
   test("POST /gl/post books a BALANCED Dr 5020 / Cr 2010 for the derived amount", async () => {
     const qty = 5;
     const { id } = await createGr(
-      [{ qty_ok: qty, qty_rejected: 0, name: "b348 post", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
+      [{ qty_ok: qty, qty_rejected: 0, name: "b368 post", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
       "post",
     );
     const expected = round2(qty * boq.price);
@@ -289,7 +289,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
   test("a POSTED receipt can no longer be returned or cancelled (409, never 500)", async () => {
     const qty = 2;
     const { id } = await createGr(
-      [{ qty_ok: qty, qty_rejected: 0, name: "b348 frozen", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
+      [{ qty_ok: qty, qty_rejected: 0, name: "b368 frozen", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
       "frozen",
     );
     await okJson(await md.post("/api/v1/gl/post", { data: { doc_ids: [id] } }), "POST /gl/post");
@@ -311,7 +311,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
   test("an UNPOSTED receipt still returns, and a returned receipt leaves the inbox", async () => {
     const qty = 2;
     const { id } = await createGr(
-      [{ qty_ok: qty, qty_rejected: 0, name: "b348 returnable", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
+      [{ qty_ok: qty, qty_rejected: 0, name: "b368 returnable", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
       "returnable",
     );
     expect(await inboxRow(id)).toBeDefined();
@@ -348,7 +348,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
   test("posting the same receipt twice books ONE JV (idempotent, never a double cost)", async () => {
     const qty = 3;
     const { id } = await createGr(
-      [{ qty_ok: qty, qty_rejected: 0, name: "b348 twice", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
+      [{ qty_ok: qty, qty_rejected: 0, name: "b368 twice", ordered_qty: qty, unit: "ถุง", boq_item_id: boq.id }],
       "twice",
     );
 

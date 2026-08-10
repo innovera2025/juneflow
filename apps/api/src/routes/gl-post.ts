@@ -90,7 +90,7 @@ export interface PostingRule {
 /** doc-type → account-code posting map (derived from seed JV_BOOKS · B-122 Q2). */
 export const POSTING_MAP: Record<GlPostableKind, PostingRule> = {
   rv: { dr: "1020", cr: "1030", basis: "amount", real: true, note: "JV-2026-0418 REM" },
-  // B-348: gr is now POSTABLE — its amount is derived server-side as
+  // B-368: gr is now POSTABLE — its amount is derived server-side as
   // Σ(gr_item.received_qty × gr_item.price), the same figure GET /gr shows.
   //
   // THE ADJACENCY THAT MUST NOT BE LOST, recorded here because this is where a

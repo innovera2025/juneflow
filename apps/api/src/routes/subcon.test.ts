@@ -75,7 +75,7 @@ interface StubOpts {
   /** Counts transaction() invocations — proves multi-write atomicity (one tx). */
   tx?: { count: number };
   /**
-   * B-351: make this table's UPDATE … RETURNING yield 0 rows — models an
+   * B-371: make this table's UPDATE … RETURNING yield 0 rows — models an
    * optimistic guard whose folded pre-state matched nothing because a concurrent
    * caller already moved the row.
    */
@@ -645,7 +645,7 @@ describe("POST /api/v1/periods/:id/deliver", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  // ── B-351: `rejected` is no longer a dead end ────────────────────────────────
+  // ── B-371: `rejected` is no longer a dead end ────────────────────────────────
   //
   // Every work_period.status write in subcon.ts is deliver / inspect(pass) /
   // inspect(reject) / approve-payment. Exactly one wrote `rejected` and NOTHING
@@ -847,7 +847,7 @@ describe("POST /api/v1/periods/:id/inspect", () => {
   });
 
   // ── B-364: a pass with OPEN defect rows — the decision, pinned ───────────────
-  // B-351 made this state reachable for the first time (before it, `rejected` was
+  // B-371 made this state reachable for the first time (before it, `rejected` was
   // terminal). DECIDED: accept. The pass neither closes nor requires closure of the
   // defect rows — they run their own open→fixing→closed loop through
   // POST /defects/{id}/recheck (flows.html "ตรวจซ้ำ → ผ่าน (Defect ปิด)"), the

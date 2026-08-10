@@ -234,7 +234,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerDocumentsRoute(v1);
       registerModelsRoute(v1);
       registerVendorsRoute(v1);
-      // B-349: the users route gained the seat meter (the sold `users` quota
+      // B-369: the users route gained the seat meter (the sold `users` quota
       // dimension had no call site anywhere).
       registerUsersRoute(v1, { credentials, deliverReset, quota: deps.quota });
       registerRolesRoute(v1);

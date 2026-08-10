@@ -31,7 +31,7 @@ import {
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { isUniqueViolation, violatedConstraint } from "./gl-post.js";
-// B-TBD-QTY: the over-receipt tolerance is asserted THROUGH the constant, never
+// B-372: the over-receipt tolerance is asserted THROUGH the constant, never
 // against a literal — Wei's final figure must cost one line, not a test sweep.
 import { GR_OVER_RECEIPT_TOLERANCE_PCT } from "./gr.js";
 import { IDEMPOTENCY_KEY_TYPE_MESSAGE, readIdempotencyKey } from "./procurement.js";
@@ -45,7 +45,7 @@ const PR = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const PO = "dddddddd-dddd-dddd-dddd-dddddddddddd";
 const WO = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
 const VENDOR = "cccccccc-cccc-cccc-cccc-cccccccccccc";
-// B-348: gr_item.price is DERIVED from these BOQ lines, never from the body.
+// B-368: gr_item.price is DERIVED from these BOQ lines, never from the body.
 const BOQ_ITEM = "ffffffff-ffff-ffff-ffff-ffffffffffff";
 const BOQ_ITEM_USD = "ffffffff-ffff-ffff-ffff-fffffffffffe";
 const BOQ_ITEM_FOREIGN = "ffffffff-ffff-ffff-ffff-fffffffffff0";
@@ -321,7 +321,7 @@ const grItem = (
 const vendorRow = { id: VENDOR, companyId: COMPANY, name: "บจก. รุ่งเรืองก่อสร้าง" };
 
 /**
- * B-348 — the SERVER's price source. gr.ts resolves a line's `boq_item_id`
+ * B-368 — the SERVER's price source. gr.ts resolves a line's `boq_item_id`
  * through boq_item -> group -> doc -> project and takes `price` + `currency_code`
  * from the row it finds; a line whose id resolves to nothing is refused.
  */
@@ -633,7 +633,7 @@ describe("POST /api/v1/gr — create receipt", () => {
         no: "GR-2026-0151",
         lines: [
           // widened detail line → one gr_item; ordered 100, received (qty_ok) 90.
-          // B-348: the price comes from BOQ_ITEM (300.00), NOT from this body.
+          // B-368: the price comes from BOQ_ITEM (300.00), NOT from this body.
           { qty_ok: 90, qty_rejected: 0, name: "ปูนซีเมนต์", ordered_qty: 100, unit: "ถุง", boq_item_id: BOQ_ITEM },
           // bare qty-only line → no gr_item (per-line detail honestly absent).
           { qty_ok: 10, qty_rejected: 0 },
@@ -656,8 +656,8 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(row.price).toBe("300.00");
   });
 
-  // ── B-348: money = SERVER, on the line ───────────────────────────────────────
-  it("IGNORES a client `price` and takes the line's money from its BOQ item (B-348)", async () => {
+  // ── B-368: money = SERVER, on the line ───────────────────────────────────────
+  it("IGNORES a client `price` and takes the line's money from its BOQ item (B-368)", async () => {
     const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
@@ -705,7 +705,7 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(res.json().money).toBe(108000); // 90 × 1200
   });
 
-  it("400s on a boq_item_id this tenant cannot see — an id that CHOOSES a price is resolved (B-348)", async () => {
+  it("400s on a boq_item_id this tenant cannot see — an id that CHOOSES a price is resolved (B-368)", async () => {
     const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
@@ -861,7 +861,7 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(inserted.find((w) => w.table === grs)).toBeFalsy();
   });
 
-  it("a named line with NO boq_item_id stores 0.00 — 'unknown', never the body's number (B-348)", async () => {
+  it("a named line with NO boq_item_id stores 0.00 — 'unknown', never the body's number (B-368)", async () => {
     const inserted: Inserted[] = [];
     const res = await (
       await buildTestApp({
@@ -890,7 +890,7 @@ describe("POST /api/v1/gr — create receipt", () => {
     expect(row.price).toBe("0.00");
   });
 
-  // ── B-TBD-QTY: the QUANTITY has a ceiling, because it posts to the ledger ─────
+  // ── B-372: the QUANTITY has a ceiling, because it posts to the ledger ─────
   //
   // B-360 made the server own the receipt's PRICE and the set of lines it may price
   // from, and left the QUANTITY wide open. Measured live at 80084a7: an order of
@@ -1078,7 +1078,7 @@ describe("POST /api/v1/gr — create receipt", () => {
     for (const c of cumulative) expect(paramsOf(c.where)).toContain("received");
   });
 
-  it("the accumulator is PR-GRAINED: it filters on pr.id, never on the anchor po_id (B-TBD-QTY)", async () => {
+  it("the accumulator is PR-GRAINED: it filters on pr.id, never on the anchor po_id (B-372)", async () => {
     // THE GRAIN MISMATCH, pinned. The basis is Σ pr_item.qty of the SOURCE PR; the
     // accumulator used to filter on `gr.po_id`. po.ts caps nothing about how many POs
     // one PR raises, so the effective ceiling was N × tolerance × ordered with N
@@ -1110,7 +1110,7 @@ describe("POST /api/v1/gr — create receipt", () => {
     }
   });
 
-  it("a receipt on the PR's WO counts against a receipt on the PR's PO — both chains are unioned (B-TBD-QTY)", async () => {
+  it("a receipt on the PR's WO counts against a receipt on the PR's PO — both chains are unioned (B-372)", async () => {
     // One PR can raise a PO *and* a WO (the seed does exactly that, and 5 such PRs
     // exist on the live stack). Reading only the chain this receipt arrived on would
     // leave the other document's receipts uncounted — the N-documents hole, one door
@@ -1280,7 +1280,7 @@ describe("POST /api/v1/gr — create receipt", () => {
             // and the currency guard is the one under test.
             [prItems, [prLine("l0", "1000", BOQ_ITEM), prLine("l1", "1000", BOQ_ITEM_USD)]],
             [grs, [gr("new-0", { poId: PO, received: 5 })]],
-            // B-348: the currencies compared are the BOQ lines' own, not the body's
+            // B-368: the currencies compared are the BOQ lines' own, not the body's
             // — the handler no longer reads a client currency_code at all.
             [
               boqItems,
@@ -1664,7 +1664,7 @@ describe("POST /api/v1/gr — partial vs full receipt", () => {
 // ---------------------------------------------------------------------------
 
 describe("GR return/cancel state machine", () => {
-  // ── B-348: a POSTED receipt is frozen ────────────────────────────────────────
+  // ── B-368: a POSTED receipt is frozen ────────────────────────────────────────
   //
   // These exist because THIS round created the hazard: until gr carried a money
   // value, return/cancel had no JV to contradict. A return after the post would
@@ -1703,7 +1703,7 @@ describe("GR return/cancel state machine", () => {
     };
 
   for (const verb of ["return", "cancel"] as const) {
-    it(`${verb}: 409 when a JV has already posted this receipt (B-348)`, async () => {
+    it(`${verb}: 409 when a JV has already posted this receipt (B-368)`, async () => {
       const updated: Updated[] = [];
       const inserted: Inserted[] = [];
       const G = gr("g0", { poId: PO, status: "received" });
@@ -1726,7 +1726,7 @@ describe("GR return/cancel state machine", () => {
       expect(inserted.find((i) => i.table === stockLedgers)).toBeUndefined();
     });
 
-    it(`${verb}: a jv posting a DIFFERENT receipt does not freeze this one (B-348/B-362)`, async () => {
+    it(`${verb}: a jv posting a DIFFERENT receipt does not freeze this one (B-368/B-362)`, async () => {
       const updated: Updated[] = [];
       const G = gr("g0", { poId: PO, status: "received" });
       const res = await (
@@ -1973,7 +1973,7 @@ const keyedGrs =
   };
 
 /**
- * B-TBD-QTY: a gr_item row source that can tell the create path's CUMULATIVE read
+ * B-372: a gr_item row source that can tell the create path's CUMULATIVE read
  * — "everything already received against this anchor", whose predicate names
  * `gr.status` — from a read of ONE receipt's own lines (grItemsFor / the replay
  * envelope), whose predicate names `gr_item.gr_id`.
@@ -2183,7 +2183,7 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     const originalItem = {
       id: "new-1",
       grId: "new-0",
-      // B-348: the line prices off a real BOQ item, so the replay rebuilds the
+      // B-368: the line prices off a real BOQ item, so the replay rebuilds the
       // same envelope from the same SERVER-owned number.
       boqItemId: BOQ_ITEM,
       name: "ปูนซีเมนต์",
@@ -2210,7 +2210,7 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
         [projects, [project]],
         [prItems, [prLine("l0", "1000")]], // ordered 1000 → a 1000 receipt is FULL
         [grs, keyedGrs({ [IDEMP_KEY]: stored }, [original])],
-        // B-TBD-QTY: NOTHING has been received against this order yet (request 1 is
+        // B-372: NOTHING has been received against this order yet (request 1 is
         // the first receipt) — `originalItem` is what the REPLAY re-reads back as
         // its own line, and must not double as "already received".
         [grItems, cumulativeGrItems([], [originalItem])],
@@ -2241,12 +2241,12 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     expect(res1.statusCode).toBe(201);
     expect(res1.json().partial).toBe(false); // the order is fully received…
     // …so this very handler closed the PO — the state that used to strand the replay.
-    // B-TBD-QTY: the close is selected by the column it sets, not by being the only
+    // B-372: the close is selected by the column it sets, not by being the only
     // po write — a priced receipt also touches po elsewhere in this flow.
     const closes = updated.filter((u) => u.table === pos && "status" in u.set);
     expect(closes).toHaveLength(1);
     expect(closes[0]!.set).toEqual({ status: "closed" });
-    // B-TBD-QTY: the ceiling's lock is on the SOURCE PR, not the anchor, and it is
+    // B-372: the ceiling's lock is on the SOURCE PR, not the anchor, and it is
     // the FIRST write of the whole request. Order is the guarantee: it must precede
     // the gr insert (whose FK takes KEY SHARE on the anchor, and whose PO in turn
     // takes one on this PR — upgrading a KEY SHARE from two transactions at once is
@@ -2275,7 +2275,7 @@ describe("POST /api/v1/gr — B-264 (an order-closing receipt is still replayabl
     expect(inserted.filter((w) => w.table === grs)).toHaveLength(1);
     expect(inserted.filter((w) => w.table === grItems)).toHaveLength(1);
     expect(inserted.filter((w) => w.table === defectReports)).toHaveLength(1);
-    // B-TBD-QTY: the CLOSE, selected by column — the replay takes no anchor lock at
+    // B-372: the CLOSE, selected by column — the replay takes no anchor lock at
     // all (it never enters the transaction), so the po write count would otherwise
     // conflate "no second close" with "no second lock".
     expect(updated.filter((u) => u.table === pos && "status" in u.set)).toHaveLength(1);

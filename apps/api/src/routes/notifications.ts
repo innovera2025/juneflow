@@ -58,7 +58,7 @@ export function registerNotificationsRoute(app: FastifyInstance): void {
 
     // company_id auto-injected by select(); narrowed to THIS user's rows.
     const rows = await db.select(notifications, eq(notifications.userId, user.id));
-    // B-347 — ORDERING, and this is a PRECONDITION of the emitter, not a tidy-up.
+    // B-367 — ORDERING, and this is a PRECONDITION of the emitter, not a tidy-up.
     //
     // This read had NO ordering of any kind. It was stable only by accident: the
     // sole writer was the seed, which inserts all 22 rows in one statement, so the

@@ -1,4 +1,4 @@
-// G3 unit tests (PLAN.md §9) — the notification EMITTER (B-347).
+// G3 unit tests (PLAN.md §9) — the notification EMITTER (B-367).
 //
 // What these prove, and what they deliberately do not:
 //  · The fan-out set is derived from role.approval_level, through the SCOPED

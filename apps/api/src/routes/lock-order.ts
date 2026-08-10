@@ -40,7 +40,7 @@
 // impossible: a waiter only ever holds rows with ids BELOW the one it waits on, so
 // "A waits on a row B holds" and "B waits on a row A holds" cannot both be true.
 //
-// THE SOURCE PR COMES BEFORE inventory_item (B-TBD-QTY), and this is the one
+// THE SOURCE PR COMES BEFORE inventory_item (B-372), and this is the one
 // cross-table edge in the order. gr.ts createGr's over-receipt ceiling is a
 // read-then-write, so it takes an EXCLUSIVE lock before reading — a guarded UPDATE,
 // the B-361 pattern, because `pr` carries no company_id and TenantDb.selectForUpdate

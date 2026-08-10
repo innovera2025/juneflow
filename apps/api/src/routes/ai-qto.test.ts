@@ -51,7 +51,7 @@ interface StubOpts {
   captured?: Captured[];
   inserted?: Inserted[];
   updated?: Updated[];
-  /** B-349: make the nth insert into a table throw (models a 23505 on a unique index). */
+  /** B-369: make the nth insert into a table throw (models a 23505 on a unique index). */
   insertThrows?: (table: unknown, nth: number) => unknown;
   /** Records every table a FOR UPDATE row lock was taken on. */
   locked?: unknown[];
@@ -199,7 +199,7 @@ describe("POST /api/v1/ai-qto/upload — stub job + AI credit", () => {
 });
 
 // ---------------------------------------------------------------------------
-// B-349 — the meter TURNS. Before this, `aiUsage` had three readers and zero
+// B-369 — the meter TURNS. Before this, `aiUsage` had three readers and zero
 // writers anywhere in apps/api, so `used` never moved and the 402 above could
 // never fire on a real tenant: a "deducted AI credit" that no statement deducts.
 // ---------------------------------------------------------------------------
@@ -213,7 +213,7 @@ const usageRow = (used: number) => ({
   updatedAt: new Date(),
 });
 
-describe("POST /api/v1/ai-qto/upload — B-349 ai_usage is written", () => {
+describe("POST /api/v1/ai-qto/upload — B-369 ai_usage is written", () => {
   it("INSERTS the month's meter row at 1 when none exists yet", async () => {
     const inserted: Inserted[] = [];
     const res = await (

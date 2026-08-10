@@ -72,7 +72,7 @@ describe("SubscriptionQuotaResolver — real limit + real usage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// B-349 — the seat OVERRIDE (subscription.seats), and its blast radius
+// B-369 — the seat OVERRIDE (subscription.seats), and its blast radius
 // ---------------------------------------------------------------------------
 const dbWithSeats = (limits: Record<string, number>, seats: number | null) =>
   stubDb([
@@ -83,7 +83,7 @@ const dbWithSeats = (limits: Record<string, number>, seats: number | null) =>
     [aiUsage, [{ month, used: 3 }, { month, used: 4 }]],
   ]);
 
-describe("SubscriptionQuotaResolver — the seat override (B-349)", () => {
+describe("SubscriptionQuotaResolver — the seat override (B-369)", () => {
   it("subscription.seats OVERRIDES the package's users limit", async () => {
     const r = new SubscriptionQuotaResolver(dbWithSeats(LIMITS, 3));
     expect(await r.resolve(COMPANY, "users")).toEqual({ limit: 3, used: 2 });

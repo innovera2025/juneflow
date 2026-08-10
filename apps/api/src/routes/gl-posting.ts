@@ -85,7 +85,7 @@ export class GrNoLongerPostableError extends Error {
  * B-361 — TAKE THE RECEIPT'S ROW LOCK, THEN RE-DECIDE. Called FIRST inside the
  * posting transaction, before the JV insert.
  *
- * WHAT WAS BROKEN. B-348 froze a POSTED receipt against return/cancel with two
+ * WHAT WAS BROKEN. B-368 froze a POSTED receipt against return/cancel with two
  * plain SELECTs on `jv` (one before the flip, one inside the transaction), while
  * the poster read `gr.status` with a plain SELECT of its own — in
  * listGlPostingDocs, OUTSIDE any transaction, once per batch. Under READ COMMITTED
@@ -201,7 +201,7 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
     // chain counts.ts uses. NOTE (carried limitation): this covers PO-anchored
     // GRs only; WO-anchored GRs (grs.wo_id) are not enumerated here, exactly as
     // in the original badge query — kept identical so the two never diverge.
-    // B-348: `status = 'received'` ONLY. Before this round every gr row was
+    // B-368: `status = 'received'` ONLY. Before this round every gr row was
     // enumerated regardless of status, which was invisible because every gr row
     // carried `amount: null` and was therefore unpostable anyway. The moment a
     // receipt has a money value that stops being harmless in BOTH directions: a
@@ -238,7 +238,7 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
   };
 
   // -------------------------------------------------------------------------
-  // B-348 — THE RECEIPT'S MONEY VALUE. One extra read, not N+1.
+  // B-368 — THE RECEIPT'S MONEY VALUE. One extra read, not N+1.
   // -------------------------------------------------------------------------
   // listGlPostingDocs runs on EVERY shell load (counts.ts asks it for the
   // gl.inbox badge), so the line values are fetched with a single
@@ -273,7 +273,7 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
    * SAME expression gr.ts's `grWire` already puts on the list wire as `money`, so
    * the GL inbox and the GR screen cannot quote different figures for one receipt.
    * Every input is a stored server-owned column: `price` is derived from
-   * `boq_item.price` at create (B-348, gr.ts) and is never client-supplied.
+   * `boq_item.price` at create (B-368, gr.ts) and is never client-supplied.
    *
    * NULL — i.e. "no postable money amount", the honest gap — in three cases, each
    * a real receipt shape rather than a defensive hypothetical:
@@ -340,7 +340,7 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
 
   for (const r of grRows) {
     const { posted, jvNo } = resolvePosting("gr", r.id);
-    // B-348 — the former GAP ("gr carries received/rejected QUANTITY, not a money
+    // B-368 — the former GAP ("gr carries received/rejected QUANTITY, not a money
     // value") is CLOSED. The value was always there: gr_item carries `price` +
     // `currency_code` as real columns and gr.ts already derives Σ(received × price)
     // for the list wire. Lifting that same derivation here is what turns FLOW-A

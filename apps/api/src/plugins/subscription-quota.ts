@@ -99,7 +99,7 @@ export class SubscriptionQuotaResolver implements QuotaResolver {
     );
     const pkg = pkgRows[0];
     if (!pkg) return null;
-    // B-349 — the SEAT OVERRIDE, and it governs `users` ONLY.
+    // B-369 — the SEAT OVERRIDE, and it governs `users` ONLY.
     //
     // packages/db/src/schema/platform.ts is explicit about what this column is:
     // "a per-subscriber seat-cap OVERRIDE the owner may set… NULL = no override

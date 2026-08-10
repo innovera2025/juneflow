@@ -54,7 +54,7 @@ export interface UsersRouteOptions {
   credentials: CredentialStore;
   /** Invite-token delivery seam (default: no-op — see auth-provisioning.ts). */
   deliverReset: ResetDelivery;
-  /** B-349: the seat meter. `users` was the one SOLD dimension with no call site. */
+  /** B-369: the seat meter. `users` was the one SOLD dimension with no call site. */
   quota: QuotaGuard;
 }
 
@@ -209,7 +209,7 @@ export function registerUsersRoute(
     }
 
     // -----------------------------------------------------------------------
-    // B-349 — THE SEAT METER. `users` is a SOLD dimension that never turned.
+    // B-369 — THE SEAT METER. `users` is a SOLD dimension that never turned.
     // -----------------------------------------------------------------------
     // `quota.check(` resolved to exactly three call sites before this round —
     // ai-qto.ts (ai_per_month), projects.ts (projects) and files.ts (storage_gb).
@@ -231,7 +231,7 @@ export function registerUsersRoute(
     // CONTRACT GAP, REPORTED NOT PAPERED OVER: openapi.yaml declares only 201 and
     // 401 for POST /users, so this 402 is an UNDECLARED status — as are the 400,
     // 403 and 409 the handler already returns. Declaring them is a SACRED
-    // openapi.yaml edit and is filed for Wei (B-350) rather than taken here. The
+    // openapi.yaml edit and is filed for Wei (B-370) rather than taken here. The
     // body is the contract's canonical QuotaExceededError shape either way
     // (plugins/quota.ts sendQuotaExceeded), so a client that handles 402 anywhere
     // handles it here.
@@ -248,12 +248,12 @@ export function registerUsersRoute(
     // which tenants would be refused. Also note `#used` counts EVERY user row
     // including `blocked` and `invited`; whether a blocked ex-employee should
     // consume a paid seat is a billing definition, not an implementer's call, and
-    // is on B-350.
+    // is on B-370.
     //
     // -----------------------------------------------------------------------
     // B-363 — THE SEAT DECISION MOVES INSIDE A TRANSACTION, ONTO A LOCKED ROW
     // -----------------------------------------------------------------------
-    // B-349 shipped `quota.check` -> INSERT with nothing between them, which is a
+    // B-369 shipped `quota.check` -> INSERT with nothing between them, which is a
     // TOCTOU on a PRICED dimension: two invites arriving at limit−1 both read
     // `used = limit − 1`, both pass, and both insert. Measured live — 4 concurrent
     // invites against exactly one free seat, separate OS processes on a shared

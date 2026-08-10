@@ -197,13 +197,13 @@ class StaleStateError extends Error {
 /**
  * The work_period states POST /periods/{id}/deliver accepts as a SOURCE.
  *
- * `rejected` joined `pending` in B-351 — see the long note on the handler for
+ * `rejected` joined `pending` in B-371 — see the long note on the handler for
  * why this door rather than a new /reinspect one. Everything else is 409:
  * `delivered` / `inspecting` are already with the foreman, and `passed` / `paid`
  * are past the point of delivery.
  *
  * ---------------------------------------------------------------------------
- * THE REST OF THIS STATE MACHINE, honestly (B-351 recon; named, not fixed)
+ * THE REST OF THIS STATE MACHINE, honestly (B-371 recon; named, not fixed)
  * ---------------------------------------------------------------------------
  * The enum is pending|delivered|inspecting|passed|rejected|paid (schema/subcon.ts).
  *
@@ -222,7 +222,7 @@ class StaleStateError extends Error {
  *    CLOSES. approve-payment requires `passed`; there is no un-pass and no
  *    re-inspect, so a mistaken pass strands the period at `passed` forever. It is
  *    NOT opened here: `paid` writes an AP billing row AND a retention HELD row, so
- *    reversing a pass is money-adjacent and needs its own ruling (filed, B-351).
+ *    reversing a pass is money-adjacent and needs its own ruling (filed, B-371).
  *
  *  · `paid` — terminal by design, with money behind it. Correct as-is.
  *
@@ -785,7 +785,7 @@ export function registerSubconRoute(app: FastifyInstance): void {
   // one transaction (the acceptance write must land with the status flip).
   //
   // ---------------------------------------------------------------------------
-  // B-351 — `rejected` IS NOW A SOURCE HERE, and that is the whole fix
+  // B-371 — `rejected` IS NOW A SOURCE HERE, and that is the whole fix
   // ---------------------------------------------------------------------------
   // Every work_period.status write in this file is at :deliver / :inspect(pass) /
   // :inspect(reject) / :approve-payment. Exactly one of them wrote `rejected` and
@@ -839,7 +839,7 @@ export function registerSubconRoute(app: FastifyInstance): void {
     if (!resolved) {
       return reply.code(404).send({ code: "NOT_FOUND", message: `work period ${id} not found` });
     }
-    // C3 guard: a not-yet-delivered (pending) period, or — B-351 — one the foreman
+    // C3 guard: a not-yet-delivered (pending) period, or — B-371 — one the foreman
     // turned back (rejected), which is the contractor re-submitting after the fix.
     // Everything else is still 409: a delivered/inspecting period is already with
     // the foreman, and passed/paid are past the point of delivery.
@@ -861,7 +861,7 @@ export function registerSubconRoute(app: FastifyInstance): void {
       result = await db.transaction(async (tx) => {
         // Upsert the acceptance (one per period): update the existing row's
         // docs/photos, else create it — both scoped through the period chain.
-        // B-351: the UPDATE branch is the one a re-delivery takes — a rejected
+        // B-371: the UPDATE branch is the one a re-delivery takes — a rejected
         // period always has an acceptance (the reject handler ensures one so its
         // Defect List has something to hang off), so a resubmission refreshes the
         // docs/photos it already had rather than creating a second row.
@@ -875,7 +875,7 @@ export function registerSubconRoute(app: FastifyInstance): void {
               )
             )[0]!
           : (await tx.insertThrough(acceptances, projects, projectId, [{ periodId: id, docs, photos }]))[0]!;
-        // B-351 + B-149: the deliverable pre-state is folded into the FINAL UPDATE
+        // B-371 + B-149: the deliverable pre-state is folded into the FINAL UPDATE
         // (5th arg), not left in the JS pre-check above. updateThroughChain resolves
         // then updates in two round-trips, so a guard only in the resolve `where`
         // is a TOCTOU. It matters more now than it did: before this round the only
@@ -951,7 +951,7 @@ export function registerSubconRoute(app: FastifyInstance): void {
     // -----------------------------------------------------------------------
     // B-364 — A PASS WITH OPEN DEFECT ROWS. DECIDED: ACCEPT, and here is why.
     // -----------------------------------------------------------------------
-    // B-351 made this state reachable for the first time. Before it, `rejected` was
+    // B-371 made this state reachable for the first time. Before it, `rejected` was
     // a dead end, so the only way to a `passed` period was a first inspection that
     // never recorded a defect. Now: reject a period with 2 defects (both `open`) →
     // re-deliver → inspect(pass) → the period is `passed` with `open,open` still

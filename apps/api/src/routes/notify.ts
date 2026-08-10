@@ -1,5 +1,5 @@
 // The notification EMITTER — the only place in apps/api that writes a
-// `notification` row (B-347).
+// `notification` row (B-367).
 //
 // ---------------------------------------------------------------------------
 // WHAT WAS MISSING, and what was NOT

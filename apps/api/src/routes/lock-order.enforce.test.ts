@@ -351,7 +351,7 @@ describe("B-340 · every lock taker on inventory_item acquires ascending", () =>
     ).toEqual([]);
   });
 
-  it("keeps the receipt's PR lock AHEAD of its gr insert and its ledger writes (B-TBD-QTY)", () => {
+  it("keeps the receipt's PR lock AHEAD of its gr insert and its ledger writes (B-372)", () => {
     // THE ONE CROSS-TABLE EDGE, and the only one this file models: a receipt locks
     // its SOURCE PR row (a guarded UPDATE — the B-361 pattern, since `pr` carries no
     // company_id) before it reads what has already been received against that order.

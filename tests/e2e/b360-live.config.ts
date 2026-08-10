@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 // B-360 live-proof config — the API-only variant of playwright.config.ts (same
-// shape as b348-live.config.ts). The spec drives the api directly over the
+// shape as b368-live.config.ts). The spec drives the api directly over the
 // bearer-JWT flow and opens a direct psql connection to read the JV legs back
 // independently, so it needs neither the SPA nor the single-origin live-proxy
 // webServer the default LIVE config starts.

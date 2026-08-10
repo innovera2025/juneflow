@@ -1,7 +1,7 @@
 // B-360 (G4, live seeded stack, money = SERVER) — a receipt is priced ONLY from a
 // line its own order ordered.
 //
-// WHAT THIS CLOSES, measured on the seeded stack at 3e25eec BEFORE the fix. B-348
+// WHAT THIS CLOSES, measured on the seeded stack at 3e25eec BEFORE the fix. B-368
 // moved the receipt's price server-side and resolved `boq_item_id` through the
 // tenant-scoped BOQ door. That proved WHOSE line it is and nothing about WHICH
 // ORDER it belongs to, so the client stopped TYPING the price and started PICKING
@@ -25,7 +25,7 @@
 // approve → PO → approve → receive chain, a real pr_item row, and the posted JV
 // read back OUT OF POSTGRES rather than from the API's own response.
 //
-// E2E_LIVE-gated + F4-safe (login 429 → graceful skip), mirroring b348.
+// E2E_LIVE-gated + F4-safe (login 429 → graceful skip), mirroring b368.
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { Client } from "pg";
 import {
@@ -163,7 +163,7 @@ liveDescribe("B-360 — the receipt's price source is its own order's lines", ()
             name: "b360 ordered line",
             ordered_qty: qty,
             boq_item_id: ordered.id,
-            price: 999999, // still ignored — money is the server's (B-348)
+            price: 999999, // still ignored — money is the server's (B-368)
           },
         ],
       },
