@@ -72,6 +72,10 @@ class SignaturePadState extends State<SignaturePad> {
   /// The pad's own size, captured at paint time. This is the `w`/`h` written into the
   /// stroke JSON, so it must be the box the points were actually measured in — never
   /// a constant, or stored ink would re-render at the wrong aspect ratio.
+  ///
+  /// It can CHANGE while a signature is being made (a rotation as the phone is handed
+  /// across, a split-screen resize), which is why [_adoptSize] rescales the ink into
+  /// the new box rather than simply relabelling it — B-357/F6.
   Size _size = Size.zero;
 
   /// Whether the pad carries any completed mark.
@@ -96,6 +100,37 @@ class SignaturePadState extends State<SignaturePad> {
       _active = null;
     });
     widget.onChanged(ink);
+  }
+
+  /// Adopt a new pad size, RESCALING everything already drawn into it (B-357/F6).
+  ///
+  /// Called from the layout builder, so it runs before the painter is constructed for
+  /// this frame and the remapped ink is what gets drawn. It must not `setState` —
+  /// nothing here needs one, because it is already inside a build.
+  ///
+  /// The listener DOES have to be told, and after the frame rather than during it: the
+  /// parent holds the ENCODED value ([PmCloseScreen] keeps `_pending`), which still
+  /// describes the OLD viewport and is the string a submit would send. Notifying
+  /// synchronously would `setState` a parent that is mid-build; a post-frame callback
+  /// lands the moment the frame is done, and cannot loop — the next build sees an
+  /// unchanged size and rescales nothing.
+  void _adoptSize(Size next) {
+    if (next == _size) return;
+    final Size previous = _size;
+    _size = next;
+    final bool remapped = rescaleSignatureStrokes(
+      // A fresh OUTER list over the SAME inner lists: the rewrite is in place, so the
+      // stroke a finger may still be drawing keeps its identity.
+      <List<SignaturePoint>>[..._strokes, if (_active != null) _active!],
+      fromWidth: previous.width,
+      fromHeight: previous.height,
+      toWidth: next.width,
+      toHeight: next.height,
+    );
+    if (!remapped) return;
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (mounted) widget.onChanged(ink);
+    });
   }
 
   /// Clamp a raw pointer position into the pad.
@@ -147,7 +182,7 @@ class SignaturePadState extends State<SignaturePad> {
       height: widget.height,
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
-          _size = Size(constraints.maxWidth, widget.height);
+          _adoptSize(Size(constraints.maxWidth, widget.height));
           return Stack(
             children: <Widget>[
               Positioned.fill(child: _surface()),

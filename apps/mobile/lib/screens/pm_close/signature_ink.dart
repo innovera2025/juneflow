@@ -192,6 +192,67 @@ class SignatureInk {
   }
 }
 
+/// Re-express [strokes], captured in a `fromWidth` x `fromHeight` viewport, in a
+/// `toWidth` x `toHeight` one. Returns whether anything was rewritten.
+///
+/// THE DEFECT THIS CLOSES (B-357/F6). A pad records ONE `w`/`h`, read back at render
+/// time, and nothing used to reconcile the two when the box changed size. Sign the
+/// first stroke in portrait (360 px wide), the phone rotates while it is handed
+/// across, the customer finishes in landscape (780 px) — [encodeSignatureInk] then
+/// stamped `w: 780` onto points measured in a 360 px space, and every re-render scaled
+/// the pre-rotation half against the wrong unit. The round trip was arithmetically
+/// perfect and the picture was wrong.
+///
+/// The transform is [SignatureInk.fit] plus centring — the SAME expression
+/// [SignatureInkPainter] uses to draw stored ink into a box of another size — so the
+/// mark that was on the pad before the resize is the mark on it afterwards, drawn in
+/// the new box. A per-axis stretch would make it a different signature.
+///
+/// REWRITES IN PLACE, and that is load-bearing rather than a style choice: the caller
+/// may be holding the stroke a finger is still drawing, and swapping the list out from
+/// under it would leave the rest of that stroke appended to a detached copy — the mark
+/// would simply stop at the rotation.
+///
+/// A degenerate viewport on either side is refused (nothing is rewritten): points
+/// measured against 0 would be unitless, and there is no honest transform out of one.
+bool rescaleSignatureStrokes(
+  List<List<SignaturePoint>> strokes, {
+  required double fromWidth,
+  required double fromHeight,
+  required double toWidth,
+  required double toHeight,
+}) {
+  if (fromWidth == toWidth && fromHeight == toHeight) return false;
+  // Checked HERE rather than left to [SignatureInk.fit]: `fit` compares with `<`, and
+  // any comparison against NaN is false, so a NaN dimension falls through it as the
+  // OTHER axis's scale — a plausible-looking 1.0 that then makes every offset NaN.
+  // An infinite dimension does the same to the centring term.
+  if (!fromWidth.isFinite ||
+      !fromHeight.isFinite ||
+      !toWidth.isFinite ||
+      !toHeight.isFinite) {
+    return false;
+  }
+  if (fromWidth <= 0 || fromHeight <= 0 || toWidth <= 0 || toHeight <= 0) {
+    return false;
+  }
+  final double scale = SignatureInk(
+    width: fromWidth,
+    height: fromHeight,
+    strokes: const <List<SignaturePoint>>[],
+  ).fit(toWidth, toHeight);
+  if (!scale.isFinite || scale <= 0) return false;
+  final double dx = (toWidth - fromWidth * scale) / 2;
+  final double dy = (toHeight - fromHeight * scale) / 2;
+  for (final List<SignaturePoint> stroke in strokes) {
+    for (int i = 0; i < stroke.length; i++) {
+      final SignaturePoint p = stroke[i];
+      stroke[i] = SignaturePoint(dx + p.x * scale, dy + p.y * scale);
+    }
+  }
+  return true;
+}
+
 /// Round to one decimal place — the stored precision.
 ///
 /// A tenth of a logical pixel is finer than any display can render and finer than any

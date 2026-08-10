@@ -463,10 +463,7 @@ void main() {
             width: 300,
             height: 110,
             strokes: <List<SignaturePoint>>[
-              <SignaturePoint>[
-                SignaturePoint(10, 10),
-                SignaturePoint(60, 40),
-              ],
+              <SignaturePoint>[SignaturePoint(10, 10), SignaturePoint(60, 40)],
             ],
           ),
         )!;
@@ -677,6 +674,53 @@ void main() {
       await tester.tap(find.text('ปิดงาน + ลายเซ็น'), warnIfMissed: false);
       await tester.pumpAndSettle();
       expect(repo.submitted, isEmpty);
+    });
+
+    testWidgets('a ROTATION mid-signature sends ink that matches the viewport it is labelled '
+        'with (B-357/F6)', (WidgetTester tester) async {
+      // The scenario: the technician signs, the phone rotates while it is handed to
+      // the customer, the customer finishes. The pad records ONE w/h. Before this
+      // fix it simply RELABELLED the viewport, so the pre-rotation stroke stayed in
+      // the old coordinate space while `w` claimed the new one — arithmetically
+      // valid, and the picture came back at the wrong scale and offset.
+      final _FakeRepo repo = _FakeRepo(workOrders: <PmCloseEnt>[_wo('wo-1')]);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await _pump(tester, repo);
+      final double wide = tester.getSize(find.byType(SignaturePad)).width;
+      await _sign(tester);
+
+      // Rotate: the pad gets narrower (its height is fixed at the prototype's 110).
+      await tester.binding.setSurfaceSize(const Size(360, 900));
+      await tester.pumpAndSettle();
+      final double narrow = tester.getSize(find.byType(SignaturePad)).width;
+      expect(
+        narrow,
+        lessThan(wide),
+        reason: 'the fixture must actually resize',
+      );
+
+      await tester.tap(find.text('ปิดงาน + ลายเซ็น'));
+      await tester.pumpAndSettle();
+
+      final SignatureInk sent = decodeSignatureInk(
+        repo.submitted.single['signature']! as String,
+      )!;
+
+      // The viewport describes the box the points are NOW in…
+      expect(sent.width, closeTo(narrow, 0.05));
+      // …and every point is inside it. Pre-fix, the stroke kept coordinates measured
+      // across the WIDE pad while `w` said `narrow`, so this is where it failed: x
+      // ran past the right edge of the viewport it was labelled with.
+      for (final List<SignaturePoint> stroke in sent.strokes) {
+        for (final SignaturePoint p in stroke) {
+          expect(p.x, inInclusiveRange(0, sent.width + 0.05));
+          expect(p.y, inInclusiveRange(0, sent.height + 0.05));
+        }
+      }
+      // And it is still a signature: the rescale preserved the mark rather than
+      // collapsing it.
+      expect(sent.hasSignature, isTrue);
     });
   });
 

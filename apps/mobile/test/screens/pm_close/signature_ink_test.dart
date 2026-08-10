@@ -209,6 +209,145 @@ void main() {
     );
   });
 
+  group('the viewport is kept honest when the box changes size (B-357/F6)', () {
+    // A pad records ONE w/h. When the box changes size mid-signature — a rotation as
+    // the phone is handed across — relabelling the viewport leaves the earlier points
+    // measured in a space that no longer exists: arithmetically valid, visibly wrong.
+
+    test('a GROWING box rescales what is already drawn, uniformly', () {
+      final List<List<SignaturePoint>> strokes = <List<SignaturePoint>>[
+        <SignaturePoint>[
+          const SignaturePoint(10, 10),
+          const SignaturePoint(70, 40),
+        ],
+      ];
+      expect(
+        rescaleSignatureStrokes(
+          strokes,
+          fromWidth: 300,
+          fromHeight: 90,
+          toWidth: 600,
+          toHeight: 180,
+        ),
+        isTrue,
+      );
+      // Both axes doubled, so the scale is 2 and nothing is centred away.
+      expect(strokes.single, <SignaturePoint>[
+        const SignaturePoint(20, 20),
+        const SignaturePoint(140, 80),
+      ]);
+    });
+
+    test('a WIDER box keeps the mark its own size and centres it', () {
+      // The rotation case: 360 -> 780 wide, the height unchanged. min(780/360, 1) = 1,
+      // so the mark must NOT stretch — it keeps its size and moves to the middle.
+      final List<List<SignaturePoint>> strokes = <List<SignaturePoint>>[
+        <SignaturePoint>[
+          const SignaturePoint(20, 70),
+          const SignaturePoint(100, 20),
+          const SignaturePoint(180, 70),
+        ],
+      ];
+      rescaleSignatureStrokes(
+        strokes,
+        fromWidth: 360,
+        fromHeight: 90,
+        toWidth: 780,
+        toHeight: 90,
+      );
+      expect(strokes.single, <SignaturePoint>[
+        const SignaturePoint(230, 70),
+        const SignaturePoint(310, 20),
+        const SignaturePoint(390, 70),
+      ]);
+    });
+
+    test('the rewrite is IN PLACE, so a stroke still being drawn survives', () {
+      // The pad hands this the list a finger is currently appending to. Replacing that
+      // list would leave the rest of the stroke going into a detached copy — the mark
+      // would stop at the rotation.
+      final List<SignaturePoint> active = <SignaturePoint>[
+        const SignaturePoint(10, 10),
+      ];
+      final List<List<SignaturePoint>> strokes = <List<SignaturePoint>>[active];
+      rescaleSignatureStrokes(
+        strokes,
+        fromWidth: 300,
+        fromHeight: 90,
+        toWidth: 600,
+        toHeight: 180,
+      );
+      expect(identical(strokes.single, active), isTrue);
+      expect(active.single, const SignaturePoint(20, 20));
+    });
+
+    test('an unchanged or degenerate viewport rewrites nothing', () {
+      List<List<SignaturePoint>> fresh() => <List<SignaturePoint>>[
+        <SignaturePoint>[
+          const SignaturePoint(10, 10),
+          const SignaturePoint(70, 40),
+        ],
+      ];
+      const List<SignaturePoint> untouched = <SignaturePoint>[
+        SignaturePoint(10, 10),
+        SignaturePoint(70, 40),
+      ];
+
+      for (final ({double fw, double fh, double tw, double th}) c
+          in <({double fw, double fh, double tw, double th})>[
+            (fw: 300, fh: 90, tw: 300, th: 90), // no change
+            (fw: 0, fh: 90, tw: 300, th: 90), // nothing was ever measured
+            (fw: 300, fh: 90, tw: 0, th: 90), // the new box has no width
+            (fw: 300, fh: 90, tw: 300, th: -1),
+            (fw: double.nan, fh: 90, tw: 300, th: 90),
+            (fw: 300, fh: 90, tw: double.infinity, th: 90),
+          ]) {
+        final List<List<SignaturePoint>> strokes = fresh();
+        expect(
+          rescaleSignatureStrokes(
+            strokes,
+            fromWidth: c.fw,
+            fromHeight: c.fh,
+            toWidth: c.tw,
+            toHeight: c.th,
+          ),
+          isFalse,
+          reason: '$c',
+        );
+        expect(strokes.single, untouched, reason: '$c');
+      }
+    });
+
+    test('the picture survives the round trip through the encoder', () {
+      // The property that matters end to end: rescale, encode, decode, re-render at
+      // the ORIGINAL size, and the mark is where it started.
+      final List<List<SignaturePoint>> strokes = <List<SignaturePoint>>[
+        <SignaturePoint>[
+          const SignaturePoint(30, 20),
+          const SignaturePoint(120, 70),
+        ],
+      ];
+      rescaleSignatureStrokes(
+        strokes,
+        fromWidth: 300,
+        fromHeight: 90,
+        toWidth: 600,
+        toHeight: 180,
+      );
+      final SignatureInk back = decodeSignatureInk(
+        encodeSignatureInk(
+          SignatureInk(width: 600, height: 180, strokes: strokes),
+        ),
+      )!;
+      final double scale = back.fit(300, 90);
+      expect(scale, closeTo(0.5, 1e-9));
+      expect(back.strokes.single[0].x * scale, closeTo(30, 1e-9));
+      expect(back.strokes.single[0].y * scale, closeTo(20, 1e-9));
+      expect(back.strokes.single[1].x * scale, closeTo(120, 1e-9));
+      expect(back.strokes.single[1].y * scale, closeTo(70, 1e-9));
+    });
+  });
+
   group('the encoder REFUSES rather than fabricating consent', () {
     test('an EMPTY pad encodes to null — never an empty-but-present value', () {
       // The defect this prevents: `{"v":1,"w":300,"h":110,"s":[]}` is a NON-EMPTY
