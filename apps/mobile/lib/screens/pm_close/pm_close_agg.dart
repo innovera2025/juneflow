@@ -4,11 +4,9 @@
 // has no work-order column at all (see [PmCloseSummary.parts]).
 //
 // WHAT THIS SCREEN IS, HONESTLY. The prototype is the last step of the PM flow: a
-// 5-row job summary, a tap-to-sign pad, and a "close + send report" button that
-// flips to a full-screen success view. Of those three, only the SUMMARY has a wire.
-// The pad and the close are blocked on a stack decision (BLOCKERS.md B-288), so this
-// port ships a READ-ONLY summary plus the signature affordance in its real stored
-// state. It performs no write. Every claim below is traceable:
+// 5-row job summary, a tap-to-sign pad, and a "close + send report" button that flips
+// to a full-screen success view. The summary and the CLOSE are now real; the success
+// view is still dropped. Every claim below is traceable:
 //
 //   - there is NO status column and NO certificate column on pm_workorder
 //     (packages/db/src/schema/pm.ts L168-192), and the close handler's own comment
@@ -16,17 +14,29 @@
 //   - `POST /pm/workorders/:id/close` writes only the close fields the body carries
 //     — cause/fix/advice (pm-notes' three columns) and signature → customer_sign
 //     (pm.ts L785-793) — then fires `lineNotifyStub`, a verified NO-OP (B-108b);
-//   - so a close sent from THIS screen would carry nothing (pm-notes already saved
-//     the log, and no signature can be captured), leaving the row byte-identical and
-//     the 200 meaningless. A button that changes nothing must not claim a close, so
-//     the affordance ships disabled rather than firing a no-op write.
+//   - so a close from THIS screen carries `{ signature }` alone, and that write is
+//     the whole close: `customer_sign` IS the done marker every reader keys on.
+//
+// WHAT CHANGED, AND WHAT DID NOT (B-288 → B-331). B-288 withheld the close because
+// the body would have been EMPTY — pm-notes already saved cause/fix/advice, and the
+// one field left could not be captured while `customer_sign`'s ENCODING was
+// undefined. Wei ruled that encoding on 2026-08-07 (B-331: STROKE JSON), so the
+// signature is now capturable with no package at all and the close is a real write.
+// The rest of B-288's deviation list STANDS, because none of it was about the
+// signature: the success view is still dropped (it announces "PM job closed" over
+// a certificate pushed via LINE — `lineNotifyStub` is a verified no-op and no
+// certificate exists anywhere, B-108b); the CTA keeps the dict key pm.closeWithSignBtn
+// rather than the prototype's "close PM + send report", whose second half is that same
+// LINE promise; and the start-end / total-time / parts rows and the recipient caption
+// still em-dash, because no clock column exists on pm_workorder, parts are money on
+// pmQuotes.parts, and the customer's name is three hops away.
 //
 // THE ONE DERIVED FACT THAT IS REAL. "done" is not stored, but it IS derived, the
 // same way in two already-merged places: apps/web/src/screens/pm/wo-rows.ts
 // `deriveStatus` L201-210 (`customerSign !== "" -> "done"`) and this app's own
 // pm_jobs_agg. So [isSigned] reads `customer_sign` and nothing else — never a local
-// tap. The prototype's `signed` flag (L183) is a UI gesture, and a gesture is not a
-// stored fact.
+// gesture. The prototype's `signed` flag (L183) is a UI gesture, and a gesture is not
+// a stored fact; what makes the pad's ink a fact is the server accepting the write.
 //
 // The real wire is the opaque Entity `GET /pm/workorders` returns (pm.ts
 // workOrderWire L303-316):
@@ -39,10 +49,14 @@
 // (`checkin_gps` is text coordinates, not a time). That is why two of the five
 // summary rows can never be filled from this wire — see [PmCloseSummary].
 //
-// No Flutter, no i18n, no Dio here — every derivation stays unit-testable. This agg
-// is self-contained and deliberately does NOT import pm_checklist_agg (the
-// pm_checkin / pm_checklist / pm_notes precedent); it re-derives the checklist tally
-// from the same raw `items` jsonb.
+// No Flutter and no i18n here — every derivation stays unit-testable. This agg is
+// self-contained and deliberately does NOT import pm_checklist_agg (the pm_checkin /
+// pm_checklist / pm_notes precedent); it re-derives the checklist tally from the same
+// raw `items` jsonb. It DOES import the offline queue's types, for the same reason
+// pm_checkin_agg does: [resolveCloseState] is the pure half of the write path, and
+// keeping it here is what lets the outcome mapping be tested without a widget tree.
+import '../../offline/sync_operation.dart';
+import '../../offline/sync_processor.dart';
 
 /// An opaque contract Entity — GET /pm/workorders and GET /pm/assets rows are
 /// `{ [k]: unknown }`.
@@ -247,6 +261,83 @@ class PmCloseSummary {
   /// column anywhere.
   /// The label is kept and the value em-dashed, never a raw uuid dressed as a name.
   String? get recipient => null;
+}
+
+/// Where one close attempt stands. Cyclic — a failure can be retried, and a retry
+/// can fail again — so the screen reads it rather than inferring from flags.
+enum PmCloseState {
+  /// Nothing submitted (or the pad was cleared after a failure).
+  idle,
+
+  /// Enqueued and draining right now.
+  submitting,
+
+  /// The server accepted it: `customer_sign` is stored and the work order is done.
+  closed,
+
+  /// Captured durably but NOT yet accepted (offline / 5xx). It will replay. The
+  /// screen must say "pending", never "closed" — nothing is stored server-side yet.
+  queued,
+
+  /// Permanently rejected (4xx dead-letter). It will never replay on its own.
+  failed,
+}
+
+/// The close body: `{ signature }` and NOTHING else.
+///
+/// The endpoint keys off KEY PRESENCE (`has(body, …)`, apps/api/src/routes/pm.ts
+/// L787-795), which makes both halves of this load-bearing:
+///
+///   * cause / fix / advice are OMITTED. They belong to pm-notes (step 2) and were
+///     saved there through this same endpoint; this screen has no form for them, so
+///     sending them would blank a maintenance log it never showed the user.
+///   * `signature` is present ONLY when there is real ink. The handler stores
+///     `str(pick(body,'signature')).trim() || null`, so an empty string does not
+///     write an empty signature — it writes NULL, ERASING one that was already
+///     stored and reverting a completed work order to open. And any NON-empty string
+///     marks the work order done to every reader in the product (web wo-rows.ts
+///     L206, pm_jobs_agg L128, api counts.ts L132), none of which looks inside — so
+///     a syntactically valid but ink-less signature would fabricate a record of the
+///     customer's consent.
+///
+/// Returns null when [signature] is null or blank: the caller must then NOT submit
+/// at all, rather than send a body that could erase or fabricate.
+Map<String, Object?>? pmClosePayload(String? signature) {
+  if (signature == null || signature.trim().isEmpty) return null;
+  return <String, Object?>{'signature': signature};
+}
+
+/// Resolve where op [opId] stands after a drain — the pm_checkin `resolveCheckinState`
+/// contract, applied to the close.
+///
+/// Read the drain's own verdict first; if the drain never reached the op (it was
+/// blocked behind a stuck one, or a re-entrant drain was skipped), fall back to the
+/// queue: an op still listed as `failed` is dead, one still listed as `pending` will
+/// replay, and one that is GONE was accepted and removed.
+PmCloseState resolveCloseState(
+  String opId,
+  DrainReport report,
+  List<SyncOperation> due,
+) {
+  final SyncAttempt? attempt = report.attemptFor(opId);
+  if (attempt != null) {
+    switch (attempt.outcome) {
+      case SyncOutcome.synced:
+        return PmCloseState.closed;
+      case SyncOutcome.permanentlyFailed:
+        return PmCloseState.failed;
+      case SyncOutcome.deferred:
+        return PmCloseState.queued;
+    }
+  }
+  for (final SyncOperation op in due) {
+    if (op.id == opId) {
+      return op.status == SyncOpStatus.failed
+          ? PmCloseState.failed
+          : PmCloseState.queued;
+    }
+  }
+  return PmCloseState.closed; // removed from the queue = accepted
 }
 
 /// Build the honest summary of [wo], joining [assetMap] for the asset row.

@@ -23,6 +23,12 @@ const List<String> _dictFields = <String>[
   'rowTotalTime',
   'signatureTitle',
   'close',
+  // B-331 added these three when the CTA became a real close. All are EXISTING dict
+  // ids already carrying these states on pm-checkin / pm-checklist / pm-notes, so
+  // this screen still mints nothing.
+  'closed',
+  'queued',
+  'failed',
 ];
 
 /// Fields read with tp() — the Thai phrase IS the key, byte-exact with
@@ -161,23 +167,38 @@ void main() {
   );
 
   test('no dropped CLAIM can re-enter through the sidecar', () async {
-    // Four prototype strings are dropped rather than keyed, because each is a claim
+    // Three prototype strings are dropped rather than keyed, because each is a claim
     // and a claim cannot be em-dashed the way a missing value can:
-    //   * the success heading (L189, 'ปิดงาน PM สำเร็จ') — no status column exists;
+    //   * the success heading (L189, 'ปิดงาน PM สำเร็จ') — it announces an outcome
+    //     over a certificate that does not exist;
     //   * its subtitle's second line (L190) — no certificate exists and LINE is a
     //     verified no-op stub (pm.ts lineNotifyStub, B-108b);
     //   * the CTA label (L213, 'ปิดงาน PM + ส่งรายงาน') — the report half is that
-    //     same LINE promise;
-    //   * the empty pad's hint (L207, 'แตะเพื่อให้ลูกค้าลงนาม') — it promises a tap
-    //     interaction the inert pad does not have (B-288).
+    //     same LINE promise.
     // Assert on the RESOLVED text, not the raw slot value: pointing a slot at an
-    // existing dict id (pm.toastClosed, pm.closedNote) would smuggle the same claim
-    // back in while the sidecar still read as key-only.
+    // existing dict id (pm.toastClosed) would smuggle the same claim back in while
+    // the sidecar still read as key-only. pm.toastClosed is the live example — it
+    // reads 'closed · the report was sent to the customer', and its second half is
+    // exactly the LINE promise, so no slot may resolve to it.
     //
-    // NOT forbidden here: the bare word 'ปิดงาน'. This screen's CTA legitimately
-    // carries it (pm.closeWithSignBtn) as the name of a DISABLED capability — that
-    // the control cannot fire is pinned in pm_close_screen_test.dart, which is where
-    // it can actually break.
+    // TWO WORDS LEFT THIS LIST UNDER B-331, and neither left quietly:
+    //   * 'ปิดงานแล้ว' — pm.closedNote. Under B-288 it was forbidden because nothing
+    //     could ever make it true; the close now really happens, so it is the
+    //     accepted-state label. What stops it being a fabricated outcome is no
+    //     longer the sidecar but WHEN the screen prints it: only after a drain
+    //     reported the write synced. That is pinned in pm_close_screen_test.dart —
+    //     'the prototype success view never appears' proves loading a signed work
+    //     order does NOT print it, and 'a DEFERRED drain says pending' proves a
+    //     queued write does not either.
+    //   * 'ลงนาม' — it was forbidden as an INSTRUCTION on an inert pad. The pad
+    //     captures for real now, and the word survives here only inside
+    //     pm.closedNote's 'ลูกค้าลงนามรับงาน' ("the customer signed for the work"),
+    //     which is a statement about stored data rather than an invitation. Note
+    //     what is still NOT used: pm.signHere ('ลงนาม ✓'), whose ✓ asserts a
+    //     COMPLETED signature and would claim an empty pad was already signed.
+    //
+    // NOT forbidden here either: the bare word 'ปิดงาน'. The CTA legitimately
+    // carries it (pm.closeWithSignBtn) as the name of the capability it now has.
     final JuneflowI18n i18n = await JuneflowI18n.load(
       bundle: rootBundle,
       lang: 'th',
@@ -191,16 +212,22 @@ void main() {
       final String rendered = _dictFields.contains(name)
           ? i18n.t(s[name])
           : i18n.tp(s[name]);
+      // ONE excusal, and it is a substring collision rather than a loophole: the
+      // failure label admin.common.actionFailedToast reads 'ทำรายการไม่สำเร็จ' —
+      // "the action did NOT succeed" — which literally contains 'สำเร็จ'. The
+      // NEGATED form is the opposite of the claim being guarded, so it is removed
+      // before the scan. The bare word is still forbidden everywhere else, so the
+      // prototype's success heading cannot slip back in.
+      final String scanned = rendered.replaceAll('ไม่สำเร็จ', '');
       for (final String claim in <String>[
         'สำเร็จ', // "succeeded"
         'ใบรับรอง', // "certificate"
         'LINE',
-        'ส่งรายงาน', // "send report"
-        'ปิดงานแล้ว', // "closed" as a completed state
-        'ลงนาม', // "sign" as an instruction on an inert pad
+        'ส่งรายงาน', // "send report" — the LINE promise, and pm.toastClosed's tail
+        'ลงนาม ✓', // pm.signHere — the tick asserts an ALREADY-completed signature
       ]) {
         expect(
-          rendered,
+          scanned,
           isNot(contains(claim)),
           reason: '"$name" (${s[name]}) renders "$claim" — nothing backs it',
         );

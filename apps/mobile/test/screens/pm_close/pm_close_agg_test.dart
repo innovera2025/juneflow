@@ -8,6 +8,8 @@
 // cannot quietly start deriving a duration, a parts total, or a customer name from
 // something that does not carry one.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:juneflow_mobile/offline/sync_operation.dart';
+import 'package:juneflow_mobile/offline/sync_processor.dart';
 import 'package:juneflow_mobile/screens/pm_close/pm_close_agg.dart';
 
 PmCloseEnt _asset(String id, {String? name, String? code}) => <String, Object?>{
@@ -267,6 +269,102 @@ void main() {
         expect(s.parts, isNull);
         expect(s.recipient, isNull);
       }
+    });
+  });
+
+  group('pmClosePayload — what the close is allowed to send (B-331)', () {
+    test('carries `signature` and NOTHING else', () {
+      // The key set is the assertion. POST /pm/workorders/:id/close keys off key
+      // PRESENCE (pm.ts `has(body, …)`), and cause/fix/advice belong to pm-notes and
+      // were saved there — so an extra key here would BLANK a maintenance log this
+      // screen never showed the user.
+      final Map<String, Object?> body = pmClosePayload('{"v":1}')!;
+      expect(body.keys.toSet(), <String>{'signature'});
+      expect(body['signature'], '{"v":1}');
+    });
+
+    test('a null or blank signature yields NO body at all', () {
+      // Two separate defects are prevented by the same refusal:
+      //   * a NON-EMPTY value marks the work order done to every reader in the
+      //     product, none of which looks inside — so an ink-less one fabricates the
+      //     customer's consent;
+      //   * an EMPTY string is written by the handler as `str(…).trim() || null`,
+      //     i.e. NULL, which ERASES a signature already stored and reverts a closed
+      //     work order to open.
+      expect(pmClosePayload(null), isNull);
+      expect(pmClosePayload(''), isNull);
+      expect(pmClosePayload('   '), isNull);
+      expect(pmClosePayload('\n\t '), isNull);
+    });
+  });
+
+  group('resolveCloseState — the drain verdict, never an assumption', () {
+    DrainReport report(SyncOutcome o) =>
+        DrainReport(<SyncAttempt>[SyncAttempt(id: 'op-1', outcome: o)]);
+
+    SyncOperation op(SyncOpStatus status) => SyncOperation(
+      id: 'op-1',
+      entityType: 'pm_close',
+      kind: SyncOpKind.update,
+      endpoint: '/pm/workorders/wo-1/close',
+      method: 'POST',
+      payload: const <String, Object?>{},
+      createdAt: DateTime.now(),
+      status: status,
+    );
+
+    test('2xx -> closed, 4xx -> failed, 5xx/transport -> queued', () {
+      const List<SyncOperation> none = <SyncOperation>[];
+      expect(
+        resolveCloseState('op-1', report(SyncOutcome.synced), none),
+        PmCloseState.closed,
+      );
+      expect(
+        resolveCloseState('op-1', report(SyncOutcome.permanentlyFailed), none),
+        PmCloseState.failed,
+      );
+      // The one that matters most: a deferred op is CAPTURED, not stored. Reporting
+      // it as closed would announce a write the server has never seen.
+      expect(
+        resolveCloseState('op-1', report(SyncOutcome.deferred), none),
+        PmCloseState.queued,
+      );
+    });
+
+    test('a drain that never reached the op falls back to the QUEUE', () {
+      // The op can be blocked behind a stuck one, or a re-entrant drain skipped, so
+      // "no attempt" is not evidence of anything on its own.
+      final DrainReport empty = const DrainReport(<SyncAttempt>[]);
+      expect(
+        resolveCloseState('op-1', empty, <SyncOperation>[
+          op(SyncOpStatus.pending),
+        ]),
+        PmCloseState.queued,
+      );
+      expect(
+        resolveCloseState('op-1', empty, <SyncOperation>[
+          op(SyncOpStatus.failed),
+        ]),
+        PmCloseState.failed,
+      );
+      // Gone from the queue = accepted and removed.
+      expect(
+        resolveCloseState('op-1', empty, const <SyncOperation>[]),
+        PmCloseState.closed,
+      );
+    });
+
+    test('another op\'s verdict is never read as this one\'s', () {
+      expect(
+        resolveCloseState(
+          'op-1',
+          DrainReport(<SyncAttempt>[
+            const SyncAttempt(id: 'op-OTHER', outcome: SyncOutcome.synced),
+          ]),
+          <SyncOperation>[op(SyncOpStatus.pending)],
+        ),
+        PmCloseState.queued,
+      );
     });
   });
 }
