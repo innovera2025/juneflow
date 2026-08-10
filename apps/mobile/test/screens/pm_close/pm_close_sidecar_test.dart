@@ -195,18 +195,35 @@ void main() {
     // TWO WORDS LEFT THIS LIST UNDER B-331, and neither left quietly:
     //   * 'ปิดงานแล้ว' — pm.closedNote. Under B-288 it was forbidden because nothing
     //     could ever make it true; the close now really happens, so it is the
-    //     accepted-state label. What stops it being a fabricated outcome is no
-    //     longer the sidecar but WHEN the screen prints it: only after a drain
-    //     reported the write synced. That is pinned in pm_close_screen_test.dart —
-    //     'the prototype success view never appears' proves loading a signed work
-    //     order does NOT print it, and 'a DEFERRED drain says pending' proves a
-    //     queued write does not either.
+    //     accepted-state label the `closed` slot deliberately points at.
     //   * 'ลงนาม' — it was forbidden as an INSTRUCTION on an inert pad. The pad
     //     captures for real now, and the word survives here only inside
     //     pm.closedNote's 'ลูกค้าลงนามรับงาน' ("the customer signed for the work"),
     //     which is a statement about stored data rather than an invitation. Note
     //     what is still NOT used: pm.signHere ('ลงนาม ✓'), whose ✓ asserts a
     //     COMPLETED signature and would claim an empty pad was already signed.
+    //
+    // NEITHER CAN COME BACK TO THIS LIST, and that is a property of the layer rather
+    // than a preference: this test scans the RESOLVED value of every slot, and the
+    // `closed` slot resolves to pm.closedNote, which contains both words. Re-adding
+    // either one fails on the screen's own legitimate copy — verified, not assumed.
+    // So this file no longer holds an opinion about them in ANY state.
+    //
+    // WHAT ACTUALLY CONSTRAINS THEM NOW IS TIMING, WHICH THIS LAYER CANNOT SEE. An
+    // asset-level scan of a sidecar has no screen, no state and no clock; what makes
+    // pm.closedNote honest is that the screen prints it only after a drain reported
+    // the write SYNCED. That is a widget-level property and it is pinned in
+    // pm_close_screen_test.dart, by name:
+    //   * 'the prototype success view never appears, signed or not' — merely LOADING
+    //     a signed work order does not print it. Load-bearing detail: that test only
+    //     covers the case at all because one of its arms carries REAL decodable
+    //     stroke JSON. Its other signed arm ('sig-blob') is a legacy value
+    //     decodeSignatureInk returns null for, so it never reaches the signed branch;
+    //     with only that arm the test passed against a screen mutated to announce a
+    //     close on load.
+    //   * 'a DEFERRED drain says pending — never closed' — a merely QUEUED write does
+    //     not print it either.
+    // If those two are ever weakened, nothing downstream re-catches it here.
     //
     // NOT forbidden here either: the bare word 'ปิดงาน'. The CTA legitimately
     // carries it (pm.closeWithSignBtn) as the name of the capability it now has.

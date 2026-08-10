@@ -615,10 +615,47 @@ void main() {
       // label under B-331, but only AFTER the server accepts a write made in this
       // session. Merely LOADING a signed work order must not print it, or the
       // screen would be reporting an outcome it did not observe.
-      for (final String? sign in <String?>[null, 'sig-blob']) {
-        await _pump(
-          tester,
-          _FakeRepo(workOrders: <PmCloseEnt>[_wo('wo-1', customerSign: sign)]),
+      //
+      // THE THIRD VALUE IS WHAT MAKES THAT SENTENCE TESTABLE, and its absence is the
+      // hole this test shipped with. The other two cannot reach the signed branch at
+      // all: null is unsigned, and 'sig-blob' is a LEGACY opaque value that
+      // decodeSignatureInk returns null for — so under BOTH of them `_stored` stays
+      // null and a label keyed off stored ink is never exercised. "signed or not" in
+      // the name was therefore a condition this fixture could not create. The third
+      // value is real, decodable stroke JSON: a work order that ARRIVES already
+      // signed, `_stored` non-null, ink on the screen, and still no close announced
+      // because `_state` is idle and nothing was observed.
+      //
+      // GENERATED THROUGH THE ENCODER, never pasted. A frozen literal stops being
+      // able to fail the moment the encoding moves — it would keep decoding to null
+      // under a new `v` and quietly become a second 'sig-blob'.
+      final String storedInk = encodeSignatureInk(
+        const SignatureInk(
+          width: 300,
+          height: 110,
+          strokes: <List<SignaturePoint>>[
+            <SignaturePoint>[SignaturePoint(10, 10), SignaturePoint(60, 40)],
+          ],
+        ),
+      )!;
+      for (final String? sign in <String?>[null, 'sig-blob', storedInk]) {
+        // A FRESH MOUNT PER ARM, and the read count below proves it happened.
+        // pumpWidget REUSES the State when runtimeType and key match, and this
+        // screen reads the work order exactly once, from initState (there is no
+        // didUpdateWidget). Pumping the next repo into the live tree therefore
+        // leaves the FIRST arm's screen mounted and asserts it three times — a loop
+        // over three fixtures that silently tests one. Unmounting first is what
+        // makes the next arm actually load.
+        await tester.pumpWidget(const SizedBox.shrink());
+        final _FakeRepo repo = _FakeRepo(
+          workOrders: <PmCloseEnt>[_wo('wo-1', customerSign: sign)],
+        );
+        await _pump(tester, repo);
+        expect(
+          repo.woReads,
+          1,
+          reason:
+              'sign=$sign never reached the screen — the arm tested nothing',
         );
         for (final String claim in <String>[
           'สำเร็จ', // "succeeded"
