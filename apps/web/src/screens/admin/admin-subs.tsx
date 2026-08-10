@@ -37,9 +37,21 @@
  *     2026-08-10 this confirm dialog fired the "link sent to {email}" toast and called
  *     nothing — a success claim, made to a platform owner, about somebody else's account.
  *     The endpoint had in fact been mounted since B-282; the comment here said MOCK.
- *   - EXPORT stays MOCK (a faithful ctx.notify): grep of apps/api/src/routes finds no
- *     subscriber-export handler and the contract declares none. invite-user stays
- *     honest-DISABLED (the invite form is a dropped mock write path).
+ *   - EXPORT stays MOCK (a faithful ctx.notify), and "the contract declares none" was
+ *     WRONG — corrected 2026-08-10. The contract DOES declare an export: openapi.yaml:4235
+ *     POST /exports (createExport, {type,params} -> 202 Job) + :4262 GET /exports/{id}
+ *     (getExport), both generated. What is missing is the MOUNT — apps/api/src/app.ts
+ *     registers no exports route and the only "/exports" in apps/api/src is a design
+ *     comment (worker.ts:6) — so a contract-following caller gets a 404. That is
+ *     declared-but-never-mounted, the same shape as the B-282 reset-password defect two
+ *     bullets up. Filed as B-351. Separately true and unchanged: there is no
+ *     subscriber-SPECIFIC export handler either. Disclosed plainly because this control is
+ *     not merely inert — it fires admin.subs.exportToast, whose copy asserts the subscriber
+ *     list was exported as CSV: a success claim with nothing behind it, i.e. the same lie
+ *     shape as the reset-password confirm. It is left as-is only because it is a
+ *     prototype-faithful mock and changing it is a visible behaviour change (a ruling,
+ *     carried on B-351), not because it is acceptable. invite-user stays honest-DISABLED
+ *     (the invite form is a dropped mock write path).
  *
  * i18n (rule 2): every visible string is an admin.subs.* / admin.common.* dict key (t). No
  * Thai literal in source (B-073); tokens back every colour except the prototype-verbatim
@@ -770,7 +782,9 @@ export function AdminSubscribers() {
       title={t("admin.subs.title")}
       subtitle={t("admin.subs.subtitle").replace("{count}", String(allRows.length))}
       actions={
-        // Export -> MOCK toast (no export endpoint).
+        // Export -> MOCK toast. NOT "no export endpoint": the contract declares
+        // POST /exports + GET /exports/{id} and nothing mounts them (B-351). The toast
+        // asserts a CSV export that never happened — see the EXPORT bullet in the header.
         <Btn kind="outline" size="md" icon="download" onClick={() => ctx.notify(t("admin.subs.exportToast"))}>
           {t("admin.common.export")}
         </Btn>

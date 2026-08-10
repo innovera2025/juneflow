@@ -436,8 +436,18 @@ export function LandPipeline() {
       subtitle={t("land.pipeline.subtitle")}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          {/* Honest-DISABLED: no export endpoint exists anywhere in the contract (the
-              prototype's openExportModal is a mock file-picker). Verified 2026-08-10. */}
+          {/* Honest-DISABLED — but NOT because the contract has no export. It HAS one:
+              openapi.yaml:4235 declares POST /exports (operationId createExport, body
+              {type, params} -> 202 Job) and :4262 declares GET /exports/{id} (getExport),
+              and both are generated into packages/contracts types + a whole Dart client.
+              NOTHING MOUNTS THEM: apps/api/src/app.ts registers no exports route (every
+              other door is registered at :227-280) and the only "/exports" anywhere in
+              apps/api/src is a design comment, worker.ts:6. A contract-following caller
+              therefore gets a 404 on the ordinary path — declared-but-never-mounted, the
+              same shape as B-282 reset-password, which is the defect class this round
+              exists to close. Filed as B-351. The control stays disabled for that reason,
+              not for the one this comment used to give. (The prototype's openExportModal
+              is a mock file-picker either way, §0 rule 3.) */}
           <Btn kind="outline" size="md" icon="download" disabled>
             {t("land.action.export")}
           </Btn>
