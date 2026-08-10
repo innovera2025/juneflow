@@ -1,5 +1,5 @@
 /*
- * Unit tests for po-list-rows.ts (B-278, gate G3) — the POList-only wire narrowing
+ * Unit tests for po-list-rows.ts (B-355, gate G3) — the POList-only wire narrowing
  * (`paid`, `doc_date`), the house ISO/UTC date format, and the paid-bar proportion.
  * The shared po-wo-rows helpers (toPoRow / filterPoByTab / formatMoney / ...) are covered
  * by po-wo-rows.test.ts; the component<->payload seam is covered by po-list.test.tsx.

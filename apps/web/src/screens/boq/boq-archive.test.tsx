@@ -1,5 +1,5 @@
 /*
- * BOQArchive SCREEN-SEAM tests (B-278, gate G3) — the component<->payload wiring, not the
+ * BOQArchive SCREEN-SEAM tests (B-355, gate G3) — the component<->payload wiring, not the
  * pure narrowing (that is boq-archive-rows.test.ts).
  *
  * WHY THIS FILE EXISTS: boq-archive-rows.test.ts can only prove that toArchiveApproval /
@@ -115,7 +115,7 @@ beforeEach(() => {
   h.boq = { data: SERVED, isLoading: false };
 });
 
-describe("BOQArchive <-> GET /boq approval columns (B-278)", () => {
+describe("BOQArchive <-> GET /boq approval columns (B-355)", () => {
   it("renders the served approver name in the approved doc's row", () => {
     expect(rowOf(render(), "BOQ-2025-A-04")).toContain("Somporn Petchai");
   });
@@ -164,7 +164,7 @@ describe("BOQArchive <-> GET /boq approval columns (B-278)", () => {
 });
 
 /*
- * Honest-gap guards. These hold BOTH before and after the B-278 re-wire — they are stated as
+ * Honest-gap guards. These hold BOTH before and after the B-355 re-wire — they are stated as
  * negative invariants, not as evidence the wire works (see the revert probe in the slice
  * report). They fail only if a later change starts inventing these values.
  */

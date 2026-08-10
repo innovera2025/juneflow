@@ -81,7 +81,7 @@ describe("filterArchiveRows", () => {
   });
 });
 
-/* B-278 — the approver / approve-date columns, narrowed off the real GET /boq payload. */
+/* B-355 — the approver / approve-date columns, narrowed off the real GET /boq payload. */
 describe("toArchiveApproval", () => {
   it("narrows the server's snake_case approval fields", () => {
     expect(
