@@ -26,6 +26,7 @@ import { Client } from "pg";
 import {
   boqItemsByPrice,
   clientFor,
+  firstVendorId,
   isRateLimited,
   okJson,
   round2,
@@ -50,17 +51,53 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
   let boq = { id: "", price: 0 };
 
   /**
-   * An APPROVED (open) PO, resolved FRESH at call time. A receipt that reaches the
-   * ordered quantity auto-closes its PO, so a list cached in beforeAll goes stale
-   * mid-run and the resulting 409 looks like a defect in the code under test.
-   * (Same reasoning, and the same helper shape, as b340-gr-stock.spec.ts.)
+   * The APPROVED (open) PO every priced receipt in this file is received against,
+   * MINTED here rather than picked off the seed — B-360.
+   *
+   * A receipt may now only be priced from a BOQ line its own order actually
+   * ORDERED (pr_item.boq_item_id of the source PR), so "some approved PO" is no
+   * longer a sufficient anchor: most seeded PRs carry no pr_item rows at all, and
+   * the one that does (PR-2026-0418) auto-closes on the first receipt because its
+   * ordered quantity is already exceeded by the seeded GRs. Minting the order makes
+   * the anchor's ordered set KNOWN, and the ordered quantity is deliberately far
+   * above anything received here so the PO cannot close mid-run.
+   *
+   * It also exercises the real chain end to end (PR → approve → PO → approve →
+   * receive) instead of assuming a seeded shortcut.
    */
-  const openPo = async (): Promise<string> => {
-    const pos = rowsOf(await okJson(await md.get("/api/v1/po"), "GET /po"));
-    const open = pos.find((p) => p.status === "approved");
-    expect(open, "the seeded stack must carry at least one approved (open) PO").toBeDefined();
-    return String(open!.id);
+  const mintOrderedPo = async (qtyOrdered: number): Promise<string> => {
+    const projects = rowsOf(await okJson(await md.get("/api/v1/projects"), "GET /projects"));
+    expect(projects.length, "the seeded stack must carry a project").toBeGreaterThan(0);
+    const pr = await okJson(
+      await md.post("/api/v1/pr", {
+        data: {
+          no: `B348-PR-${RUN}`,
+          type: "material",
+          project_id: String(projects[0]!.id),
+          items: [{ boq_item_id: boq.id, qty: qtyOrdered }],
+        },
+      }),
+      "POST /pr",
+    );
+    const prId = String(pr.id);
+    await okJson(await md.post(`/api/v1/pr/${prId}/submit`, { data: {} }), "submit PR");
+    await okJson(await md.post(`/api/v1/pr/${prId}/approve`, { data: {} }), "approve PR");
+    const po = await okJson(
+      await md.post("/api/v1/po", { data: { pr_id: prId, no: `B348-PO-${RUN}`, vendor_id: await firstVendorId(md) } }),
+      "POST /po",
+    );
+    const poId = String(po.id);
+    await okJson(await md.post(`/api/v1/po/${poId}/submit`, { data: {} }), "submit PO");
+    const approved = await okJson(
+      await md.post(`/api/v1/po/${poId}/approve`, { data: {} }),
+      "approve PO",
+    );
+    expect(approved.status).toBe("approved");
+    return poId;
   };
+
+  /** The minted anchor (one per run — its ordered qty is never reached). */
+  let orderedPo = "";
 
   /** The posting-inbox row for a receipt (the shared source of the list AND the badge). */
   const inboxRow = async (grId: string): Promise<Record<string, unknown> | undefined> => {
@@ -107,7 +144,7 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
     suffix: string,
   ): Promise<{ id: string; body: Record<string, unknown> }> => {
     const res = await md.post("/api/v1/gr", {
-      data: { po_id: await openPo(), idempotency_key: `b348-${RUN}-${suffix}`, lines },
+      data: { po_id: orderedPo, idempotency_key: `b348-${RUN}-${suffix}`, lines },
     });
     const body = await okJson(res, `POST /gr (${suffix})`);
     expect(res.status()).toBe(201);
@@ -129,6 +166,9 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
     // accidentally reach the PO's ordered qty and auto-close it mid-suite.
     boq = items[0]!;
     expect(boq.price).toBeGreaterThan(0);
+    // B-360: the anchor must have ORDERED this line. 10,000 units ordered against
+    // receipts of ≤ 7 — the PO cannot close inside this file.
+    orderedPo = await mintOrderedPo(10_000);
   });
 
   test.beforeEach(() => {
@@ -185,18 +225,18 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
     expect((await inboxRow(id))!.currency_code).toBe("THB");
   });
 
-  test("a boq_item_id from outside this tenant is refused (400) and nothing is written", async () => {
+  test("an unresolvable boq_item_id is refused (400) and nothing is written", async () => {
     const before = rowsOf(await okJson(await md.get("/api/v1/gr"), "GET /gr")).length;
     const res = await md.post("/api/v1/gr", {
       data: {
-        po_id: await openPo(),
+        po_id: orderedPo,
         idempotency_key: `b348-${RUN}-foreign`,
         lines: [
           {
             qty_ok: 1,
             name: "b348 foreign",
             ordered_qty: 1,
-            // A well-formed uuid that is not a BOQ item of this tenant.
+            // A well-formed uuid that is no BOQ item at all.
             boq_item_id: "00000000-0000-4000-8000-000000000348",
           },
         ],
@@ -204,6 +244,11 @@ liveDescribe("B-348 — the goods receipt posts a real cost, and the cost is the
     });
     expect(res.status()).toBe(400);
     expect((await res.json()).code).toBe("VALIDATION");
+    // B-360 answers FIRST for an id like this: it is refused for not being on this
+    // ORDER, before the tenant-scoped price read is ever issued. The tenant-scope
+    // refusal itself (an id this tenant cannot see, but which the order DOES name)
+    // is a shape only the stub can build, and gr.test.ts covers it.
+    expect((await res.json()).message).toContain("not a line of this order");
     const after = rowsOf(await okJson(await md.get("/api/v1/gr"), "GET /gr")).length;
     expect(after).toBe(before);
   });

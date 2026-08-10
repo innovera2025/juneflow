@@ -55,6 +55,10 @@
 //      straight off the request, which was harmless only while the column fed a
 //      display field; gl-posting.ts now derives a POSTED GL amount from these
 //      rows, so a client value would originate a money figure.
+//      B-360 NARROWED THE SOURCE SET: tenant scope alone let the client pick
+//      WHICH of the tenant's prices to charge (proven live: 3.68M booked on a
+//      612K order). The id must now be a line of the receipt's OWN order —
+//      `pr_item.boq_item_id` of its source PR — or the request is 400.
 //   2. A named line with no `boq_item_id` has no server price source and stores
 //      0.00 — "unknown", not "zero baht" — and gl-posting refuses to post a
 //      receipt whose measurable total is 0.
@@ -74,6 +78,7 @@ import {
   pos,
   wos,
   prs,
+  prItems,
   projects,
   vendors,
   inventoryItems,
@@ -270,10 +275,23 @@ const WO_HOPS = [
 ];
 const PR_HOPS = [{ fk: prs.projectId, parent: projects }];
 /**
+ * B-360: pr_item → pr → project (mirror pr.ts PR_ITEM_HOPS). The receipt's own
+ * order lines — the ONLY set a receipt may price from. See the long note at the
+ * derivation.
+ */
+const PR_ITEM_HOPS = [
+  { fk: prItems.prId, parent: prs },
+  { fk: prs.projectId, parent: projects },
+];
+/**
  * B-348: boq_item → group → doc → project — the SAME chain pr.ts / dashboard.ts
  * price a PR through. gr_item.price is derived from `boq_item.price` reached this
  * way, so the price a receipt posts can only ever come from a BOQ line THIS tenant
  * owns (a foreign id resolves to nothing → 400, never a silently-priced receipt).
+ *
+ * B-360: tenant ownership is NOT enough — see the ordered-line gate at the
+ * derivation. This chain now runs SECOND, as the price read, after the id has
+ * already been proved to be a line of the receipt's own order.
  */
 const BOQ_ITEM_HOPS = [
   { fk: boqItems.groupId, parent: boqGroups },
@@ -385,17 +403,31 @@ async function grItemsFor(db: TenantDb, gr: GrRow): Promise<GrItemRow[]> {
 // goods is blocked until (ii) lands. That is why the refusal is a 409 with a
 // message naming the reason, not a silent no-op.
 //
-// THE RESIDUAL RACE, stated rather than papered over. The check runs BEFORE the
-// flip and AGAIN inside the transaction after the guarded UPDATE, which closes
-// the ordering "the post committed first". It does NOT close the mirror: under
-// READ COMMITTED a concurrent /gl/post issues a plain SELECT that still sees
-// `received` while this transaction's UPDATE is uncommitted, so it can post
-// between the in-transaction re-check and the COMMIT. Closing that needs a row
-// lock on `gr`, and `gr` carries no company_id, so TenantDb has no
-// selectForUpdate door for it (selectForUpdate is company_id-scoped by
-// construction). Both actors are humans at operating pace and the window is one
-// statement wide; it is recorded on the blocker with option (ii) rather than
-// bought with a new unscoped lock door.
+// THE RACE THIS ONCE LEAKED, and how the pair closes it now (B-361).
+//
+// The JV check runs BEFORE the flip and AGAIN inside the transaction after the
+// guarded UPDATE, which closes the ordering "the post committed first". B-348
+// shipped ONLY that half and filed the mirror as a one-statement residual between
+// "humans at operating pace": a concurrent /gl/post read `gr.status` with a plain
+// SELECT (in listGlPostingDocs, outside any transaction), so under READ COMMITTED
+// it saw `received` while this transaction's UPDATE was uncommitted and could
+// post between the re-check and the COMMIT.
+//
+// THAT ESTIMATE WAS WRONG, and measurably so. Two OS PROCESSES on a 700 ms
+// barrier, fresh postable receipt each round: rounds 2-6 committed the post AND
+// the return — 5 of 6, i.e. the DEFAULT outcome at ~0 ms offset, not a corner. And
+// it is the one race that matters most here, because this freeze is the ENTIRE
+// mitigation for the deferred reversing-JV ruling: while it leaked, a `returned`
+// receipt could stand against a live Dr 5020 / Cr 2010.
+//
+// gl-posting.ts lockPostableGr now takes the SAME row lock this handler's guarded
+// UPDATE takes, re-asserting `status = 'received'` on its own FINAL update, as the
+// first statement of the posting transaction. Whoever gets the row decides:
+// return-first → the post matches 0 rows and skips; post-first → the
+// in-transaction re-check below sees the committed JV and rolls this back → 409.
+// The re-check below is therefore LOAD-BEARING, not belt-and-braces: it is the
+// half that answers when the poster wins the lock. Measured after the fix: 6/6
+// rounds exactly one winner, never both, never a 500.
 
 /** A GR whose posting JV already exists (thrown from inside the return/cancel tx). */
 class GrAlreadyPostedError extends Error {}
@@ -831,15 +863,52 @@ export function registerGrRoute(app: FastifyInstance): void {
     // the same source the seed derives its gr_item prices from
     // (packages/db/src/seed/index.ts:1322) and the same one pr.ts prices a PR with.
     //
-    // AND THE ID IS RESOLVED THROUGH THE SCOPED DOOR. `boq_item_id` used to be
-    // `uuidOrNull(body)` with no resolution at all, which is harmless while it is a
-    // display link and NOT harmless the moment it selects a price: a client could
-    // otherwise price its receipt off another project's — or another tenant's — BOQ
-    // line. An id is not an amount, but here it CHOOSES one. A line naming a
-    // boq_item this tenant cannot see is 400, and (like the stock axes above) that
-    // is a 400 REGARDLESS of any idempotency key, which is why this sits BEFORE the
-    // pre-check: a replay against something that is not ours must never be answered
-    // from our data.
+    // AND THE ID IS RESOLVED AGAINST THIS ORDER'S OWN LINES — B-360, and the
+    // TENANT DOOR ALONE WAS NOT ENOUGH.
+    //
+    // B-348 resolved `boq_item_id` through BOQ_ITEM_HOPS, which proves only that the
+    // line belongs to THIS TENANT. That closed cross-tenant pricing and left
+    // cross-ORDER pricing wide open, which is the same defect one indirection down:
+    // the client no longer TYPES the price, it PICKS which of the tenant's prices to
+    // charge. Measured live on the seeded stack at 3e25eec, before this fix: a
+    // receipt of 2 units against PO-2026-0289 (total 612,400), naming the
+    // 1,840,000/unit lump-sum line SUB-STR-001 from a different PR entirely, was
+    // accepted 201 with money 3,680,000 and posted JV-2026-0422 Dr 5020 3,680,000 /
+    // Cr 2010 3,680,000 — 3.68M of cost and trade payable booked on a 612K order.
+    //
+    // THE SET A RECEIPT MAY PRICE FROM is the ordered lines of its OWN source PR:
+    // `pr_item.boq_item_id` for the PR this PO/WO was raised from. That is not a
+    // proxy for the right answer, it IS the right answer — pr_item is the only
+    // ORDERED line table in the schema (a PO carries a header `total` and no lines
+    // at all), so "what was ordered" and "what may be received" are the same set by
+    // construction. Project scope was considered and rejected as the primary gate:
+    // every BOQ line in the seeded tenant lives under ONE project, so a project
+    // check would have accepted the exploit above unchanged.
+    //
+    // AN ORDER WITH NO LINES CAN PRICE NOTHING, and that is deliberate rather than
+    // an oversight. Some PRs carry no pr_item rows (a WO's lump-sum งานเหมา has no
+    // BOQ qty source — the header note above says so, and the seed has such PRs), so
+    // there is no ordered price basis anywhere for a receipt against them. Pricing
+    // such a receipt off ANY BOQ line would be inventing the basis, so a named
+    // `boq_item_id` is refused: the receipt is still recorded, its lines still store
+    // 0.00 = "unknown", and gl-posting.ts refuses to post it. FLOW-A therefore
+    // becomes a cost chain exactly where a real ordered line exists, and nowhere else.
+    //
+    // THE REFUSAL IS 400 VALIDATION, not 404 and not 409. The boq_item may well
+    // EXIST and be visible to this tenant — the request is what is incoherent: it
+    // claims to receive against an order that never contained that line. 409 would
+    // read as "state conflict, try later" and nothing about that receipt body will
+    // ever become valid, and apps/mobile sync_processor.dart dead-letters every 4xx
+    // permanently, so the honest terminal answer is the one that names the request.
+    // Like the stock axes above, it is a 400 REGARDLESS of any idempotency key —
+    // which is why this sits BEFORE the pre-check: a replay naming a line that is
+    // not on this order must never be answered from our data.
+    //
+    // Both gates stay, and they prove different things: the ordered-line gate
+    // (which order is this?) and the scoped BOQ read (whose line is this?). A
+    // pr_item.boq_item_id is an FK with no tenant predicate of its own, so an order
+    // line CAN in principle name a row this tenant cannot read; the price read is
+    // what refuses that, and it is defence in depth, not a duplicate.
     //
     // A NAMED LINE WITH NO boq_item_id keeps price 0.00. That is "unknown", not
     // "zero baht" — the same reading apps/web already applies to a zero
@@ -855,6 +924,24 @@ export function registerGrRoute(app: FastifyInstance): void {
       ...new Set(itemDrafts.map((d) => d.boqItemId).filter((v): v is string => v != null)),
     ];
     if (boqItemIds.length > 0) {
+      // B-360: what this order actually ORDERED. Scoped through pr_item → pr →
+      // project, so the set itself can only ever describe a PR of this tenant.
+      const orderedLines = await db.selectThrough(
+        prItems,
+        PR_ITEM_HOPS,
+        eq(prItems.prId, prId),
+      );
+      const orderable = new Set(
+        orderedLines.map((l) => l.boqItemId).filter((v): v is string => v != null),
+      );
+      for (const id of boqItemIds) {
+        if (!orderable.has(id)) {
+          return reply.code(400).send({
+            code: "VALIDATION",
+            message: `boq_item ${id} is not a line of this order (a receipt is priced ONLY from what its own PR ordered)`,
+          });
+        }
+      }
       const priced = await db.selectThrough(
         boqItems,
         BOQ_ITEM_HOPS,

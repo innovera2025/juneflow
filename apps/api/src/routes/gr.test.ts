@@ -246,10 +246,14 @@ const woRow = (status: string) => ({
   updatedAt: D,
 });
 
-const prLine = (id: string, qty: string) => ({
+// A pr_item — the receipt's ORDERED line. B-360 made `boqItemId` load-bearing:
+// a receipt may only price from a boq_item this PR actually ordered, so the
+// default is the priced BOQ line the create tests name. Pass an explicit id (or
+// null) to model an order that did NOT order that line.
+const prLine = (id: string, qty: string, boqItemId: string | null = BOQ_ITEM) => ({
   id,
   prId: PR,
-  boqItemId: "b0",
+  boqItemId,
   qty,
   createdAt: D,
   updatedAt: D,
@@ -697,7 +701,10 @@ describe("POST /api/v1/gr — create receipt", () => {
             [pos, [poRow("approved")]],
             [prs, [prRow]],
             [projects, [project]],
-            [prItems, [prLine("l0", "1000")]],
+            // The order DID order this line (pr_item.boq_item_id is a bare FK with
+            // no tenant predicate of its own), so the B-360 ordered-line gate passes
+            // and the SCOPED price read is the guard under test here.
+            [prItems, [prLine("l0", "1000", BOQ_ITEM_FOREIGN)]],
             [grs, [gr("new-0", { poId: PO, received: 90 })]],
             // The scoped read returns NOTHING for the foreign id.
             [boqItems, []],
@@ -717,10 +724,127 @@ describe("POST /api/v1/gr — create receipt", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe("VALIDATION");
-    expect(res.json().message).toContain("boq_item");
+    expect(res.json().message).toContain("not found in this tenant");
     // Nothing persisted — not the receipt, not the line.
     expect(inserted.find((w) => w.table === grs)).toBeFalsy();
     expect(inserted.find((w) => w.table === grItems)).toBeFalsy();
+  });
+
+  // ── B-360: the price source is THIS ORDER'S lines, not the tenant's BOQ ──────
+  it("400s on a boq_item_id the order never ordered — the tenant door alone let a client PICK its price (B-360)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            // This PR ordered the 300.00 line …
+            [prItems, [prLine("l0", "1000", BOQ_ITEM)]],
+            [grs, [gr("new-0", { poId: PO, received: 2 })]],
+            // … and BOTH lines are visible to this tenant, which is exactly why the
+            // scoped BOQ read cannot refuse the expensive one.
+            [
+              boqItems,
+              [
+                boqItemPriced(BOQ_ITEM, "300.00", "THB"),
+                boqItemPriced(BOQ_ITEM_USD, "1840000.00", "THB"),
+              ],
+            ],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [
+          // The attack: 2 units priced off a line from somebody else's order.
+          { qty_ok: 2, name: "ปูนซีเมนต์", ordered_qty: 2, boq_item_id: BOQ_ITEM_USD },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("not a line of this order");
+    // Nothing persisted — no receipt, no priced line, no 3.68M.
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
+    expect(inserted.find((w) => w.table === grItems)).toBeFalsy();
+  });
+
+  it("an order with NO lines can price NOTHING — a named boq_item is refused, not silently priced (B-360)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, []], // a lump-sum order: no ordered line detail at all
+            [grs, [gr("new-0", { poId: PO, received: 2 })]],
+            [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        lines: [{ qty_ok: 2, name: "ปูนซีเมนต์", ordered_qty: 2, boq_item_id: BOQ_ITEM }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("not a line of this order");
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
+  });
+
+  it("the ordered-line gate refuses BEFORE the idempotency pre-check — a replay is never answered from our data (B-360)", async () => {
+    const captured: Captured[] = [];
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "1000", BOQ_ITEM)]],
+            // A receipt ALREADY carrying this key: if the pre-check ran first it
+            // would resolve and answer 201 with that original receipt.
+            [
+              grs,
+              keyedGrs(
+                { "replay-360": [gr("g-old", { poId: PO, received: 2 })] },
+                [gr("g-old", { poId: PO, received: 2 })],
+              ),
+            ],
+            [boqItems, [boqItemPriced(BOQ_ITEM_USD, "1840000.00")]],
+          ],
+          captured,
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        idempotency_key: "replay-360",
+        lines: [{ qty_ok: 2, name: "x", ordered_qty: 2, boq_item_id: BOQ_ITEM_USD }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("not a line of this order");
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
   });
 
   it("a named line with NO boq_item_id stores 0.00 — 'unknown', never the body's number (B-348)", async () => {
@@ -887,7 +1011,9 @@ describe("POST /api/v1/gr — create receipt", () => {
             [pos, [poRow("approved")]],
             [prs, [prRow]],
             [projects, [project]],
-            [prItems, [prLine("l0", "1000")]],
+            // B-360: BOTH lines are on this order, so the ordered-line gate passes
+            // and the currency guard is the one under test.
+            [prItems, [prLine("l0", "1000", BOQ_ITEM), prLine("l1", "1000", BOQ_ITEM_USD)]],
             [grs, [gr("new-0", { poId: PO, received: 5 })]],
             // B-348: the currencies compared are the BOQ lines' own, not the body's
             // — the handler no longer reads a client currency_code at all.
