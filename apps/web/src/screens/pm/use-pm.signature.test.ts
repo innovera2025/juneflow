@@ -62,6 +62,7 @@ import {
   SIGNATURE_MIN_STROKE_SPAN,
   clearSignatureCapture,
   createSignatureCapture,
+  createSignaturePadBinding,
   readSignatureCapture,
   resizeSignatureCapture,
   signatureCaptureHasInk,
@@ -72,6 +73,7 @@ import {
   type PadPointer,
   type PadRect,
   type SignatureInk,
+  type SignaturePadBinding,
   type SignaturePoint,
 } from "./use-pm";
 
@@ -359,11 +361,19 @@ describe("the close toast states only what happened (B-357/F5)", () => {
  * workspace has no jsdom to add one (B-358). The gate demonstrated the cost by
  * mutating the pad's wiring to throw every stroke away — 1776 tests stayed green.
  *
- * So the seam is no longer in JSX. `wo-detail.tsx` holds a plain SignatureCapture and
- * calls the pure functions below on each pointer event; the confirm handler reads the
- * SAME object. What is left un-pinned is React's own event dispatch — and the discard
- * mutation that started this no longer type-checks, because the pad has no callback
- * prop to hand a discarding function to.
+ * So the seam is no longer in JSX. The pure functions below carry every rule between a
+ * pointer event and the wire, and the group after this one pins the BINDING that hands
+ * the same capture to the pad and to the confirm button.
+ *
+ * WHAT IS STILL NOT PINNED, said plainly because this header used to claim it away. It
+ * read: "the discard mutation that started this no longer type-checks, because the pad
+ * has no callback prop to hand a discarding function to." True about the callback,
+ * false as a conclusion — the seam became object IDENTITY, and TypeScript does not
+ * check identity. Both of the gate's probes compiled at `tsc --noEmit` exit 0 with the
+ * whole suite green: `capture={createSignatureCapture()}` and
+ * `capture={{ ...capture.current }}`. The second is closed by construction now (see
+ * the binding group below); the first is NOT, and is disclosed in BLOCKERS.md B-358
+ * rather than claimed impossible.
  *
  * Every test here is written to die on a "drew and discarded" cut: make
  * signaturePadMove or signaturePadUp a no-op, or have readSignatureCapture ignore the
@@ -544,6 +554,229 @@ describe("the pad → request seam (B-357/F1)", () => {
 
     const parsed = JSON.parse(readSignatureCapture(capture)!) as { s: number[][][] };
     expect(parsed.s[0]).toHaveLength(3);
+  });
+});
+
+/* ===========================================================================
+ * THE BINDING — one capture at BOTH ends (B-357/F1, second round)
+ * ===========================================================================
+ * The group above pins the pure rules. This one pins the thing the gate broke twice:
+ * that the object the PAD writes and the object CONFIRM reads are the same one.
+ *
+ * The two probes, both of which compiled clean and left 1794 green against the old
+ * `capture={…}` prop:
+ *
+ *   (A) `capture={createSignatureCapture()}`  — a different object handed to the pad.
+ *   (B) `capture={{ ...capture.current }}`    — a shallow copy. The dangerous one: the
+ *       copy SHARES `strokes`, so the ink renders perfectly and the technician sees
+ *       the customer's signature, but `width`/`height` land on the copy, the real
+ *       object keeps width 0, and encodeSignatureInk takes its degenerate-viewport
+ *       branch. The WO closes with `customer_sign` NULL.
+ *
+ * (B) is what this group closes, and closes STRUCTURALLY rather than by assertion:
+ * every member of a binding is a closure over one capture, so a shallow copy of a
+ * binding is that binding. The test below spreads one and draws through the copy.
+ *
+ * (A) is NOT closed and is not pretended to be — building a fresh binding at the call
+ * site is still expressible and still invisible on screen. BLOCKERS.md B-358 carries
+ * it with both probes as the reproduction.
+ */
+describe("the pad binding is ONE capture at both ends (B-357/F1)", () => {
+  const RECT: PadRect = { left: 20, top: 100, width: 300, height: 90 };
+
+  /** Drive a binding's own handlers — exactly the calls wo-detail.tsx's canvas makes. */
+  function drawOn(b: SignaturePadBinding, pad: ReturnType<typeof fakePad>, pts: [number, number][]) {
+    b.down(pad.at(pts[0]![0], pts[0]![1]));
+    for (const [x, y] of pts.slice(1)) b.move(pad.at(x, y));
+    b.up();
+  }
+
+  const NAME: [number, number][] = [
+    [10, 70],
+    [30, 40],
+    [60, 62],
+    [95, 25],
+  ];
+
+  it("handlers → read round-trips non-null on ONE object", () => {
+    const b = createSignaturePadBinding();
+    drawOn(b, fakePad(RECT), NAME);
+
+    expect(b.hasInk()).toBe(true);
+    const signature = b.read();
+    expect(signature).not.toBeNull();
+
+    const parsed = JSON.parse(signature!) as { w: number; h: number; s: number[][][] };
+    // The viewport landed on the SAME object the strokes did — this is the exact pair
+    // probe (B) split apart.
+    expect(parsed.w).toBe(300);
+    expect(parsed.h).toBe(90);
+    expect(parsed.s).toHaveLength(1);
+    expect(parsed.s[0]).toHaveLength(4);
+  });
+
+  it("a shallow COPY of a binding is the binding it was copied from (probe B)", () => {
+    const b = createSignaturePadBinding();
+    const copy = { ...b };
+    expect(copy).not.toBe(b);
+
+    // Draw through the COPY, read through the ORIGINAL.
+    drawOn(copy, fakePad(RECT), NAME);
+
+    expect(b.hasInk()).toBe(true);
+    const signature = b.read();
+    expect(signature).not.toBeNull();
+    expect(signature).toBe(copy.read());
+    // Under probe (B) this was the assertion that failed while the canvas looked
+    // perfect: the strokes were shared and the viewport was not.
+    expect((JSON.parse(signature!) as { w: number }).w).toBe(300);
+  });
+
+  it("what the pad PAINTS is what confirm SENDS", () => {
+    const b = createSignaturePadBinding();
+    const pad = fakePad(RECT);
+    drawOn(b, pad, NAME);
+    // Still drawing a second stroke: the open one is painted AND sent.
+    b.down(pad.at(150, 30));
+    b.move(pad.at(190, 65));
+
+    const painted = b.strokesToPaint();
+    const sent = (JSON.parse(b.read()!) as { s: number[][][] }).s;
+    expect(painted).toHaveLength(2);
+    expect(sent).toHaveLength(painted.length);
+    expect(sent.map((s) => s.length)).toEqual(painted.map((s) => s.length));
+  });
+
+  it("clear() empties the very capture read() reads", () => {
+    const b = createSignaturePadBinding();
+    drawOn(b, fakePad(RECT), NAME);
+    expect(b.read()).not.toBeNull();
+
+    b.clear();
+
+    expect(b.hasInk()).toBe(false);
+    expect(b.strokesToPaint()).toEqual([]);
+    expect(b.read()).toBeNull();
+  });
+
+  it("cancel() drops the open stroke, and read() agrees with the canvas", () => {
+    const b = createSignaturePadBinding();
+    const pad = fakePad(RECT);
+    b.down(pad.at(10, 70));
+    b.move(pad.at(60, 30));
+    b.cancel();
+
+    expect(b.hasInk()).toBe(false);
+    expect(b.strokesToPaint()).toEqual([]);
+    expect(b.read()).toBeNull();
+  });
+
+  it("two bindings do not share a capture", () => {
+    // The other half of "one object": binding state must not be module-level, or two
+    // open close modals would sign each other's work orders.
+    const first = createSignaturePadBinding();
+    const second = createSignaturePadBinding();
+    drawOn(first, fakePad(RECT), NAME);
+
+    expect(first.read()).not.toBeNull();
+    expect(second.hasInk()).toBe(false);
+    expect(second.read()).toBeNull();
+  });
+});
+
+/* ===========================================================================
+ * THE CONFIRM GATE — the two clients agree about a drawn-on pad (B-357/F3)
+ * ===========================================================================
+ * The asymmetry this closes was not in what the guard ACCEPTS (both clients accept a
+ * 9 px slip and a hand dragged across the pad — that limit is stated, not hidden). It
+ * was in what happens on REJECTION: mobile gates its CTA on the encode, so
+ * un-encodable ink leaves the button quiet; web left confirm permanently enabled and
+ * sent `?? undefined`, so a pad visibly covered in ink closed the work order unsigned
+ * under a success toast.
+ *
+ * `refusesInk()` is the web side adopting mobile's rule, and it lives on the binding
+ * rather than as an expression in JSX precisely so this group can reach it.
+ */
+describe("the confirm gate refuses to discard drawn ink (B-357/F3)", () => {
+  const RECT: PadRect = { left: 20, top: 100, width: 300, height: 90 };
+
+  function drawOn(b: SignaturePadBinding, pad: ReturnType<typeof fakePad>, pts: [number, number][]) {
+    b.down(pad.at(pts[0]![0], pts[0]![1]));
+    for (const [x, y] of pts.slice(1)) b.move(pad.at(x, y));
+    b.up();
+  }
+
+  it("an EMPTY pad does not refuse — an unsigned close is legitimate on web", () => {
+    const b = createSignaturePadBinding();
+    expect(b.hasInk()).toBe(false);
+    expect(b.read()).toBeNull();
+    // The one case that must stay ENABLED: the close still records cause/fix/advice,
+    // and the toast claims no signature.
+    expect(b.refusesInk()).toBe(false);
+  });
+
+  it("a real signature does not refuse", () => {
+    const b = createSignaturePadBinding();
+    drawOn(b, fakePad(RECT), [
+      [10, 70],
+      [30, 40],
+      [60, 62],
+      [95, 25],
+    ]);
+    expect(b.read()).not.toBeNull();
+    expect(b.refusesInk()).toBe(false);
+  });
+
+  it("a pad covered in SHORT strokes refuses — the mark the old gate discarded", () => {
+    // The gate's own reproduction: 12 strokes spanning the full 300 px pad, each about
+    // 6.4 px of travel. Every one is under SIGNATURE_MIN_STROKE_SPAN, so the encoder
+    // returns null while the canvas is visibly covered in ink.
+    const b = createSignaturePadBinding();
+    const pad = fakePad(RECT);
+    for (let i = 0; i < 12; i++) {
+      const x = 8 + i * 24;
+      drawOn(b, pad, [
+        [x, 45],
+        [x + 4, 50],
+      ]);
+    }
+
+    expect(b.hasInk()).toBe(true);
+    expect(b.strokesToPaint()).toHaveLength(12);
+    expect(b.read()).toBeNull();
+    // Before this gate the button was enabled here, `?? undefined` dropped the mark,
+    // and the close reported success.
+    expect(b.refusesInk()).toBe(true);
+  });
+
+  it("a taps-only pad refuses", () => {
+    const b = createSignaturePadBinding();
+    const pad = fakePad(RECT);
+    for (const [x, y] of [
+      [40, 40],
+      [120, 55],
+    ] as [number, number][]) {
+      b.down(pad.at(x, y));
+      b.up();
+    }
+
+    expect(b.hasInk()).toBe(true);
+    expect(b.read()).toBeNull();
+    expect(b.refusesInk()).toBe(true);
+  });
+
+  it("clearing a refused pad returns the CTA to the empty-pad case", () => {
+    const b = createSignaturePadBinding();
+    const pad = fakePad(RECT);
+    b.down(pad.at(40, 40));
+    b.up();
+    expect(b.refusesInk()).toBe(true);
+
+    // The escape hatch the gate depends on: the clear affordance is showing whenever
+    // refusesInk() is true, because both read the same hasInk().
+    expect(b.hasInk()).toBe(true);
+    b.clear();
+    expect(b.refusesInk()).toBe(false);
   });
 });
 

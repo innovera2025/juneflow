@@ -51,7 +51,7 @@
  * literal in source; tokens back every colour (rule 6). "GPS" is a prototype-verbatim
  * ASCII abbreviation (no dict key, like wo-list's "Retention" / pm-dashboard's "%").
  */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
@@ -82,15 +82,8 @@ import {
   useUpdateChecklist,
   useCloseWorkorder,
   closeToastText,
-  createSignatureCapture,
-  clearSignatureCapture,
-  readSignatureCapture,
-  signatureCaptureHasInk,
-  signaturePadCancel,
-  signaturePadDown,
-  signaturePadMove,
-  signaturePadUp,
-  type SignatureCapture,
+  createSignaturePadBinding,
+  type SignaturePadBinding,
 } from "./use-pm";
 import { ChecklistPicker } from "./checklist-picker";
 
@@ -761,30 +754,47 @@ function WoDetailBody({ wo }: { wo: WoRow }) {
  *
  * WHAT IS LEFT IN THIS FILE, AND WHY (B-357/F1). Only the PAINTING and the JSX. Every
  * rule between a pointer event and the wire — rect-to-CSS-px, clamping, thinning, the
- * capture viewport, stroke assembly, the encode — lives in use-pm.ts as pure functions
- * over a plain [SignatureCapture], because apps/web's test environment is node (no
- * canvas, no DOM, and no jsdom in the workspace — BLOCKERS.md B-358) and anything left
- * in JSX here is unreachable by a test. The gate demonstrated exactly that: mutating
- * the old `onChange` wiring to discard every stroke left the whole suite green.
+ * capture viewport, stroke assembly, the encode — lives in use-pm.ts as pure functions,
+ * because apps/web's test environment is node (no canvas, no DOM, and no jsdom in the
+ * workspace — BLOCKERS.md B-358) and anything left in JSX here is unreachable by a
+ * test. The gate demonstrated exactly that: mutating the old `onChange` wiring to
+ * discard every stroke left the whole suite green.
  *
- * The pad therefore no longer TRANSFORMS anything on its way out — it mutates the very
- * object the confirm handler reads. There is no callback prop left to hand a
- * discarding function to, so that mutation no longer type-checks.
+ * WHAT THAT DOES NOT BUY, and the correction (B-357/F1, second round). This paragraph
+ * used to end "there is no callback prop left to hand a discarding function to, so
+ * that mutation no longer type-checks". Killing the callback MOVED the seam; it did
+ * not close it. With `capture={…}` the seam was object identity, which nothing
+ * type-checks — the gate compiled `capture={createSignatureCapture()}` and
+ * `capture={{ ...capture.current }}` at exit 0 with 1794 green, the second of which
+ * renders the customer's signature perfectly and still closes the WO with
+ * `customer_sign` NULL.
+ *
+ * So the pad now takes a [SignaturePadBinding] — one closure over one capture, shared
+ * with the confirm button, with the capture object in scope at neither call site. That
+ * closes the shallow-copy probe by construction (every member closes over the same
+ * capture, so a copy of a binding IS the binding). It does not close "hand the pad a
+ * fresh binding", which stays expressible and stays invisible; that residue is
+ * disclosed in BLOCKERS.md B-358 with both probes as its reproduction, rather than
+ * claimed away.
  */
 
 /**
- * A real signature pad: pointer events into [capture], [capture] onto a canvas.
+ * A real signature pad: pointer events into [pad], [pad] onto a canvas.
  *
- * It reports nothing. What may be SENT is read straight off the same capture at
- * confirm time (readSignatureCapture → encodeSignatureInk, the single place the
- * refusal rules live).
+ * It reports no VALUE — [onInkChanged] is a bare nudge so the modal can re-render its
+ * confirm gate, and carries nothing that could be dropped in transit. What may be
+ * SENT is read by the confirm button off the same binding (`pad.read()` →
+ * encodeSignatureInk, the single place the refusal rules live).
+ *
+ * It holds no ink state of its own: `pad.hasInk()` is read at render time and the
+ * nudge is what schedules that render. A nudge that was sabotaged would leave the
+ * clear affordance and the confirm gate visibly frozen rather than silently wrong.
  */
-function SignaturePad({ capture }: { capture: SignatureCapture }) {
+function SignaturePad({ pad, onInkChanged }: { pad: SignaturePadBinding; onInkChanged: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  /** Resolved `--text`, cached — see redraw(). */
+  /** Resolved ink colour, cached — see redraw(). */
   const inkColor = useRef<string | null>(null);
-  /** Mirrors whether anything is drawn, so the clear affordance can render. */
-  const [hasInk, setHasInk] = useState(false);
+  const hasInk = pad.hasInk();
 
   /** Repaint every stroke. The canvas is the only render surface — strokes live in a
    *  ref so a 60 Hz pointer stream does not trigger a React render per point. */
@@ -819,8 +829,7 @@ function SignaturePad({ capture }: { capture: SignatureCapture }) {
     ctx2d.lineWidth = 2;
     ctx2d.lineCap = "round";
     ctx2d.lineJoin = "round";
-    const all = capture.active ? [...capture.strokes, capture.active] : capture.strokes;
-    for (const stroke of all) {
+    for (const stroke of pad.strokesToPaint()) {
       if (stroke.length === 0) continue;
       ctx2d.beginPath();
       ctx2d.moveTo(stroke[0]!.x, stroke[0]!.y);
@@ -831,12 +840,12 @@ function SignaturePad({ capture }: { capture: SignatureCapture }) {
       if (stroke.length === 1) ctx2d.lineTo(stroke[0]!.x + 0.01, stroke[0]!.y);
       ctx2d.stroke();
     }
-  }, [capture]);
+  }, [pad]);
 
   const clear = () => {
-    clearSignatureCapture(capture);
-    setHasInk(false);
+    pad.clear();
     redraw();
+    onInkChanged();
   };
 
   return (
@@ -848,22 +857,22 @@ function SignaturePad({ capture }: { capture: SignatureCapture }) {
         // (B-357/F1). `React.PointerEvent<HTMLCanvasElement>` satisfies PadPointer
         // structurally, so no adapter object is built on a 60 Hz path.
         onPointerDown={(e) => {
-          signaturePadDown(capture, e);
+          pad.down(e);
           redraw();
         }}
         onPointerMove={(e) => {
-          signaturePadMove(capture, e);
+          pad.move(e);
           redraw();
         }}
         onPointerUp={() => {
-          signaturePadUp(capture);
-          setHasInk(signatureCaptureHasInk(capture));
+          pad.up();
           redraw();
+          onInkChanged();
         }}
         onPointerCancel={() => {
-          signaturePadCancel(capture);
-          setHasInk(signatureCaptureHasInk(capture));
+          pad.cancel();
           redraw();
+          onInkChanged();
         }}
         style={{
           display: "block",
@@ -914,17 +923,36 @@ function SignaturePad({ capture }: { capture: SignatureCapture }) {
  * The close modal's body (pm3.jsx closeWO L128-147): the completeness banner, the
  * signature pad, and the two buttons.
  *
- * A component rather than inline JSX because it owns the CAPTURE: modal-host calls the
+ * A component rather than inline JSX because it owns the BINDING: modal-host calls the
  * body render prop as a plain function on every host render, so a hook written inline
  * at the call site would belong to the host.
  *
- * The capture is a ref rather than state, and that is not an optimisation: the confirm
- * button is always enabled (the prototype's is, and a close genuinely records the
- * cause/fix/advice log with or without a signature), so nothing about the pad's
- * contents drives this component's rendering. Holding the encoded value in state
- * bought nothing and cost the seam its testability — see the pad's own header and
- * B-357/F1. `readSignatureCapture` returns null for an empty, taps-only or
- * never-travelled pad, and postCloseWorkorder then omits the key entirely.
+ * The binding is a ref rather than state — the ink itself must not drive rendering, or
+ * a 60 Hz pointer stream would render React 60 times a second. What DOES drive
+ * rendering is a bare counter bumped once per completed stroke and once per clear, and
+ * the only thing it drives is the confirm gate below and the pad's clear affordance.
+ *
+ * THE CONFIRM GATE (B-357/F3). It used to be permanently enabled, on the reasoning
+ * that the prototype's is and that a close genuinely records the cause/fix/advice log
+ * with or without a signature. That is sound for an EMPTY pad and wrong for a drawn-on
+ * one: a signature made entirely of short strokes — 12 strokes across the full 300 px
+ * pad, each about 6.4 px — encodes to null, so the pad was visibly covered in ink, the
+ * close sent `signature: undefined` and the toast reported success. Mobile never had
+ * that hole: `_canSubmit` gates on the ENCODE (pm_close_screen.dart:401), so
+ * un-encodable ink leaves the CTA quiet. The two clients now agree, mobile's way:
+ *
+ *   * empty pad          → ENABLED. Closing without a signature is legitimate here
+ *                          (the log is the other half of this write) and the toast
+ *                          claims no signature (closeToastText, B-357/F5).
+ *   * ink that encodes   → ENABLED, and the signature is sent.
+ *   * ink that does NOT  → DISABLED. Silently discarding a mark the customer made and
+ *     encode               then reporting success is the one outcome neither client
+ *                          may produce. The clear affordance is showing (it is driven
+ *                          by the same binding), so the way out is always one tap.
+ *
+ * The gate reads at RENDER time; the value SENT is read again at click time off the
+ * same binding, so a stroke still open under a second pointer cannot be dropped by a
+ * stale render.
  */
 function CloseWoModalBody({
   everyDone,
@@ -940,7 +968,8 @@ function CloseWoModalBody({
   onConfirm: (signature: string | undefined) => void;
 }) {
   const { t } = useI18n();
-  const capture = useRef(createSignatureCapture());
+  const pad = useRef(createSignaturePadBinding()).current;
+  const [, bumpInk] = useReducer((n: number) => n + 1, 0);
 
   return (
     <div>
@@ -964,7 +993,7 @@ function CloseWoModalBody({
       </div>
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>{t("pm.signatureLabel")}</div>
-        <SignaturePad capture={capture.current} />
+        <SignaturePad pad={pad} onInkChanged={bumpInk} />
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <Btn kind="outline" size="md" onClick={onCancel}>
@@ -974,12 +1003,13 @@ function CloseWoModalBody({
           kind="primary"
           size="md"
           icon="check"
-          // The prototype's confirm is always enabled and the close genuinely records
-          // the cause/fix/advice log with or without a signature, so it stays enabled.
-          // What is refused is a FABRICATED signature: readSignatureCapture returns
-          // null for an empty, taps-only or never-travelled pad, and the key is then
-          // omitted rather than sent blank (which would ERASE a stored signature).
-          onClick={() => onConfirm(readSignatureCapture(capture.current) ?? undefined)}
+          // Quiet while the pad carries ink the encoder refuses (B-357/F3) — the
+          // mobile CTA's own rule. An EMPTY pad still closes: what is refused is a
+          // FABRICATED signature, so `pad.read()` returns null for an empty, taps-only
+          // or never-travelled pad and the key is then omitted rather than sent blank
+          // (blank would ERASE a stored signature).
+          disabled={pad.refusesInk()}
+          onClick={() => onConfirm(pad.read() ?? undefined)}
         >
           {t("pm.confirmCloseBtn")}
         </Btn>

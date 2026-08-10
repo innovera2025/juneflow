@@ -377,13 +377,35 @@ export function encodeSignatureInk(ink: SignatureInk): string | null {
  * gate proved the point by mutating the wiring to `onChange={() => onChange(null)}`:
  * every stroke silently discarded, the close still fired, 1776 tests still green.
  *
- * So the pad no longer TRANSFORMS anything on its way out. It mutates a plain
- * [SignatureCapture] object that the confirm handler reads directly, and every rule
- * between a pointer event and the wire — rect-to-CSS-px, clamping, thinning, the
- * viewport, stroke assembly, the encode — is a pure function here, pinned in
- * use-pm.signature.test.ts. What is left in JSX is `<SignaturePad capture={…} />`,
- * which carries no callback to sabotage: the gate's mutation no longer type-checks,
- * because there is no `onChange` prop to hand a discarding function to.
+ * So the pad no longer TRANSFORMS anything on its way out. Every rule between a
+ * pointer event and the wire — rect-to-CSS-px, clamping, thinning, the viewport,
+ * stroke assembly, the encode — is a pure function here, pinned in
+ * use-pm.signature.test.ts.
+ *
+ * WHAT THAT DOES **NOT** BUY, corrected under B-357/F1 second round. This block used
+ * to end "the gate's mutation no longer type-checks, because there is no `onChange`
+ * prop to hand a discarding function to". The premise is true and the conclusion was
+ * FALSE: killing the callback moved the seam, it did not close it. With the pad taking
+ * `capture={…}` the seam became OBJECT IDENTITY between the pad's prop and the
+ * confirm handler's ref, and nothing type-checks identity. The gate demonstrated two
+ * edits, both `tsc --noEmit` exit 0 and both 1794 green:
+ *
+ *   (A) `capture={createSignatureCapture()}`  — the pad draws into a different object.
+ *   (B) `capture={{ ...capture.current }}`    — worse, because it is INVISIBLE: the
+ *       shallow copy SHARES the `strokes` array, so the ink renders perfectly and only
+ *       `width`/`height` land on the copy; the real object keeps width 0, the encoder
+ *       takes its degenerate-viewport branch and the work order closes with
+ *       `customer_sign` NULL after the technician watched the customer sign.
+ *
+ * WHAT IS ACTUALLY DONE ABOUT IT. The two references are collapsed into ONE closure —
+ * [createSignaturePadBinding] — so the capture object is not in scope at either call
+ * site and cannot be substituted at either end. That CLOSES (B) by construction: every
+ * member of a binding is a closure over the same capture, so a shallow copy of the
+ * binding is behaviourally the binding. It does NOT close (A): handing the pad a
+ * freshly-built binding is still expressible and still invisible on screen, and no
+ * node test can see it while the JSX is unreachable. That residue is DISCLOSED, with
+ * both probes recorded as its reproduction, in BLOCKERS.md B-358 — it is not claimed
+ * to be impossible.
  *
  * The Dart pad keeps its own callback shape (SignaturePadState is directly drivable
  * in a widget test — disabling one line there turns 5 screen tests red), so this is a
@@ -556,6 +578,72 @@ export function readSignatureCapture(c: SignatureCapture): string | null {
     height: c.height,
     strokes: c.active ? [...c.strokes, c.active] : c.strokes,
   });
+}
+
+/**
+ * ONE capture, bound to BOTH ends of the close modal (B-357/F1, second round).
+ *
+ * Every member is a closure over the same [SignatureCapture]. The pad drives `down` /
+ * `move` / `up` / `cancel` / `clear` and paints [strokesToPaint]; the confirm button
+ * calls [read]. Neither holds the capture, neither can be handed a different one, and
+ * a shallow copy of a binding is behaviourally the binding it was copied from — which
+ * is the whole reason for the shape (see the block comment above for the probe it
+ * closes, and for the one it does not).
+ */
+export interface SignaturePadBinding {
+  /** Pen down: adopt the box size and open a stroke. */
+  down(e: PadPointer): void;
+  /** Pen move: extend the open stroke. */
+  move(e: PadPointer): void;
+  /** Pen up: complete the open stroke. */
+  up(): void;
+  /** The OS took the pointer: DISCARD the open stroke (see [signaturePadCancel]). */
+  cancel(): void;
+  /** Drop every stroke. */
+  clear(): void;
+  /** Whether anything at all is drawn — drives the clear affordance and the confirm
+   *  gate's "there is ink here" half. Not the same question as [read]. */
+  hasInk(): boolean;
+  /** Everything to paint, including the stroke in progress. */
+  strokesToPaint(): SignaturePoint[][];
+  /** What may be SENT, or null. The single path from this pad to the request. */
+  read(): string | null;
+  /**
+   * Whether the close CTA must stay QUIET (B-357/F3): there is ink on this pad and
+   * the encoder refuses it.
+   *
+   * An EMPTY pad is deliberately NOT refused — a web close is legitimately available
+   * without a signature, because it also records the cause/fix/advice log, and the
+   * toast claims no signature ([closeToastText]). What must never happen is the third
+   * case: a pad the customer visibly drew on, silently discarded, followed by a
+   * success toast. A signature made entirely of short strokes lands exactly there —
+   * 12 strokes across the full 300 px pad, each about 6.4 px, encodes to null.
+   *
+   * Mobile has always worked this way (`_canSubmit` gates on the encode,
+   * pm_close_screen.dart). This is the web side adopting it, so the two clients stop
+   * disagreeing about what a drawn-on pad means. It lives HERE rather than as an
+   * expression in JSX for the reason this whole seam moved: a node test can reach it.
+   */
+  refusesInk(): boolean;
+}
+
+/**
+ * Bind a fresh capture. Call it ONCE per modal and keep the binding (a ref) — a
+ * binding built during render would start every render with an empty pad.
+ */
+export function createSignaturePadBinding(): SignaturePadBinding {
+  const c = createSignatureCapture();
+  return {
+    down: (e: PadPointer) => signaturePadDown(c, e),
+    move: (e: PadPointer) => signaturePadMove(c, e),
+    up: () => signaturePadUp(c),
+    cancel: () => signaturePadCancel(c),
+    clear: () => clearSignatureCapture(c),
+    hasInk: () => signatureCaptureHasInk(c),
+    strokesToPaint: () => (c.active ? [...c.strokes, c.active] : c.strokes),
+    read: () => readSignatureCapture(c),
+    refusesInk: () => signatureCaptureHasInk(c) && readSignatureCapture(c) === null,
+  };
 }
 
 /**
