@@ -19,11 +19,27 @@
  * prototype file, identical math) and re-exported here so the screen pulls one row module.
  * This module adds only the pipeline-specific pieces: the 7-stage domain constant, the
  * per-stage grouping, the 3 kanban aggregates (in-pipeline count, pending count, total
- * budget over non-closed plots), and the card tenure badge tone/label mapping. All are
- * server-derived (client DISPLAY math over server money, like land-bank's totalValue KPI);
- * nothing is fabricated and no write lives here (read/display port).
+ * budget over non-closed plots), the card tenure badge tone/label mapping, and the card's
+ * compact price cell (cardValueText). All are server-derived (client DISPLAY math over
+ * server money, like land-bank's totalValue KPI); nothing is fabricated and no write lives
+ * here (read/display port).
+ *
+ * ONE deliberate asymmetry, named so it does not read as an oversight: cardValueText reads
+ * the SERVER's total_value, while totalBudget (KPI3) still SUMS the local plotValue. The
+ * card states ONE plot's valuation, so a re-derived figure there is a claim about that plot
+ * and a zero is a fabricated valuation; the KPI is an aggregate the screen header already
+ * declares as client-derived, and a 0 term changes no sum. Moving the KPI to server money
+ * too would change a rendered figure for any plot whose total_value is null — a separate
+ * decision with a G5 consequence, not a side effect of this fix.
  */
-import { toPlotRow, plotValue, areaRai, areaText, type PlotRow } from "./land-bank-rows";
+import {
+  toPlotRow,
+  plotValue,
+  areaRai,
+  areaText,
+  millionsText,
+  type PlotRow,
+} from "./land-bank-rows";
 import type { DictKey } from "@juneflow/i18n";
 
 // Re-export the shared display helpers the pipeline view also consumes (from the same
@@ -142,6 +158,34 @@ export function pendingCount(rows: readonly PlotRow[]): number {
  */
 export function totalBudget(rows: readonly PlotRow[]): number {
   return rows.filter((p) => p.stage !== CLOSE_STAGE).reduce((s, p) => s + plotValue(p), 0);
+}
+
+/* --------------------------------------------------------------------------- */
+/* Card compact price (land.jsx L121)                                            */
+/* --------------------------------------------------------------------------- */
+
+/**
+ * The kanban card's compact price cell as a millions TEXT ("83.4"), or null when the plot
+ * carries no priced valuation (the view renders an em-dash, and drops the "M" glyph with
+ * the number rather than leaving a bare magnitude suffix).
+ *
+ * money = SERVER: the source is plotWire.total_value. Until 2026-08-10 this cell rendered
+ * `millionsText(plotValue(p))` — a LOCAL areaRai x pricePerRai re-derivation, which is the
+ * exact thing the detail modal's total-value row forbids in writing (B-316/A2). The two
+ * disagreed on one screen: an unpriced plot's card read "0.0M" while its own modal said
+ * em-dash for both total value and price/rai.
+ *
+ * `> 0` and not `!= null`, for the same reason the modal row uses `> 0`: the server's
+ * `priced` test is PRESENCE-only (land-sales.ts:296), so a stored price_per_rai = 0 yields
+ * total_value: 0, not null (:306). A genuine zero-value plot is not something this screen
+ * can distinguish from an unpriced one, and never-0 wins over never-hide.
+ *
+ * Display-neutral wherever a price exists: the server rounds to 2 dp (plotTotalValue,
+ * land-sales.ts:117) and the local formula did not, a difference of under half a satang
+ * that cannot survive `/1e6` + `toFixed(1)`.
+ */
+export function cardValueText(p: PlotRow): string | null {
+  return p.totalValue != null && p.totalValue > 0 ? millionsText(p.totalValue) : null;
 }
 
 /* --------------------------------------------------------------------------- */

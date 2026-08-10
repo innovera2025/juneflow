@@ -35,6 +35,7 @@ import {
   areaDetailText,
   advanceErrorKind,
   advanceErrorMessage,
+  cardValueText,
   plotValue,
   totalRai,
   raiText,
@@ -227,6 +228,39 @@ describe("KPI aggregates", () => {
   it("totalBudget excludes the close plot's value", () => {
     const closedOnly = [plot({ stage: "close", areaSqm: 1600, pricePerRai: 9000000 })];
     expect(totalBudget(closedOnly)).toBe(0);
+  });
+});
+
+describe("cardValueText — the kanban card's compact price (never a fabricated 0)", () => {
+  it("renders the SERVER total_value in millions, not a local area x price", () => {
+    expect(cardValueText(plot())).toBe("78.1");
+    // The distinguishing case: a row whose server total_value DISAGREES with the local
+    // re-derivation. The card must follow the server. If this helper ever went back to
+    // plotValue() it would answer "78.1" here.
+    expect(cardValueText(plot({ totalValue: 55000000 }))).toBe("55.0");
+  });
+
+  it("returns null for an unpriced plot instead of the fabricated '0.0'", () => {
+    // total_value: 0 is what the server actually sends for a stored price_per_rai = 0 --
+    // its `priced` test is PRESENCE-only (land-sales.ts:296), so 0 never becomes null.
+    expect(cardValueText(plot({ totalValue: 0, pricePerRai: 0 }))).toBeNull();
+    expect(cardValueText(plot({ totalValue: null }))).toBeNull();
+    // ...and this is the contradiction that motivated it: the SAME plot's modal rows both
+    // em-dash (they guard on `> 0`), while the card used to print "0.0M".
+    expect(millionsText(plotValue(plot({ pricePerRai: 0 })))).toBe("0.0");
+  });
+
+  it("is display-neutral wherever a price exists (server 2dp vs the old unrounded local)", () => {
+    // NOT a tripwire, and deliberately so: this one SURVIVES a revert to
+    // millionsText(plotValue(p)) — it exists to record WHY the source swap moves no pixel,
+    // which is the claim the G5 decision rests on. The two above are the tripwires.
+    // The seeded plot that exposes the rounding difference: 51680 sqm x 6,500,000/rai =
+    // 209949999.99999997 locally, 209950000 after the server's round2. Same rendered text,
+    // which is why swapping the source moves no pixel on any priced plot.
+    const p = plot({ areaSqm: 51680, pricePerRai: 6500000, totalValue: 209950000 });
+    expect(plotValue(p)).not.toBe(p.totalValue);
+    expect(cardValueText(p)).toBe(millionsText(plotValue(p)));
+    expect(cardValueText(p)).toBe("209.9");
   });
 });
 

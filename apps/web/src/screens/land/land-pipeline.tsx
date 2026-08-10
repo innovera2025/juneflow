@@ -22,7 +22,10 @@
  *     pending deals = stage in {nego, deal, dd});
  *   - the 7 kanban columns come from the local LAND_STAGES domain constant; each column
  *     groups the plots by stage and renders a static card (id / tenure badge / title /
- *     amphoe · prov / area in rai / compact millions price);
+ *     amphoe · prov / area in rai / compact millions price). The card price is SERVER money
+ *     (plotWire.total_value via cardValueText) and em-dashes for an unpriced plot — it was
+ *     a local areaRai x pricePerRai until 2026-08-10, which printed a fabricated "0.0M"
+ *     the plot's OWN detail modal contradicted with an em-dash;
  *   - loading = token skeleton columns; an empty catalogue shows every column's own
  *     empty-state cell (land.pipeline.emptyCol) — naturally honest.
  *
@@ -81,7 +84,7 @@ import {
   areaRai,
   areaDetailText,
   totalRai,
-  plotValue,
+  cardValueText,
   raiText,
   millionsText,
   formatMoney,
@@ -575,6 +578,7 @@ export function LandPipeline() {
                   {col.map((p) => {
                     const labelKey = tenureLabelKey(p.tenure);
                     const loc = locationText(p);
+                    const cardValue = cardValueText(p);
                     return (
                       // Card click opens the plot-detail modal (land.jsx L113 onClick ->
                       // openPlotDetail), whose primary action posts the real advance-stage.
@@ -649,10 +653,20 @@ export function LandPipeline() {
                           <span className="num" style={{ fontSize: 11, color: "var(--text-2)", fontWeight: 600 }}>
                             {areaRai(p.areaSqm).toFixed(1)} {unitRai}
                           </span>
-                          {/* Compact price: (area x price/rai) in millions. Trailing "M" is an ASCII
-                              magnitude glyph literal (land.jsx L121) — no i18n key, B-073-safe chrome. */}
+                          {/* Compact price in millions, from the SERVER's total_value (money =
+                              SERVER) — the same rule, and now the same source, as the detail
+                              modal's total-value row 380 lines up. This cell used to render
+                              millionsText(plotValue(p)), a LOCAL areaRai x pricePerRai
+                              re-derivation that the row comment explicitly forbids, and it
+                              printed "0.0M" for an unpriced plot whose own modal said em-dash
+                              for both total value and price/rai — two views of one plot
+                              disagreeing on one screen. Unpriced now em-dashes here too, and
+                              the trailing "M" (an ASCII magnitude glyph literal, land.jsx L121;
+                              no i18n key, B-073-safe chrome) belongs to the number, so it goes
+                              with it rather than leaving a bare suffix.
+                              Nothing moves for a priced plot: see cardValueText. */}
                           <span className="num" style={{ fontSize: 11.5, fontWeight: 700 }}>
-                            {millionsText(plotValue(p))}M
+                            {cardValue == null ? DASH : `${cardValue}M`}
                           </span>
                         </div>
                       </div>
