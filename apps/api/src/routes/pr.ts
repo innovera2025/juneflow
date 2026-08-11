@@ -71,6 +71,8 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
+import { bestEffortNotify, notifyPrDecided, notifyPrSubmitted } from "./notify.js";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
 
 type PrRow = typeof prs.$inferSelect;
@@ -334,9 +336,10 @@ export function registerPrRoute(app: FastifyInstance): void {
     const vendorNameById = new Map(vendorRows.map((v) => [v.id, v.name]));
     const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
 
+    // B-323: `docs` is a selectThrough (INNER JOIN, no ORDER BY) — total-order it.
     return reply.code(200).send(
       listEnvelope(
-        docs.map((d) => {
+        newestFirst(docs).map((d) => {
           const { amount, currency } = sumLines(linesByPr.get(d.id) ?? [], prices);
           return prWire(d, amount, currency, {
             vendor: d.vendorId ? vendorNameById.get(d.vendorId) ?? null : null,
@@ -429,6 +432,38 @@ export function registerPrRoute(app: FastifyInstance): void {
         return reply.code(400).send({
           code: "VALIDATION",
           message: "boq_item_id must be a BOQ item of this tenant",
+        });
+      }
+      // B-372 (Wei, ก) — AN ORDERED LINE MUST CARRY A QUANTITY.
+      //
+      // WHY THIS IS A MONEY GUARD AND NOT TIDINESS. gr.ts prices a receipt from
+      // pr_item and bounds its quantity by pr_item.qty; a line ordered at 0 has a
+      // ceiling of 0, and a ceiling of 0 would make the line impossible to receive
+      // at all, so gr.ts deliberately SKIPS the ceiling for it (the un-quantified
+      // งานเหมา case). Accepting `qty: 0` here therefore handed the caller a switch
+      // that turns the receipt ceiling OFF. Proven live at 016308e as one ordinary
+      // user, entirely through the public API: PR one line qty 0 -> submit ->
+      // approve -> PO (total 0.00) -> approve -> POST /gr qty_ok 99,999,999 -> 201
+      // -> JV-2026-0438 Dr 5020 / Cr 2010 14,199,999,858.00. 14.2 billion booked
+      // against an order whose total is zero.
+      //
+      // ONLY WHEN THE LINE NAMES A BOQ ITEM. A non-BOQ line (expense / advance —
+      // `pr_item.boq_item_id` is nullable exactly for those) has no BOQ quantity to
+      // state and no price basis to exploit; gr.ts can never price or receive
+      // against it, so it keeps the old rule. This is the narrowest form of the
+      // ruling that closes the hole.
+      //
+      // qty 0 IS NOT A LEGITIMATE ORDERED LINE, checked rather than assumed. The
+      // prototype's PR form seeds EVERY BOQ row at 0 (forms.jsx:599) and counts
+      // only `qty > 0` as chosen ("{n} จาก {m}", :699) — so 0 is the UNSELECTED
+      // state, not a quantity, and such a row is meant to be dropped before it is
+      // sent, never persisted as an order for nothing. A PR with NO lines at all
+      // remains valid (Wei accepted it) and is a different thing entirely.
+      if (boqItemId && qty <= 0) {
+        return reply.code(400).send({
+          code: "VALIDATION",
+          message:
+            "a line that names a boq_item_id must carry qty > 0 (an ordered line without a quantity has no receivable amount)",
         });
       }
       lineDrafts.push({ boqItemId, qty });
@@ -533,6 +568,16 @@ export function registerPrRoute(app: FastifyInstance): void {
       { status: "pending", submittedAt: new Date() },
       eq(prs.id, id),
     );
+    // B-367: the PR has entered the approval queue → notify the tier that must
+    // sign it (prototype bell "PR-2026-0418 รออนุมัติชั้น 2"). The tier is this
+    // file's OWN requiredApprovalLevel over this file's OWN derived amount — the
+    // same pair the approve handler below enforces and the dashboard inbox filters
+    // on — so the bell can never name a different set of approvers than the inbox.
+    // Best-effort: a failed bell must not 500 a submit that already committed.
+    const { amount: submittedAmount } = await prAmount(db, id);
+    await bestEffortNotify(request.log, "pr.submitted", () =>
+      notifyPrSubmitted(db, id, requiredApprovalLevel(submittedAmount)),
+    );
     return reply.code(200).send(await prWireWithAmount(db, updated!));
   });
 
@@ -593,6 +638,12 @@ export function registerPrRoute(app: FastifyInstance): void {
         message: "only a pending PR can be approved",
       });
     }
+    // B-367: the decision goes back to whoever raised the PR. `requester_id` is
+    // nullable (and the seed leaves it null) — a PR with no recorded requester
+    // emits NOTHING rather than guessing an addressee; there is no created_by.
+    await bestEffortNotify(request.log, "pr.approved", () =>
+      notifyPrDecided(db, id, updated.requesterId),
+    );
     return reply.code(200).send(prWire(updated, amount, currency));
   });
 
@@ -657,6 +708,10 @@ export function registerPrRoute(app: FastifyInstance): void {
         message: "only a pending PR can be rejected",
       });
     }
+    // B-367: same as approve — the requester is told the outcome, and only them.
+    await bestEffortNotify(request.log, "pr.rejected", () =>
+      notifyPrDecided(db, id, updated.requesterId),
+    );
     return reply.code(200).send(await prWireWithAmount(db, updated));
   });
 }

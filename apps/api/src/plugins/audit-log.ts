@@ -36,6 +36,93 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // (with or without the /api/v1 prefix), never a substring like /badmin/.
 const ADMIN_PATH = /(?:^|\/)admin(?:\/|$)/;
 
+// B-282 — SECRETS MUST NEVER REACH audit_log.
+//
+// The hook records `after: request.body` for every successful mutation, and
+// audit_log is durable, append-only and readable through GET /audit-log. Until
+// B-282 no mutating route carried a secret in its body, so the rule held by
+// accident: POST /auth/login has a password but is public and unattributed, so
+// no row was ever written for it. POST /auth/reset breaks that accident — its
+// body is {token, password} and it now names its tenant so the mutation IS
+// audited. Recording that body verbatim would persist the plaintext password
+// AND a live single-use reset token.
+//
+// The fix belongs HERE, at the single choke point, not in the reset handler:
+// every current and future mutating route is covered, and a new route that
+// happens to accept a credential cannot reintroduce the leak by forgetting.
+// Matching is on the KEY NAME (exact, case-insensitive) — never on the value —
+// so nothing is redacted by accident: `photo_after`, `token_count`-style names
+// and every business field keep their real value.
+const SECRET_KEYS = new Set([
+  "password",
+  "newpassword",
+  "new_password",
+  "currentpassword",
+  "current_password",
+  "confirmpassword",
+  "confirm_password",
+  "token",
+  "accesstoken",
+  "access_token",
+  "refreshtoken",
+  "refresh_token",
+  "idtoken",
+  "id_token",
+  "secret",
+  "clientsecret",
+  "client_secret",
+  "apikey",
+  "api_key",
+  "authorization",
+]);
+
+/** What replaces a secret. A fixed marker, so the row still proves the field was sent. */
+const REDACTED = "[redacted]";
+
+/**
+ * Deep-copy `value` with every secret-named property replaced by [redacted], at
+ * ANY depth. Non-mutating — `request.body` must stay intact for anything that
+ * runs after this hook.
+ *
+ * WHY THERE IS NO DEPTH CAP. The first cut stopped at `depth > 8` and returned
+ * the sub-tree VERBATIM below it, so a body nesting `password` ten levels down
+ * was written to audit_log.after in the clear — the exact leak this function
+ * exists to prevent, and reachable on every mutating route because no route
+ * registers a body schema, so `request.body` is recorded wholesale. A cap can
+ * only ever choose between leaking the tail and dropping it; walking the tree
+ * with an explicit stack removes the choice. The cap's real job — never
+ * recursing without bound on hostile input — is done by being ITERATIVE: there
+ * is no call stack to overflow. `request.body` is JSON.parse output, a finite
+ * acyclic tree bounded by Fastify's bodyLimit, so the walk terminates in
+ * O(size).
+ */
+function redactSecrets(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  /** An empty copy of the same KIND — an array stays an array in the audit row. */
+  const emptyLike = (src: object): Record<string, unknown> =>
+    (Array.isArray(src) ? [] : {}) as Record<string, unknown>;
+
+  const root = emptyLike(value);
+  // [source, its copy] pairs still to walk. LIFO: order of writes does not
+  // matter, only that every node is visited exactly once.
+  const pending: Array<[object, Record<string, unknown>]> = [[value, root]];
+  while (pending.length > 0) {
+    const [src, dst] = pending.pop()!;
+    for (const [key, v] of Object.entries(src)) {
+      if (SECRET_KEYS.has(key.toLowerCase())) {
+        dst[key] = REDACTED;
+      } else if (v === null || typeof v !== "object") {
+        dst[key] = v;
+      } else {
+        const child = emptyLike(v);
+        dst[key] = child;
+        pending.push([v, child]);
+      }
+    }
+  }
+  return root;
+}
+
 /** Logical action derived from the HTTP method of a mutating request. */
 const METHOD_ACTION: Record<string, string> = {
   POST: "create",
@@ -123,8 +210,10 @@ export async function registerAuditLog(
         userId: await resolveUserId(request),
         action: isOwnerRead ? "read" : resolveAction(request.method, routePath),
         entity: path,
-        // A read has no mutation body; a mutation records its intent as `after`.
-        after: isMutation ? (request.body ?? undefined) : undefined,
+        // A read has no mutation body; a mutation records its intent as `after`
+        // — with every secret-named field replaced (see SECRET_KEYS above), so
+        // a password or a live reset token can never be persisted here.
+        after: isMutation ? (redactSecrets(request.body) ?? undefined) : undefined,
         ip: request.ip ?? null,
         at: new Date(),
       };

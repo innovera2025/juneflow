@@ -57,6 +57,7 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byIdAsc, entryOrder, newestFirst, stampEntryOrder } from "./list-order.js";
 import { round2 } from "./money.js";
 import { loadRole, loadUserByEmail } from "./profile-data.js";
 import { loadCaller, permAllowed } from "./authz.js";
@@ -341,9 +342,10 @@ export function registerBoqRoute(app: FastifyInstance): void {
     }
     const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
 
+    // B-323: `docs` is a selectThrough (INNER JOIN, no ORDER BY) — total-order it.
     return reply.code(200).send(
       listEnvelope(
-        docs.map((d) =>
+        newestFirst(docs).map((d) =>
           docWire(
             d,
             totalByDoc.get(d.id) ?? 0,
@@ -439,14 +441,19 @@ export function registerBoqRoute(app: FastifyInstance): void {
     const { total, currency } = docTotal(items);
     const cbsByGroup = new Map(cbs.map((c) => [c.groupId, c]));
     const wireGroups = [...groups]
-      .sort((a, b) => a.seq - b.seq)
+      // B-323: boq_group.seq carries no unique constraint (a Revise can duplicate one),
+      // and it is `integer NOT NULL DEFAULT 0` (packages/db/src/schema/boq.ts) — never
+      // null, but groups added without an explicit seq all tie at 0. Both cases reach
+      // the id floor, which is what actually decides them.
+      .sort((a, b) => a.seq - b.seq || byIdAsc(a, b))
       .map((g) => {
         const c = cbsByGroup.get(g.id);
         return { id: g.id, name: g.name, seq: g.seq, cbs: c ? cbsWire(c) : null };
       });
     const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
     const wireHistory = [...history]
-      .sort((a, b) => b.version - a.version)
+      // B-323: two history rows can share a version (the same revision recorded twice).
+      .sort((a, b) => b.version - a.version || byIdAsc(a, b))
       .map((v) =>
         versionHistoryWire(v, v.by ? userNameById.get(v.by) ?? null : null),
       );
@@ -485,7 +492,15 @@ export function registerBoqRoute(app: FastifyInstance): void {
       : eq(boqDocs.id, id);
     const items = await db.selectThrough(boqItems, ITEM_HOPS, where);
 
-    return reply.code(200).send(listEnvelope(items.map(itemWire)));
+    // B-323: these are a DOCUMENT'S LINES, not a document list — the editor renders
+    // them as the ordered body of one BOQ. entryOrder (created_at ASC), never
+    // newestFirst, which would print the priced lines bottom-to-top. boq_item has no
+    // `seq`, so entry order lives only in what the writer records — and BOTH writers
+    // of this table stamp the batch apart (stampEntryOrder): POST /boq/:id/items
+    // (boq.ts) and POST /ai-qto/create-boq (ai-qto.ts). A reader ordered ASC over an
+    // unstamped batch is not ordered at all: one insert = one now() = every line tied
+    // = the uuid tiebreak decides. Both halves or neither.
+    return reply.code(200).send(listEnvelope(entryOrder(items).map(itemWire)));
   });
 
   // POST /boq/:id/items — bulk add priced lines (from BOM / Excel / AI QTO).
@@ -596,7 +611,20 @@ export function registerBoqRoute(app: FastifyInstance): void {
     // The whole BOQ tree is tenant-scoped through the project; every target group
     // was proven to belong to THIS doc above, so anchoring the scoped insert on
     // the doc's (tenant-owned) project keeps the write fail-closed.
-    const created = await db.insertThrough(boqItems, projects, doc.projectId, rows);
+    //
+    // B-323: stampEntryOrder is the WRITE half of the entryOrder read at GET
+    // /boq/:id/items. insertThrough is ONE `.insert().values(rows)` — one statement,
+    // one `now()` — so a bulk add (from BOM / Excel / AI QTO) would give every line of
+    // the batch the SAME created_at, the ASC comparator would fall through to the
+    // `defaultRandom()` uuid, and the priced body of the BOQ would render in uuid
+    // order. boq_item has no `seq`, so entry order lives ONLY in what this write
+    // records. The 1 ms spacing moves no rendered date (timestamptz keeps µs).
+    const created = await db.insertThrough(
+      boqItems,
+      projects,
+      doc.projectId,
+      stampEntryOrder(rows),
+    );
 
     // Echo the created lines + the doc's refreshed total.
     const wireItems = created.map(itemWire);

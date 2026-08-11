@@ -56,11 +56,21 @@ import {
   projects,
   salesUnits,
 } from "@juneflow/db/schema";
+import { THAILAND_RATES } from "@juneflow/tax-engine/thailand";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { pick, str, toNum } from "./procurement.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, isUniqueViolation, resolveAccountIds } from "./gl-post.js";
+import { byNewestThenId } from "./list-order.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  withDocNoRetry,
+} from "./gl-post.js";
 import { loadCaller, permAllowed } from "./authz.js";
 
 /** Financial-authz module key (B-082 F1). */
@@ -98,6 +108,65 @@ const SQM_PER_RAI = 1600;
 
 /** A land buy-deal deposit is 10% of the plot's total price (B-161 buy branch). */
 const DEAL_DEPOSIT_RATE = 0.1;
+
+/**
+ * A plot's total assessed value in FULL units — area-in-rai × price/rai, 2 dp.
+ * The deposit's base; also shipped on plotWire so the browser never recomputes it.
+ */
+function plotTotalValue(areaSqm: number, pricePerRai: number): number {
+  return round2((areaSqm / SQM_PER_RAI) * pricePerRai);
+}
+
+/**
+ * The buy-deal deposit in FULL units — DEAL_DEPOSIT_RATE of the plot total, 2 dp.
+ *
+ * B-316/A2 — money=SERVER, SINGLE SOURCE. This is the ONLY deposit formula in the repo:
+ * both the read (plotWire.deal_deposit, what land.dd renders) and the write
+ * (POST /land/plots/:id/deal, what the Dr 1150 / Cr 2010 JV books) call it, so the
+ * number a person reads on the due-diligence screen is by construction the number the
+ * ledger posts. Before this, the browser rounded its own copy to whole baht
+ * (Math.round) while this side rounded to 2 dp — up to a 0.50 baht disagreement, and a
+ * 1-baht disagreement in the rendered string. Reintroducing a second copy anywhere
+ * re-opens that seam; land-sales.test.ts asserts read === write on the same plot.
+ */
+function plotDealDeposit(areaSqm: number, pricePerRai: number): number {
+  return round2(plotTotalValue(areaSqm, pricePerRai) * DEAL_DEPOSIT_RATE);
+}
+
+/**
+ * The Land-Department transfer fee on a plot, in FULL units — THAILAND_RATES
+ * .landTransferFeePercent of the plot total, 2 dp.
+ *
+ * B-319 (Wei = ก) — money=SERVER. This and plotSbt() used to be float literals in a
+ * REACT SCREEN FILE (land-dd-rows.ts `TRANSFER_FEE_RATE = 0.02` / `SBT_RATE = 0.033`):
+ * two statutory rates with no server counterpart, no spec entry and nothing that would
+ * notice if the law changed. The rate now lives in @juneflow/tax-engine/thailand beside
+ * the compliance interface; the browser reads plotWire.transfer_fee and computes nothing.
+ *
+ * The rate is UNCONDITIONAL and prototype-traceable, not statute-sourced — read the
+ * rates.ts docstring before trusting the figure. Nothing posts this number today (the
+ * buy JV books only the deposit); it is a displayed ESTIMATE. It is computed here so the
+ * future contract-confirm / transfer write inherits it instead of re-deriving it.
+ */
+function plotTransferFee(areaSqm: number, pricePerRai: number): number {
+  return round2(
+    (plotTotalValue(areaSqm, pricePerRai) * THAILAND_RATES.landTransferFeePercent) / 100,
+  );
+}
+
+/**
+ * The specific business tax (ภาษีธุรกิจเฉพาะ) on a plot, in FULL units —
+ * THAILAND_RATES.specificBusinessTaxPercent of the plot total, 2 dp. See plotTransferFee.
+ *
+ * Estimate, not a liability: whether SBT applies at all can turn on a holding period,
+ * and where it does not a stamp duty does instead — none of which the spec states and
+ * land_plot has no acquisition date to evaluate. Flat rate, per B-319.
+ */
+function plotSbt(areaSqm: number, pricePerRai: number): number {
+  return round2(
+    (plotTotalValue(areaSqm, pricePerRai) * THAILAND_RATES.specificBusinessTaxPercent) / 100,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Reply helpers (flat contract Error shape {code,message})
@@ -178,10 +247,11 @@ function isBalanced(
   return sumDr === sumCr;
 }
 
-function byCreatedDesc(a: { createdAt: Date | null }, b: { createdAt: Date | null }): number {
-  const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  return bt - at;
+type CreatedRow = { createdAt: Date | null; id?: string };
+function byCreatedDesc(a: CreatedRow, b: CreatedRow): number {
+  // B-323: delegates to the shared TOTAL order — the local version returned 0 for
+  // any two rows sharing an instant, which left their order to the DB.
+  return byNewestThenId(a, b);
 }
 
 // ---------------------------------------------------------------------------
@@ -210,15 +280,33 @@ function leadWire(l: LeadRow): Record<string, unknown> {
 
 // GET /land/plots — the land-plot register (land.jsx). price_per_rai is money →
 // currency_code. area_sqm is the plot area. Ordered newest-first.
+//
+// B-316/A2: total_value + deal_deposit are money the DUE-DILIGENCE screen displays
+// (land.dd buy tab). They are computed HERE, by the same helpers the deal write posts
+// with, so the browser has nothing left to compute. Both are null when area_sqm or
+// price_per_rai is absent — the screen renders an em-dash for a null and NEVER falls
+// back to a local formula (a fallback formula is the same defect with a nicer name).
+//
+// B-319: transfer_fee + sbt complete that set — the last two figures on land.dd the
+// browser still computed, off statutory rates that lived only in the screen file. The
+// rates now come from @juneflow/tax-engine/thailand; all four buy terms are server money.
 function plotWire(p: LandPlotRow): Record<string, unknown> {
+  const areaSqm = num(p.areaSqm);
+  const pricePerRai = num(p.pricePerRai);
+  const priced = areaSqm != null && pricePerRai != null;
   return {
     id: p.id,
     project_id: p.projectId,
     deed_no: p.deedNo,
-    area_sqm: num(p.areaSqm),
+    area_sqm: areaSqm,
     gps: p.gps,
-    price_per_rai: num(p.pricePerRai),
+    price_per_rai: pricePerRai,
     currency_code: p.currencyCode,
+    // money=SERVER (B-316/A2, B-319) — null when the plot carries no area/price.
+    total_value: priced ? plotTotalValue(areaSqm, pricePerRai) : null,
+    deal_deposit: priced ? plotDealDeposit(areaSqm, pricePerRai) : null,
+    transfer_fee: priced ? plotTransferFee(areaSqm, pricePerRai) : null,
+    sbt: priced ? plotSbt(areaSqm, pricePerRai) : null,
     stage: p.stage,
     tenure: p.tenure,
     // LA-2 (0042): Land Bank registry columns (null → em-dash in the UI).
@@ -585,7 +673,8 @@ async function createSalesBooking(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE the retried closure below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = existing?.currencyCode ?? "THB";
   const lineRows: (typeof jvLines.$inferInsert)[] = [
@@ -596,8 +685,12 @@ async function createSalesBooking(
     return conflict(reply, "internal: booking journal entry does not balance");
   }
 
-  try {
-    const savedUnit = await db.transaction(async (tx) => {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry). The
+  // jv_source_doc_uq `booking:<unit>` 23505 names a DIFFERENT constraint, so a real
+  // double-booking still lands on the 409 below on its FIRST throw.
+  const allocThenBook = async (): Promise<SalesUnitRow> => {
+    jvNo = await allocJvNo(db);
+    return db.transaction(async (tx) => {
       let unit: SalesUnitRow;
       if (existing) {
         const set: Partial<Omit<typeof salesUnits.$inferInsert, "companyId">> = {
@@ -626,8 +719,14 @@ async function createSalesBooking(
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
       return unit;
     });
+  };
+  try {
+    const savedUnit = await withDocNoRetry(allocThenBook);
     return reply.code(201).send({ ...unitWire(savedUnit), jv_no: jvNo });
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — a 409 here would falsely claim the unit was already booked.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (isUniqueViolation(err)) {
       return reply
         .code(409)
@@ -692,7 +791,8 @@ async function createSalesDown(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenRecord below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = unit.currencyCode ?? "THB";
   const sourceDoc = `down:${salesUnitId}:${seq}`;
@@ -704,11 +804,15 @@ async function createSalesDown(
     return conflict(reply, "internal: down journal entry does not balance");
   }
 
-  try {
-    // The instalment row (down_payment_txn = authoritative) + the balanced receipt JV
-    // in ONE tx. unique(sales_unit_id, seq) on the CLIENT instalment_no is the dedup
-    // point: a concurrent/duplicate submit of the same instalment trips 23505 → the
-    // whole tx rolls back → 409 (no duplicate instalment, no duplicate receipt JV).
+  // The instalment row (down_payment_txn = authoritative) + the balanced receipt JV
+  // in ONE tx. unique(sales_unit_id, seq) on the CLIENT instalment_no is the dedup
+  // point: a concurrent/duplicate submit of the same instalment trips 23505 → the
+  // whole tx rolls back → 409 (no duplicate instalment, no duplicate receipt JV).
+  // B-318: allocate + record is ONE retryable unit. That B-167 instalment 23505
+  // names a DIFFERENT constraint, so it is never retried — the dedup still fires on
+  // the FIRST throw and a duplicate instalment is still a 409, not a re-attempt.
+  const allocThenRecord = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       await tx
         .insert(downPaymentTxns, { salesUnitId, seq, amount: moneyStr(amt), currencyCode, paidAt })
@@ -718,6 +822,9 @@ async function createSalesDown(
         .returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
+  };
+  try {
+    await withDocNoRetry(allocThenRecord);
     return reply.code(201).send({
       sales_unit_id: salesUnitId,
       unit_id: unit.unitId,
@@ -728,6 +835,10 @@ async function createSalesDown(
       jv_no: jvNo,
     });
   } catch (err) {
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — a 409 would falsely claim this instalment was already recorded,
+    // and mobile dead-letters every 4xx permanently.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (isUniqueViolation(err)) {
       return reply.code(409).send({
         code: "INVALID_STATE",
@@ -743,9 +854,10 @@ async function createSalesDown(
 // ---------------------------------------------------------------------------
 
 // POST /land/plots/:id/deal — close a land deal (land.jsx). Load the plot (404).
-// `type === "buy"`: the deposit is COMPUTED server-side =
-// round2(round2(area_sqm / 1600 × price_per_rai) × 10%) (money=SERVER — the client
-// terms are never read for the amount). A null area/price → honest 409. Posts
+// `type === "buy"`: the deposit is COMPUTED server-side by plotDealDeposit() — the same
+// helper plotWire ships as `deal_deposit`, so what land.dd DISPLAYS is by construction
+// what this posts (B-316/A2; money=SERVER — the client terms are never read for the
+// amount, and the client no longer holds a formula). A null area/price → honest 409. Posts
 // Dr 1150 land-held / Cr 2010 AP = deposit, keyed source_doc `deal:<plotId>`.
 // `type === "lease"` (B-161 · Wei=ง, rent code B-173=ก): the first-period land-lease
 // rent is an OPERATING EXPENSE. money=SERVER posts the CLIENT-supplied rent verbatim
@@ -790,7 +902,8 @@ async function createLandPlotDeal(
       );
     }
 
-    const jvNo = await allocJvNo(db);
+    // B-318: assigned INSIDE allocThenPost below (a retry must re-read the max).
+    let jvNo = "";
     const jvId = randomUUID();
     const currencyCode = plot.currencyCode ?? "THB";
     const lineRows: (typeof jvLines.$inferInsert)[] = [
@@ -801,7 +914,9 @@ async function createLandPlotDeal(
       return conflict(reply, "internal: lease deal journal entry does not balance");
     }
 
-    try {
+    // B-318: allocate + post is ONE retryable unit (see withDocNoRetry).
+    const allocThenPost = async (): Promise<void> => {
+      jvNo = await allocJvNo(db);
       await db.transaction(async (tx) => {
         await tx
           .insert(apBillings, {
@@ -818,8 +933,13 @@ async function createLandPlotDeal(
           .returning();
         await tx.insertThrough(jvLines, jvs, jvId, lineRows);
       });
+    };
+    try {
+      await withDocNoRetry(allocThenPost);
       return reply.code(200).send({ plot_id: plotId, type, amount: rentAmt, jv_no: jvNo });
     } catch (err) {
+      // B-318 FIRST: allocation exhausted — nothing committed, so never a 409.
+      if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
       if (isUniqueViolation(err)) {
         return reply
           .code(409)
@@ -840,7 +960,8 @@ async function createLandPlotDeal(
       "land plot is missing area_sqm or price_per_rai — cannot compute a deal deposit",
     );
   }
-  const deposit = round2(round2((area / SQM_PER_RAI) * price) * DEAL_DEPOSIT_RATE);
+  // B-316/A2: the SAME helper plotWire ships as deal_deposit — read and write cannot drift.
+  const deposit = plotDealDeposit(area, price);
   if (deposit <= 0) {
     return conflict(reply, "computed deal deposit is not positive");
   }
@@ -859,7 +980,8 @@ async function createLandPlotDeal(
     );
   }
 
-  const jvNo = await allocJvNo(db);
+  // B-318: assigned INSIDE allocThenPost below (a retry must re-read the max).
+  let jvNo = "";
   const jvId = randomUUID();
   const currencyCode = plot.currencyCode ?? "THB";
   const lineRows: (typeof jvLines.$inferInsert)[] = [
@@ -870,7 +992,9 @@ async function createLandPlotDeal(
     return conflict(reply, "internal: deal journal entry does not balance");
   }
 
-  try {
+  // B-318: allocate + post is ONE retryable unit (see withDocNoRetry).
+  const allocThenPost = async (): Promise<void> => {
+    jvNo = await allocJvNo(db);
     await db.transaction(async (tx) => {
       // B-164 (Wei=ก): the Cr 2010 AP is a real payable to the land owner — record it
       // in the AP subledger (ap_billing) so it surfaces in GET /ap/billings + aging,
@@ -891,8 +1015,13 @@ async function createLandPlotDeal(
       await tx.insert(jvs, { id: jvId, no: jvNo, sourceDoc, memo: `land-deal ${plotId}` }).returning();
       await tx.insertThrough(jvLines, jvs, jvId, lineRows);
     });
+  };
+  try {
+    await withDocNoRetry(allocThenPost);
     return reply.code(200).send({ plot_id: plotId, type, deposit, jv_no: jvNo });
   } catch (err) {
+    // B-318 FIRST: allocation exhausted — nothing committed, so never a 409.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
     if (isUniqueViolation(err)) {
       return reply
         .code(409)

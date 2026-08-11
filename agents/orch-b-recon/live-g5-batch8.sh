@@ -71,7 +71,13 @@ sweep = set(ported) | {"dashboard", "users"} - {"login"}
 
 mpath = wt / "tests/visual/screens.manifest.json"
 d = json.loads(mpath.read_text(encoding="utf-8"))
-have = {s["screen"] for s in d["screens"]}
+# B-304: dedupe on ROUTE id, not screen id. `sweep` holds ROUTE ids, and a
+# manifest row's `screen` is frequently a DIFFERENT string from its `route`
+# (app-shell/dashboard, opex-budget/opex, gr-list/gr.list, ...). Comparing the
+# two sets appended ~84 duplicate rows pointing at prototype gallery/ refs on top
+# of the 99 real app-baseline rows -> 183 capture records, which is where the
+# misleading "194 total" came from.
+have = {s.get("route", s["screen"]) for s in d["screens"]} | {s["screen"] for s in d["screens"]}
 added, missing = [], []
 for route in sorted(sweep):
     if route in have:
@@ -106,7 +112,7 @@ TOKEN=$(curl -s -X POST "${API}/api/v1/auth/login" -H 'content-type: application
   -d "{\"email\":\"${SEED_EMAIL}\",\"password\":\"${SEED_PASSWORD}\"}" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
 if [ -z "$TOKEN" ]; then echo "FATAL: login failed"; exit 1; fi
-python3 - "$STATE" "$WEB" "$TOKEN_KEY" "$TOKEN" <<'PY'
+python3 - "$STATE" "http://localhost:${PROXY_PORT:-5374}" "$TOKEN_KEY" "$TOKEN" <<'PY'
 import json, sys
 sp, web, key, tok = sys.argv[1:5]
 open(sp, "w").write(json.dumps({"cookies": [], "origins": [
@@ -114,9 +120,49 @@ open(sp, "w").write(json.dumps({"cookies": [], "origins": [
 print("storageState written")
 PY
 
+# ---------------------------------------------------------------------------
+# B-304, defect 1 — THE reason this script used to report every screen red.
+# apps/web/src/api-client.ts calls the RELATIVE path /api/v1, and the web image's
+# nginx has only `try_files ... /index.html`. Pointing the gate straight at $WEB
+# therefore made every API call return HTML with status 200, so every
+# shell-bearing screen rendered DATALESS and failed — 99 rows, 1 PASS, and the
+# one passer was `login`, the only screen that makes no API call. That was read
+# as "the reference pack is stale" for two days. Same-origin proxy, same shape
+# as full-rebaseline.sh.
+PROXY_PORT=${PROXY_PORT:-5374}
+BASE="http://localhost:${PROXY_PORT}"
+echo "== 5b. micro-proxy :${PROXY_PORT} (same-origin: /api -> api · else -> web) =="
+node - "$PROXY_PORT" "$API_PORT" "$WEB_PORT" <<'JS' &
+const [port, apiPort, webPort] = process.argv.slice(2).map(Number);
+const http = require("http");
+http.createServer((req, res) => {
+  const target = req.url.startsWith("/api/") ? apiPort : webPort;
+  const p = http.request({ host: "localhost", port: target, path: req.url,
+    method: req.method, headers: { ...req.headers, host: `localhost:${target}` } },
+    (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
+  p.on("error", () => { res.writeHead(502); res.end("proxy-502"); });
+  req.pipe(p);
+}).listen(port, () => console.log(`  proxy up :${port}`));
+JS
+PROXY_PID=$!
+trap 'kill $PROXY_PID 2>/dev/null || true' EXIT
+sleep 1
+
+# FAIL LOUDLY rather than producing a plausible all-red sweep. A dataless render
+# is indistinguishable from a real regression in the report, so assert the API
+# actually answers JSON through the SAME origin the gate will use.
+CT=$(curl -s -o /dev/null -w '%{content_type}' -H "authorization: Bearer ${TOKEN}" "${BASE}/api/v1/projects")
+echo "  ${BASE}/api/v1/projects -> content-type: ${CT}"
+case "$CT" in
+  application/json*) : ;;
+  *) echo "FATAL: /api/v1 did not return JSON through the gate's own origin (got '${CT}')."
+     echo "       Every shell-bearing screen would render dataless and the sweep would report"
+     echo "       a plausible-looking all-red result. Refusing to run — see B-304."; exit 1 ;;
+esac
+
 echo "== 6. run visual gate (capture mode) — full batch-8 sweep =="
 cd "$WT"
-VISUAL_BASE_URL="$WEB" VISUAL_STORAGE_STATE="$STATE" \
+VISUAL_BASE_URL="$BASE" VISUAL_STORAGE_STATE="$STATE" \
   pnpm --dir tests run test:visual || echo "(non-zero = some screens FAIL; per-screen catalog in report)"
 
 echo "== 7. collect =="

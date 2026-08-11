@@ -8,6 +8,7 @@
 // it directly where a real device database is wired (Phase 4).
 
 export 'in_memory_sync_queue.dart';
+export 'pending_op_adoption.dart';
 export 'sync_operation.dart';
 export 'sync_processor.dart';
 export 'sync_queue.dart';

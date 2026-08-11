@@ -69,8 +69,54 @@ const List<MobileRoute> kMobileRoutes = <MobileRoute>[
 /// its PR rows push the PR detail (a PUSHED route, so `detail` has no builder here).
 /// `pm-checkin` is the first offline-WRITE screen (feature/mobile-write-checkin): it
 /// is a built tab route (honest-empty with no selection) that pm-jobs also pushes
-/// with a real work-order id. Every further screen port adds its id here and its
-/// widget in [mobileScreenBuilders] (mobile_screen_router.dart).
+/// with a real work-order id. `pm-checklist` continues that PM flow
+/// (feature/mobile-pm-checklist): pm-checkin pushes it with the same work-order id
+/// once the check-in is confirmed, and it too is honest-empty as a bare tab route.
+/// `pm-notes` is the PM flow's third write screen (feature/mobile-pm-notes): the
+/// maintenance log (cause / fix / advice), which pm-checklist pushes with the same
+/// work-order id once the checklist save is confirmed, and which is honest-empty as a
+/// bare tab route. `pm-close` completes that flow (feature/mobile-pm-close): the job
+/// summary, the signature pad and the close, which pm-notes pushes with the same
+/// work-order id once the log is saved, and which is honest-empty as a bare tab route.
+/// It is the PM flow's FOURTH offline-write screen — `POST
+/// /pm/workorders/{id}/close { signature }`. This paragraph said it performed no write
+/// and shipped an honest-disabled CTA, which was true until B-331 (corrected under
+/// B-357/F4): the close was withheld only because `customer_sign`'s ENCODING was
+/// undefined and no signature could be captured (B-288). Wei ruled that encoding on
+/// 2026-08-07 and the CTA went live. Every further screen port adds its id here and
+/// its widget in [mobileScreenBuilders] (mobile_screen_router.dart).
+///
+///
+/// The four after-sales SERVICE screens land together
+/// (feature/mobile-service-group) over one endpoint family and one state machine:
+/// `srv-track` (a resident's request + its 5-step timeline), `tech-jobs` (the
+/// technician's own tickets + the schedule/start moves), `srv-new` (raise a request —
+/// also the service tab's landing route) and `tech-close` (the close-out, which
+/// tech-jobs pushes with a REAL ticket id and which is honest-empty as a bare tab
+/// route).
+/// `fm-accept`, `field-progress` and `field-pr` are the FOREMAN / FIELD group
+/// (feature/mobile-field-group); each resolves its own subject from a real read, so
+/// none needs a pushed id: fm-accept IS the queue (GET /acceptance-center),
+/// field-progress lists the tenant's subcon contracts when no contract id is pushed
+/// and loads the tapped one's periods, and field-pr picks a BOQ then one of its
+/// lines.
+/// `field-gr` is the site's REVIEW of a recorded goods receipt (GET /gr — the
+/// vendor and the gr_item lines the wire already resolves). It is NOT a second
+/// `st-receive`: that screen ENTERS counts against a PO, this one displays a
+/// receipt that already exists, which is the only reading under which its own
+/// partial line can be rendered at all (field_gr_agg.dart; fork raised as B-324).
+/// Nothing lists GRs on mobile yet, so a bare tab route follows the register's
+/// newest RECEIVED receipt (the srv-track precedent) and the nullable-id push
+/// seam is ready for a future list. It performs NO write.
+/// `field-stock` is the on-site MATERIAL ISSUE (GET /inventory/stock balances for a
+/// warehouse -> POST /inventory/issues through the offline queue). It is the
+/// heaviest write on mobile: one transaction cuts the stock ledger AND posts a
+/// Dr 1140 / Cr 5020 JV, which is why it carries a B-312 idempotency key. Its
+/// prototype CTA shows a money total and this screen's does NOT — no endpoint
+/// prices a basket before it is posted, so the figure could only be computed on the
+/// client (field_stock_agg.dart "THE 18,000 BAHT"). Like the rest of the
+/// pushed-subject screens its warehouse id is nullable: nothing lists warehouses on
+/// mobile today, so a bare tab route follows the newest.
 const Set<String> kBuiltRouteIds = <String>{
   'inbox',
   'notif',
@@ -78,8 +124,22 @@ const Set<String> kBuiltRouteIds = <String>{
   'reject',
   'sales-crm',
   'st-grlist',
+  'st-receive',
   'pm-jobs',
   'pm-checkin',
+  'pm-checklist',
+  'pm-notes',
+  'pm-close',
+  'srv-track',
+  'tech-jobs',
+  'srv-new',
+  'tech-close',
+  'exec',
+  'fm-accept',
+  'field-progress',
+  'field-pr',
+  'field-gr',
+  'field-stock',
 };
 
 /// The set of all known route ids.

@@ -26,6 +26,8 @@ import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { PlatformDb } from "../db/platform-db.js";
 import { PlatformWriteDb } from "../db/platform-write-db.js";
+import type { ResetDeliveryMessage } from "../auth-provisioning.js";
+import { FakeCredentialStore } from "../auth-provisioning-fake.js";
 import { computeMrrArr, type DunningNotice } from "./admin.js";
 import type { AuditRecord } from "../plugins/audit-log.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -123,7 +125,15 @@ afterEach(async () => {
   await app?.close();
 });
 
+// B-282: buildApp defaults `credentials` to the REAL DbCredentialStore, so a
+// test touching /admin/users/{id}/reset-password opts into the fake here.
+let credentials: FakeCredentialStore;
+let delivered: ResetDeliveryMessage[];
+
 async function buildTestApp(overrides: Partial<AppDeps> = {}): Promise<FastifyInstance> {
+  credentials =
+    (overrides.credentials as FakeCredentialStore | undefined) ?? new FakeCredentialStore();
+  delivered = [];
   app = await buildApp({
     db: overrides.db ?? stubDb({ rows: [] }),
     resolveTenant: overrides.resolveTenant ?? (async () => null),
@@ -134,6 +144,8 @@ async function buildTestApp(overrides: Partial<AppDeps> = {}): Promise<FastifyIn
       new QuotaGuard({ resolver: unlimitedQuotaResolver, upgradeUrl: "https://upgrade.test" }),
     auditSink: overrides.auditSink ?? (async () => {}),
     notify: overrides.notify,
+    credentials,
+    deliverReset: overrides.deliverReset ?? ((m) => void delivered.push(m)),
     logger: false,
   });
   await app.ready();
@@ -948,5 +960,136 @@ describe("GET /admin/subscribers — mrr/arr on the envelope (money=SERVER)", ()
     expect(body.total).toBe(2); // both subs still listed
     expect(body.mrr).toBe(7900); // only the active monthly; the trial is 0
     expect(body.arr).toBe(94800); // 7900 × 12
+  });
+});
+
+// ===========================================================================
+// B-282 — POST /admin/users/{id}/reset-password. This op was DECLARED in the
+// contract (openapi.yaml L398-411) and never mounted, sitting between /block
+// and /unblock, which ARE mounted: the same "declared, no handler" gap as
+// /auth/forgot and /auth/reset, found by diffing every declared op against the
+// registered routes rather than by fixing only the two the slice named.
+// ===========================================================================
+describe("POST /admin/users/{id}/reset-password — B-282", () => {
+  const RESET_URL = "/api/v1/admin/users/u-other/reset-password";
+
+  // Two different reads hit `user` in this handler: loadCaller resolves the
+  // OWNER by email through request.db, and platformDb resolves the TARGET by id
+  // cross-tenant. The stub returns whole tables, so discriminate on the bound
+  // params — otherwise the target lookup silently returns the caller's own row.
+  const userRows = (isOwner: boolean) => (where: SQL | undefined) =>
+    paramsOf(where).includes("u-other") ? [otherUser("u-other")] : [caller(isOwner)];
+
+  it("is mounted (it used to 404 for everyone, owner included)", async () => {
+    const store = new FakeCredentialStore();
+    store.seed({ authUserId: "au-other", companyId: OTHER_COMPANY, email: "someone@other.co.th" });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, userRows(true)]] }),
+        credentials: store,
+      })
+    ).inject({ method: "POST", url: RESET_URL });
+    expect(res.statusCode).not.toBe(404);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("403s a tenant non-owner BEFORE any cross-tenant read or token issue", async () => {
+    const store = new FakeCredentialStore();
+    store.seed({ authUserId: "au-other", companyId: OTHER_COMPANY, email: "someone@other.co.th" });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, userRows(false)]] }),
+        credentials: store,
+      })
+    ).inject({ method: "POST", url: RESET_URL });
+    expect(res.statusCode).toBe(403);
+    expect(store.tokens.size).toBe(0);
+    expect(delivered).toHaveLength(0);
+  });
+
+  it("401s a session-less request", async () => {
+    const res = await (await buildTestApp()).inject({ method: "POST", url: RESET_URL });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("issues a token delivered ONLY to the target user, never returned to the owner", async () => {
+    const store = new FakeCredentialStore();
+    store.seed({ authUserId: "au-other", companyId: OTHER_COMPANY, email: "someone@other.co.th" });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, userRows(true)]] }),
+        credentials: store,
+      })
+    ).inject({ method: "POST", url: RESET_URL });
+
+    expect(res.statusCode).toBe(200);
+    expect(store.tokens.size).toBe(1);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.kind).toBe("admin");
+    expect(delivered[0]!.to).toBe("someone@other.co.th");
+    // The owner never sees the token or any password.
+    expect(res.body).not.toContain(delivered[0]!.token);
+    expect(res.json().password).toBeUndefined();
+    // The owner also never SETS a password — only a reset link is issued.
+    expect(store.accounts.get("au-other")!.password).toBeNull();
+  });
+
+  it("audits the AFFECTED tenant, not the owner's own company", async () => {
+    const store = new FakeCredentialStore();
+    store.seed({ authUserId: "au-other", companyId: OTHER_COMPANY, email: "someone@other.co.th" });
+    const audited: AuditRecord[] = [];
+    await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, userRows(true)]] }),
+        credentials: store,
+        auditSink: async (r) => void audited.push(r),
+      })
+    ).inject({ method: "POST", url: RESET_URL });
+
+    expect(audited).toHaveLength(1);
+    expect(audited[0]!.companyId).toBe(OTHER_COMPANY);
+  });
+
+  it("404s an unknown user without issuing anything", async () => {
+    const store = new FakeCredentialStore();
+    // A credential DOES exist for someone@other.co.th — the 404 must come from
+    // the unknown user id, not from an accidentally-empty credential store.
+    store.seed({ authUserId: "au-other", companyId: OTHER_COMPANY, email: "someone@other.co.th" });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // "ghost" matches no user row; the caller's own row still resolves.
+        db: stubDb({
+          rows: [
+            [
+              users,
+              (where: SQL | undefined) =>
+                paramsOf(where).includes("ghost") ? [] : [caller(true)],
+            ],
+          ],
+        }),
+        credentials: store,
+      })
+    ).inject({ method: "POST", url: "/api/v1/admin/users/ghost/reset-password" });
+    expect(res.statusCode).toBe(404);
+    expect(store.tokens.size).toBe(0);
+  });
+
+  it("404s a user that has no credential at all (a pre-B-282 invite)", async () => {
+    const store = new FakeCredentialStore(); // nothing seeded
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, userRows(true)]] }),
+        credentials: store,
+      })
+    ).inject({ method: "POST", url: RESET_URL });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("NOT_FOUND");
+    expect(store.tokens.size).toBe(0);
   });
 });

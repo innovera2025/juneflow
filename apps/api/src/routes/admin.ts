@@ -22,8 +22,15 @@ import {
 } from "@juneflow/db/schema";
 import type { PlatformDb } from "../db/platform-db.js";
 import type { PlatformWriteDb } from "../db/platform-write-db.js";
+import {
+  newResetToken,
+  RESET_TOKEN_TTL_MS,
+  type CredentialStore,
+  type ResetDelivery,
+} from "../auth-provisioning.js";
 import { ownerOnly } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byNewestThenId } from "./list-order.js";
 import { round2 } from "./money.js";
 import { pick, str, toNum } from "./procurement.js";
 
@@ -128,10 +135,11 @@ function num(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function byCreatedDesc(a: { createdAt: Date | null }, b: { createdAt: Date | null }): number {
-  const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  return bt - at;
+type CreatedRow = { createdAt: Date | null; id?: string };
+function byCreatedDesc(a: CreatedRow, b: CreatedRow): number {
+  // B-323: delegates to the shared TOTAL order — the local version returned 0 for
+  // any two rows sharing an instant, which left their order to the DB.
+  return byNewestThenId(a, b);
 }
 
 // --- Entity-opaque wire mappers (snake_case of the REAL columns) ------------
@@ -224,9 +232,17 @@ export function computeMrrArr(
 /** Register the owner-gated platform-admin read + write routes on the /api/v1 scope. */
 export function registerAdminRoutes(
   app: FastifyInstance,
-  deps: { platformDb: PlatformDb; platformWriteDb: PlatformWriteDb; notify: DunningNotifier },
+  deps: {
+    platformDb: PlatformDb;
+    platformWriteDb: PlatformWriteDb;
+    notify: DunningNotifier;
+    /** Credential/reset seam — B-282 (POST /admin/users/{id}/reset-password). */
+    credentials: CredentialStore;
+    /** Reset-token delivery seam (default: no-op — see auth-provisioning.ts). */
+    deliverReset: ResetDelivery;
+  },
 ): void {
-  const { platformDb, platformWriteDb, notify } = deps;
+  const { platformDb, platformWriteDb, notify, credentials, deliverReset } = deps;
 
   // GET /admin/packages — the S/M/L/Full plan catalog (global; owner-gated read).
   app.get("/admin/packages", async (request, reply) => {
@@ -315,6 +331,57 @@ export function registerAdminRoutes(
     const [user] = await platformWriteDb.updateAllTenants(users, id, { status: "active" });
     if (!user) return notFound(reply, `user ${id} not found`);
     request.auditTargetCompanyId = user.companyId;
+    return reply.code(200).send(userWire(user));
+  });
+
+  // POST /admin/users/{id}/reset-password — B-282. This op was DECLARED in the
+  // contract (openapi.yaml L398-411) and never mounted, sitting between its two
+  // mounted siblings above: the same "declared but no handler" gap as
+  // /auth/forgot and /auth/reset, and the same fix. It issues a reset token for
+  // a subscriber's user and hands it to the delivery seam.
+  //
+  // The owner never sees, sets, or receives the password: no plaintext is
+  // generated here, the token is delivered ONLY to the target user's own stored
+  // address, and the 200 body is the user row — never the token.
+  app.post("/admin/users/:id/reset-password", async (request, reply) => {
+    const caller = await ownerOnly(request, reply);
+    if (!caller) return;
+    const id = (request.params as { id?: string }).id ?? "";
+    const [user] = (await platformDb.selectAllTenants(
+      users,
+      eq(users.id, id),
+    )) as UserRow[];
+    if (!user) return notFound(reply, `user ${id} not found`);
+    request.auditTargetCompanyId = user.companyId; // audit the affected tenant
+
+    // NOT canonicalized, deliberately — the canonicalization sweep stops at the
+    // boundary between client input and stored data. Both sides of this lookup
+    // are STORED (a dictionary user.email keyed into auth_user.email), and every
+    // path that writes them writes both from ONE canonical string (POST /users)
+    // or one lowercase literal (the seed), so they cannot disagree. Rewriting
+    // one stored key on its way into the other would be strictly WRONG for a
+    // pair that is consistently mixed-case, and would defend only a state that
+    // cannot arise. See canonicalEmail's contract.
+    const account = await credentials.findByEmail(user.email);
+    // No credential row = nothing to reset (a pre-B-282 user invited before this
+    // slice). Say so plainly — this surface is owner-only, so there is no
+    // enumeration concern, and silently answering 200 would hide real breakage.
+    if (!account) {
+      return notFound(reply, `user ${id} has no credential to reset`);
+    }
+
+    const { token, hash } = newResetToken();
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+    await credentials.issueResetToken(account.authUserId, hash, expiresAt);
+    try {
+      await deliverReset({ to: account.email, token, kind: "admin", expiresAt });
+    } catch (err) {
+      request.log.error(
+        { kind: "admin", error: (err as { name?: string })?.name },
+        "password-reset delivery failed",
+      );
+    }
+
     return reply.code(200).send(userWire(user));
   });
 

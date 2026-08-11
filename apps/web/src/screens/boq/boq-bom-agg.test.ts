@@ -2,15 +2,26 @@
  * Unit tests for boq-bom-agg.ts (P2-WEB-05, gate G3) — the pure BOM-line aggregation
  * that backs the BOM Templates screen. Covers line-amount, per-house total, per-category
  * total, whole-percent share (incl. the empty/zero guards), the M/S/L grouping order,
- * the opaque jsonb parse, and the millions formatter.
+ * the opaque jsonb parse, the block value, the drop-reporting payload parse + money gate
+ * (B-272), and the millions formatter.
+ *
+ * SCOPE — these are PURE-MODULE tests: they prove the derivations are correct for a given
+ * BomLine[], and nothing about the screen. They stay green whether or not boq-bom.tsx
+ * actually calls the endpoint (a re-emptied screen leaves every one of them passing), so
+ * the component<->hook seam is covered separately in boq-bom.test.tsx. The wire-shape block
+ * below pins the served row shape, so a field rename breaks a test here instead of silently
+ * parsing to nothing.
  */
 import { describe, it, expect } from "vitest";
 import {
   BOM_CAT_ORDER,
   parseBomLine,
   parseBomLines,
+  parseBomPayload,
+  totalsPublishable,
   lineAmount,
   bomTotal,
+  bomBlockValue,
   bomCatTotal,
   bomCatPct,
   groupByCat,
@@ -132,6 +143,134 @@ describe("parseBomLines", () => {
   it("returns [] for non-array input", () => {
     expect(parseBomLines(undefined)).toEqual([]);
     expect(parseBomLines({})).toEqual([]);
+  });
+});
+
+/*
+ * B-272 — `boms.items` is unconstrained jsonb, so a served row can carry a `cat` outside
+ * M/S/L. parseBomLines DROPS it, which would leave every cross-line sum short by that row's
+ * qty x price while the server's bom_item_count still counts it. parseBomPayload reports the
+ * drop and totalsPublishable() is the gate the view uses before printing any such sum.
+ */
+describe("parseBomPayload", () => {
+  it("reports served == parsed when every row carries a valid category", () => {
+    const p = parseBomPayload([
+      { cat: "M", qty: 1, price: 10 },
+      { cat: "L", qty: 2, price: 5 },
+    ]);
+    expect(p.served).toBe(2);
+    expect(p.lines).toHaveLength(2);
+    expect(p.dropped).toBe(0);
+  });
+
+  it("counts a row it could not categorise as dropped (money the sums would miss)", () => {
+    const p = parseBomPayload([
+      { cat: "M", qty: 1, price: 10 },
+      { cat: "E", qty: 10, price: 5000 }, // real qty x price, no readable category
+      { cat: null, qty: 3, price: 7 },
+    ]);
+    expect(p.served).toBe(3);
+    expect(p.lines).toHaveLength(1);
+    expect(p.dropped).toBe(2);
+  });
+
+  it("counts a non-object element as a dropped row too", () => {
+    const p = parseBomPayload(["nope", { cat: "S", qty: 1, price: 1 }]);
+    expect(p).toMatchObject({ served: 2, dropped: 1 });
+  });
+
+  it("is an empty, drop-free payload for a non-array / empty response", () => {
+    expect(parseBomPayload([])).toEqual({ lines: [], served: 0, dropped: 0 });
+    expect(parseBomPayload(undefined)).toEqual({ lines: [], served: 0, dropped: 0 });
+  });
+});
+
+describe("totalsPublishable", () => {
+  it("is true only when at least one line parsed and nothing was dropped", () => {
+    expect(totalsPublishable(parseBomPayload([{ cat: "M", qty: 1, price: 10 }]))).toBe(true);
+  });
+
+  it("is false when a served row was dropped — the sum would be short", () => {
+    const p = parseBomPayload([
+      { cat: "M", qty: 1, price: 10 },
+      { cat: "E", qty: 10, price: 5000 },
+    ]);
+    // The derivable total (10) EXCLUDES the dropped 50,000 — it must not be published.
+    expect(bomTotal(p.lines)).toBe(10);
+    expect(totalsPublishable(p)).toBe(false);
+  });
+
+  it("is false for an empty payload (nothing to total)", () => {
+    expect(totalsPublishable(parseBomPayload([]))).toBe(false);
+  });
+});
+
+describe("bomBlockValue", () => {
+  it("multiplies the per-house total by the block's unit count", () => {
+    expect(bomBlockValue(sample, 84)).toBe(700 * 84);
+  });
+  it("is 0 for a non-positive / non-finite unit count (never NaN)", () => {
+    expect(bomBlockValue(sample, 0)).toBe(0);
+    expect(bomBlockValue(sample, -3)).toBe(0);
+    expect(bomBlockValue(sample, Number.NaN)).toBe(0);
+  });
+  it("is 0 when there are no lines", () => {
+    expect(bomBlockValue([], 84)).toBe(0);
+  });
+});
+
+/*
+ * The REAL GET /models/{id}/bom payload — the `data` rows are the boms.items elements
+ * verbatim, as asserted by apps/api/src/routes/models.test.ts ("returns the model's BOM
+ * template lines (keyed by unit_type = code)": `expect(body.data).toEqual(lines)`) and as
+ * seeded in packages/db/src/seed/index.ts BOM_LINES_B1. This fixture is that shape (a
+ * three-line excerpt of the B-1 seed; the non-Latin name/detail/unit text is replaced with
+ * ASCII so this .ts stays ASCII-only per the port rules — only the FIELD NAMES, the
+ * category codes and the numbers are load-bearing here).
+ */
+const wirePayload = [
+  { cat: "M", code: "01-001", name: "bored pile", detail: "21m deep", unit: "each", qty: 18, price: 4200 },
+  { cat: "S", code: "S-01", name: "structure subcontract", detail: "lump sum", unit: "lot", qty: 1, price: 420000 },
+  { cat: "L", code: "L-01", name: "masonry labour", detail: "whole house", unit: "sqm", qty: 720, price: 220 },
+];
+
+describe("the GET /models/{id}/bom wire shape", () => {
+  it("parses the served row shape without dropping a line", () => {
+    const lines = parseBomLines(wirePayload);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toEqual({
+      cat: "M",
+      code: "01-001",
+      name: "bored pile",
+      detail: "21m deep",
+      unit: "each",
+      qty: 18,
+      price: 4200,
+    });
+  });
+
+  it("derives the per-row, per-category and per-house figures off it", () => {
+    const lines = parseBomLines(wirePayload);
+    expect(lineAmount(lines[0]!)).toBe(75_600); // 18 x 4200
+    expect(bomCatTotal(lines, "M")).toBe(75_600);
+    expect(bomCatTotal(lines, "S")).toBe(420_000);
+    expect(bomCatTotal(lines, "L")).toBe(158_400); // 720 x 220
+    expect(bomTotal(lines)).toBe(654_000);
+    expect(millions2(bomTotal(lines))).toBe("0.65");
+    expect(bomCatPct(lines, "S")).toBe(64); // 420000/654000 = 64.2 -> 64
+    expect(bomBlockValue(lines, 84)).toBe(54_936_000);
+  });
+
+  it("renders the M/S/L bands in prototype order off it", () => {
+    expect(groupByCat(parseBomLines(wirePayload)).map((g) => g.cat)).toEqual(["M", "S", "L"]);
+  });
+
+  it("treats the empty-BOM response as no lines (view em-dashes, never a fabricated 0 row)", () => {
+    // models.ts returns `data: []` for a model whose code matches no bom row.
+    const lines = parseBomLines([]);
+    expect(lines).toEqual([]);
+    expect(groupByCat(lines)).toEqual([]);
+    expect(bomTotal(lines)).toBe(0);
   });
 });
 

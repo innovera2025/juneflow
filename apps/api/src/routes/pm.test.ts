@@ -250,6 +250,43 @@ describe("GET /api/v1/pm/assets", () => {
     expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
   });
 
+  // B-323: /pm/assets is a 2-hop selectThrough. Proven live — with the sort removed,
+  // forcing a merge join produced a 16-row scramble on the seeded stack, and
+  // pm-assets is the single largest baseline this round moves (18,115 px).
+  it("emits a TOTAL order — the same list whatever order the join plan returns", async () => {
+    const at = (iso: string): Date => new Date(iso);
+    const rows = ["a1", "a2", "a3", "a4"].map((id, i) => ({
+      ...assetRow({ id, code: `LIFT-${id}` }),
+      createdAt: at(`2026-07-20T08:59:5${9 - i}Z`),
+    }));
+    const listIds = async (r: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[pmAssets, r]] }) })
+      ).inject({ url: "/api/v1/pm/assets" });
+      return res.json().data.map((x: { id: string }) => x.id);
+    };
+    const expected = ["a1", "a2", "a3", "a4"];
+    expect(await listIds(rows)).toEqual(expected);
+    expect(await listIds([rows[2]!, rows[0]!, rows[3]!, rows[1]!])).toEqual(expected);
+    expect(await listIds([...rows].reverse())).toEqual(expected);
+  });
+
+  it("breaks a same-instant tie on id — every asset registered in one batch ties", async () => {
+    const same = new Date("2026-07-20T09:00:00Z");
+    const rows = [
+      { ...assetRow({ id: "zz" }), createdAt: same },
+      { ...assetRow({ id: "aa" }), createdAt: same },
+    ];
+    const listIds = async (r: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[pmAssets, r]] }) })
+      ).inject({ url: "/api/v1/pm/assets" });
+      return res.json().data.map((x: { id: string }) => x.id);
+    };
+    expect(await listIds(rows)).toEqual(["aa", "zz"]);
+    expect(await listIds([...rows].reverse())).toEqual(["aa", "zz"]);
+  });
+
   it("wraps assets in the B-014 envelope with the real-column wire shape", async () => {
     const res = await (
       await buildTestApp({

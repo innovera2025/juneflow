@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { projects, projectNodes, projectTypes } from "@juneflow/db";
+import { projects, projectNodes, projectTypes, salesUnits } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import {
@@ -145,6 +145,63 @@ const PT_REALESTATE = {
 // tenant-owned project).
 const OWNED_PROJECT = { id: "new-0", companyId: COMPANY, name: "x" };
 
+// ---------------------------------------------------------------------------
+// GET /projects — list order (B-323)
+// ---------------------------------------------------------------------------
+describe("GET /api/v1/projects — deterministic order", () => {
+  const SESSION_OK = { companyId: COMPANY, user: { id: "au-0", email: "e", name: "n" } };
+  const proj = (id: string, name: string, createdAt: Date) => ({
+    id,
+    companyId: COMPANY,
+    typeId: PT_REALESTATE.id,
+    name,
+    short: name,
+    color: null,
+    status: "active",
+    currencyCode: "THB",
+    budget: "1.00",
+    createdAt,
+    updatedAt: createdAt,
+  });
+
+  // This list is the one master list in the round that is deliberately NOT
+  // newest-first, so the DIRECTION is the property under test, not just "is it
+  // sorted". `project` sits in the seed's ASCENDING_STAGGER_TABLES because the app
+  // anchors on the OLDEST project as the primary one — dashboard.ts
+  // resolvePrimaryProject sorts created_at ASC and takes [0] to find the hero project
+  // (`project:rjp`, seed index 0). A newest-first list would render against its own
+  // anchor: the project the dashboard calls primary would sit at the BOTTOM.
+  it("orders ASCENDING (oldest first), matching the primary-project anchor", async () => {
+    const at = (iso: string): Date => new Date(iso);
+    const rows = [
+      proj("p-rjp", "ราชพฤกษ์", at("2026-07-20T08:59:57Z")),   // hero — seed index 0
+      proj("p-2", "นนทบุรี", at("2026-07-20T08:59:58Z")),
+      proj("p-3", "ภูเก็ต", at("2026-07-20T08:59:59Z")),
+      proj("p-4", "สยาม", at("2026-07-20T09:00:00Z")),
+    ];
+    const listIds = async (r: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION_OK,
+          db: stubDb([
+            [projects, r],
+            [projectTypes, [PT_REALESTATE]],
+            [projectNodes, []],
+            [salesUnits, []],
+          ]),
+        })
+      ).inject({ url: "/api/v1/projects" });
+      return res.json().data.map((x: { id: string }) => x.id);
+    };
+    const expected = ["p-rjp", "p-2", "p-3", "p-4"];
+    expect(await listIds(rows)).toEqual(expected);
+    expect(await listIds([rows[2]!, rows[0]!, rows[3]!, rows[1]!])).toEqual(expected);
+    // the DIRECTION guard: a reversed read must NOT come back reversed, and the hero
+    // project must not end up last.
+    expect(await listIds([...rows].reverse())).toEqual(expected);
+  });
+});
+
 describe("POST /api/v1/projects — auth", () => {
   it("401s flat without a session (fail closed)", async () => {
     const res = await (await buildTestApp()).inject({
@@ -264,6 +321,15 @@ describe("POST /api/v1/projects — first phase materialized as project_node row
     const unitRows = nodeRows.filter((n) => n.kind === "unit");
     expect(phaseRows).toHaveLength(1);
     expect(unitRows).toHaveLength(3);
+
+    // B-323: the whole phase→unit ladder is ONE insertThrough = one now(). project_node
+    // has no `seq` and dashboard.ts reads it with entryOrder, so an unstamped batch
+    // renders the new project's phase ladder in `defaultRandom()` uuid order.
+    const times = (nodeRows as { createdAt?: Date }[]).map((n) => n.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(nodeRows.length);
+    for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!);
+
     // the phase is a root node (no parent) named after the wizard's label.
     expect(phaseRows[0]!.name).toBe("เฟส 1");
     expect(phaseRows[0]!.parentId).toBeNull();

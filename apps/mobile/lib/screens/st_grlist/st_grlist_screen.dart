@@ -30,6 +30,7 @@ import '../../app/app_services.dart';
 import '../../i18n/i18n.dart';
 import '../../theme/juneflow_theme.dart';
 import '../../widgets/mobile_header.dart';
+import '../st_receive/st_receive_screen.dart';
 import 'st_grlist_agg.dart';
 import 'st_grlist_repository.dart';
 
@@ -69,8 +70,22 @@ class _StGrListScreenHostState extends State<StGrListScreenHost> {
           repo: DioStGrListRepository(services.dio),
           strings: strings,
           i18n: services.i18n,
-          // No forward-navigation seam yet → the receive flow is not wired
-          // (honest no-op affordance; never a fabricated destination).
+          // st-receive is built, so the affordance now NAVIGATES (it was an
+          // honest no-op while the destination did not exist). The push carries
+          // the REAL po id the receipt anchors on, plus the PO number and the
+          // resolved vendor name this row already holds — so the receive header
+          // shows real data without re-fetching it.
+          onOpenReceive: (StGrRow row) {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (BuildContext _) => StReceiveScreenHost(
+                  poId: row.id,
+                  poNo: row.no.isEmpty ? null : row.no,
+                  vendorName: row.vendorName,
+                ),
+              ),
+            );
+          },
         );
       },
     );

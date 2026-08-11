@@ -527,6 +527,91 @@ describe("GET /api/v1/boq/:id/items — list + group filter", () => {
     );
   });
 
+  // B-323: a BOQ's items are its document LINES, not a document list. They render as
+  // the ordered body of one doc, so they read ENTRY order (created_at ASC) — the exact
+  // opposite direction to every list endpoint. Asserting a newest-first order here
+  // would pass a fix that prints the priced lines bottom-to-top.
+  //
+  // boq_item has no `seq` column, so entry order lives only in created_at; POST
+  // /boq/:id/items stamps the batch apart (stampEntryOrder) to record it.
+  //
+  // NOTE what this first test does NOT prove. It hands the reader four DISTINCT
+  // timestamps — the seed's stagger in miniature — so it passes whether or not the
+  // WRITE path stamps. A reader is only exercised against the real defect by rows that
+  // actually TIE, which is what the two tests after it do (mirroring gr.test.ts).
+  it("renders the doc's LINES in entry order — ascending, whatever the join plan returns", async () => {
+    const at = (iso: string): Date => new Date(iso);
+    const lines = ["i0", "i1", "i2", "i3"].map((id, i) => ({
+      ...item(id, "g0", "M", "1", "1.00"),
+      createdAt: at(`2026-07-20T09:00:00.00${i}Z`),
+    }));
+    const listIds = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "approved")]], [boqItems, rows]] }),
+        })
+      ).inject({ url: "/api/v1/boq/d0/items" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    const expected = ["i0", "i1", "i2", "i3"];
+    expect(await listIds(lines)).toEqual(expected);
+    expect(await listIds([lines[2]!, lines[0]!, lines[3]!, lines[1]!])).toEqual(expected);
+    // the direction guard: reversed input must NOT come back reversed
+    expect(await listIds([...lines].reverse())).toEqual(expected);
+  });
+
+  it("RECOVERS entry order from a stamped batch even when uuid order is its REVERSE", async () => {
+    // The uuids are chosen so that sorting by id yields the exact opposite of entry
+    // order, and the read hands the rows back in a third, scrambled order. Only
+    // created_at can produce the right answer — which is why the write path must
+    // stamp it. Without the stamp these three would tie and the uuid would decide.
+    const t0 = new Date("2026-07-20T09:00:00.000Z").getTime();
+    const written = [
+      { ...item("ffff-cement", "g0", "M", "1", "1.00"), createdAt: new Date(t0) },
+      { ...item("7777-steel", "g0", "M", "2", "1.00"), createdAt: new Date(t0 + 1) },
+      { ...item("0000-sand", "g0", "M", "3", "1.00"), createdAt: new Date(t0 + 2) },
+    ];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [doc("d0", "N", "approved")]],
+            [boqItems, [written[2]!, written[0]!, written[1]!]],
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/boq/d0/items" });
+    const ids = res.json().data.map((r: { id: string }) => r.id);
+    expect(ids).toEqual(["ffff-cement", "7777-steel", "0000-sand"]);
+    // Asserted as a FOIL: if entryOrder ever degrades to the id tiebreak, the result
+    // becomes this instead, so the test cannot pass by accident.
+    expect([...ids].sort()).toEqual(["0000-sand", "7777-steel", "ffff-cement"]);
+  });
+
+  it("a doc whose lines DID tie (written before the stamp) still renders deterministically", async () => {
+    // Rows already in the database carry the old tied timestamps and cannot be
+    // repaired. entryOrder must still be TOTAL over them — deterministically wrong
+    // beats nondeterministic, because the visual gate can at least hold the line.
+    const tied = new Date("2026-07-20T09:00:00.000Z");
+    const legacy = [
+      { ...item("ffff-cement", "g0", "M", "1", "1.00"), createdAt: tied },
+      { ...item("0000-sand", "g0", "M", "3", "1.00"), createdAt: tied },
+    ];
+    const listIds = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[boqDocs, [doc("d0", "N", "approved")]], [boqItems, rows]] }),
+        })
+      ).inject({ url: "/api/v1/boq/d0/items" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // Both join-plan orders must agree — that is what "total" means.
+    expect(await listIds(legacy)).toEqual(await listIds([...legacy].reverse()));
+  });
+
   it("?group binds the group id into the scoped item read", async () => {
     const captured: Captured[] = [];
     await (
@@ -578,6 +663,55 @@ describe("POST /api/v1/boq/:id/items — bulk add", () => {
     // the write landed on the boq_item table.
     const write = inserted.find((w) => w.table === boqItems);
     expect(write).toBeTruthy();
+  });
+
+  // B-323 — the WRITE half. This is the test whose absence let the defect ship: the
+  // read-side test above hands the reader distinct timestamps, so it passes with or
+  // without a stamp. insertThrough is ONE `.insert().values(rows)` — one statement,
+  // one now() — so an unstamped bulk add gives every line the SAME created_at, the ASC
+  // reader falls through to the `defaultRandom()` uuid, and the priced body of the BOQ
+  // renders in uuid order, stably wrong forever. Assert the batch is spaced apart.
+  it("stamps a bulk add apart so its ENTRY ORDER is recorded, not inferred", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [doc("d0", "N", "draft")]],
+            [boqGroups, [group("g0", "d0", "02", 1)]],
+            [projects, [project]],
+            [boqItems, []],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/items",
+      payload: {
+        items: [
+          { group_id: "g0", code: "M-1", name: "ปูน", cat: "M", qty: 1, price: 100 },
+          { group_id: "g0", code: "M-2", name: "เหล็ก", cat: "M", qty: 2, price: 100 },
+          { group_id: "g0", code: "M-3", name: "ทราย", cat: "M", qty: 3, price: 100 },
+          { group_id: "g0", code: "M-4", name: "หิน", cat: "M", qty: 4, price: 100 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const rows = inserted.find((w) => w.table === boqItems)!.rows as {
+      code: string;
+      createdAt?: Date;
+    }[];
+    // body order is preserved …
+    expect(rows.map((r) => r.code)).toEqual(["M-1", "M-2", "M-3", "M-4"]);
+    // … and each line carries a DISTINCT, strictly increasing instant. Without the
+    // stamp every createdAt here is `undefined` (the column default fires server-side
+    // and ties them all), so both assertions below fail.
+    const times = rows.map((r) => r.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(4);
+    for (let i = 1; i < times.length; i++) expect(times[i]!).toBeGreaterThan(times[i - 1]!);
   });
 
   it("accepts a bare items[] array body too", async () => {

@@ -1,0 +1,2 @@
+ALTER TABLE "ap_deposit" ADD COLUMN "idempotency_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "ap_deposit_idempotency_uq" ON "ap_deposit" USING btree ("idempotency_key") WHERE "ap_deposit"."idempotency_key" IS NOT NULL;

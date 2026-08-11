@@ -1,0 +1,5 @@
+### the raw PO chain (selectThrough's SQL, no ORDER BY) under two planner configs
+--- default
+PO-2026-0291 PO-2026-0290 PO-2026-0289 PO-2026-0288 PO-2026-0287 PO-2026-0286 
+--- enable_mergejoin only
+PO-2026-0287 PO-2026-0291 PO-2026-0286 PO-2026-0288 PO-2026-0290 PO-2026-0289 

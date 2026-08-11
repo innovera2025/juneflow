@@ -23,6 +23,7 @@ import { and, eq } from "drizzle-orm";
 import { opexBudgets } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byIdAsc } from "./list-order.js";
 import { isUniqueViolation } from "./gl-post.js";
 import { pick, str, toNum } from "./procurement.js";
 
@@ -59,7 +60,15 @@ async function listBudgets(
   const rows = (await db.select(opexBudgets)) as OpexBudgetRow[];
   const filtered = year != null ? rows.filter((r) => r.year === year) : rows;
   return [...filtered]
-    .sort((a, b) => a.year - b.year || (a.dept < b.dept ? -1 : a.dept > b.dept ? 1 : 0))
+    // B-323: (dept, year) IS unique per company (opex_budget_company_dept_year_uq), so
+    // this could have been exempted — but an id floor needs no claim at all, and costs
+    // one token. Prefer the floor over the argument wherever the rows carry an id.
+    .sort(
+      (a, b) =>
+        a.year - b.year ||
+        (a.dept < b.dept ? -1 : a.dept > b.dept ? 1 : 0) ||
+        byIdAsc(a, b),
+    )
     .map(budgetWire);
 }
 

@@ -68,15 +68,29 @@
 // materials-cost = value, source_doc `issue:<id>`, carrying the issue's project_id
 // (and a single distinct cc_id, when present) on both legs. 1140 + 5020 are real
 // COA_SEED codes (resolved per-tenant at post time — never invented, C-177; a
-// missing code → honest 409). The JV posts EXACTLY ONCE at create (the issue id is
-// fresh), so there is no idempotency pre-check to make.
+// missing code → honest 409).
+//
+// ISSUE IDEMPOTENCY (B-312 · migration 0059) — this comment used to read "the JV
+// posts EXACTLY ONCE at create (the issue id is fresh), so there is no idempotency
+// pre-check to make". That reasoning was BACKWARDS and is now deleted: a fresh id
+// per request is precisely why a REPLAY is unprotected. apps/mobile's offline
+// SyncProcessor retries at-least-once, so a create it never heard back on is
+// re-sent → a NEW issue row → a NEW `issue:<new id>` source_doc → jv_source_doc_uq
+// (whose predicate does not even list `issue:`) cannot see it → TWO clean balanced
+// JVs for ONE physical issue, and the stock ledger decremented TWICE. Proven live:
+// two identical posts of 100 bags → MI-2026-0001 + MI-2026-0002, JV-2026-0419 +
+// JV-2026-0420, Σ Dr 1140 = 2 × value, on-hand 800 instead of 900. The fix is the
+// ratified B-261/B-307 template: a CLIENT idempotency_key + a PARTIAL unique index
+// + a 23505 catch that returns the ORIGINAL. It is a CLIENT key (not B-308's
+// natural key) because (project_id, from_warehouse_id, issue_date, value) is
+// legitimately repeatable AND four of those five columns are nullable.
 //   ⚠ ORCHESTRATOR-FLAG (Wei-ratify, do NOT block): the prototype draft's
 //     "Cr inventory asset" leg has NO dedicated COA account in COA_SEED. Cr 5020
 //     materials-cost (reclassify the GR-expensed material pool into project WIP) is
 //     the coherent existing-account choice; stated here so a ratify blocker is filed.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   inventoryItems,
   issueLines,
@@ -91,10 +105,21 @@ import {
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
-import { pick, str, toNum } from "./procurement.js";
+import { pick, readIdempotencyKey, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed, type CallerAuthz } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
-import { ACCT, allocJvNo, resolveAccountIds } from "./gl-post.js";
+import { entryOrder, newestFirst, stampEntryOrder } from "./list-order.js";
+import { inLockOrder } from "./lock-order.js";
+import {
+  ACCT,
+  allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
+  isUniqueViolation,
+  resolveAccountIds,
+  violatedConstraint,
+  withDocNoRetry,
+} from "./gl-post.js";
 
 type InventoryItemRow = typeof inventoryItems.$inferSelect;
 type WarehouseRow = typeof warehouses.$inferSelect;
@@ -104,6 +129,7 @@ type StockLedgerRow = typeof stockLedgers.$inferSelect;
 type TransferLineRow = typeof transferLines.$inferSelect;
 type IssueLineRow = typeof issueLines.$inferSelect;
 type ProjectRow = typeof projects.$inferSelect;
+type JvRow = typeof jvs.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -119,6 +145,16 @@ const FINANCE_MODULE = "finance";
  * COA lacks it → honest 409 (C-177).
  */
 const WIP_MATERIAL = "1140";
+
+/** The partial unique index the B-312 replay branch gates on BY NAME (B-263). */
+const ISSUE_IDEMPOTENCY_CONSTRAINT = "material_issue_idempotency_uq";
+
+/**
+ * issue_line carries NO company_id — it is scoped THROUGH its material_issue parent
+ * (which does). One shared hop chain so the read path (getIssue) and the B-312
+ * replay sender cannot drift on how a line is tenant-scoped.
+ */
+const ISSUE_LINE_HOPS = [{ fk: issueLines.issueId, parent: materialIssues }];
 
 // ---------------------------------------------------------------------------
 // Reply helpers (flat contract Error shape {code,message})
@@ -172,17 +208,6 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Epoch ms of a stored timestamp/date, else 0 (a malformed value sorts last). */
-function msOf(ts: unknown): number {
-  if (ts == null) return 0;
-  const t = new Date(ts as string | Date).getTime();
-  return Number.isFinite(t) ? t : 0;
-}
-
-/** Sort a set of rows carrying `createdAt` newest-first (mock list order). */
-function newestFirst<T extends { createdAt?: unknown }>(rows: readonly T[]): T[] {
-  return [...rows].sort((a, b) => msOf(b.createdAt) - msOf(a.createdAt));
-}
 
 /** The on-hand rollup key for a (item, warehouse) pair. */
 function balanceKey(itemId: string, warehouseId: string): string {
@@ -552,7 +577,11 @@ async function getTransfer(
       transfer.fromWarehouseId ? whName.get(transfer.fromWarehouseId) ?? null : null,
       transfer.toWarehouseId ? whName.get(transfer.toWarehouseId) ?? null : null,
     ),
-    lines: lines.map(transferLineWire),
+    // B-323: a transfer's lines are its ordered BODY, not a list — entryOrder
+    // (created_at ASC), matching the stamp POST /inventory/transfers applies.
+    // selectThrough emits INNER JOINs with no ORDER BY, so the raw order is a
+    // join-plan artefact.
+    lines: entryOrder(lines).map(transferLineWire),
   });
 }
 
@@ -583,7 +612,7 @@ async function getIssue(
     // issue_line carries no company_id — scoped THROUGH material_issue.
     db.selectThrough(
       issueLines,
-      [{ fk: issueLines.issueId, parent: materialIssues }],
+      ISSUE_LINE_HOPS,
       eq(materialIssues.id, issueId),
     ) as Promise<IssueLineRow[]>,
     db.select(projects) as Promise<ProjectRow[]>,
@@ -591,7 +620,9 @@ async function getIssue(
   const projectName = new Map(projectRows.map((p) => [p.id, p.name]));
   return reply.code(200).send({
     ...issueWire(issue, issue.projectId ? projectName.get(issue.projectId) ?? null : null),
-    lines: lines.map(issueLineWire),
+    // B-323: an issue's lines are its ordered BODY — entryOrder (created_at ASC),
+    // matching the stamp POST /inventory/issues applies.
+    lines: entryOrder(lines).map(issueLineWire),
   });
 }
 
@@ -796,17 +827,37 @@ async function createTransfer(
         status: "pending",
       })
       .returning()) as StockTransferRow[];
+    // ONE ARRAY, TWO CONSUMERS — and the composition order below is load-bearing.
+    //
+    // B-323 (stampEntryOrder): transfer_line is a no-`seq` LINE table read back as the
+    // ordered body of one transfer (GET /inventory/transfers/{id} renders
+    // entryOrder(lines), i.e. created_at ASC). One insertThrough = one INSERT = one
+    // now() = every line tied, so the batch is stamped 1 ms apart to RECORD entry order.
+    //
+    // B-340 (inLockOrder): `transfer_line.item_id` is an FK, so this INSERT also takes an
+    // implicit `FOR KEY SHARE` on each inventory_item — in ROW ORDER, which is CLIENT
+    // order — and that conflicts with the `FOR UPDATE` approveTransfer and createIssue
+    // take below. Body order deadlocked 16 of 48 requests across 6 of 6 rounds against
+    // concurrent issues (measured at 039bfcb; PG 40P01 -> uncaught -> 500 -> the phone's
+    // offline drain wedges). See lock-order.ts.
+    //
+    // STAMP FIRST, THEN SORT. Composed the other way round the stamp would follow the
+    // LOCK order, and every transfer detail screen would silently render its lines in
+    // item-id order instead of the order the storekeeper typed them. Stamping first ties
+    // each line's created_at to its BODY position, so reordering for the insert moves the
+    // locks without moving the body — gr.ts needed no such care because its stamped rows
+    // (gr_item) and its sorted rows (stock_ledger) are two separate arrays.
     await tx.insertThrough(
       transferLines,
       stockTransfers,
       transferId,
-      lines.map((l) => ({
+      inLockOrder(stampEntryOrder(lines.map((l) => ({
         transferId,
         itemId: l.itemId,
         qty: qtyStr(l.qty),
         fromWh: fromWarehouseId,
         toWh: toWarehouseId,
-      })),
+      })))),
     );
     return header!;
   });
@@ -865,6 +916,26 @@ async function approveTransfer(
 
   try {
     await db.transaction(async (tx) => {
+      // B-342: TAKE THE ROW LOCKS FIRST — before the ledger read, as the first
+      // statement in the transaction. Without this the guard below is a pure TOCTOU:
+      // measured live at 2f42244, 2 SEPARATE PROCESSES each approving a transfer of
+      // the whole balance answered [200,200] with a source balance of −100 in 5 of 6
+      // rounds.
+      //
+      // THIS PATH — NOT THE ISSUE PATH — IS THE ONE THAT WAS ACTUALLY EXPOSED. B-339
+      // item 2 named the issue guard, but a transfer posts NO JV ("an internal
+      // relocation touches no P&L"), so nothing serialises it, whereas the issue path
+      // turned out to be protected BY ACCIDENT (see the note at createIssue's lock).
+      // An accidental guard on one path is not a reason to leave the other unlocked.
+      const itemIds = [...new Set(lines.map((l) => l.itemId))];
+      const locked = await tx.selectForUpdate(
+        inventoryItems,
+        inArray(inventoryItems.id, itemIds),
+      );
+      if (locked.length !== itemIds.length) {
+        // An item vanished between the line read and the lock, or is not ours.
+        throw new NegativeStockError("a transferred item no longer exists in this tenant");
+      }
       // Read the ledger INSIDE the tx so the guard is consistent with the writes.
       const ledgers = (await tx.select(stockLedgers)) as StockLedgerRow[];
       const running = onHandByItemWarehouse(ledgers);
@@ -928,6 +999,134 @@ async function approveTransfer(
   return reply.code(200).send({ id: transferId, status: "approved" });
 }
 
+// ---------------------------------------------------------------------------
+// POST /inventory/issues — B-312 idempotency (client key + partial index + replay)
+// ---------------------------------------------------------------------------
+
+/** A create/replay line as the 201 body reports it (client shape, no row id). */
+interface IssueEnvelopeLine {
+  itemId: string;
+  qty: number;
+  ccId: string | null;
+}
+
+/**
+ * The 201 create/replay body: the issue header wire + the posted `jv_no` + the
+ * per-line detail. Shared by the FRESH create AND the B-312 replay so a replayed
+ * POST is byte-identical to the original BY CONSTRUCTION rather than by two
+ * hand-built shapes happening to agree today (the grCreateEnvelope precedent).
+ * `value` is re-derived from the PERSISTED column on both paths — never recomputed
+ * on a replay, so a later price change cannot make the replay disagree with the
+ * original. Key ORDER is the spread's: `value` keeps issueWire's slot.
+ */
+function issueCreateEnvelope(
+  issue: MaterialIssueRow,
+  projectName: string | null,
+  jvNo: string | null,
+  lines: readonly IssueEnvelopeLine[],
+): Record<string, unknown> {
+  return {
+    ...issueWire(issue, projectName),
+    jv_no: jvNo,
+    value: num(issue.value),
+    lines: lines.map((l) => ({ item_id: l.itemId, qty: l.qty, cc_id: l.ccId })),
+  };
+}
+
+/**
+ * Resolve the ORIGINAL material issue behind a client idempotency_key. THREE
+ * filters, ALL load-bearing:
+ *   - the TENANT scope — `material_issue` carries company_id directly, so it is a
+ *     plain TenantTable and db.select() AND-binds company_id by construction (ZERO
+ *     hops, the attendance shape — unlike gr, which has no company_id and must walk
+ *     po/wo → pr → project). Without it a key-only lookup could resolve ANOTHER
+ *     company's issue: material_issue_idempotency_uq is a GLOBAL partial index on
+ *     the key alone, so a cross-tenant key clash is physically possible;
+ *   - the ANCHOR project_id — the same key replayed against a DIFFERENT project must
+ *     never hand back the first project's issue (that would confirm a material
+ *     withdrawal the second project never received, and hide the one it did);
+ *   - the ANCHOR from_warehouse_id — likewise a key reused against another warehouse
+ *     must not confirm a decrement that warehouse never took.
+ * A non-matching anchor deliberately resolves to null: the caller falls through to
+ * the insert, trips the global index, and the catch answers the honest 409
+ * "idempotency_key already used". Handing back someone else's document is worse than
+ * a 409. Used by the PRE-CHECK, the 23505 catch AND the negative-stock catch — ONE
+ * resolver, so the three paths can never diverge on what counts as "the client's own
+ * issue".
+ */
+async function findIssueByIdempotencyKey(
+  db: TenantDb,
+  args: { idempotencyKey: string; projectId: string; fromWarehouseId: string },
+): Promise<MaterialIssueRow | null> {
+  const { idempotencyKey, projectId, fromWarehouseId } = args;
+  const [existing] = (await db.select(
+    materialIssues,
+    and(
+      eq(materialIssues.idempotencyKey, idempotencyKey),
+      eq(materialIssues.projectId, projectId),
+      eq(materialIssues.fromWarehouseId, fromWarehouseId),
+    ),
+  )) as MaterialIssueRow[];
+  return existing ?? null;
+}
+
+/**
+ * Rebuild and send the 201 create envelope for an ALREADY-PERSISTED issue — same id,
+ * same server `no`, money and lines RE-READ not recomputed, and critically NO second
+ * write of any kind: no stock_ledger row, no JV, no issue_line. The `jv_no` comes
+ * from the ORIGINAL JV (source_doc `issue:<id>`) — never re-allocated, so a replay
+ * cannot mint a voucher number for a posting that already exists. The ONLY place a
+ * replay 201 is produced (the pre-check, the 23505 catch and the negative-stock catch
+ * all call it).
+ */
+async function sendExistingIssue(
+  db: TenantDb,
+  reply: FastifyReply,
+  existing: MaterialIssueRow,
+  projectName: string | null,
+): Promise<FastifyReply> {
+  const [lines, jvRows] = await Promise.all([
+    db.selectThrough(
+      issueLines,
+      ISSUE_LINE_HOPS,
+      eq(materialIssues.id, existing.id),
+    ) as Promise<IssueLineRow[]>,
+    db.select(jvs, eq(jvs.sourceDoc, `issue:${existing.id}`)) as Promise<JvRow[]>,
+  ]);
+  return reply.code(201).send(
+    issueCreateEnvelope(
+      existing,
+      projectName,
+      jvRows[0]?.no ?? null,
+      lines.map((l) => ({ itemId: l.itemId, qty: num(l.qty), ccId: l.ccId })),
+    ),
+  );
+}
+
+/**
+ * B-312 idempotency REPLAY, reached from a CATCH (either the 23505 on
+ * material_issue_idempotency_uq, or the negative-stock guard tripping on stock the
+ * ORIGINAL already consumed). A key that collided at the DB layer but resolves to
+ * nothing in THIS tenant/anchor (a cross-tenant clash, or the same key against a
+ * different project/warehouse) is an honest 409 — never a leak, never a fabricated
+ * issue. Kept deliberately alongside the pre-check: a pre-check is NOT a substitute
+ * for the unique index + catch (money-post-idempotency lesson).
+ */
+async function replayExistingIssue(
+  db: TenantDb,
+  reply: FastifyReply,
+  args: {
+    idempotencyKey: string;
+    projectId: string;
+    fromWarehouseId: string;
+    projectName: string | null;
+  },
+): Promise<FastifyReply> {
+  const existing = await findIssueByIdempotencyKey(db, args);
+  if (!existing) return conflict(reply, "idempotency_key already used");
+  return sendExistingIssue(db, reply, existing, args.projectName);
+}
+
 /**
  * POST /inventory/issues — issue stock out to a project + post the cost to WIP
  * (inventory.jsx IssueAddForm). finance.approve (it MOVES stock and POSTS money).
@@ -948,6 +1147,18 @@ async function createIssue(
 ): Promise<FastifyReply> {
   const caller = await requireFinance(request, reply, "approve");
   if (!caller) return reply;
+
+  // B-312: the client's replay key, read FIRST — before any validation, any read and
+  // any write, so nothing can run ahead of it. Absent / explicit null / blank →
+  // null, so the web create form is unchanged and no dedup path fires without a key
+  // (the index is PARTIAL and SQL NULL is not equal to itself, so both layers refuse
+  // a null independently). B-309: a PRESENT but non-string key is a 400 rather than
+  // being swallowed by str() into that same null — a silent dedup-off double-posts
+  // this issue's JV. Shared parser (readIdempotencyKey) with POST /gr and POST
+  // /labor/attendance so the three money-writes cannot drift on what counts as a key.
+  const idem = readIdempotencyKey(body);
+  if (!idem.ok) return badRequest(reply, idem.message);
+  const idempotencyKey = idem.key;
 
   const projectId = str(pick(body, "project_id", "projectId")).trim();
   if (!projectId) return badRequest(reply, "project_id is required");
@@ -979,6 +1190,29 @@ async function createIssue(
     }
   }
 
+  // B-312 PRE-CHECK, deliberately HOISTED ABOVE db.transaction — this is the
+  // load-bearing deviation from the attendance template, and a catch-at-the-insert
+  // implementation is WRONG here. Inside the tx the NEGATIVE-STOCK GUARD runs BEFORE
+  // the header insert, so on a replay the original has ALREADY consumed the stock and
+  // the guard throws first: the insert (and therefore the 23505 that would trigger the
+  // replay) is never reached. Proven live: on-hand 800, issue 800, replay → "409
+  // insufficient stock … on-hand 0, issue 800" for material that really did leave the
+  // warehouse. That is B-264 exactly, and sync_processor.dart dead-letters every 4xx
+  // PERMANENTLY, so the storekeeper would see FAILED with no in-app recovery. The
+  // anchors are resolved above this on purpose: a foreign project/warehouse/item is a
+  // 400 REGARDLESS of any key — a replay against something that is not ours must never
+  // be answered from our data. Falling through is safe: a key that is new (or belongs
+  // to another anchor/tenant) still meets every gate below, and the 23505 catch remains
+  // the concurrency backstop.
+  if (idempotencyKey) {
+    const existing = await findIssueByIdempotencyKey(db, {
+      idempotencyKey,
+      projectId,
+      fromWarehouseId,
+    });
+    if (existing) return sendExistingIssue(db, reply, existing, project.name);
+  }
+
   // SERVER money (standard-cost): value = Σ qty × item.price.
   const value = round2(
     lines.reduce((sum, l) => sum + l.qty * num(priceById.get(l.itemId)), 0),
@@ -1005,84 +1239,182 @@ async function createIssue(
 
   const issueId = randomUUID();
   const no = await allocIssueNo(db);
-  const jvNo = await allocJvNo(db);
+  // B-318: the JV number is assigned INSIDE allocThenIssue below (a retry must
+  // re-read the advanced max). material_issue.no is NOT covered by 0061 this round
+  // (Wei ruled jv + ap_deposit only) — it carries the same allocator defect and is
+  // reported, not fixed here, so it stays allocated out here.
+  let jvNo = "";
   const jvId = randomUUID();
   const jvLineRows: (typeof jvLines.$inferInsert)[] = [
     { jvId, accountId: wipId, dr: moneyStr(value), cr: moneyStr(0), currencyCode: "THB", ccId: jvCcId, projectId },
     { jvId, accountId: materialsId, dr: moneyStr(0), cr: moneyStr(value), currencyCode: "THB", ccId: jvCcId, projectId },
   ];
 
+  // B-318: allocate + write is ONE retryable unit. Only jv_company_no_uq is
+  // retried — the B-312 material_issue_idempotency_uq 23505 names a DIFFERENT
+  // constraint, so it still propagates on the FIRST throw to its replay branch,
+  // and NegativeStockError is not a unique violation at all.
   let created: MaterialIssueRow;
   try {
-    created = await db.transaction(async (tx) => {
-      // NEGATIVE-STOCK GUARD (B6): read the ledger inside the tx for consistency.
-      const ledgers = (await tx.select(stockLedgers)) as StockLedgerRow[];
-      const running = onHandByItemWarehouse(ledgers);
-      const ledgerRows: Omit<typeof stockLedgers.$inferInsert, "companyId">[] = [];
-      for (const line of lines) {
-        const key = balanceKey(line.itemId, fromWarehouseId);
-        const available = num(running.get(key));
-        const remaining = round2(available - line.qty);
-        if (remaining < 0) {
-          throw new NegativeStockError(
-            `insufficient stock for item ${line.itemId} in warehouse ${fromWarehouseId}: ` +
-              `on-hand ${available}, issue ${line.qty}`,
-          );
+    created = await withDocNoRetry(async () => {
+      jvNo = await allocJvNo(db);
+      return db.transaction(async (tx) => {
+        // B-342: TAKE THE ROW LOCKS FIRST, before the ledger read.
+        //
+        // HONEST NOTE ON WHAT THIS PATH ALREADY HAD. Measured live at 2f42244, this
+        // path did NOT reproduce the race: 6 rounds of 2 separate processes each
+        // issuing the whole balance gave one 201 and one 409 every time. The reason is
+        // ACCIDENTAL and worth writing down, because it is the kind of protection that
+        // silently disappears. allocJvNo runs OUTSIDE the tx; a concurrent pair
+        // therefore reads the same max and both build the same jv.no, so the loser
+        // trips jv_company_no_uq (migration 0061, added for the UNRELATED B-318
+        // allocator defect), rolls its WHOLE tx back — ledger row included — and
+        // withDocNoRetry re-runs it; the retry's fresh ledger read then sees the
+        // winner's commit and answers an honest 409. The two possible interleavings
+        // both land safe: if the loser's allocJvNo DOES see the winner's JV it gets a
+        // free number, but then its ledger read sees the winner's movement too.
+        //
+        // That is a real mechanism, not luck — but it is undocumented, it depends on a
+        // unique index added for another purpose, and it evaporates the moment this
+        // path stops posting a JV or starts allocating numbers differently. The
+        // transfer path, which posts no JV, had nothing equivalent and failed 5 of 6
+        // rounds. So the lock is taken HERE TOO, explicitly, rather than resting the
+        // money guard on a side effect of document numbering.
+        const itemIds = [...new Set(lines.map((l) => l.itemId))];
+        const locked = await tx.selectForUpdate(
+          inventoryItems,
+          inArray(inventoryItems.id, itemIds),
+        );
+        if (locked.length !== itemIds.length) {
+          throw new NegativeStockError("an issued item no longer exists in this tenant");
         }
-        running.set(key, remaining);
-        ledgerRows.push({
-          itemId: line.itemId,
-          warehouseId: fromWarehouseId,
-          qty: qtyStr(-line.qty),
-          refDoc: `issue:${issueId}`,
-        });
-      }
-      const [header] = (await tx
-        .insert(materialIssues, {
-          id: issueId,
-          no,
-          projectId,
-          fromWarehouseId,
-          value: moneyStr(value),
-          currencyCode: "THB",
-          issueDate,
-          byUserId: caller.userId,
-          status: "approved",
-        })
-        .returning()) as MaterialIssueRow[];
-      await tx.insertThrough(
-        issueLines,
-        materialIssues,
-        issueId,
-        lines.map((l) => ({ issueId, itemId: l.itemId, qty: qtyStr(l.qty), ccId: l.ccId })),
-      );
-      // stock_ledger carries company_id → scoped insert door, one row at a time.
-      for (const row of ledgerRows) {
-        await tx.insert(stockLedgers, row).returning();
-      }
-      // Cost-to-WIP JV (B5): Dr 1140 WIP / Cr 5020 materials-cost = value.
-      await tx
-        .insert(jvs, {
-          id: jvId,
-          no: jvNo,
-          sourceDoc: `issue:${issueId}`,
-          memo: `material-issue ${no}`,
-        })
-        .returning();
-      await tx.insertThrough(jvLines, jvs, jvId, jvLineRows);
-      return header!;
+        // NEGATIVE-STOCK GUARD (B6): read the ledger inside the tx for consistency.
+        const ledgers = (await tx.select(stockLedgers)) as StockLedgerRow[];
+        const running = onHandByItemWarehouse(ledgers);
+        const ledgerRows: Omit<typeof stockLedgers.$inferInsert, "companyId">[] = [];
+        for (const line of lines) {
+          const key = balanceKey(line.itemId, fromWarehouseId);
+          const available = num(running.get(key));
+          const remaining = round2(available - line.qty);
+          if (remaining < 0) {
+            throw new NegativeStockError(
+              `insufficient stock for item ${line.itemId} in warehouse ${fromWarehouseId}: ` +
+                `on-hand ${available}, issue ${line.qty}`,
+            );
+          }
+          running.set(key, remaining);
+          ledgerRows.push({
+            itemId: line.itemId,
+            warehouseId: fromWarehouseId,
+            qty: qtyStr(-line.qty),
+            refDoc: `issue:${issueId}`,
+          });
+        }
+        const [header] = (await tx
+          .insert(materialIssues, {
+            id: issueId,
+            no,
+            projectId,
+            fromWarehouseId,
+            value: moneyStr(value),
+            currencyCode: "THB",
+            issueDate,
+            byUserId: caller.userId,
+            status: "approved",
+            // B-312: the header carries the client key. A REPLAY that raced past the
+            // pre-check trips material_issue_idempotency_uq → 23505 → the catch below
+            // returns the ORIGINAL. The header is the FIRST write in this tx (the guard
+            // above only READS), so that 23505 rolls the whole block back BEFORE any
+            // stock_ledger row or JV leg exists — the replay-safety of the stock
+            // movement is structural, not a compensating action.
+            idempotencyKey,
+          })
+          .returning()) as MaterialIssueRow[];
+        // B-323: issue_line is a no-`seq` LINE table read back as the ordered body of
+        // one issue (GET /inventory/issues/{id}) — stamp the batch apart in body order.
+        await tx.insertThrough(
+          issueLines,
+          materialIssues,
+          issueId,
+          stampEntryOrder(
+            lines.map((l) => ({ issueId, itemId: l.itemId, qty: qtyStr(l.qty), ccId: l.ccId })),
+          ),
+        );
+        // stock_ledger carries company_id → scoped insert door, one row at a time.
+        for (const row of ledgerRows) {
+          await tx.insert(stockLedgers, row).returning();
+        }
+        // Cost-to-WIP JV (B5): Dr 1140 WIP / Cr 5020 materials-cost = value.
+        await tx
+          .insert(jvs, {
+            id: jvId,
+            no: jvNo,
+            sourceDoc: `issue:${issueId}`,
+            memo: `material-issue ${no}`,
+          })
+          .returning();
+        await tx.insertThrough(jvLines, jvs, jvId, jvLineRows);
+        return header!;
+      });
     });
   } catch (err) {
-    if (err instanceof NegativeStockError) return conflict(reply, err.message);
+    // B-318 FIRST: JV-number allocation lost the race to exhaustion. Nothing
+    // committed — no stock moved, no JV — so a retry of the whole request is safe.
+    if (err instanceof DocNoExhaustedError) return docNoExhausted(reply);
+    // B-312 CONCURRENCY BACKSTOP. Two distinct races land here, and BOTH are the same
+    // logical event — "the original committed between our pre-check and our write":
+    //
+    //  (1) 23505 on material_issue_idempotency_uq — our guard read the ledger BEFORE
+    //      the original committed (so it saw the un-consumed stock and passed), then
+    //      our header insert hit the index. Entering this branch needs ALL THREE of: a
+    //      key present (the partial index exempts nulls, so a key-less insert can never
+    //      dedup), SQLSTATE 23505, and — B-263 — the violated constraint BY NAME.
+    //      `err.constraint` alone is undefined in production because drizzle nests the
+    //      DatabaseError under `.cause`; violatedConstraint() reads both levels. The
+    //      name check is load-bearing: 23505 alone only says "SOME unique constraint",
+    //      so a future unique index on material_issue (a unique `no`, say) would
+    //      otherwise silently inherit the replay path and answer the wrong document.
+    //
+    //  (2) NegativeStockError — the SAME race with the other interleaving: the original
+    //      committed BEFORE our in-tx guard read, so the guard sees the stock it already
+    //      consumed and throws for goods that really were issued. The pre-check above
+    //      cannot close this window (it ran earlier), and the 23505 never fires because
+    //      the guard pre-empts the insert. Re-resolving the client's OWN issue here is
+    //      what makes the hoist race-tight rather than merely race-narrowed. A fresh
+    //      (unkeyed, or non-resolving) write is unaffected: it still gets the honest 409.
+    //
+    // Both use the SAME resolver and the SAME sender, so they cannot diverge. Anything
+    // else rethrows to the 500 handler — the safe failure for a money write (nothing
+    // committed, client retries) rather than a confidently wrong answer.
+    if (
+      idempotencyKey &&
+      isUniqueViolation(err) &&
+      violatedConstraint(err) === ISSUE_IDEMPOTENCY_CONSTRAINT
+    ) {
+      return replayExistingIssue(db, reply, {
+        idempotencyKey,
+        projectId,
+        fromWarehouseId,
+        projectName: project.name,
+      });
+    }
+    if (err instanceof NegativeStockError) {
+      if (idempotencyKey) {
+        const existing = await findIssueByIdempotencyKey(db, {
+          idempotencyKey,
+          projectId,
+          fromWarehouseId,
+        });
+        if (existing) return sendExistingIssue(db, reply, existing, project.name);
+      }
+      return conflict(reply, err.message);
+    }
     throw err;
   }
 
-  return reply.code(201).send({
-    ...issueWire(created, project.name),
-    jv_no: jvNo,
-    value,
-    lines: lines.map((l) => ({ item_id: l.itemId, qty: l.qty, cc_id: l.ccId })),
-  });
+  return reply
+    .code(201)
+    .send(issueCreateEnvelope(created, project.name, jvNo, lines));
 }
 
 // ---------------------------------------------------------------------------

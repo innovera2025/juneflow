@@ -1,5 +1,28 @@
 # TASKS.md — คิวงาน Autonomous Loop
 
+> ## ⚠️ สถานะไฟล์นี้ (2026-08-07) — อ่านก่อนสรุปว่าโปรเจคจบ
+>
+> **ไฟล์นี้ติดตาม "เฟส port" เท่านั้น และเฟสนั้นเสร็จจริง** — 214/214 แถว done,
+> จอ web 102/102 route ใน `PORTED_SCREENS`, backend ครบทุก flow. ทุกแถวตรวจย้อนได้.
+>
+> **แต่ไฟล์นี้ไม่ใช่ภาพรวมของโปรเจค.** งานที่เหลือไม่ใช่ "ของที่ยังไม่ได้สร้าง"
+> แต่เป็น **"ของที่สร้างแล้วแต่ผิด"** ซึ่งอยู่ใน **`BLOCKERS.md`** ทั้งหมด
+> (เปิดอยู่ ~46 ข้อ ณ วันที่เขียน). ของแบบนี้เขียนล่วงหน้าเป็นคิวไม่ได้ —
+> มันโผล่จากการตรวจ เช่น B-312 มาจาก recon ของ B-307, B-313 มาจาก recon ของ B-312.
+>
+> **Autonomous Loop หยุดเดินตั้งแต่ 2026-07-27** (commit `chore(loop):` ใบสุดท้าย)
+> เพราะคิว `ready` หมด ไม่ใช่เพราะมันพัง — `scripts/loop-runner.sh` หยิบเฉพาะแถว
+> `ready` ในเขตตัวเอง และไม่มีแถวไหนเหลือ. ตั้งแต่นั้นงานขับจาก `BLOCKERS.md`
+> ด้วยรอบ recon → build → verify (ผู้ตรวจ ≠ ผู้เขียน) แล้ว merge เข้า `dev`.
+>
+> **ถ้าจะปลุก loop กลับมา** ต้องแปลง blocker ที่เปิดอยู่เป็นแถว `ready` พร้อมเขตก่อน —
+> แต่ราวครึ่งหนึ่งรอ Wei ตัดสิน ซึ่ง loop หยิบไม่ได้อยู่ดี.
+>
+> **นิยาม "เสร็จ" ที่แท้จริง** = ผ่าน 5 gates (PLAN.md §9). ตอนนี้ **gate 5 (visual) ยังไม่เขียว**
+> — ดู B-301 / B-305 / B-306. ดังนั้นแถว `done` ในไฟล์นี้ = "port แล้วและผ่าน gate 1-4"
+> ไม่ใช่ "done ตามนิยาม 5 gates".
+
+
 > อ้างอิง: `PLAN.md` §7 (Phase Plan) · §10 (Autonomous Loop Protocol) · Bootstrap Manifest v2 กลุ่ม 3.1 + กลุ่ม 5
 > เขต (zone): `backend` | `web` | `mobile` | `qa` | `integrations` | `devops`
 > สถานะ: `ready` / `doing` / `blocked` / `review` / `done`
@@ -150,6 +173,7 @@ Gates อ้างตาม PLAN.md §9: **G1** schema · **G2** contract test �
 | P1-BE-11 | backend | done | **[B-059+B-060] cc schema + docnum running** — migration ใหม่ (ALTER-only): `cost_center` + type enum(Project/Overhead/Dept) + link text + owner text + budget numeric + currency_code + status enum(draft/approved) · `doc_numbering.running` int → **text** · handler /cost-centers คืน field ครบ · /doc-numbering running เป็น string · seed: CC_SEED 7 ตัวตาม mock (`master.jsx:584-592`) + DOCNUM BOQ row = "B-02 v3" · fixtures/tests update · **ไม่แตะ openapi** (Entity opaque) · driven by orch-A | — | G1 drizzle check · G3 api tests เขียว · gate 4.5 | 3 ชม. |
 | P1-BE-12 | backend | done | **[B-067] docnum `locked` boolean→text enum-code** — migration 0013 ALTER-only (hand-CASE mirror reset_rule ตาม `SACRED-EDITS-QUEUE §B-067`) + re-seed 10 rows lock codes (ทุกใบ/ตามแผนก/ตามคลัง/—) + route comment · `SACRED_OVERRIDE=wei-approved:B-067` · 0000-0012 byte-identical · **3 i18n keys (lockAll/lockWarehouse/fmtYear) = orch-A direct-apply** · **ปลด WEB-12** · driven by orch-A | — | G1 drizzle check · G3 api tests · gate 4.5 | 2 ชม. |
 | P1-DEV-08 | devops | done | **[B-055] prod boot fix** — `infra/docker-compose.prod.yml`: `AUTH_SECRET`→`BETTER_AUTH_SECRET` (api+worker · mirror dev) · zone infra ล้วน · driven by orch-A | — | `docker compose config` OK · gate 4.5 | 0.5 ชม. |
+| P2-DEV-09 | devops | done | **deploy-ready images** — `apps/web` could not reach the API at all: `api-client.ts:23` falls back to a same-origin `/api/v1` and the baked nginx config had only `try_files … /index.html`, so every API call answered **index.html with HTTP 200** — a failure shaped like a success. Adds `apps/web/nginx.conf.template` (/api proxy via a variable + resolver so nginx boots with api down; `$request_uri` appended so the prefix survives · exact-match `/healthz` above the SPA fallback · gzip · immutable hashed assets, **no `always` on that Cache-Control** or a 404 caches for a year · `no-store` on index.html · nosniff/DENY/Referrer-Policy repeated in every location because nginx REPLACES rather than merges the inherited set) · `pnpm fetch` deps layer copying **package.json + lockfile** (lockfile alone left corepack blind to the `packageManager` pin, so the install still hit the registry) · api runs as `node` uid 1000 with an unwritable /app · HEALTHCHECK in both images · three stale TODOs retired (P0-BE-13 / P0-DEV-01 / P0-WEB-01, all `done`) · vite dev proxy added, same defect on the dev server | P0-DEV-01, P0-DEV-05 | gate 4.5 ×2 (FAIL→FAIL→PASS) · both images built and probed A/B against the dev baseline · install proven offline under `--network none` · 404-cacheability proven both arms · web 1831 · typecheck 0 | 3 ชม. |
 | P1-BE-13 | backend | done | **[B-058] POST /projects handler + wizard** — register `createProject` handler (apps/api · contract+ProjectInput พร้อม) · quota 402 guard · web wire CreateProjectForm (orch-B follow) · dep BE-12 (backend worktree serialize) | P1-BE-12 | G3 api tests · gate 4.5 | 2 ชม. |
 | P1-BE-14 | backend | done | **[B-065] project_type tenant-scope** — migration 0014 add `company_id` (nullable · 4 default=null global · custom=tenant) + write path scope ด้วย company · dep BE-12/13 (migration serialize) | P1-BE-13 | G1 drizzle · G3 · gate 4.5 | 2 ชม. |
 | P1-BE-15 | backend | done | **[B-049 §10] dashboard endpoints + impl** — apply `SACRED-EDITS-QUEUE §10` (7 ep Entity-opaque + tag dashboard · `SACRED_OVERRIDE=wei-approved:B-049`) + regen TS/Dart · **impl** aggregation handlers อ่าน seed จริง (C10 · type-aware summary realestate/civil/service/solar · tenant door selectThrough/selectReference) · ไม่มี migration (read-only) · dep BE-14 (backend worktree serialize) · driven by orch-A | P1-BE-14 | G2 contract lint+regen · G3 api tests · gate 4.5 | 4 ชม. |

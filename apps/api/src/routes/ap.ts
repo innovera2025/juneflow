@@ -61,6 +61,7 @@ import type { TenantDb } from "../db/tenant-db.js";
 import { businessNowMs } from "../business-clock.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { has, pick, str, toNum } from "./procurement.js";
 import { loadCaller, permAllowed } from "./authz.js";
 
@@ -243,13 +244,10 @@ async function listBilling(db: TenantDb): Promise<Record<string, unknown>[]> {
     gr: new Map([...grsViaPo, ...grsViaWo].map((g) => [g.id, g.no])),
   };
 
-  return [...bills]
-    .sort((a, b) => {
-      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bt - at;
-    })
-    .map((b) => billingWire(b, vendorNames, refs));
+  // B-323: was an inline created_at-only comparator — tie-BLIND (returned 0 for two
+  // bills sharing an instant, leaving the pair to the join plan). The shared
+  // newestFirst is TOTAL (created_at DESC, then id ASC).
+  return newestFirst(bills).map((b) => billingWire(b, vendorNames, refs));
 }
 
 // ---------------------------------------------------------------------------
@@ -404,11 +402,9 @@ async function listPv(db: TenantDb): Promise<Record<string, unknown>[]> {
   ]);
   const payees = resolvePayees(pvRows, bills, vendorRows);
 
-  const sorted = [...pvRows].sort((a, b) => {
-    const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return bt - at;
-  });
+  // B-323: same tie-blind inline comparator as listBillings — use the shared TOTAL
+  // order so two PVs created in one transaction cannot swap between reads.
+  const sorted = newestFirst(pvRows);
   return Promise.all(
     sorted.map((pv) => pvWire(pv, payees.get(pv.id) ?? { vendorId: null, vendorName: null })),
   );
@@ -449,10 +445,10 @@ async function createPv(
     return badRequest(reply, "billing_ids must be a non-empty array");
   }
 
-  const amount = toNum(pick(body, "amount"));
-  if (amount == null || amount <= 0) {
-    return badRequest(reply, "amount is required and must be greater than zero");
-  }
+  // B-315 (Wei = ก · 2026-08-06) — money = SERVER. `amount` is deliberately NOT
+  // read from the request; it is derived below from the billing rows this handler
+  // already loads. Any client `amount` is IGNORED (the browser keeps its figure as
+  // an on-screen preview only). See the derivation after the tenant-scope check.
 
   const whtPctRaw = toNum(pick(body, "wht_pct", "whtPct"));
   const whtPct = whtPctRaw != null && whtPctRaw >= 0 ? whtPctRaw : 0;
@@ -490,6 +486,31 @@ async function createPv(
   const foreign = billingIds.find((id) => !ownedIds.has(id));
   if (foreign) {
     return badRequest(reply, `billing_id ${foreign} not found in this tenant`);
+  }
+
+  // ── B-315: the SERVER computes the payable ────────────────────────────────
+  // The gross is what the covered billings already carry — Σ ap_billing.amount.
+  //
+  // `ap_billing.amount` is VAT-INCLUSIVE: `vat` is the tax portion CONTAINED IN
+  // it, never an addend. Every seeded row satisfies vat = amount × 7/107
+  // (920000/60187, 96800/6334, 415400/27184, 268000/17542, 645000/42196), and
+  // ap.jsx's own PV net box shows AP-2026-0180 as "645,000.00" under the label
+  // "มูลค่า AP รวม (รวม VAT)" while that billing's vat is 42,196 — excluded.
+  // 645000 − 19350 (3%) − 64500 = 561,150, the prototype's printed net exactly.
+  // The browser was sending amount + vat, which DOUBLE-COUNTED the VAT (+6.54%).
+  //
+  // billing_ids is a SET (deduped above) and the handler accepts N ids, so this
+  // SUMS — it must not read billingIds[0] the way payee/currency do. ownedBills
+  // is exactly the requested set: the select is inArray-scoped and any id missing
+  // from it already returned 400 above, so no row can be counted twice or missed.
+  //
+  // The 400 below replaces the deleted client-side `amount > 0` check: a billing
+  // may legitimately carry amount 0 (the column is notNull default "0", and the
+  // land-sales / subcon inserters write computed values), and a zero-value PV
+  // would post a zero JV and print a zero bank instruction.
+  const amount = round2(ownedBills.reduce((sum, b) => sum + num(b.amount), 0));
+  if (amount <= 0) {
+    return badRequest(reply, "billing_ids cover no payable amount");
   }
 
   // WHT leg via the tax engine (F-AP1); net = gross − WHT − retention. Currency

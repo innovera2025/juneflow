@@ -1,0 +1,26 @@
+### stamps.csv (every created_at/updated_at, ordered by id)
+IDENTICAL
+
+### order-ap-pv.txt (row ORDER as the endpoint emits it)
+IDENTICAL
+
+### order-ar-tax.txt (row ORDER as the endpoint emits it)
+IDENTICAL
+
+### order-dms-documents.txt (row ORDER as the endpoint emits it)
+IDENTICAL
+
+### order-documents.txt (row ORDER as the endpoint emits it)
+IDENTICAL
+
+### order-gl-posting-inbox.txt (row ORDER as the endpoint emits it)
+IDENTICAL
+
+### order-gr.txt (row ORDER as the endpoint emits it)
+IDENTICAL
+
+### order-notifications.txt (row ORDER as the endpoint emits it)
+IDENTICAL
+
+### order-petty.txt (row ORDER as the endpoint emits it)
+IDENTICAL

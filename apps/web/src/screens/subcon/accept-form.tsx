@@ -86,7 +86,14 @@ export interface AcceptFormProps {
   contractId: string;
   /** The period being inspected. */
   periodId: string;
-  periodSeq: number;
+  /**
+   * The period's ordinal as the accept/reject toasts should print it ({no}) — resolved by
+   * the parent, which is the only place that can see the WHOLE served plan and therefore
+   * whether `seq` is a usable ordinal at all (subcon-accept.tsx periodOrdinal /
+   * hasOrdinalSeq). Already an em-dash when it is not, so this component never restates a
+   * raw seq the plan does not license.
+   */
+  periodLabel: string;
   /** Period basis (percent|distance|milestone|unit) — drives the measure banner. */
   periodBasis: string;
   /** Period money in FULL units (the client payment PREVIEW). */
@@ -101,7 +108,7 @@ export function AcceptForm({
   onClose,
   contractId,
   periodId,
-  periodSeq,
+  periodLabel,
   periodBasis,
   periodAmount,
   retentionPct,
@@ -135,7 +142,7 @@ export function AcceptForm({
       onClose();
       ctx.notify(
         t("subcon.acceptToast")
-          .replace("{no}", String(periodSeq))
+          .replace("{no}", periodLabel)
           .replace("{value}", formatMoney(readNum(resp, "net")))
           .replace("{retention}", formatMoney(readNum(resp, "retention"))),
       );
@@ -152,7 +159,7 @@ export function AcceptForm({
     try {
       await decide.reject({ periodId, contractId, defects: items.map((item) => ({ item })) });
       onClose();
-      ctx.notify(t("subcon.rejectToast").replace("{no}", String(periodSeq)), "warn");
+      ctx.notify(t("subcon.rejectToast").replace("{no}", periodLabel), "warn");
     } catch {
       // Held in query state; keep the modal open for a retry.
     }

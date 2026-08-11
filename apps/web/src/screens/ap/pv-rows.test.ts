@@ -18,6 +18,7 @@ import {
   statusTone,
   statusLabelKind,
   pvNet,
+  pvGross,
   impliedWhtPct,
   pvSubmittable,
   buildPvBody,
@@ -166,6 +167,34 @@ describe("pvNet + impliedWhtPct", () => {
   });
 });
 
+/*
+ * B-315 — ap_billing.amount is VAT-INCLUSIVE; the row's `vat` is the tax portion
+ * contained IN it. The preview used to show amount + vat, double-counting it.
+ */
+describe("pvGross (B-315)", () => {
+  // Billing rows as the wire delivers them — vat present and non-zero. pvGross
+  // takes only { amount }, so the compiler ALSO forbids ever reading vat here.
+  const bill = (amount: number, vat: number) => ({ amount, vat });
+  // ap.jsx AP-2026-0180 verbatim: the prototype's own net box prints 645,000
+  // under its "AP total (VAT included)" label while that row's vat is 42,196.
+  const AP0180 = bill(645000, 42196);
+
+  it("is the billing's amount alone - vat is NOT an addend", () => {
+    expect(pvGross(AP0180)).toBe(645000);
+    expect(pvGross(AP0180)).not.toBe(687196); // the old amount + vat
+    // every seeded row satisfies vat = amount x 7/107, i.e. contained, not added
+    expect(pvGross(bill(920000, 60187))).toBe(920000);
+    expect(pvGross(bill(96800, 6334))).toBe(96800);
+  });
+
+  it("feeds impliedWhtPct the base that yields the seeded 3.00%", () => {
+    // the rider that makes this load-bearing: the server now applies the submitted
+    // pct to its OWN gross, so an inflated base here no longer self-cancels.
+    expect(impliedWhtPct(19350, pvGross(AP0180))).toBe(3);
+    expect(impliedWhtPct(19350, 645000 + 42196)).toBe(2.82); // the old, wrong base
+  });
+});
+
 describe("create-form helpers", () => {
   const draft = (p: Partial<PvDraft> = {}): PvDraft => ({
     billingId: "",
@@ -200,8 +229,8 @@ describe("create-form helpers", () => {
         }),
       ),
     ).toEqual({
+      // B-315: no `amount` — the server derives the gross from billing_ids.
       billing_ids: ["b1"],
-      amount: 645000,
       wht_pct: 3,
       retention: 64500,
       method: "cheque",
@@ -214,9 +243,14 @@ describe("create-form helpers", () => {
   it("buildPvBody omits method + cheque fields when unset", () => {
     expect(buildPvBody(draft({ billingId: "b1", gross: 100 }))).toEqual({
       billing_ids: ["b1"],
-      amount: 100,
       wht_pct: 0,
       retention: 0,
     });
+  });
+
+  it("B-315: buildPvBody never sends `amount`, whatever the preview shows", () => {
+    const body = buildPvBody(draft({ billingId: "b1", gross: 9_000_000 }));
+    expect(body).not.toHaveProperty("amount");
+    expect(Object.keys(body).sort()).toEqual(["billing_ids", "retention", "wht_pct"]);
   });
 });

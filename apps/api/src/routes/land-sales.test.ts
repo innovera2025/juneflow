@@ -32,7 +32,9 @@ import {
   users,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
+import { THAILAND_RATES } from "@juneflow/tax-engine/thailand";
 import { buildApp, type AppDeps } from "../app.js";
+import { round2 } from "./money.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
 
@@ -323,6 +325,124 @@ describe("GET /api/v1/land/plots", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().total).toBe(0);
     expect(res.json().data).toEqual([]);
+  });
+
+  // B-316/A2 — money=SERVER. The due-diligence screen used to compute the plot total and
+  // the 10% deposit in the BROWSER, rounding to whole baht where this side rounds to 2 dp.
+  // The wire now carries both, so the browser has nothing left to compute.
+  it("ships total_value + deal_deposit (2 dp), so the browser computes no money", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          // 115-0-73 rai @ 5,250,000/rai = 184,292 sqm -> total 604,708,125.00 and a
+          // 2-dp deposit of 60,470,812.50. The browser's whole-baht copy said
+          // 60,470,813 — the 0.50 baht seam this closes.
+          rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: "184292.0000", pricePerRai: "5250000.00" })]]],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0]).toMatchObject({ total_value: 604708125, deal_deposit: 60470812.5 });
+    expect(res.json().data[0].deal_deposit).not.toBe(Math.round(604708125 * 0.1));
+  });
+
+  it("nulls total_value + deal_deposit for an unpriced plot (em-dash, never 0)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: null, pricePerRai: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].total_value).toBeNull();
+    expect(res.json().data[0].deal_deposit).toBeNull();
+
+    // one side missing is still unknown — never a half-computed figure
+    const half = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p1", "d", D0, { pricePerRai: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(half.json().data[0].deal_deposit).toBeNull();
+  });
+
+  // B-319 (Wei = ก) — the last two figures on land.dd the BROWSER computed, off statutory
+  // rates that existed nowhere but a React screen file. The rates now come from
+  // @juneflow/tax-engine/thailand and the fee lands on the wire.
+  //
+  // The plot is chosen so 2-dp and whole-baht rounding DISAGREE (12,094,162.50 vs the
+  // browser's old 12,094,163) — a self-consistent, evenly-dividing total would pass
+  // against a re-introduced client formula too.
+  it("ships transfer_fee + sbt (2 dp) at the tax-engine rates, so the browser computes no money", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          // 115-0-73 rai @ 5,250,000/rai -> total 604,708,125.00
+          rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: "184292.0000", pricePerRai: "5250000.00" })]]],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    const row = res.json().data[0];
+
+    // PINNED literals: a statutory rate changing must break a build, not slip through.
+    expect(row).toMatchObject({ transfer_fee: 12094162.5, sbt: 19955368.13 });
+    // ...and the wire must actually FOLLOW the rate table, not a stray literal that
+    // happens to agree with it today. Edit THAILAND_RATES without editing the handler
+    // (or vice versa) and this pair goes red.
+    expect(row.transfer_fee).toBe(round2((604708125 * THAILAND_RATES.landTransferFeePercent) / 100));
+    expect(row.sbt).toBe(round2((604708125 * THAILAND_RATES.specificBusinessTaxPercent) / 100));
+    // the whole-baht values the browser used to invent — must NOT be what we ship
+    expect(row.transfer_fee).not.toBe(Math.round(604708125 * 0.02));
+    expect(row.sbt).not.toBe(Math.round(604708125 * 0.033));
+  });
+
+  it("nulls transfer_fee + sbt for an unpriced plot (em-dash, never 0)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p0", "d", D0, { areaSqm: null, pricePerRai: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].transfer_fee).toBeNull();
+    expect(res.json().data[0].sbt).toBeNull();
+
+    // one side missing is still unknown — a fee on a half-known plot is a fabricated fee
+    const half = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, [plot("p1", "d", D0, { areaSqm: null })]]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(half.json().data[0].transfer_fee).toBeNull();
+    expect(half.json().data[0].sbt).toBeNull();
+  });
+
+  /*
+   * G5 PIXEL GUARD (server side). tests/visual/reference/app-baseline/land-dd.png was
+   * captured against the seeded dd-stage plot (โฉนด 11902, 24 rai @ 6,800,000/rai) while
+   * the BROWSER computed these two figures. Moving them to the server must not move a
+   * pixel — the seeded price divides evenly, so 2-dp equals whole baht here.
+   */
+  it("renders the G5 baseline plot's fees unchanged (โฉนด 11902, 24 rai x 6.8M)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [[landPlots, [plot("p0", "โฉนด 11902", D0, { areaSqm: "38400.0000", pricePerRai: "6800000.00" })]]],
+        }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    expect(res.json().data[0]).toMatchObject({
+      total_value: 163200000,
+      deal_deposit: 16320000,
+      transfer_fee: 3264000, // what the browser's round(total x 0.02) produced
+      sbt: 5385600, // what the browser's round(total x 0.033) produced
+    });
   });
 });
 
@@ -944,6 +1064,45 @@ describe("POST /api/v1/land/plots/:id/deal", () => {
     expect(bill.status).toBe("draft");
     expect(bill.currencyCode).toBe("THB");
     expect(bill.vendorId).toBeNull(); // a land deal has no vendor FK — never invented
+  });
+
+  /*
+   * B-316/A2 — THE ANTI-DRIFT ASSERTION. This is the whole point of the fix: the deposit
+   * the due-diligence screen READS (GET /land/plots -> deal_deposit) must be the deposit
+   * the deal WRITE posts to the Dr 1150 / Cr 2010 JV and the AP subledger. Both come from
+   * plotDealDeposit(), so they cannot disagree; give either side its own formula again and
+   * this test goes red.
+   *
+   * The plot is deliberately one where 2-dp and whole-baht rounding differ (a .50 tail),
+   * so a re-introduced Math.round on either side is caught rather than masked by a total
+   * that happens to divide evenly — which is true of every plot in the seed.
+   */
+  it("READ deal_deposit === WRITE deposit === the posted JV line, on the same plot", async () => {
+    const inserted: Inserted[] = [];
+    const plots = [plot("p1", "d", D0, { areaSqm: "184292.0000", pricePerRai: "5250000.00" })];
+
+    const read = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[landPlots, plots]] }),
+      })
+    ).inject({ method: "GET", url: "/api/v1/land/plots" });
+    const shown = read.json().data[0].deal_deposit as number;
+
+    const write = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: dealDb({ inserted, plots }) })
+    ).inject({ method: "POST", url: "/api/v1/land/plots/p1/deal", payload: { type: "buy" } });
+    expect(write.statusCode).toBe(200);
+
+    // what the user read == what the endpoint returns == what the ledger books
+    expect(shown).toBe(60470812.5);
+    expect(write.json().deposit).toBe(shown);
+    const lines = inserted.find((i) => i.table === jvLines)!.values as Record<string, unknown>[];
+    expect(lines.find((l) => l.accountId === ACC_LAND)!.dr).toBe("60470812.50");
+    expect(lines.find((l) => l.accountId === ACC_AP)!.cr).toBe("60470812.50");
+    expect(Number(lines.find((l) => l.accountId === ACC_LAND)!.dr)).toBe(shown);
+    const bill = inserted.find((i) => i.table === apBillings)!.values as Record<string, unknown>;
+    expect(Number(bill.amount)).toBe(shown);
   });
 
   it("lease deal: posts the CLIENT first-period rent Dr 5100 (ccId) / Cr 2010 + ap_billing, source deal:<id>:lease (B-161 Wei=ง)", async () => {

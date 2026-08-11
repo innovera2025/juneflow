@@ -31,9 +31,28 @@
  *     the users read (the roster is a pure derivation of it, no local copy). The "Save settings"
  *     write is REAL too (W1c): PUT /admin/subscribers/{id}/package writes the selected package_id
  *     + a seat override onto the subscription row (money = SERVER; the seat stepper edits LOCAL
- *     state the Save button then persists) and invalidates the subscribers read. The remaining
- *     writes stay MOCK (no merged handler): export / reset-password fire faithful ctx.notify
- *     toasts; invite-user is honest-DISABLED (the invite form is a dropped mock write path).
+ *     state the Save button then persists) and invalidates the subscribers read.
+ *   - reset-password is REAL too (B-282): POST /admin/users/{id}/reset-password, bodiless,
+ *     owner-gated. It writes credential state only, so NO read is invalidated. Until
+ *     2026-08-10 this confirm dialog fired the "link sent to {email}" toast and called
+ *     nothing — a success claim, made to a platform owner, about somebody else's account.
+ *     The endpoint had in fact been mounted since B-282; the comment here said MOCK.
+ *   - EXPORT stays MOCK (a faithful ctx.notify), and "the contract declares none" was
+ *     WRONG — corrected 2026-08-10. The contract DOES declare an export: openapi.yaml:4235
+ *     POST /exports (createExport, {type,params} -> 202 Job) + :4262 GET /exports/{id}
+ *     (getExport), both generated. What is missing is the MOUNT — apps/api/src/app.ts
+ *     registers every other door in one block at :221-284 and no exports route, and the
+ *     only "/exports" in apps/api/src is a design comment (worker.ts:6) describing a job
+ *     pipeline that was never built — so a contract-following caller gets a 404. That is
+ *     declared-but-never-mounted, the same shape as the B-282 reset-password defect two
+ *     bullets up. Filed as B-351. Separately true and unchanged: there is no
+ *     subscriber-SPECIFIC export handler either. Disclosed plainly because this control is
+ *     not merely inert — it fires admin.subs.exportToast, whose copy asserts the subscriber
+ *     list was exported as CSV: a success claim with nothing behind it, i.e. the same lie
+ *     shape as the reset-password confirm. It is left as-is only because it is a
+ *     prototype-faithful mock and changing it is a visible behaviour change (a ruling,
+ *     carried on B-351), not because it is acceptable. invite-user stays honest-DISABLED
+ *     (the invite form is a dropped mock write path).
  *
  * i18n (rule 2): every visible string is an admin.subs.* / admin.common.* dict key (t). No
  * Thai literal in source (B-073); tokens back every colour except the prototype-verbatim
@@ -88,6 +107,7 @@ import {
   useBlockUser,
   useUnblockUser,
   useSetSubscriberPackage,
+  useResetUserPassword,
 } from "./use-admin";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
@@ -227,6 +247,8 @@ function CompanyControl({
   const block = useBlockUser();
   const unblock = useUnblockUser();
   const setPkg = useSetSubscriberPackage(sub.id);
+  // reset takes the USER id (u.id) and writes credential state only — no read is invalidated.
+  const reset = useResetUserPassword();
 
   const [tab, setTab] = useState<"control" | "users">("control");
   const [pkgId, setPkgId] = useState(sub.packageId);
@@ -303,9 +325,20 @@ function CompanyControl({
               kind="primary"
               size="md"
               icon="mail"
+              disabled={reset.isPending || !canManageUser(u.id)}
               onClick={() => {
+                // REAL owner-gated write (B-282): POST /admin/users/{id}/reset-password,
+                // no body. close() unmounts this dialog before the POST settles (single
+                // modal slot), so the toast fires off the SETTLED promise (fireWithToast,
+                // B-200b) — never before the server answered. A rejection (403 non-owner,
+                // 404 no-credential) shows the failure toast instead of the success one:
+                // this button used to claim a link had been mailed while calling nothing.
                 close();
-                ctx.notify(t("admin.subs.resetPwToast").replace("{email}", u.email || DASH));
+                fireWithToast(
+                  () => reset.mutateAsync(u.id),
+                  () => ctx.notify(t("admin.subs.resetPwToast").replace("{email}", u.email || DASH)),
+                  () => ctx.notify(t("admin.common.actionFailedToast"), "danger"),
+                );
               }}
             >
               {t("admin.subs.resetPwSend")}
@@ -750,7 +783,9 @@ export function AdminSubscribers() {
       title={t("admin.subs.title")}
       subtitle={t("admin.subs.subtitle").replace("{count}", String(allRows.length))}
       actions={
-        // Export -> MOCK toast (no export endpoint).
+        // Export -> MOCK toast. NOT "no export endpoint": the contract declares
+        // POST /exports + GET /exports/{id} and nothing mounts them (B-351). The toast
+        // asserts a CSV export that never happened — see the EXPORT bullet in the header.
         <Btn kind="outline" size="md" icon="download" onClick={() => ctx.notify(t("admin.subs.exportToast"))}>
           {t("admin.common.export")}
         </Btn>

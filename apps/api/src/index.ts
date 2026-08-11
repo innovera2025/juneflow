@@ -75,6 +75,20 @@ if (usingDevAuthSecret()) {
   );
 }
 
+// B-282: the credential store is real (buildApp defaults it to
+// DbCredentialStore), but NO delivery adapter is wired — apps/api has no mail
+// dependency and @juneflow/notifications ships no concrete SmtpTransport
+// (BLOCKERS.md B-269). Tokens are therefore issued and stored correctly but go
+// nowhere. The warning is unconditional rather than config-driven: there is no
+// env switch to read, and inventing one would be a guess.
+app.log.warn(
+  "No password-reset delivery adapter is wired — the /users invite, " +
+    "POST /auth/forgot and POST /admin/users/:id/reset-password issue valid " +
+    "tokens that are NOT sent to anyone. Pass buildApp({ deliverReset }) once a " +
+    "transport exists (wiring steps in src/auth-provisioning.ts; BLOCKERS.md " +
+    "B-282 / B-269).",
+);
+
 const port = Number(process.env.PORT ?? 3000);
 
 app

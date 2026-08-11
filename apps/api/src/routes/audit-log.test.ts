@@ -146,6 +146,29 @@ describe("GET /api/v1/audit-log", () => {
     expect(Object.keys(first).sort()).toEqual(["action", "at", "entity", "id", "user_id", "user_name"]);
   });
 
+  // B-323: the feed sorted on `at` alone, which returns 0 for two entries sharing an
+  // instant — and here that is the NORM, not an edge: every mutation of ONE request is
+  // written under the same statement timestamp. Ties fell through to the join plan, so
+  // a single request's own entries could reorder between two reads of the same feed.
+  it("is TOTAL when entries share an instant — one request's own rows cannot reorder", async () => {
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb([[users, [userRow]], [auditLogs, rows]]),
+        })
+      ).inject({ url: "/api/v1/audit-log" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // Three entries of one request: identical `at`, so only the id floor can order them.
+    const a = audit("aaa", 5);
+    const b = audit("bbb", 5);
+    const c = audit("ccc", 5);
+    expect(await ids([a, b, c])).toEqual(["aaa", "bbb", "ccc"]);
+    expect(await ids([c, a, b])).toEqual(["aaa", "bbb", "ccc"]);
+    expect(await ids([c, b, a])).toEqual(["aaa", "bbb", "ccc"]);
+  });
+
   it("null user_id reads 'ระบบ'; an unresolvable user_id stays an honest null", async () => {
     const res = await (
       await buildTestApp({

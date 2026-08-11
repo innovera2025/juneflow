@@ -17,19 +17,29 @@
  * project name via pr_id -> pr.project_id -> GET /projects. Pure logic (tab filter /
  * status tone / money format / id joins) lives in po-wo-rows.ts (unit-tested, G3).
  *
- * WIRE GAPS (reported honestly, never fabricated) — the poWire is only
- * { id, no, pr_id, vendor_id, status, approval_step, currency_code, credit_term,
- *   total, vat, amount } (apps/api/src/routes/po.ts):
- *   - NO deposit / down-payment / paid columns (po.ts GAP 2): the deposit + paid
- *     columns, the payment-schedule pct/amounts, and the PO-Decrement rows render an
- *     em-dash / are omitted (that whole subsystem is presentational, not persisted).
+ * LIST PAYLOAD (apps/api/src/routes/po.ts poWire, pinned by po.test.ts's exact-key
+ * assertion): { id, no, pr_id, vendor_id, status, approval_step, currency_code,
+ * credit_term, total, vat, amount, doc_date, paid, deposit }.
+ *   - REAL (B-355 re-wire): `paid` (= Σ ap_billing on the PO, server-computed 2dp,
+ *     B-079/F2) drives the จ่ายไป column + its proportion bar; `doc_date` (= created_at)
+ *     drives the detail document-date SmallStat, ISO/UTC per the house formatDate.
+ *     Both are displayed verbatim — never recomputed (money = SERVER).
+ * WIRE GAPS (reported honestly, never fabricated):
+ *   - deposit column: the prototype cell is a CONTRACTED down-payment PERCENT pill
+ *     (po.list.depositPaid/depositDue "{pct}% · ..."), but the wire's `deposit` is a PAID
+ *     amount and `pos` has no agreed-rate column — deriving pct from a payment would
+ *     misstate a contract term, so the cell stays an em-dash (B-356).
+ *   - payment-schedule amounts + "PO remaining": amount×pct / total−paid are monetary
+ *     totals that would be originated in the browser — em-dash (money = SERVER).
  *   - NO GR% column on the po wire: the receive-goods(%) list cell renders an em-dash
  *     and its progress bar is omitted (the receive-progress lives on GET /gr, not here).
- *   - NO "closed" status + NO document date: the closed row-badge, the closed/deposit/
- *     awaiting-GR KPI values + tabs, and the detail document-date render em-dash / empty.
- *   - KPI values: pending + open (approved) are real C10 counts; deposit-due /
- *     awaiting-GR / closed-this-month have no wire metric -> em-dash. The mock money
- *     sub-captions are unkeyed and omitted.
+ *   - NO "closed" status: the closed row-badge + the closed tab stay empty.
+ *   - KPI values: pending + open (approved) are real C10 counts; deposit-due (needs the
+ *     same missing agreed rate) / awaiting-GR / closed-this-month have no wire metric ->
+ *     em-dash. The mock money sub-captions are unkeyed and omitted.
+ *   - credit_term / vat ARE on the payload, but pototype/po-wo.jsx POList (L12-205) has
+ *     no cell for either (8 fixed columns, 4 fixed detail SmallStats) — adding one would
+ *     be a redesign (§0 rule 1). Reported, not invented (B-356).
  *   - Detail actions target mock subsystems: pay (no deposit endpoint) shows a
  *     confirm + toast only; receive-goods navigates to the GR screen; edit / print are
  *     presentational (no PO line-item edit endpoint; print is icon-only in the
@@ -72,6 +82,7 @@ import {
   type PoRow,
   type PoTab,
 } from "./po-wo-rows";
+import { poListWireById, formatDate, paidPct, type PoListWire } from "./po-list-rows";
 import { usePoList, usePrList } from "./use-po-wo";
 import { POCreateForm } from "./po-create-form";
 import poWoStrings from "./po-wo-strings.json" with { type: "json" };
@@ -268,6 +279,9 @@ export function POList() {
   const [sel, setSel] = useState(0);
 
   const rows = useMemo<PoRow[]>(() => (poQ.data ?? []).map(toPoRow), [poQ.data]);
+  // The two POList-only wire fields (paid, doc_date), keyed by doc id — see po-list-rows.ts.
+  const wireById = useMemo(() => poListWireById(poQ.data), [poQ.data]);
+  const wireOf = (id: string): PoListWire | undefined => wireById.get(id);
   const prRefs = useMemo(() => (prQ.data ?? []).map(toPrRef), [prQ.data]);
   const vendorNames = useMemo(
     () => vendorNameById((vendorQ.data ?? []).map(toVendorRef)),
@@ -441,10 +455,41 @@ export function POList() {
                         <td style={{ ...td, textAlign: "right", fontWeight: 600 }} className="num">
                           {formatMoney(r.total)}
                         </td>
-                        {/* deposit: no wire (po.ts GAP 2) — em-dash */}
+                        {/* deposit: the prototype pill is a CONTRACTED down-payment percent
+                            ("{pct}% · paid/due"); the wire's `deposit` is a PAID amount, and
+                            pos has no agreed-rate column — em-dash, never imputed (B-356). */}
                         <td style={{ ...td, color: "var(--text-3)" }}>{DASH}</td>
-                        {/* paid: no wire — em-dash (progress bar omitted) */}
-                        <td style={{ ...td, color: "var(--text-3)" }} className="num">{DASH}</td>
+                        {/* paid (จ่ายไป): real Σ ap_billing off the LIST payload (po.ts
+                            sumBillings, B-079/F2) — server-computed, displayed verbatim.
+                            The bar is a display proportion of paid/total (paidPct). */}
+                        <td style={td} className="num">
+                          {wireOf(r.id) ? (
+                            <>
+                              <div style={{ fontSize: 11.5, fontWeight: 600 }}>
+                                {formatMoney(wireOf(r.id)!.paid)}
+                              </div>
+                              <div
+                                style={{
+                                  height: 3,
+                                  background: "var(--surface-3)",
+                                  borderRadius: 999,
+                                  marginTop: 3,
+                                  overflow: "hidden",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: `${paidPct(wireOf(r.id)!.paid, r.total)}%`,
+                                    height: "100%",
+                                    background: "var(--accent)",
+                                  }}
+                                />
+                              </div>
+                            </>
+                          ) : (
+                            <span style={{ color: "var(--text-3)" }}>{DASH}</span>
+                          )}
+                        </td>
                         {/* receive-goods %: no wire on po — em-dash (progress bar omitted) */}
                         <td style={{ ...td, color: "var(--text-3)" }} className="num">{DASH}</td>
                         <td style={td}>
@@ -490,8 +535,12 @@ export function POList() {
                     label={tp(P("project"))}
                     value={resolvePoProjectName(selectedRow.prId, prProjectIds, projectNames) || DASH}
                   />
-                  {/* document-date: no date column on the wire — em-dash */}
-                  <SmallStat label={tp(P("docDate"))} value={DASH} />
+                  {/* document-date: real `doc_date` off the LIST payload (= pos.created_at),
+                      rendered ISO/UTC per the house formatDate convention. */}
+                  <SmallStat
+                    label={tp(P("docDate"))}
+                    value={formatDate(wireOf(selectedRow.id)?.docDate ?? "") || DASH}
+                  />
                   <SmallStat label={t("po.list.colRefPr")} value={refPrNo(selectedRow.prId) || DASH} brand />
                 </div>
               </div>

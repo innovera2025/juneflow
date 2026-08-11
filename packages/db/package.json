@@ -32,8 +32,10 @@
     "migrate": "drizzle-kit migrate",
     "migration:check": "drizzle-kit check",
     "seed": "tsx src/seed/index.ts",
+    "quota:preflight": "tsx src/quota-preflight.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
@@ -45,6 +47,7 @@
     "better-auth": "^1.2.8",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.0"
   }
 }

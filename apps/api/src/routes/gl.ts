@@ -40,15 +40,25 @@ import {
 import type { TenantDb } from "../db/tenant-db.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
-import { listGlPostingDocs } from "./gl-posting.js";
+import {
+  GrNoLongerPostableError,
+  listGlPostingDocs,
+  lockPostableGr,
+} from "./gl-posting.js";
 import {
   POSTING_MAP,
   allocJvNo,
+  docNoExhausted,
+  DocNoExhaustedError,
   isUniqueViolation,
+  JV_COMPANY_NO_CONSTRAINT,
   resolveAccountIds,
+  violatedConstraint,
+  withDocNoRetry,
   type PostingRule,
 } from "./gl-post.js";
 import { loadCaller, permAllowed } from "./authz.js";
+import { byIdAsc } from "./list-order.js";
 
 type JvRow = typeof jvs.$inferSelect;
 type JvLineRow = typeof jvLines.$inferSelect;
@@ -129,7 +139,9 @@ function coaWire(a: GlAccountRow): Record<string, unknown> {
 async function getCoa(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(glAccounts)) as GlAccountRow[];
   return [...rows]
-    .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))
+    // B-323: code is unique per company (gl_account_company_code_uq) — id floor anyway,
+    // so the order does not depend on a constraint staying put.
+    .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0) || byIdAsc(a, b))
     .map(coaWire);
 }
 
@@ -181,7 +193,12 @@ async function listJv(db: TenantDb): Promise<Record<string, unknown>[]> {
     const at = a.created_at ? new Date(a.created_at as Date).getTime() : 0;
     const bt = b.created_at ? new Date(b.created_at as Date).getTime() : 0;
     if (at !== bt) return bt - at;
-    return a.no < b.no ? 1 : a.no > b.no ? -1 : 0;
+    if (a.no !== b.no) return a.no < b.no ? 1 : -1;
+    // B-323: `no` alone is NOT a safe floor here — B-168 is an open, live defect in
+    // which allocJvNo can mint a DUPLICATE jv.no, so two distinct JVs can tie on both
+    // created_at and no and hand the pair back to the join plan. id is unique by
+    // construction, so it closes the order unconditionally.
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 }
 
@@ -352,19 +369,34 @@ async function createJv(
   // header too, never leaving an orphaned jv (previously mitigated only by
   // header-first ordering). insertThrough re-proves this tenant owns the parent
   // jv INSIDE the same transaction; the tx wrapper carries the same company_id.
-  const { createdJv, createdLines } = await db.transaction(async (tx) => {
-    const [createdJv] = (await tx
-      .insert(jvs, {
-        id: jvId,
-        no: parsed.no,
-        sourceDoc: parsed.sourceDoc,
-        periodId: parsed.periodId,
-        memo: parsed.memo,
-      })
-      .returning()) as JvRow[];
-    const createdLines = await tx.insertThrough(jvLines, jvs, jvId, lineRows);
-    return { createdJv, createdLines };
-  });
+  //
+  // B-318: this is the ONE jv-insert site that must NOT retry. `no` is CLIENT-
+  // supplied (parseJvBody) — re-running would insert the caller's same number
+  // again and collide forever, and silently renumbering someone's manual JV would
+  // be worse. It is also the only site with no catch at all, so before 0061 a
+  // duplicate manual number was an unhandled 500. Map it BY NAME to the honest 409.
+  let created: { createdJv: JvRow | undefined; createdLines: unknown[] };
+  try {
+    created = await db.transaction(async (tx) => {
+      const [createdJv] = (await tx
+        .insert(jvs, {
+          id: jvId,
+          no: parsed.no,
+          sourceDoc: parsed.sourceDoc,
+          periodId: parsed.periodId,
+          memo: parsed.memo,
+        })
+        .returning()) as JvRow[];
+      const createdLines = await tx.insertThrough(jvLines, jvs, jvId, lineRows);
+      return { createdJv, createdLines };
+    });
+  } catch (err) {
+    if (isUniqueViolation(err) && violatedConstraint(err) === JV_COMPANY_NO_CONSTRAINT) {
+      return conflict(reply, `JV number ${parsed.no} is already used in this company`);
+    }
+    throw err;
+  }
+  const { createdJv, createdLines } = created;
 
   return reply.code(201).send({
     id: createdJv?.id ?? jvId,
@@ -933,6 +965,20 @@ async function postGlDocs(
   let nextSeq = noMatch ? Number(noMatch[2]) : 1;
   const allocNextNo = (): string =>
     `${noPrefix}${String(nextSeq++).padStart(seqWidth, "0")}`;
+  /**
+   * B-318 retry allocator. This batch is the WORST case of the defect: it reads the
+   * base ONCE and then increments in JS, so a concurrent batch does not collide on
+   * one number — it collides across the whole RANGE. Bumping nextSeq on a collision
+   * would inherit that drifted range and keep losing, so a retry must RE-BASE from
+   * the committed max. (Each doc is its own committed transaction executed
+   * sequentially, so the re-read always sees the winner and returns a higher number.)
+   */
+  const rebaseNextNo = async (): Promise<string> => {
+    const fresh = await allocJvNo(db);
+    const m = /^(.*-)(\d+)$/.exec(fresh);
+    if (m) nextSeq = Number(m[2]);
+    return allocNextNo();
+  };
 
   const posted: { doc_id: string; source: string; jv_no: string; amount: number }[] = [];
   const skipped: { doc_id: string; reason: string }[] = [];
@@ -948,9 +994,18 @@ async function postGlDocs(
       skipped.push({ doc_id: docId, reason: "already posted" });
       continue;
     }
-    if (doc.amount == null) {
-      // C10 honest gap: gr carries received/rejected QUANTITY, not a money
-      // amount — a doc with no real money value is NOT postable (never invent one).
+    if (doc.amount == null || doc.amount <= 0) {
+      // A doc with no real money value is NOT postable (never invent one).
+      //
+      // B-368 WIDENED THIS FROM `== null` TO `<= 0`, and it is defence in depth
+      // rather than the primary guard. gl-posting.ts already returns null for a
+      // receipt whose measurable total is 0 (no gr_item rows = the mobile shape;
+      // or lines carrying no server price source). But `gr` is the first inbox
+      // source whose amount is DERIVED rather than read off a stored money column,
+      // so it is the first that can be 0 at all — every other kind is positive by
+      // construction. A zero-amount JV is two zero legs: balanced, meaningless, and
+      // it marks the document posted FOREVER, which is worse than leaving it
+      // pending. Two independent places now have to fail for that to happen.
       skipped.push({ doc_id: docId, reason: "no postable money amount" });
       continue;
     }
@@ -973,7 +1028,10 @@ async function postGlDocs(
     const cur = doc.currency_code ?? "THB";
     if (currency == null) currency = cur;
     const jvId = randomUUID();
-    const jvNo = allocNextNo();
+    // B-318: assigned INSIDE allocThenPost — the first attempt takes the in-batch
+    // counter, a retry re-bases from the committed max.
+    let jvNo = "";
+    let attempt = 0;
     // A balanced 2-leg JV: Dr rule.dr = amount, Cr rule.cr = amount.
     const lineRows: (typeof jvLines.$inferInsert)[] = [
       { jvId, accountId: drId, dr: moneyStr(amount), cr: "0.00", currencyCode: cur },
@@ -981,8 +1039,18 @@ async function postGlDocs(
     ];
     // ONE transaction per posted doc: header + both legs together. insertThrough
     // re-proves this tenant owns the parent jv INSIDE the same tx (fail closed).
-    try {
+    const allocThenPost = async (): Promise<void> => {
+      jvNo = attempt++ === 0 ? allocNextNo() : await rebaseNextNo();
       await db.transaction(async (tx) => {
+        // B-361: a goods receipt can be RETURNED or CANCELLED by another writer
+        // while this batch runs. `doc.posted` and the `status = 'received'`
+        // enumeration were both read OUTSIDE any transaction, one plain SELECT
+        // each, so neither decides anything under concurrency. Take the receipt's
+        // row lock and re-decide HERE, as the FIRST statement of the transaction
+        // and before the JV exists — the return/cancel side locks the same row
+        // with its own guarded UPDATE, so one of the two always waits for the
+        // other. 0 rows → the receipt moved on → throw → the whole post rolls back.
+        if (doc.source === "gr") await lockPostableGr(tx, doc.id);
         await tx
           .insert(jvs, {
             id: jvId,
@@ -1008,8 +1076,34 @@ async function postGlDocs(
             .returning();
         }
       });
+    };
+    try {
+      await withDocNoRetry(allocThenPost);
       posted.push({ doc_id: doc.id, source: doc.source, jv_no: jvNo, amount });
     } catch (err) {
+      // B-318 FIRST, and it must NOT reuse "already posted": this doc is NOT posted.
+      // That existing reason is the nastiest possible lie here — the caller reads it
+      // as "someone else did it" and stops trying. The batch answers 200 (other docs
+      // in it really did commit), so an honest per-doc skip is the truthful analogue
+      // of the 503 the single-doc handlers return.
+      if (err instanceof DocNoExhaustedError) {
+        skipped.push({
+          doc_id: doc.id,
+          reason: "document-number allocation contended — nothing posted, retry",
+        });
+        continue;
+      }
+      // B-361: a concurrent return/cancel took the receipt out of `received`
+      // before this JV committed. Nothing was written (the transaction rolled
+      // back), and this is deliberately NOT "already posted": it is not posted,
+      // and it is not postable — the goods went back to the vendor.
+      if (err instanceof GrNoLongerPostableError) {
+        skipped.push({
+          doc_id: doc.id,
+          reason: "the receipt was returned or cancelled — no longer postable",
+        });
+        continue;
+      }
       // P2-BE-52: a concurrent /gl/post posted this doc first — the 0037
       // source_doc UNIQUE index tripped. Map to the same idempotent skip as the
       // doc.posted pre-check (never a 500, never a duplicate JV).
@@ -1037,7 +1131,9 @@ async function postGlDocs(
 async function listPeriods(db: TenantDb): Promise<Record<string, unknown>[]> {
   const rows = (await db.select(accountingPeriods)) as AccountingPeriodRow[];
   return [...rows]
-    .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
+    // B-323: period is unique per company (accounting_period_company_period_uq) — id
+    // floor anyway, same reasoning as the COA read.
+    .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0) || byIdAsc(a, b))
     .map((p) => ({
       id: p.id,
       period: p.period,
@@ -1146,7 +1242,19 @@ async function glProjectPl(
   });
   // Highest revenue first — a stable, defined order (the mock's margin sort needs a
   // nonzero revenue the seed lacks; revenue desc is the honest ordering).
-  projectsOut.sort((a, b) => b.revenue - a.revenue);
+  // B-323: and because the seed lacks that revenue, EVERY project ties at 0 here — the
+  // comparator returned 0 for the entire list. The rows carry no id (project_id is the
+  // Map key, "" for the unallocated bucket), and the Map's insertion order comes from a
+  // joined jv_line read, so it is join-plan order — not a floor. project_id is.
+  projectsOut.sort(
+    (a, b) =>
+      b.revenue - a.revenue ||
+      ((a.project_id ?? "") < (b.project_id ?? "")
+        ? -1
+        : (a.project_id ?? "") > (b.project_id ?? "")
+          ? 1
+          : 0),
+  );
 
   const t = projectsOut.reduce(
     (s, p) => {

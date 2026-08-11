@@ -48,6 +48,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { costCenters, projects } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
 
 type CostCenterRow = typeof costCenters.$inferSelect;
@@ -115,7 +116,8 @@ export function registerCostCentersRoute(app: FastifyInstance): void {
       // ({data, page, page_size, total}). The full tenant-scoped list is
       // returned as one page (filter/page/page_size accepted but not
       // interpreted) — see list-envelope.ts.
-      listEnvelope(rows.map(toWire)),
+      // B-323: `rows` is a selectThrough (INNER JOIN, no ORDER BY) — total-order it.
+      listEnvelope(newestFirst(rows).map(toWire)),
     );
   });
 

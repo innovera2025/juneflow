@@ -37,6 +37,7 @@ import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
 import { createFakeR2Storage } from "./files.js";
+import { entryOrder } from "./list-order.js";
 
 const COMPANY = "22222222-2222-2222-2222-222222222222";
 const SESSION = {
@@ -65,11 +66,33 @@ interface StubOpts {
   captured?: Captured[];
   inserted?: Inserted[];
   updated?: Updated[];
+  /**
+   * B-312: make an insert into a table THROW (models a 23505 unique-violation on the
+   * material_issue_idempotency_uq partial index). Receives the table and the running
+   * 0-based per-table insert count, so a test can let the 1st create through and trip
+   * only the replay. Return null to insert normally. (labor.test.ts writeStub shape.)
+   */
+  insertThrows?: (table: unknown, nth: number) => Error | null;
+  /**
+   * B-312: called with the rows an insert actually RETURNED (id + createdAt stamped).
+   * Lets a test derive its stored-row view from what the handler really wrote instead
+   * of hand-seeding it — so a handler that writes twice really IS seen twice by the
+   * later ledger / JV assertions (a hand-seeded array would hide the defect).
+   */
+  onInsert?: (table: unknown, rows: Record<string, unknown>[]) => void;
 }
 
 /** Db stub: canned rows per table (reads, incl. selectThrough joins) + write capture. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [] } = opts;
+  const {
+    rows,
+    captured = [],
+    inserted = [],
+    updated = [],
+    insertThrows,
+    onInsert,
+  } = opts;
+  const insertCount = new Map<unknown, number>();
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -77,16 +100,30 @@ function stubDb(opts: StubOpts): Db {
     return [];
   };
   const builderFor = (table: unknown) => {
+    let pendingWhere: SQL | undefined;
+    let awaited = false;
     const builder = {
       $dynamic: () => builder,
       innerJoin: () => builder,
       where: (where: SQL) => {
         captured.push({ table, where });
-        return Promise.resolve(rowsFor(table, where));
+        pendingWhere = where;
+        awaited = true;
+        // The chain may END here (plain select) or CONTINUE — B-342's selectForUpdate
+        // appends `.orderBy(id).for("update")`. Returning a builder that is ALSO a
+        // thenable serves both without the call sites having to know which.
+        return builder;
       },
+      // B-342: the selectForUpdate() shape. The stub models the SHAPE so the handler
+      // runs; it cannot model a row lock, and NO test in this file claims it does. The
+      // lock is proven live in tests/e2e/b342-money-races.spec.ts by holding a
+      // colliding transaction open in a second psql session and asserting the API
+      // BLOCKS on it (an elapsed-time assertion, which cannot pass by accident).
+      orderBy: () => builder,
+      for: () => builder,
       then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
-        captured.push({ table, where: undefined });
-        return Promise.resolve(rowsFor(table, undefined)).then(onOk, onErr);
+        if (!awaited) captured.push({ table, where: undefined });
+        return Promise.resolve(rowsFor(table, pendingWhere)).then(onOk, onErr);
       },
     };
     return builder;
@@ -97,14 +134,20 @@ function stubDb(opts: StubOpts): Db {
     insert: (table: unknown) => ({
       values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
         returning: () => {
+          const nth = insertCount.get(table) ?? 0;
+          insertCount.set(table, nth + 1);
+          const boom = insertThrows?.(table, nth);
+          // Thrown BEFORE the capture: a rejected insert wrote no row, so it must not
+          // be counted as one (the "exactly one row" assertions depend on that).
+          if (boom) return Promise.reject(boom);
           inserted.push({ table, values });
           const arr = Array.isArray(values) ? values : [values];
-          return Promise.resolve(
-            arr.map((v) => {
-              const row = v as Record<string, unknown>;
-              return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
-            }),
-          );
+          const out = arr.map((v) => {
+            const row = v as Record<string, unknown>;
+            return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
+          });
+          onInsert?.(table, out as Record<string, unknown>[]);
+          return Promise.resolve(out);
         },
       }),
     }),
@@ -696,8 +739,59 @@ describe("POST /api/v1/inventory/transfers", () => {
     // lines written (via insertThrough into transfer_line).
     const lines = inserted.find((i) => i.table === transferLines)!.values as Record<string, unknown>[];
     expect(lines).toHaveLength(2);
+    // B-323: transfer_line is a no-`seq` LINE table whose detail read orders by
+    // entryOrder (created_at ASC). One insertThrough = one now(), so without the
+    // stamp both lines tie and the transfer's body renders in uuid order.
+    const times = (lines as { createdAt?: Date }[]).map((l) => l.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(2);
+    expect(times[1]!).toBeGreaterThan(times[0]!);
     // NO stock movement on create (deferred to approve).
     expect(inserted.find((i) => i.table === stockLedgers)).toBeUndefined();
+  });
+
+  it("writes the lines in LOCK order but stamps them in BODY order — the detail screen still renders what was typed", async () => {
+    // B-340 gate-4.5 finding 1, and the trap that comes with its fix. `transfer_line` is
+    // BOTH the rendered body of one transfer AND an FK child of `inventory_item`, so ONE
+    // array has two consumers with two different required orders:
+    //   - Postgres wants ASCENDING item id, because this multi-row INSERT takes an
+    //     implicit `FOR KEY SHARE` per row IN ROW ORDER and a descending one deadlocks a
+    //     concurrent issue's `FOR UPDATE` (16 of 48 requests 500 before the fix);
+    //   - the storekeeper wants the order they typed, which GET /inventory/transfers/{id}
+    //     recovers via entryOrder (created_at ASC).
+    // Both are satisfied only by stamp-THEN-sort. Sorting first would move the stamps too
+    // and silently reorder every transfer detail screen — which nothing else here would
+    // catch, because the test above sends its lines ALREADY ascending, so for it the sort
+    // is a no-op and it passes with the composition either way round.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: transferDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/inventory/transfers",
+      // DESCENDING body — line order is client-controlled, and ITEM1 > ITEM0.
+      payload: {
+        from_warehouse_id: WH_FROM,
+        to_warehouse_id: WH_TO,
+        lines: [
+          { item_id: ITEM1, qty: 5 },
+          { item_id: ITEM0, qty: 4 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const lines = inserted.find((i) => i.table === transferLines)!.values as {
+      itemId: string;
+      createdAt: Date;
+    }[];
+    // WRITTEN ascending by item id — the row order Postgres takes its FK locks in.
+    expect(lines.map((l) => l.itemId)).toEqual([ITEM0, ITEM1]);
+    // STAMPED in body order: the line typed FIRST (ITEM1) carries the EARLIER instant,
+    // even though it is now written SECOND.
+    const at = new Map(lines.map((l) => [l.itemId, l.createdAt.getTime()]));
+    expect(at.get(ITEM1)!).toBeLessThan(at.get(ITEM0)!);
+    // So the reader the detail route actually uses reproduces the typed body exactly.
+    expect(entryOrder(lines).map((l) => l.itemId)).toEqual([ITEM1, ITEM0]);
   });
 
   it("400s a line item that is not in this tenant (ownership)", async () => {
@@ -742,6 +836,12 @@ describe("POST /api/v1/inventory/transfers/:id/approve", () => {
         [stockTransfers, opts.transfer ?? [transferRow(TRANSFER0, { status: "pending" })]],
         [transferLines, [transferLineRow(TRANSFER0, ITEM0, "10.0000")]],
         [stockLedgers, opts.ledger ?? [ledgerRow(ITEM0, WH_FROM, "100.0000")]],
+        // B-342: approveTransfer now takes a row lock on the line items BEFORE reading
+        // the ledger (selectForUpdate). The stub must resolve that read or the handler
+        // sees zero locked rows and refuses. This models the item EXISTING; it cannot
+        // model the LOCK — that is proven live, by holding a colliding transaction open
+        // in a second psql session (tests/e2e/b342-money-races.spec.ts).
+        [inventoryItems, [itemRow(ITEM0)]],
       ],
       inserted: opts.inserted,
       updated: opts.updated,
@@ -839,6 +939,59 @@ describe("POST /api/v1/inventory/issues", () => {
     });
 
   const issuePayload = { project_id: PROJECT0, from_warehouse_id: WH_FROM, lines: [{ item_id: ITEM0, qty: 10, cc_id: CC0 }] };
+
+  // B-323: issue_line is a no-`seq` LINE table whose detail read (GET
+  // /inventory/issues/{id}) orders by entryOrder (created_at ASC). One insertThrough
+  // is one statement / one now(), so without the stamp every line of a multi-line
+  // issue ties and the document's body renders in `defaultRandom()` uuid order.
+  it("stamps a multi-line issue apart so its ENTRY ORDER is recorded, not inferred", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            ...authzRows({ approve: true }),
+            [projects, [projectRow]],
+            [warehouses, [warehouseRow(WH_FROM)]],
+            [
+              inventoryItems,
+              [itemRow(ITEM0, { price: "50.00" }), itemRow(ITEM1, { price: "30.00" })],
+            ],
+            [
+              stockLedgers,
+              [ledgerRow(ITEM0, WH_FROM, "100.0000"), ledgerRow(ITEM1, WH_FROM, "100.0000")],
+            ],
+            [materialIssues, [issueRow("seed-mi", { no: "OPEN-1" })]],
+            [jvs, [jvSeed]],
+            [glAccounts, COA_ROWS],
+          ],
+          inserted,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/inventory/issues",
+      payload: {
+        project_id: PROJECT0,
+        from_warehouse_id: WH_FROM,
+        lines: [
+          { item_id: ITEM0, qty: 3, cc_id: CC0 },
+          { item_id: ITEM1, qty: 4, cc_id: CC0 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const lines = inserted.find((i) => i.table === issueLines)!.values as {
+      itemId: string;
+      createdAt?: Date;
+    }[];
+    expect(lines.map((l) => l.itemId)).toEqual([ITEM0, ITEM1]);
+    const times = lines.map((l) => l.createdAt?.getTime());
+    expect(times.every((t) => typeof t === "number")).toBe(true);
+    expect(new Set(times).size).toBe(2);
+    expect(times[1]!).toBeGreaterThan(times[0]!);
+  });
 
   it("403s a caller lacking finance.approve (an issue moves stock + posts money)", async () => {
     const inserted: Inserted[] = [];
@@ -948,5 +1101,538 @@ describe("POST /api/v1/inventory/issues", () => {
     expect(fired[0]!.entity).toBe("/api/v1/inventory/issues");
     expect(fired[0]!.companyId).toBe(COMPANY);
     expect(fired[0]!.userId).toBe("u-0");
+  });
+});
+
+// ===========================================================================
+// B-312 — POST /inventory/issues idempotency (client key + partial index + replay)
+// ---------------------------------------------------------------------------
+// WHY this is a MONEY contract, not data hygiene: createIssue MINTS a fresh issue id
+// per request and posts a Dr 1140 / Cr 5020 JV keyed `issue:<that fresh id>`, so a
+// replay produces a SECOND source_doc — jv_source_doc_uq (whose predicate does not
+// even list `issue:`) can never see it, and the two JVs are individually clean and
+// balanced. The stock ledger is decremented twice at the same time. Proven live
+// before the fix: MI-2026-0001 + MI-2026-0002, JV-2026-0419 + JV-2026-0420,
+// Σ Dr 1140 = 33,700.00 for one physical issue of 16,850.00, on-hand 800 not 900.
+// sync_processor.dart replays a create it never heard back on, so the LOAD-BEARING
+// assertions below are the JV total and the ledger balance — a row count alone would
+// not encode this defect.
+// ===========================================================================
+
+const IDEMP_KEY = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+const SECOND_KEY = "b7c8d9e0-1f2a-4b3c-8d4e-5f6a7b8c9d0e";
+/** Every client key this suite sends — a read binding one of these IS a dedup resolve. */
+const CLIENT_KEYS: readonly string[] = [IDEMP_KEY, SECOND_KEY, "123"];
+const ISSUE_IDEMP_UQ = "material_issue_idempotency_uq";
+
+/**
+ * A raw pg unique-violation (SQLSTATE 23505) — the DatabaseError node-postgres throws,
+ * naming the violated index on `.constraint`. `null` models a 23505 naming nothing.
+ */
+const pgUniqueViolation = (constraint: string | null = ISSUE_IDEMP_UQ): Error =>
+  Object.assign(
+    new Error(`duplicate key value violates unique constraint "${constraint ?? "?"}"`),
+    constraint === null ? { code: "23505" } : { code: "23505", constraint },
+  );
+
+/**
+ * The shape the HANDLER actually sees: every insert goes through drizzle, which wraps
+ * the driver error in a DrizzleQueryError and nests the DatabaseError under `.cause`.
+ * isUniqueViolation() / violatedConstraint() must BOTH look one level down — a suite
+ * that only ever threw the FLAT shape would stay green against a gate reading
+ * `err.constraint` directly while production silently lost its replay path (B-263).
+ */
+const uniqueViolation = (constraint: string | null = ISSUE_IDEMP_UQ): Error =>
+  Object.assign(new Error("Failed query"), { cause: pgUniqueViolation(constraint) });
+
+/**
+ * A keyed create issues TWO kinds of material_issue read — the keyed dedup resolve
+ * (pre-check, and again from a catch) and allocIssueNo's unkeyed running-number scan.
+ * The row-blind stub answers both the same, so this splits them: a read whose WHERE
+ * binds the client key gets `keyed()` ([] models "not stored / another tenant's or
+ * anchor's row we cannot see"); every other read gets `unkeyed()`.
+ */
+const keyedIssues =
+  (keyed: (key: string) => unknown[], unkeyed: () => unknown[]) =>
+  (where: SQL | undefined): unknown[] => {
+    // A read binding one of the suite's client keys IS the dedup resolve; everything
+    // else (allocIssueNo's running-number scan, insertThrough's parent-ownership
+    // probe) is unkeyed and sees the whole stored set.
+    const key = paramsOf(where).find(
+      (p): p is string => typeof p === "string" && CLIENT_KEYS.includes(p),
+    );
+    return key === undefined ? unkeyed() : keyed(key);
+  };
+
+/**
+ * The jv table answers TWO reads: allocJvNo's unkeyed scan, and the replay sender's
+ * `source_doc = issue:<id>` lookup. The latter really filters, so a replay's `jv_no`
+ * is the ORIGINAL voucher number and never a freshly allocated one.
+ */
+const jvSource =
+  (stored: () => unknown[]) =>
+  (where: SQL | undefined): unknown[] => {
+    const src = paramsOf(where).find(
+      (p): p is string => typeof p === "string" && p.startsWith("issue:"),
+    );
+    return src
+      ? stored().filter((j) => (j as { sourceDoc?: string }).sourceDoc === src)
+      : stored();
+  };
+
+/** Every material_issue read this request made whose WHERE bound the client key. */
+const keyedIssueReads = (captured: Captured[]): Captured[] =>
+  captured.filter(
+    (c) => c.table === materialIssues && paramsOf(c.where).includes(IDEMP_KEY),
+  );
+
+/** Σ signed qty over the ledger view — the on-hand the handler itself would compute. */
+const onHand = (ledger: readonly unknown[]): number =>
+  ledger.reduce((s: number, l) => s + Number((l as { qty: string }).qty), 0);
+
+/** Σ debits posted to 1140 WIP across EVERY jv_line insert this app made. */
+const sumWipDebits = (inserted: Inserted[]): number =>
+  inserted
+    .filter((i) => i.table === jvLines)
+    .flatMap((i) => i.values as Record<string, unknown>[])
+    .filter((l) => l.accountId === ACC_WIP)
+    .reduce((s, l) => s + Number(l.dr), 0);
+
+/**
+ * The B-312 stub. The stored views are DERIVED from what the handler actually WROTE
+ * (onInsert) — never hand-seeded — so if a replay wrote a second row the ledger and JV
+ * assertions really would see it. That is the whole point.
+ */
+const idempWorld = (opts: {
+  seedQty?: string;
+  captured?: Captured[];
+  inserted?: Inserted[];
+  insertThrows?: (table: unknown, nth: number) => Error | null;
+  /** Overrides the keyed material_issue resolve (models a race / a foreign anchor). */
+  keyedResolve?: (key: string) => unknown[];
+}) => {
+  const storedIssues: unknown[] = [];
+  const storedLines: unknown[] = [];
+  const storedJvs: unknown[] = [jvSeed];
+  const storedLedger: unknown[] = [ledgerRow(ITEM0, WH_FROM, opts.seedQty ?? "100.0000")];
+  const db = stubDb({
+    rows: [
+      ...authzRows(),
+      [projects, [projectRow]],
+      [warehouses, [warehouseRow(WH_FROM)]],
+      [inventoryItems, [itemRow(ITEM0, { price: "50.00" })]],
+      [glAccounts, COA_ROWS],
+      [stockLedgers, () => storedLedger],
+      [issueLines, () => storedLines],
+      [jvs, jvSource(() => storedJvs)],
+      [
+        materialIssues,
+        keyedIssues(
+          opts.keyedResolve ??
+            // The faithful default: the resolve really FILTERS by the bound key, so a
+            // DIFFERENT key resolves nothing exactly as the real AND-ed WHERE would.
+            ((key: string) =>
+              storedIssues.filter(
+                (i) => (i as { idempotencyKey?: string | null }).idempotencyKey === key,
+              )),
+          () => storedIssues,
+        ),
+      ],
+    ],
+    captured: opts.captured,
+    inserted: opts.inserted,
+    insertThrows: opts.insertThrows,
+    onInsert: (table, out) => {
+      if (table === materialIssues) storedIssues.push(...out);
+      else if (table === issueLines) storedLines.push(...out);
+      else if (table === jvs) storedJvs.push(...out);
+      else if (table === stockLedgers) storedLedger.push(...out);
+    },
+  });
+  return { db, storedIssues, storedLines, storedJvs, storedLedger };
+};
+
+const issuePost = (extra: Record<string, unknown> = {}, qty = 10) => ({
+  method: "POST" as const,
+  url: "/api/v1/inventory/issues",
+  payload: {
+    project_id: PROJECT0,
+    from_warehouse_id: WH_FROM,
+    lines: [{ item_id: ITEM0, qty, cc_id: CC0 }],
+    ...extra,
+  },
+});
+
+describe("POST /api/v1/inventory/issues — B-312 idempotency (client key + replay)", () => {
+  it("same idempotency_key twice → ONE issue, ONE JV (Σ Dr 1140 = 500, not 1000) and stock decremented ONCE (on-hand 90, not 80)", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    // THE MONEY ASSERTION FIRST (it is the point): one JV, and Σ Dr 1140 = the ONE
+    // issue's value. Without the dedup there are TWO clean balanced JVs and 1000
+    // capitalised into WIP for 500 of material — invisible to every downstream guard,
+    // because each JV on its own is perfectly well-formed.
+    expect(sumWipDebits(inserted)).toBe(500);
+    expect(sumWipDebits(inserted)).not.toBe(1000);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+
+    // THE STOCK ASSERTION: one −10 movement, not two. on-hand 100 − 10 = 90.
+    expect(onHand(world.storedLedger)).toBe(90);
+    expect(onHand(world.storedLedger)).not.toBe(80);
+    const legs = inserted.filter((i) => i.table === stockLedgers);
+    expect(legs).toHaveLength(1);
+    expect((legs[0]!.values as Record<string, unknown>).qty).toBe("-10.0000");
+
+    // ONE header row across BOTH requests, carrying the client key.
+    const issueIns = inserted.filter((i) => i.table === materialIssues);
+    expect(issueIns).toHaveLength(1);
+    expect((issueIns[0]!.values as Record<string, unknown>).idempotencyKey).toBe(IDEMP_KEY);
+    expect(world.storedIssues).toHaveLength(1);
+
+    // The replay is idempotent — the client sees its OWN issue (same id, same server
+    // `no`, same jv_no), never a 409, never a duplicate. Byte-identical BY
+    // CONSTRUCTION (one envelope fn, one sender).
+    expect(res2.json()).toEqual(res1.json());
+    expect(res2.json().id).toBe(res1.json().id);
+    expect(res2.json().no).toBe(res1.json().no);
+    expect(res2.json().jv_no).toBe(res1.json().jv_no);
+    expect(res2.json().lines).toEqual([{ item_id: ITEM0, qty: 10, cc_id: CC0 }]);
+  });
+
+  it("a FULL-issue replay (the original consumed ALL the stock) returns 201 with the ORIGINAL — never the negative-stock 409 sync_processor.dart would dead-letter", async () => {
+    // THE HOIST PROOF (B-264 class). The in-tx negative-stock guard runs BEFORE the
+    // header insert, so on a replay of a full issue it sees on-hand 0 and throws — an
+    // implementation whose only dedup is a catch AT THE INSERT never reaches the 23505
+    // and answers "409 insufficient stock" for material that really did leave the
+    // warehouse. Both defences are exercised here: the hoisted pre-check resolves it
+    // first, and the negative-stock catch re-resolves as the racing backstop.
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ seedQty: "100.0000", inserted });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }, 100));
+    const res2 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }, 100));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.statusCode).not.toBe(409);
+    expect(res2.json()).toEqual(res1.json());
+    expect(inserted.filter((i) => i.table === materialIssues)).toHaveLength(1);
+    expect(inserted.filter((i) => i.table === stockLedgers)).toHaveLength(1);
+    expect(onHand(world.storedLedger)).toBe(0);
+    expect(sumWipDebits(inserted)).toBe(5000); // 100 × 50, ONCE
+  });
+
+  it("the 23505 backstop still fires when the PRE-CHECK misses (the real race) → 201 with the ORIGINAL, still one issue / one JV / one movement", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    // The real race: the pre-checks of BOTH requests run before the original is
+    // visible to us (reads 0 and 1 resolve nothing); our header insert then trips the
+    // partial unique index, and read 2 — issued from the catch, after that commit —
+    // finds it. Exactly the window an app-level pre-check cannot close, which is why
+    // the catch is kept.
+    let keyedReadNo = 0;
+    const world = idempWorld({
+      inserted,
+      captured,
+      keyedResolve: () => (keyedReadNo++ < 2 ? [] : storedIssuesRef()),
+      insertThrows: (table, nth) =>
+        table === materialIssues && nth >= 1 ? uniqueViolation() : null,
+    });
+    const storedIssuesRef = () => world.storedIssues;
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json()); // the ORIGINAL, from the same sender
+    // STRUCTURAL replay-safety: the header is the FIRST write in the tx (the guard
+    // only READS), so the 23505 aborts the block before ANY stock_ledger row or JV leg
+    // is attempted — the replay needs no compensating action. Nothing after the header
+    // ran on request 2.
+    expect(inserted.filter((i) => i.table === materialIssues)).toHaveLength(1);
+    expect(inserted.filter((i) => i.table === stockLedgers)).toHaveLength(1);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+    expect(onHand(world.storedLedger)).toBe(90);
+    expect(sumWipDebits(inserted)).toBe(500);
+    // 3 keyed resolves: create#1's pre-check, create#2's pre-check (missed), the catch.
+    expect(keyedIssueReads(captured)).toHaveLength(3);
+  });
+
+  it("the NEGATIVE-STOCK catch re-resolves the client's own issue (the other interleaving of the same race) → 201, not a 409 for goods already issued", async () => {
+    // Here the original committed BEFORE our in-tx guard read the ledger, so the guard
+    // — not the unique index — is what trips. Without the re-resolve in that catch the
+    // replay would 409 and be dead-lettered forever.
+    const inserted: Inserted[] = [];
+    let keyedReadNo = 0;
+    const world = idempWorld({
+      inserted,
+      keyedResolve: () => (keyedReadNo++ < 2 ? [] : world.storedIssues),
+    });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }, 100));
+    const res2 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }, 100));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json());
+    expect(inserted.filter((i) => i.table === materialIssues)).toHaveLength(1);
+    expect(inserted.filter((i) => i.table === stockLedgers)).toHaveLength(1);
+    expect(onHand(world.storedLedger)).toBe(0);
+  });
+
+  it("a genuinely insufficient FRESH issue still 409s — the negative-stock re-resolve never fabricates a success", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ seedQty: "5.0000", inserted, keyedResolve: () => [] });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost({ idempotency_key: IDEMP_KEY }, 10));
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/insufficient stock/);
+    expect(inserted.filter((i) => i.table === materialIssues)).toHaveLength(0);
+    expect(inserted.filter((i) => i.table === stockLedgers)).toHaveLength(0);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(0);
+  });
+
+  it("409s when a key collision resolves to NO issue in this tenant/anchor (a cross-tenant clash, or the same key against another project) — never a leak, never a fabricated issue", async () => {
+    const inserted: Inserted[] = [];
+    // The colliding row belongs to ANOTHER company (or another project/warehouse) →
+    // invisible through our scoped, anchored resolve.
+    const world = idempWorld({
+      inserted,
+      keyedResolve: () => [],
+      insertThrows: (table) => (table === materialIssues ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toMatch(/idempotency_key already used/);
+    expect(inserted.filter((i) => i.table === materialIssues)).toHaveLength(0);
+    expect(inserted.filter((i) => i.table === stockLedgers)).toHaveLength(0);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(0);
+  });
+
+  it("the dedup resolve is TENANT-scoped and ANCHORED (binds company_id + project_id + from_warehouse_id, never the key alone)", async () => {
+    const captured: Captured[] = [];
+    const world = idempWorld({ captured, keyedResolve: () => [] });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res.statusCode).toBe(201);
+    const keyed = keyedIssueReads(captured);
+    expect(keyed.length).toBeGreaterThan(0);
+    for (const c of keyed) {
+      const params = paramsOf(c.where);
+      expect(params).toContain(COMPANY); // tenant scope, bound by the TenantDb door
+      expect(params).toContain(PROJECT0); // anchor 1
+      expect(params).toContain(WH_FROM); // anchor 2
+    }
+  });
+
+  it("different idempotency_keys → two distinct issues, two movements, two JVs (no dedup path)", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted, keyedResolve: () => [] });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    for (const key of [IDEMP_KEY, SECOND_KEY]) {
+      const res = await app.inject(issuePost({ idempotency_key: key }));
+      expect(res.statusCode).toBe(201);
+    }
+    expect(inserted.filter((i) => i.table === materialIssues)).toHaveLength(2);
+    expect(inserted.filter((i) => i.table === stockLedgers)).toHaveLength(2);
+    expect(onHand(world.storedLedger)).toBe(80);
+  });
+
+  it("no idempotency_key → a normal single create; the key persists as null and NO dedup read is issued (the web create form is unchanged)", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const world = idempWorld({ inserted, captured });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost());
+
+    expect(res.statusCode).toBe(201);
+    const issueIns = inserted.filter((i) => i.table === materialIssues);
+    expect(issueIns).toHaveLength(1);
+    expect((issueIns[0]!.values as Record<string, unknown>).idempotencyKey).toBe(null);
+    expect(keyedIssueReads(captured)).toHaveLength(0);
+    expect(onHand(world.storedLedger)).toBe(90);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["whitespace", "   "],
+    ["tab/newline", "\t\n"],
+  ])("a %s idempotency_key is treated as ABSENT — persists null and issues no dedup read", async (_label, key) => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    const world = idempWorld({ inserted, captured });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost({ idempotency_key: key }));
+
+    expect(res.statusCode).toBe(201);
+    const issueIns = inserted.filter((i) => i.table === materialIssues);
+    expect((issueIns[0]!.values as Record<string, unknown>).idempotencyKey).toBe(null);
+    expect(captured.filter((c) => c.table === materialIssues && paramsOf(c.where).includes(key))).toHaveLength(0);
+  });
+
+  it("an explicit null idempotency_key is ABSENT, not an error (the nullable mobile field's wire form)", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost({ idempotency_key: null }));
+    expect(res.statusCode).toBe(201);
+    expect(
+      (inserted.find((i) => i.table === materialIssues)!.values as Record<string, unknown>)
+        .idempotencyKey,
+    ).toBe(null);
+  });
+
+  it.each([
+    ["a number", 123],
+    ["a boolean", true],
+    ["an array", ["k"]],
+    ["an object", { k: 1 }],
+  ])(
+    "B-309: %s idempotency_key → 400 VALIDATION and NOTHING is written (never a silent no-key create)",
+    async (_label, key) => {
+      const inserted: Inserted[] = [];
+      const world = idempWorld({ inserted });
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+      ).inject(issuePost({ idempotency_key: key }));
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe("VALIDATION");
+      expect(res.json().message).toMatch(/idempotency_key must be a string/);
+      expect(inserted).toHaveLength(0);
+      expect(onHand(world.storedLedger)).toBe(100); // untouched
+    },
+  );
+
+  it("B-309: the camelCase alias is guarded too — {idempotencyKey: 123} → 400, nothing written", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost({ idempotencyKey: 123 }));
+    expect(res.statusCode).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("a numeric-LOOKING string key is a valid key (it is a string) and dedups normally", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res1 = await app.inject(issuePost({ idempotency_key: "123" }));
+    const res2 = await app.inject(issuePost({ idempotency_key: "123" }));
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json());
+    const issueIns = inserted.filter((i) => i.table === materialIssues);
+    expect(issueIns).toHaveLength(1);
+    expect((issueIns[0]!.values as Record<string, unknown>).idempotencyKey).toBe("123");
+    expect(onHand(world.storedLedger)).toBe(90);
+  });
+
+  it.each([
+    ["a 23505 naming ANOTHER constraint", uniqueViolation("material_issue_pkey")],
+    ["a 23505 naming nothing", uniqueViolation(null)],
+    ["a FLAT (un-nested) 23505 on another constraint", pgUniqueViolation("material_issue_pkey")],
+  ])(
+    "B-263: %s is NOT a replay — it rethrows (500) while the SAME stub replays on material_issue_idempotency_uq",
+    async (_label, boom) => {
+      const world = idempWorld({
+        keyedResolve: () => [],
+        insertThrows: (table) => (table === materialIssues ? boom : null),
+      });
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+      ).inject(issuePost({ idempotency_key: IDEMP_KEY }));
+      expect(res.statusCode).toBe(500);
+
+      // CONTROL — the same stub, the same key, the correct constraint name → 409 (the
+      // replay path IS reachable; the test above is not passing for a trivial reason).
+      const control = idempWorld({
+        keyedResolve: () => [],
+        insertThrows: (table) => (table === materialIssues ? uniqueViolation() : null),
+      });
+      const res2 = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: control.db })
+      ).inject(issuePost({ idempotency_key: IDEMP_KEY }));
+      expect(res2.statusCode).toBe(409);
+    },
+  );
+
+  it("a keyless create can NEVER enter the replay path even on a 23505 (the partial index exempts nulls)", async () => {
+    const world = idempWorld({
+      insertThrows: (table) => (table === materialIssues ? uniqueViolation() : null),
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(issuePost());
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("the replay's jv_no is the ORIGINAL voucher number, re-read from source_doc issue:<id> — never re-allocated", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res1 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app.inject(issuePost({ idempotency_key: IDEMP_KEY }));
+    const postedJv = inserted.find((i) => i.table === jvs)!.values as Record<string, unknown>;
+    expect(res1.json().jv_no).toBe(postedJv.no);
+    expect(res2.json().jv_no).toBe(postedJv.no);
+    expect(String(postedJv.sourceDoc)).toBe(`issue:${res1.json().id}`);
+  });
+
+  it("403 (finance.approve) still wins over a replay — an unattributable/underprivileged caller never reaches the dedup read", async () => {
+    const captured: Captured[] = [];
+    const db = stubDb({
+      rows: [
+        ...authzRows({ approve: false }),
+        [projects, [projectRow]],
+        [warehouses, [warehouseRow(WH_FROM)]],
+        [inventoryItems, [itemRow(ITEM0)]],
+        [materialIssues, [issueRow("mi-0", { idempotencyKey: IDEMP_KEY } as never)]],
+      ],
+      captured,
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject(issuePost({ idempotency_key: IDEMP_KEY }));
+    expect(res.statusCode).toBe(403);
+    expect(keyedIssueReads(captured)).toHaveLength(0);
+  });
+
+  it("a replay against a project that is NOT this tenant's is a 400 — never answered from our data", async () => {
+    const db = stubDb({
+      rows: [
+        ...authzRows(),
+        [projects, []], // foreign / absent project
+        [warehouses, [warehouseRow(WH_FROM)]],
+        [inventoryItems, [itemRow(ITEM0)]],
+      ],
+    });
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db })
+    ).inject(issuePost({ idempotency_key: IDEMP_KEY }));
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/project_id not found/);
   });
 });

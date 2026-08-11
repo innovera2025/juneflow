@@ -303,6 +303,24 @@ export const apDeposits = pgTable("ap_deposit", {
   used: numeric("used", { precision: 16, scale: 2 }).notNull().default("0"),
   currencyCode: text("currency_code").notNull().default("THB"),
   status: text("status").notNull().default("approved"),
+  // B-313 (migration 0060): the client-supplied idempotency key for the mobile
+  // offline SyncProcessor's at-least-once replay. POST /ap/deposit MINTS a fresh
+  // deposit id per request and posts a Dr 1160 / Cr 1010 JV keyed `dep:<that fresh
+  // id>` — so jv_source_doc_uq can NEVER see a replay (two different source_docs,
+  // two clean balanced JVs) and the cash credit is doubled. Proven live: two
+  // byte-identical posts of ฿250,000 → DP-2026-0001 + DP-2026-0002, JV-2026-0419 +
+  // JV-2026-0420, Σ Dr 1160 = Σ Cr 1010 = 500,000.00 for ONE payment.
+  // No natural key exists, and BOTH halves were proven live rather than argued:
+  //   - NULL-escapable — with a unique index on (company_id, vendor_id, po_id,
+  //     amount) in place, a byte-identical row still INSERTED (po_id is NULL, and
+  //     SQL NULL is not equal to itself). vendor_id/po_id/wo_id/pct are ALL nullable.
+  //   - legitimately repeatable — set a real po_id on two equal instalments and that
+  //     same index CANNOT EVEN BE BUILT ("Key (…)=(…) is duplicated"). Two equal
+  //     instalments to one vendor against one PO is ordinary business.
+  // Hence the B-307 CLIENT-key shape, not B-308's natural key. `no` is NOT NULL but
+  // SERVER-allocated — an output, not a client key. NULLABLE: pre-existing rows and
+  // web clients that omit it carry none and never collide.
+  idempotencyKey: text("idempotency_key"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
@@ -315,6 +333,28 @@ export const apDeposits = pgTable("ap_deposit", {
   index("ap_deposit_vendor_idx").on(t.vendorId),
   index("ap_deposit_po_idx").on(t.poId),
   index("ap_deposit_wo_idx").on(t.woId),
+  // B-313 (migration 0060): PARTIAL unique index — a replayed POST /ap/deposit
+  // carrying a previously-seen idempotency_key trips 23505 → the handler returns the
+  // ORIGINAL deposit (no duplicate row, no second JV, no second cash credit).
+  // Partial (WHERE idempotency_key IS NOT NULL) so the pre-existing / key-less
+  // deposits are exempt and never collide (mirrors gr_idempotency_uq /
+  // attendance_idempotency_uq / material_issue_idempotency_uq). Proven to apply
+  // cleanly on real seeded data.
+  uniqueIndex("ap_deposit_idempotency_uq")
+    .on(t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
+  // B-318 (migration 0061): the deposit NUMBER is unique per tenant. allocDepositNo
+  // is a plain `max(suffix)+1` read, so two CONCURRENT (genuinely distinct) creates
+  // both saw the same max and minted the same DP-<year>-<NNNN> — observed live, three
+  // numbers across six real deposits. That is NOT what the 0060 idempotency key
+  // covers: a key dedupes REPLAYS of ONE request; this is two different payments
+  // colliding on a voucher number, and a duplicated voucher number is exactly what
+  // makes the money trail un-auditable. FULL (not partial): `no` is NOT NULL, so
+  // there is no NULL to exempt and a predicate would only add an escape hatch.
+  // Mirrors ar_invoice_company_no_uq (0047) — the same problem already solved on AR.
+  // The allocator side is withDocNoRetry() in ap-deposit.ts: the index alone would
+  // turn the collision into a false 409 for a real payment.
+  uniqueIndex("ap_deposit_company_no_uq").on(t.companyId, t.no),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -482,6 +522,17 @@ export const jvs = pgTable("jv", {
   uniqueIndex("jv_source_doc_uq")
     .on(t.sourceDoc)
     .where(sql`${t.sourceDoc} ~ '^(pv|rv|gr|payroll|fa|cn|apcn|apdn|ret|dep|booking|down|transfer|deal|petty):'`),
+  // B-318 / B-168 (migration 0061): the JV NUMBER is unique per tenant. jv_source_doc_uq
+  // guards WHAT was posted (a source doc posts at most once); it says nothing about the
+  // number the posting was FILED under. allocJvNo is a plain `max(suffix)+1` read shared
+  // by 17 insert sites, so two concurrent posts of DIFFERENT source docs both read the
+  // same max and file under the same JV-<year>-<NNNN> — observed live, four numbers
+  // across six real JVs. Nothing crashes and no amount is wrong; the books simply stop
+  // being traceable, and jv_no is what every ActionOk hands the user as the voucher
+  // reference. FULL (not partial): `no` is NOT NULL, so there is no NULL to exempt.
+  // The allocator side is withDocNoRetry() at every insert site (gl-post.ts) — this
+  // index without it would convert the collision into a false "already posted" 409.
+  uniqueIndex("jv_company_no_uq").on(t.companyId, t.no),
 ]);
 
 /**
@@ -786,13 +837,41 @@ export const workers = pgTable("worker", {
   skill: text("skill"),
   payType: text("pay_type"),
   active: boolean("active").notNull().default(true),
+  // B-332 (migration 0062): the auth link. Before this column `worker` and `user`
+  // had NO relationship in either direction, so a mobile field check-in could not
+  // answer "which worker is this caller?" — the server could only take a client-
+  // supplied worker_id on trust. NULLABLE and it must stay that way: workers are
+  // day-labourers and most will never hold a login (the 8 seeded rows carry none,
+  // and there is no backfill value that would not be a fabrication).
+  //
+  // ON DELETE set null, NOT cascade — load-bearing. Deleting a user account must
+  // drop the login link and KEEP the worker: cascading would delete the worker and
+  // (through attendance/payroll's own cascade) that worker's PAYROLL HISTORY.
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("worker_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("worker_company_idx").on(t.companyId),
+  // B-332: one user resolves to AT MOST one worker. Without it "which worker am I?"
+  // is ambiguous at the check-in door and the handler would have to pick — which on
+  // a table that sums into payroll means clocking one man's day onto another man's
+  // pay. PARTIAL (WHERE user_id IS NOT NULL) because the column is nullable and
+  // Postgres treats NULLs as DISTINCT: a full index would admit all 8 unlinked
+  // workers today but is the wrong shape to reason about (B-307's NULL-distinctness
+  // trap — the opposite call from B-308's payroll_worker_period_uq, whose two
+  // columns are both NOT NULL). The predicate also makes the intent explicit: many
+  // workers with no login, never two workers with the same login.
+  //
+  // ONE index, not two: this same btree serves the `WHERE user_id = $1` self-lookup
+  // (the equality implies the predicate), so no separate worker_user_idx is added.
+  uniqueIndex("worker_user_uq")
+    .on(t.userId)
+    .where(sql`${t.userId} IS NOT NULL`),
+]);
 
 /**
  * Attendance — a worker's daily time record (erd.html labor "worker_id, day, ot,
@@ -815,13 +894,302 @@ export const attendances = pgTable("attendance", {
   status: text("status").notNull().default("full"),
   dayFraction: numeric("day_fraction", { precision: 3, scale: 2 }).notNull().default("1"),
   ccId: uuid("cc_id").references(() => costCenters.id, { onDelete: "set null" }),
+  // B-307 (migration 0057): the client-supplied idempotency key for the mobile
+  // offline SyncProcessor's at-least-once replay. POST /labor/payroll computes the
+  // payout by SUMMING attendance ROWS (not DISTINCT days), so a replayed check-in
+  // inserts a second row and the worker is PAID TWICE for that day — a money defect,
+  // not data hygiene. This key + the attendance_idempotency_uq partial unique index
+  // below is the dedup point (mirrors the B-261 gr contract). NULLABLE: pre-existing
+  // rows and the web bulk-save carry none and never collide.
+  idempotencyKey: text("idempotency_key"),
+  // B-332 (migration 0062): the mobile field check-in/check-out pair. The mapping
+  // the comment below called "undecided" is now decided: CHECK-OUT IS A SECOND
+  // COLUMN ON THIS ROW, never a second row.
+  //
+  // WHY a column and not a row — the reason is arithmetic, not indexing.
+  // createLaborPayroll pays by SUMMING ROWS (`total += dayRate * day_fraction + …`)
+  // and day_fraction is NOT NULL DEFAULT 1, so a check-out written as its own row
+  // would carry its own full day_fraction and the worker would be paid 2.0 days for
+  // one day worked. The B-307 key would NOT catch it either: a check-in and a
+  // check-out are two distinct client operations carrying two distinct legitimate
+  // idempotency keys, so nothing collides. It is the B-307 double-pay defect
+  // re-entering through a different door.
+  //
+  // CLIENT-SUPPLIED timestamps, not server now(): the phone queues these offline and
+  // the SyncProcessor may drain hours later, so now()-at-sync would record the sync
+  // time instead of the time the worker actually stood at the gate. Client-supplied
+  // is also what makes the check-out replay-safe (the retry re-sends the same
+  // instant, so "same value stored" is provably a replay rather than a second event).
+  // Neither column feeds the payroll sum — day_fraction and ot do — so a client value
+  // here is a RECORD, not money.
+  checkedInAt: timestamp("checked_in_at", { withTimezone: true, mode: "date" }),
+  checkedOutAt: timestamp("checked_out_at", { withTimezone: true, mode: "date" }),
+  // B-332: the device fix at each event, WGS-84 decimal degrees (the format
+  // Geolocator.getCurrentPosition returns). numeric(9,6) — 6 dp is ~0.11 m and is
+  // EXACTLY the mobile formatter's precision (formatGpsFix toStringAsFixed(6)), so
+  // nothing is lost crossing the wire; 3 integer digits hold ±180.
+  //
+  // Deliberately NUMERIC, diverging from the shipped `text` precedent
+  // (pm_workorder.checkin_gps, land_plot.gps, both "13.8076, 100.4519"): those are
+  // DISPLAY strings that are never computed against. A radius/geofence check is a
+  // distance calculation, and a text column has to be parsed for it — where
+  // unparseable text fails silently.
+  //
+  // NULLABLE is load-bearing, not laziness. GpsSource.currentFix() returns a plain
+  // null for permission-denied / location-services-off / no-fix and NEVER fabricates
+  // a coordinate. NOT NULL here would mean a worker with location off cannot clock
+  // in at all — the same "reject real work at the door" failure as a wrong unique
+  // key, arriving through a different column.
+  //
+  // NOT captured: Position.accuracy (metres). The mobile seam returns only a
+  // formatted lat/lng, and a radius verdict computed without an accuracy figure is
+  // misleading (a ±500 m fix reported as "within 12 m"). Widening the seam is a
+  // prerequisite for the geofence, not a column to add speculatively here.
+  checkinLat: numeric("checkin_lat", { precision: 9, scale: 6 }),
+  checkinLng: numeric("checkin_lng", { precision: 9, scale: 6 }),
+  checkoutLat: numeric("checkout_lat", { precision: 9, scale: 6 }),
+  checkoutLng: numeric("checkout_lng", { precision: 9, scale: 6 }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("attendance_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("attendance_company_idx").on(t.companyId),
+  // B-307 (migration 0057): PARTIAL unique index — a replayed POST /labor/attendance
+  // carrying a previously-seen idempotency_key trips 23505 → the handler returns the
+  // ORIGINAL row (no duplicate, so payroll still sums that day ONCE). Partial (WHERE
+  // idempotency_key IS NOT NULL) so every pre-existing / key-less attendance row is
+  // exempt and never collides (mirrors gr_idempotency_uq / jv_source_doc_uq).
+  // Deliberately NOT unique(worker_id, day): a cost-centre-split day is legitimately
+  // two `half` rows with different cc_id (the column exists for exactly that), and the
+  // mobile check-in/check-out pair's mapping onto this single POST is undecided — a
+  // wrong uniqueness constraint on a money table rejects real work at the door.
+  //
+  // B-332 REVISITED the "undecided" half and STILL adds no such index. Check-out is
+  // now decided (a column above, so the pair no longer needs two rows). Two things
+  // argue against unique(worker_id, day) — and a THIRD argument that stood here until
+  // B-332's gate-4.5 review has been RETRACTED as false; it is kept below, corrected,
+  // because it was the one presented as decisive.
+  //   1. THE COST-CENTRE SPLIT above — the load-bearing reason. A day legitimately
+  //      split across two cost centres is two `half` rows on one date (the cc_id column
+  //      exists for exactly that), and a full natural key makes that a 23505. Proven
+  //      live: both rows 201, day_fraction summing to exactly 1.0. Honest qualification,
+  //      unchanged: the shipped web register keys its state one entry per worker and has
+  //      no cc selector, so a split day is producible only through the API today. That
+  //      makes this an argument about foreclosing a real data shape rather than about
+  //      breaking a shipped screen — which is why reason 2 is carried alongside it.
+  //   2. IT WOULD FIGHT THE B-307 KEY. attendance_idempotency_uq below dedups a
+  //      REPLAY; a natural key dedups a DUPLICATE. A screen remount mints a NEW
+  //      idempotency key for the same worker+day (the key is per screen instance), so
+  //      that request passes the key index and trips the natural key — and the catch
+  //      in labor.ts gates on the constraint NAME (B-263), so a different name
+  //      rethrows to a 500. On the phone a 5xx is deferred and the drain STOPS, so the
+  //      whole write queue wedges behind it. The name gate correctly prevents
+  //      answering the WRONG ROW; it is not a licence to add the index.
+  //      B-336 NOTE: this is a cost of ANY new unique index here, including the partial
+  //      attendance_self_day_uq added below — it is paid there by naming that
+  //      constraint in the catch too, not by leaving the money defect open. It remains
+  //      an argument against the FULL key because a full key would charge that cost on
+  //      the legitimate cost-centre split as well, where there is no honest answer to
+  //      give; the partial one charges it only on a duplicate, where 409 IS the answer.
+  //   3. RETRACTED — "THE CORRECTION PATH". This said a second INSERT is the ONLY way
+  //      to correct a day, so a unique index would turn every correction into a 23505.
+  //      The INSERT is accepted, but IT DOES NOT CORRECT ANYTHING. createLaborPayroll
+  //      pays by SUMMING ROWS, so the second row is ADDED to the first. Proven live on
+  //      a 500/day worker: one `full` day paid 500; filing the `half` correction paid
+  //      750. Reducing a man's day RAISED his pay, and a day genuinely corrected to
+  //      half owes 250. The argument was not merely weak, it pointed the wrong way —
+  //      the constraint was refused partly to protect a path that does not exist.
+  //      THERE IS NO CORRECTION PATH ON attendance TODAY: no UPDATE, PUT, PATCH or
+  //      DELETE anywhere in registerLaborRoute, and no supersede/void column here. The
+  //      only way to change a recorded day is direct SQL. B-335 is open for a real one;
+  //      note that when it lands it will be an UPDATE or a supersede marker, NOT a
+  //      second INSERT, so it is not an argument against this index either way.
+  //      (The B-310 lineage still stands on its own: B-308's unique(worker_id, period)
+  //      froze payroll with no recompute path, and its remedy needs attendance to be
+  //      correctable — which, per the above, it currently is not.)
+  // NULL-distinctness, checked explicitly since B-307 and B-308 answered that same
+  // test in opposite directions: worker_id and day are BOTH NOT NULL, so such an
+  // index would be FULL and INESCAPABLE — the B-308 case, not the B-307 case. Passing
+  // that test is not what makes a key right: an inescapable index is exactly as
+  // dangerous as it is strong when it is the wrong constraint.
+  // A check-in the user genuinely initiates twice is a DUPLICATE, not a replay, and
+  // the honest answer to it is a 409. B-332's gate-4.5 review found that answer named
+  // here but never built, on a door that had just been opened to the payee: five
+  // keyless self-service POSTs for one day were five 201s and a 5× payout. It now
+  // exists twice over — the pre-check in labor.ts (findRecordedDay) for the sequential
+  // class, and attendance_self_day_uq below for the concurrent one.
+  uniqueIndex("attendance_idempotency_uq")
+    .on(t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
+  // B-336 (migration 0062 · MONEY): at most ONE UNCOSTED attendance row per worker per
+  // day. This is the constraint the pre-check above could not be: an application
+  // pre-check with nothing behind it does not survive concurrency, and a double-tap on
+  // a phone IS two concurrent requests. Measured live at the pre-check-only SHA, same
+  // worker, same day, ten separate client processes:
+  //
+  //     burst of  2 parallel → [201,201]        2 rows · payroll 1000 for a 500/day man
+  //     burst of 10 parallel → [201,…,201,409…] 2 rows · payroll 1000
+  //
+  // Under READ COMMITTED both requests run the pre-check's SELECT before either INSERT
+  // commits, so only a DB-layer constraint can settle it (the money-post-idempotency
+  // lesson: a pre-check is never a substitute for the index + catch).
+  //
+  // WHAT THE PREDICATE MEANS, EXACTLY — and what it does NOT mean. It was proposed as
+  // "the self-service door, which is the door with no other guard", because a
+  // self-service caller is refused cc_id outright (labor.ts) so every self-service row
+  // has cc_id NULL. THAT IMPLICATION RUNS ONE WAY ONLY. self-service ⇒ cc_id IS NULL;
+  // cc_id IS NULL does NOT ⇒ self-service. The roster (finance.create) door writes
+  // uncosted rows too, and this index constrains those identically. Recorded in this
+  // direction deliberately: the review before this one found a comment on this very
+  // table claiming a safety it did not have, and a money constraint justified by a
+  // one-way implication read as an equivalence is the same failure.
+  //
+  // SO WHAT DOES IT REJECT ON THE ROSTER DOOR? Exactly one class: a SECOND uncosted row
+  // for a worker+day. That class is not real work — it is the "correction" reason 3
+  // above retracted. Proven live on a 500/day worker at the pre-check-only SHA: a full
+  // day paid 500, and filing the `half` correction paid 750. It ADDS. Refusing it with
+  // a 409 removes no correction path (there is none — B-335), and forecloses none: when
+  // B-335 lands it is an UPDATE or a supersede marker, not a second INSERT.
+  //
+  // WHAT IT DOES NOT TOUCH, each proven live rather than reasoned:
+  //   - the COST-CENTRE SPLIT (reason 1, the load-bearing refusal of a FULL natural
+  //     key): both rows carry cc_id NOT NULL, so the predicate does not see them at
+  //     all. Two `half` rows, one date, [201,201], day_fraction summing to 1.0;
+  //   - a MIXED split — one half charged to a cost centre, one left uncosted. Only ONE
+  //     row is NULL, so there is no collision. [201,201];
+  //   - the NIGHT SHIFT across midnight: check-out is a COLUMN on the check-in's row
+  //     (above), so one shift is one row; the next night is a different `day`;
+  //   - every day OTHER than a repeat — the index is per (worker, DAY).
+  // This is why the FULL unique(worker_id, day) stays refused and this one is added:
+  // the predicate is what separates the split from the duplicate.
+  //
+  // NULL-DISTINCTNESS — the test B-307 and B-308 answered in opposite directions, and
+  // the reason this index is not the B-307 trap. B-307 refused a natural key BECAUSE a
+  // nullable column makes an index escapable (NULLs are distinct, so the constrained
+  // rows slip out from under it). Here the predicate deliberately TARGETS the NULL
+  // case: the rows it covers are exactly the rows whose cc_id is NULL, and within them
+  // both indexed columns are NOT NULL. There is nothing to escape through — a row can
+  // leave this index's coverage only by acquiring a real cc_id, which is precisely the
+  // legitimate split, and which the self-service door refuses.
+  //
+  // NO company_id COLUMN, unlike attendance_idempotency_uq's honest global-index
+  // caveat: worker_id is a server-assigned FK to a worker that carries exactly one
+  // company_id, so (worker_id, day) already determines the tenant. A cross-tenant clash
+  // is physically impossible here, where on a CLIENT-supplied key it is not.
+  //
+  // IT NEEDS THE CATCH, and the catch needs an order. A trip here surfaces as 23505
+  // naming attendance_self_day_uq, which the B-263 name gate in labor.ts would rethrow
+  // to a 500 — and on the phone a 5xx stops the whole drain. labor.ts now names this
+  // constraint too, and resolves the caller's OWN idempotency key FIRST, before
+  // dispatching on the name: a concurrent replay violates BOTH indexes with one INSERT
+  // and Postgres reports only one of them, so a catch that branched on the name alone
+  // would answer 409 to a legitimate replay the phone then dead-letters.
+  //
+  // OPERATOR NOTE (the B-318 lesson): this statement was ADDED to migration 0062 rather
+  // than filed as 0063, which is safe only because 0062 is unmerged. A database that
+  // already applied the earlier 0062 will SKIP it (journal-registered) and end up
+  // without the index, silently. Rebuild such a stack; do not re-migrate it. The live
+  // burst in tests/e2e/b332-checkin-schema.spec.ts is what detects it if you don't.
+  uniqueIndex("attendance_self_day_uq")
+    .on(t.workerId, t.day)
+    .where(sql`${t.ccId} IS NULL`),
+  // B-338 / B-342 (migration 0063): the COMPLEMENT of the index above — at most ONE
+  // attendance row per (worker, day, COST CENTRE). The two predicates partition the
+  // table: `cc_id IS NULL` → one uncosted day per worker; `cc_id IS NOT NULL` → one day
+  // per (worker, cost centre). Every row is covered by exactly one of them.
+  //
+  // WHAT THAT DOES AND DOES NOT GUARANTEE — stated exactly, because an earlier version
+  // of this comment said "Nothing falls between them, which is the gap B-336 left open
+  // and this closes", and that sentence is true of ROW COVERAGE and false of the money.
+  //   - GUARANTEED: at most one row per (worker, day, cc_id) tuple, NULL cc included.
+  //     A duplicate — the same day filed twice against the same allocation — is refused.
+  //   - NOT GUARANTEED, and NOT EXPRESSIBLE HERE: that Σ(day_fraction) over a
+  //     (worker, day) is ≤ 1.0. That is an INEQUALITY OVER AN AGGREGATE of many rows.
+  //     A unique index constrains tuple EQUALITY and a CHECK constrains a SINGLE ROW;
+  //     neither can state it — the same shape, and the same answer, as the Σ(qty) ≥ 0
+  //     stock invariant this round refused to fake an index for.
+  // MEASURED at 87e10c2 with BOTH indexes present, roster door, one worker, one day, a
+  // 500/day worker:
+  //     cc-A full ×2                  → [201, 409] → 1 row, Σ 1.00 → payroll  500  ✓
+  //     uncosted full + cc-A full     → [201, 201] → 2 rows, Σ 2.00 → payroll 1000  ✗
+  //     cc-A + cc-B + uncosted, full  → [201×3]    → 3 rows, Σ 3.00 → payroll 1500  ✗
+  // Semantically rows 2 and 3 are the same day recorded twice — once unallocated, once
+  // allocated — which is what both index NAMES mean, and payroll SUMS rows. So B-338's
+  // headline number (a day paid twice) is still reachable through the door this round
+  // blesses: the ESCAPE has moved from "same cc twice" to "uncosted plus costed", and
+  // the bound is now the number of cost centres plus one rather than unbounded.
+  //   PRE-EXISTING, not a regression — the mixed pair was already [201,201] before
+  //   migration 0063, and the cross-cc split is legitimate work that must stay 201.
+  //   OPEN, and tracked as B-343 (the ≤ 1.0 day_fraction invariant), which needs a
+  //   per-(worker, day) SUM check inside the write, not another index.
+  // tests/e2e/b342-money-races.spec.ts measures all three lines above and asserts the
+  // 2× as the MEASURED CURRENT STATE labelled B-343-open, not as intended behaviour.
+  //
+  // THE CASE, re-proven live at 2f42244 BEFORE this index existed: the roster door
+  // (finance.create), two `full` rows, one worker, one day, the SAME cc_id →
+  // [201,201], two rows at day_fraction 1 each, and POST /labor/payroll → 1000 for
+  // one day on a 500/day worker. attendance_self_day_uq is PARTIAL and cannot see a
+  // COSTED pair BY CONSTRUCTION — that predicate is exactly what keeps the legitimate
+  // cost-centre split legal, so the pair escapes it by design, not by oversight.
+  //
+  // NULL-DISTINCTNESS — the SAME test B-307/B-308/B-336 answered, answered the same
+  // way and for the same reason. Within this index's coverage all THREE columns are
+  // NOT NULL: worker_id and day by declaration, cc_id by the predicate itself. There
+  // is nothing to escape through. A row leaves this index's coverage only by having
+  // NO cost centre — at which point the index above catches it instead. This is the
+  // B-336 inversion (a predicate that TARGETS the NULL case, so the rows it covers
+  // carry no NULLs), not the B-307 trap (a nullable column INSIDE the key, whose
+  // NULLs are distinct from one another and slip out from under it).
+  //
+  // WHY TWO PARTIAL INDEXES rather than one `unique(worker_id, day, cc_id) NULLS NOT
+  // DISTINCT` (B-338 option ก): logically equivalent on PG 15+, but the single form
+  // has to DROP a shipped 0062 object, replaces a constraint name the labor.ts catch
+  // already handles, and depends on a drizzle `.nullsNotDistinct()` surface. The
+  // additive partial form is one CREATE INDEX, byte-identical in idiom to the
+  // statement directly above it, and leaves each constraint name meaning exactly one
+  // thing — which is what the B-263 name-gated catch dispatches on.
+  //
+  // WHAT IT REFUSES THAT USED TO PASS — two rows, judged rather than glossed:
+  //   - the "correction" (same worker+day+cc, filed again). B-336 already PROVED live
+  //     that this corrects nothing: createLaborPayroll SUMS rows, so a `full` day paid
+  //     500 plus a `half` "correction" pays 750, where a day genuinely corrected to
+  //     half owes 250. It removes no correction path (B-335: there is no UPDATE/PUT/
+  //     PATCH/DELETE on attendance anywhere in registerLaborRoute) and forecloses none
+  //     (B-335 will be an UPDATE or a supersede marker, not a second INSERT). It does
+  //     make B-335 MORE urgent — now on the costed door too;
+  //   - two half-day stints in the SAME cost centre on one day. This one carries ZERO
+  //     information a single row cannot: two `half` rows at cc A sum to day_fraction
+  //     1.0 and allocate 100% to cc A — identical to one `full` row at cc A. A CROSS-cc
+  //     split carries real information (the allocation); a same-cc split carries none.
+  // WHAT IT LEAVES ALONE, each proven live in tests/e2e/b342-money-races.spec.ts:
+  // the cost-centre split (cc A + cc B → [201,201]), the MIXED split (one costed, one
+  // uncosted → [201,201], one row under each index), the night shift, and every other
+  // (worker, day, cc) tuple. "LEAVES ALONE" IS THE HONEST WORD FOR IT and not an
+  // endorsement: the mixed shape is legitimate at half+half (Σ 1.00, one day allocated
+  // in two places) and is the B-343 money gap at full+full (Σ 2.00, one day paid twice).
+  // This index cannot tell those apart — day_fraction is not in its key and could not be
+  // (the constraint is on the SUM). Both are measured in that spec, the second labelled
+  // as the open gap.
+  //
+  // IT NEEDS THE CATCH — the same B-263 requirement as both indexes above, and the
+  // reason this is not merely a migration. An UNNAMED 23505 rethrows to the 500
+  // handler, and sync_processor.dart DEFERS a 5xx and stops the whole offline drain,
+  // so one duplicate would wedge a worker's entire queue. labor.ts names this
+  // constraint, and — because two of the three names now mean "this day is already
+  // recorded" — its message dispatch was INVERTED to fail safe on an unknown name.
+  //
+  // OPERATOR NOTE (the B-318 lesson, and UNLIKE 0062): this is a SEPARATE migration
+  // 0063, because 0062 is MERGED — appending to it would be silently skipped by any
+  // stack that already applied it. CREATE UNIQUE INDEX also ABORTS if duplicates
+  // already exist; the detector query is in 0063's header comment, and a non-empty
+  // result is a money defect to be resolved by hand, never auto-deleted.
+  uniqueIndex("attendance_costed_day_uq")
+    .on(t.workerId, t.day, t.ccId)
+    .where(sql`${t.ccId} IS NOT NULL`),
+]);
 
 /**
  * Payroll — a worker's payout for a period (erd.html labor "period, cc_id").
@@ -845,7 +1213,28 @@ export const payrolls = pgTable("payroll", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),
-}, (t) => [index("payroll_company_idx").on(t.companyId)]);
+}, (t) => [
+  index("payroll_company_idx").on(t.companyId),
+  /**
+   * B-308 (money · Wei = ก): ONE payroll run per worker per period. Without this a
+   * double-click on "run payroll" mints TWO rows, and because the GL guard keys on
+   * `source_doc = payroll:<id>` (jv_source_doc_uq, 0037) BOTH post as clean balanced
+   * JVs — 2× the money for one day's work, uncorrelatable after the fact. Reproduced
+   * live: JV-2026-0419 + JV-2026-0420, 687.50 each, distinct payroll ids.
+   *
+   * NATURAL key, not a client idempotency key (unlike attendance_idempotency_uq /
+   * gr_idempotency_uq): a second run for the same worker+period is never legitimate
+   * work — `period` is a monthly YYYY-MM bucket by ruling (B-140 RG-4) and no
+   * UPDATE / PUT / re-run path for `payroll` exists anywhere in the API.
+   *
+   * NOT partial and NOT company-scoped, both deliberate: worker_id and period are
+   * both NOT NULL, so the key covers 100% of rows with no NULL-distinctness escape
+   * (the trap the partial B-307 index had to dodge); and worker_id FKs a
+   * tenant-owned worker, so two companies can never share one — the 2-column key is
+   * strictly TIGHTER than adding company_id, never looser.
+   */
+  uniqueIndex("payroll_worker_period_uq").on(t.workerId, t.period),
+]);
 
 /**
  * OpexBudget — a department's operating budget by month, compared across years

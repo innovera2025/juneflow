@@ -271,6 +271,60 @@ describe("GET /api/v1/po — auth + list", () => {
     expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
   });
 
+  // B-323 round 2: this is the endpoint the whole blocker exists for. GET /po is a
+  // selectThrough (three INNER JOINs, no ORDER BY), and po.list is a manifest screen
+  // with a committed baseline. Measured live on the seeded stack under forced planner
+  // configs, the raw chain returns:
+  //   default   -> PO-2026-0291 0290 0289 0288 0287 0286
+  //   mergejoin -> PO-2026-0287 0291 0286 0288 0290 0289
+  // Removing the sort left ALL 1476 tests green, which is why these tests exist: the
+  // suite could not previously tell the fixed code from the broken code.
+  it("emits a TOTAL order — the same list whatever order the join plan returns", async () => {
+    const at = (iso: string): Date => new Date(iso);
+    const seeded = [
+      { ...po("p291", "PO-2026-0291", "approved", 1), createdAt: at("2026-07-20T09:00:00Z") },
+      { ...po("p290", "PO-2026-0290", "approved", 1), createdAt: at("2026-07-20T08:59:59Z") },
+      { ...po("p289", "PO-2026-0289", "approved", 1), createdAt: at("2026-07-20T08:59:58Z") },
+      { ...po("p288", "PO-2026-0288", "approved", 1), createdAt: at("2026-07-20T08:59:57Z") },
+      { ...po("p287", "PO-2026-0287", "approved", 1), createdAt: at("2026-07-20T08:59:56Z") },
+      { ...po("p286", "PO-2026-0286", "approved", 1), createdAt: at("2026-07-20T08:59:55Z") },
+    ];
+    const expected = ["p291", "p290", "p289", "p288", "p287", "p286"];
+    const listIds = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[pos, rows], [apBillings, []]] }),
+        })
+      ).inject({ url: "/api/v1/po" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    expect(await listIds(seeded)).toEqual(expected);
+    // the EXACT permutation the merge-join plan produced on the live stack
+    expect(await listIds([seeded[4]!, seeded[0]!, seeded[5]!, seeded[3]!, seeded[1]!, seeded[2]!]))
+      .toEqual(expected);
+    expect(await listIds([...seeded].reverse())).toEqual(expected);
+  });
+
+  it("breaks a same-instant tie on id, so POs raised in one second still order", async () => {
+    const same = new Date("2026-07-20T09:00:00Z");
+    const rows = [
+      { ...po("zz", "PO-Z", "approved", 1), createdAt: same },
+      { ...po("aa", "PO-A", "approved", 1), createdAt: same },
+    ];
+    const listIds = async (r: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[pos, r], [apBillings, []]] }),
+        })
+      ).inject({ url: "/api/v1/po" });
+      return res.json().data.map((x: { id: string }) => x.id);
+    };
+    expect(await listIds(rows)).toEqual(["aa", "zz"]);
+    expect(await listIds([...rows].reverse())).toEqual(["aa", "zz"]);
+  });
+
   it("returns the B-014 envelope of real po columns + AP paid/deposit split", async () => {
     // Two billings on p0: a 300k deposit + a 200k progress → paid 500k, deposit 300k.
     const res = await (

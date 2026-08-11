@@ -13,6 +13,7 @@
 import { eq } from "drizzle-orm";
 import { evmSnapshots, projects } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+import { byIdAsc } from "./list-order.js";
 
 /** One EVM period, money as finite baht numbers (drizzle numeric → number). */
 export interface EvmSeriesRow {
@@ -56,7 +57,14 @@ export async function loadEvmSeries(
     projectId ? eq(evmSnapshots.projectId, projectId) : undefined,
   )) as SnapshotRow[];
 
-  return rows
+  return (
+    [...rows]
+      // B-323: period alone ties whenever two snapshots share a bucket — which is the
+      // normal case for the projectId=null read, since it spans EVERY owned project and
+      // they all report the same 'YYYY-MM' periods. The floor has to go on the rows,
+      // because the mapped wire shape below drops the id.
+      .sort((a, b) => a.period.localeCompare(b.period) || byIdAsc(a, b))
+  )
     .map((r) => ({
       period: r.period,
       periodEnd: r.periodEnd as unknown as string,
@@ -66,6 +74,5 @@ export async function loadEvmSeries(
       budget: num(r.budget),
       bac: num(r.bac),
       currencyCode: r.currencyCode,
-    }))
-    .sort((a, b) => a.period.localeCompare(b.period));
+    }));
 }

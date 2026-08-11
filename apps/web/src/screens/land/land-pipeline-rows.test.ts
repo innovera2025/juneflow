@@ -6,6 +6,12 @@
  * tenure badge tone/label + location composition. The reused money/area helpers
  * (plotValue / totalRai / raiText / millionsText) are covered by land-bank-rows.test.ts;
  * a couple of assertions here confirm the re-export wiring only.
+ *
+ * The last five describes cover the write round that turned the card back on: the stage
+ * resolution the toast labels with, the terminal guard that decides whether the advance
+ * control renders at all, the detail-modal composition (which must produce "" — an em-dash
+ * in the view — rather than a dangling separator or a confident zero), and the rejection
+ * classifier that keeps a failed advance from being reported as the terminal case.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -18,8 +24,19 @@ import {
   pendingCount,
   totalBudget,
   tenureToneHex,
+  detailTenureToneHex,
   tenureLabelKey,
   locationText,
+  stageById,
+  stageLabelKey,
+  canAdvance,
+  detailTitle,
+  detailSubtitle,
+  areaDetailText,
+  advanceErrorKind,
+  advanceErrorMessage,
+  cardAreaText,
+  cardValueText,
   plotValue,
   totalRai,
   raiText,
@@ -39,11 +56,19 @@ function plot(over: Partial<PipelinePlot> = {}): PipelinePlot {
     currencyCode: "THB",
     stage: "nego",
     tenure: "negotiate",
+    // SERVER money (plotWire.total_value / deal_deposit): 18.6 rai x 4.2M = 78,120,000.
+    totalValue: 78120000,
+    dealDeposit: 7812000,
+    // B-319: fee/SBT are SERVER money too (plotWire.transfer_fee / sbt, 2% / 3.3%).
+    transferFee: 1562400,
+    sbt: 2577960,
     // ASCII placeholders (the narrowing/composition is language-agnostic; the real wire
     // values are Thai server data — kept out of .ts per B-073, mirror land-bank-rows.test).
     title: "Plot Bangbuathong Zone C",
     amphoe: "Bangbuathong",
     prov: "Nonthaburi",
+    tambon: "Bangrakphatthana",
+    owner: "Somying Sapthawi",
     ...over,
   };
 }
@@ -62,8 +87,14 @@ describe("toPipelinePlot", () => {
         stage: "dd",
         tenure: "buy",
         title: "Plot Ratchaphruek Phase 4",
+        tambon: "Bangkhanun",
         amphoe: "Bangkruai",
         prov: "Nonthaburi",
+        owner: "Thidin Rungruang Co.",
+        total_value: 163200000,
+        deal_deposit: 16320000,
+        transfer_fee: 3264000,
+        sbt: 5385600,
         created_at: "2026-07-01T00:00:00Z",
       }),
     ).toEqual({
@@ -77,8 +108,14 @@ describe("toPipelinePlot", () => {
       stage: "dd",
       tenure: "buy",
       title: "Plot Ratchaphruek Phase 4",
+      tambon: "Bangkhanun",
       amphoe: "Bangkruai",
       prov: "Nonthaburi",
+      owner: "Thidin Rungruang Co.",
+      totalValue: 163200000,
+      dealDeposit: 16320000,
+      transferFee: 3264000,
+      sbt: 5385600,
     });
   });
 
@@ -94,6 +131,8 @@ describe("toPipelinePlot", () => {
     expect(r.title).toBe("");
     expect(r.amphoe).toBe("");
     expect(r.prov).toBe("");
+    expect(r.tambon).toBe("");
+    expect(r.owner).toBe("");
   });
 
   it("does not consume created_at (not a card field)", () => {
@@ -165,12 +204,15 @@ describe("plotsInStage", () => {
 });
 
 describe("KPI aggregates", () => {
+  // totalValue is set on every row because KPI3 reads the SERVER's figure, not the local
+  // area x price. The two agree here; the disagreeing case is its own test below.
   const rows = [
-    plot({ id: "a", stage: "source", areaSqm: 29760, pricePerRai: 4200000 }), // 78,120,000
-    plot({ id: "b", stage: "dd", areaSqm: 38400, pricePerRai: 6800000 }), // 163,200,000
-    plot({ id: "c", stage: "nego", areaSqm: 1600, pricePerRai: 1000000 }), // 1,000,000
-    plot({ id: "d", stage: "deal", areaSqm: 1600, pricePerRai: 2000000 }), // 2,000,000
-    plot({ id: "e", stage: "close", areaSqm: 1600, pricePerRai: 9000000 }), // excluded from KPI1/3
+    plot({ id: "a", stage: "source", areaSqm: 29760, pricePerRai: 4200000, totalValue: 78120000 }),
+    plot({ id: "b", stage: "dd", areaSqm: 38400, pricePerRai: 6800000, totalValue: 163200000 }),
+    plot({ id: "c", stage: "nego", areaSqm: 1600, pricePerRai: 1000000, totalValue: 1000000 }),
+    plot({ id: "d", stage: "deal", areaSqm: 1600, pricePerRai: 2000000, totalValue: 2000000 }),
+    // excluded from KPI1/3
+    plot({ id: "e", stage: "close", areaSqm: 1600, pricePerRai: 9000000, totalValue: 9000000 }),
   ];
 
   it("pipelineCount counts every plot except close (land.jsx L94)", () => {
@@ -190,6 +232,126 @@ describe("KPI aggregates", () => {
   it("totalBudget excludes the close plot's value", () => {
     const closedOnly = [plot({ stage: "close", areaSqm: 1600, pricePerRai: 9000000 })];
     expect(totalBudget(closedOnly)).toBe(0);
+  });
+
+  it("totalBudget sums the SERVER's total_value, not a local area x price", () => {
+    // The tripwire for the 2026-08-10 swap: one row whose server figure DISAGREES with the
+    // local re-derivation (1600 sqm x 1,000,000/rai = 1,000,000 locally). A totalBudget that
+    // went back to plotValue() would answer 1,000,000 here.
+    const disagreeing = [plot({ stage: "nego", areaSqm: 1600, pricePerRai: 1000000, totalValue: 4000 })];
+    expect(totalBudget(disagreeing)).toBe(4000);
+  });
+
+  it("is display-neutral on the seed (the claim the G5 decision rests on)", () => {
+    // NOT a tripwire, and deliberately so: this one SURVIVES a revert to the local sum — it
+    // exists to record WHY the source swap moves no pixel, which is why no re-baseline is
+    // owed. Seed LAND_PLOTS (packages/db/src/seed/index.ts:819), area = rai*1600 + ngan*400
+    // + wa*4, server total_value = round2(area/1600 x price/rai) (land-sales.ts:117).
+    const round2 = (x: number) => Number(x.toFixed(2)); // apps/api/src/routes/money.ts:23
+    const seed = [
+      { rai: 18, ngan: 2, wa: 40, pricePerRai: 4200000, stage: "nego" },
+      { rai: 24, ngan: 0, wa: 0, pricePerRai: 6800000, stage: "dd" },
+      { rai: 120, ngan: 1, wa: 0, pricePerRai: 850000, stage: "feas" },
+      { rai: 8, ngan: 3, wa: 12, pricePerRai: 9500000, stage: "survey" },
+      { rai: 240, ngan: 0, wa: 0, pricePerRai: 620000, stage: "source" },
+      { rai: 15, ngan: 0, wa: 0, pricePerRai: 4350000, stage: "deal" },
+      { rai: 32, ngan: 1, wa: 20, pricePerRai: 6500000, stage: "close" },
+      { rai: 95, ngan: 2, wa: 0, pricePerRai: 880000, stage: "source" },
+    ].map((s) => {
+      const areaSqm = s.rai * 1600 + s.ngan * 400 + s.wa * 4;
+      return plot({
+        areaSqm,
+        pricePerRai: s.pricePerRai,
+        stage: s.stage,
+        totalValue: round2((areaSqm / 1600) * s.pricePerRai),
+      });
+    });
+    const localSum = seed
+      .filter((p) => p.stage !== "close")
+      .reduce((sum, p) => sum + plotValue(p), 0);
+    // Bit-identical, not merely same-to-1dp: the ONE seeded plot whose product needs the
+    // server's rounding (51680 sqm x 6,500,000 = 209949999.99999997) is the close plot,
+    // which this KPI excludes.
+    expect(totalBudget(seed)).toBe(localSum);
+    expect(totalBudget(seed)).toBe(725032500);
+    expect(millionsText(totalBudget(seed))).toBe("725.0");
+  });
+
+  it("scores a null total_value as 0 — the exact figure the local formula gave it", () => {
+    // The premise the pre-swap deferral got wrong. total_value is null EXACTLY when
+    // area_sqm or price_per_rai is NULL (land-sales.ts:296 is a presence test), and num()
+    // reads a missing number as 0, so plotValue was already 0 for every null-value plot.
+    // Both spellings of "unpriced" therefore add nothing, and the swap moved no figure.
+    //
+    // Which half of this is load-bearing, measured rather than assumed: the plotValue
+    // assertions ARE the tripwire — they fail the moment the local formula stops being 0 for
+    // a NULL, which is the premise the whole decision rests on. The `?? 0` is a record, not
+    // a tripwire: deleting it leaves this green because JS adds `null` as 0 anyway (probe M4
+    // is an equivalent mutant). It stays for the type and for the reader.
+    const nullArea = plot({ stage: "nego", areaSqm: 0, pricePerRai: 4200000, totalValue: null });
+    const nullPrice = plot({ stage: "dd", areaSqm: 29760, pricePerRai: 0, totalValue: null });
+    expect(plotValue(nullArea)).toBe(0);
+    expect(plotValue(nullPrice)).toBe(0);
+    expect(totalBudget([nullArea, nullPrice])).toBe(0);
+    expect(totalBudget([...rows, nullArea, nullPrice])).toBeCloseTo(244320000, 2);
+  });
+});
+
+describe("cardValueText — the kanban card's compact price (never a fabricated 0)", () => {
+  it("renders the SERVER total_value in millions, not a local area x price", () => {
+    expect(cardValueText(plot())).toBe("78.1");
+    // The distinguishing case: a row whose server total_value DISAGREES with the local
+    // re-derivation. The card must follow the server. If this helper ever went back to
+    // plotValue() it would answer "78.1" here.
+    expect(cardValueText(plot({ totalValue: 55000000 }))).toBe("55.0");
+  });
+
+  it("returns null for an unpriced plot instead of the fabricated '0.0'", () => {
+    // total_value: 0 is what the server actually sends for a stored price_per_rai = 0 --
+    // its `priced` test is PRESENCE-only (land-sales.ts:296), so 0 never becomes null.
+    expect(cardValueText(plot({ totalValue: 0, pricePerRai: 0 }))).toBeNull();
+    expect(cardValueText(plot({ totalValue: null }))).toBeNull();
+    // ...and this is the contradiction that motivated it: the SAME plot's modal rows both
+    // em-dash (they guard on `> 0`), while the card used to print "0.0M".
+    expect(millionsText(plotValue(plot({ pricePerRai: 0 })))).toBe("0.0");
+  });
+
+  it("is display-neutral wherever a price exists (server 2dp vs the old unrounded local)", () => {
+    // NOT a tripwire, and deliberately so: this one SURVIVES a revert to
+    // millionsText(plotValue(p)) — it exists to record WHY the source swap moves no pixel,
+    // which is the claim the G5 decision rests on. The two above are the tripwires.
+    // The seeded plot that exposes the rounding difference: 51680 sqm x 6,500,000/rai =
+    // 209949999.99999997 locally, 209950000 after the server's round2. Same rendered text,
+    // which is why swapping the source moves no pixel on any priced plot.
+    const p = plot({ areaSqm: 51680, pricePerRai: 6500000, totalValue: 209950000 });
+    expect(plotValue(p)).not.toBe(p.totalValue);
+    expect(cardValueText(p)).toBe(millionsText(plotValue(p)));
+    expect(cardValueText(p)).toBe("209.9");
+  });
+});
+
+describe("cardAreaText — the kanban card's area cell (never a fabricated 0.0)", () => {
+  it("renders the area in rai to one decimal (land.jsx L120)", () => {
+    expect(cardAreaText(plot())).toBe("18.6"); // 29760 sqm / 1600
+    expect(cardAreaText(plot({ areaSqm: 38400 }))).toBe("24.0");
+  });
+
+  it("returns null for a plot with no area instead of the fabricated '0.0'", () => {
+    // createLandPlot stores areaSqm: null when no area is given (land-sales.ts:465), which
+    // num() reads as 0 — so this is reachable, not theoretical.
+    expect(cardAreaText(plot({ areaSqm: 0 }))).toBeNull();
+    expect(cardAreaText(plot({ areaSqm: Number.NaN }))).toBeNull();
+    expect(cardAreaText(plot({ areaSqm: -1 }))).toBeNull();
+  });
+
+  it("agrees with the SAME plot's detail-modal area row on every input", () => {
+    // The card and the modal describe one plot on one screen; when only the modal guarded,
+    // an arealess plot read "0.0 rai" on the card and an em-dash in its own detail — the
+    // area twin of the price contradiction fixed in the same round.
+    for (const areaSqm of [29760, 38400, 1, 0, -1, Number.NaN]) {
+      const shown = areaDetailText(areaSqm, "rai") !== "";
+      expect(cardAreaText({ areaSqm }) !== null).toBe(shown);
+    }
   });
 });
 
@@ -239,5 +401,103 @@ describe("re-exported display helpers (wiring check)", () => {
   it("totalRai / raiText / millionsText render the prototype display strings", () => {
     expect(raiText(totalRai([plot({ areaSqm: 29760 }), plot({ areaSqm: 38400 })]))).toBe("42.6");
     expect(millionsText(78120000)).toBe("78.1");
+  });
+});
+
+/* --------------------------------------------------------------------------- */
+/* Plot-detail modal + advance-stage (land.jsx openPlotDetail L279-317)          */
+/* Added with the write wire: the detail drawer + POST advance-stage.            */
+/* --------------------------------------------------------------------------- */
+
+describe("stageById / stageLabelKey", () => {
+  it("resolves each of the 7 stage codes to its definition and dict key", () => {
+    for (const s of LAND_STAGES) {
+      expect(stageById(s.id)).toBe(s);
+      expect(stageLabelKey(s.id)).toBe(s.labelKey);
+    }
+  });
+
+  it("returns undefined/null for a stage code that is not one of the 7", () => {
+    // The advance toast labels the stage the SERVER returned; a stage the client does not
+    // know must render raw, never be silently mapped onto a neighbouring label.
+    expect(stageById("archived")).toBeUndefined();
+    expect(stageLabelKey("archived")).toBeNull();
+    expect(stageLabelKey("")).toBeNull();
+  });
+});
+
+describe("canAdvance", () => {
+  it("is true for every non-terminal stage", () => {
+    for (const s of LAND_STAGES.filter((x) => x.id !== CLOSE_STAGE)) {
+      expect(canAdvance(s.id)).toBe(true);
+    }
+  });
+
+  it("is false at the terminal stage (the action is not rendered, land.jsx L311)", () => {
+    expect(canAdvance(CLOSE_STAGE)).toBe(false);
+  });
+});
+
+describe("detailTitle / detailSubtitle", () => {
+  it("composes 'id · title' and 'tambon · amphoe · prov' (land.jsx L282-283)", () => {
+    const p = plot();
+    expect(detailTitle(p)).toBe("L-068 · Plot Bangbuathong Zone C");
+    expect(detailSubtitle(p)).toBe("Bangrakphatthana · Bangbuathong · Nonthaburi");
+  });
+
+  it("drops absent parts so no dangling middot is rendered", () => {
+    expect(detailTitle({ id: "L-1", title: "" })).toBe("L-1");
+    expect(detailSubtitle({ tambon: "", amphoe: "A", prov: "" })).toBe("A");
+  });
+
+  it("returns '' when nothing is wire-backed (view falls back to an em-dash)", () => {
+    expect(detailTitle({ id: "", title: "" })).toBe("");
+    expect(detailSubtitle({ tambon: "", amphoe: "", prov: "" })).toBe("");
+  });
+});
+
+describe("areaDetailText", () => {
+  it("renders 'rai-ngan-wa (rai)' from area_sqm alone (land.jsx L300)", () => {
+    expect(areaDetailText(29760, "rai")).toBe("18-2-40 (18.6 rai)");
+  });
+
+  it("returns '' for a plot with no area — the view renders an em-dash, not '0-0-0 (0.0)'", () => {
+    expect(areaDetailText(0, "rai")).toBe("");
+    expect(areaDetailText(Number.NaN, "rai")).toBe("");
+    expect(areaDetailText(-1, "rai")).toBe("");
+  });
+});
+
+describe("detailTenureToneHex", () => {
+  it("is the DETAIL two-branch mapping (land.jsx L296), not the card's three-branch one", () => {
+    expect(detailTenureToneHex("lease")).toBe("#B45309");
+    expect(detailTenureToneHex("buy")).toBe("#0F766E");
+    // The divergence that must NOT be "unified": negotiate is teal in the detail modal and
+    // violet on the card.
+    expect(detailTenureToneHex("negotiate")).toBe("#0F766E");
+    expect(tenureToneHex("negotiate")).toBe("#7C3AED");
+  });
+});
+
+describe("advanceErrorKind / advanceErrorMessage", () => {
+  it("reads the terminal case off the server's own 409 code", () => {
+    expect(
+      advanceErrorKind({ code: "INVALID_STATE", message: "land plot is already at the final stage (closed)" }),
+    ).toBe("terminal");
+  });
+
+  it("classifies every other rejection as an error (never dressed up as terminal)", () => {
+    expect(advanceErrorKind({ code: "NOT_FOUND", message: "land plot x not found" })).toBe("error");
+    expect(advanceErrorKind({ code: "FORBIDDEN" })).toBe("error");
+    expect(advanceErrorKind(new Error("network down"))).toBe("error");
+    expect(advanceErrorKind(undefined)).toBe("error");
+    expect(advanceErrorKind(null)).toBe("error");
+    expect(advanceErrorKind("boom")).toBe("error");
+  });
+
+  it("surfaces the server message, and '' when there is none", () => {
+    expect(advanceErrorMessage({ message: "land plot x not found" })).toBe("land plot x not found");
+    expect(advanceErrorMessage({ code: "FORBIDDEN" })).toBe("");
+    expect(advanceErrorMessage(null)).toBe("");
   });
 });

@@ -281,6 +281,24 @@ describe("GET /api/v1/fa/assets", () => {
     ]);
   });
 
+  // B-323: this list used an inline created_at-only comparator that returned 0 for two
+  // assets sharing an instant, handing the pair back to the join plan. A bulk
+  // POST /fa/import registers a whole batch in one statement, so the tie is routine.
+  it("is TOTAL when two assets share an instant (id floor decides)", async () => {
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[fixedAssets, rows]] }),
+        })
+      ).inject({ url: "/api/v1/fa/assets" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // `faRow()` hardcodes the same createdAt for every row — a genuine tie.
+    expect(await ids([faRow("aaa"), faRow("bbb")])).toEqual(["aaa", "bbb"]);
+    expect(await ids([faRow("bbb"), faRow("aaa")])).toEqual(["aaa", "bbb"]);
+  });
+
   it("derives book_value from accumulated_depr (cost − accumulated)", async () => {
     const res = await (
       await buildTestApp({
@@ -851,6 +869,23 @@ describe("GET /api/v1/fa/adjustments", () => {
     // company_id bound on the read (tenant scope).
     const read = captured.find((c) => c.table === faAdjustments);
     expect(paramsOf(read!.where)).toContain(COMPANY);
+  });
+
+  // B-323: this list used an inline created_at-only comparator that returned 0 for two
+  // adjustments sharing an instant, handing the pair back to the join plan. The
+  // adjustments of ONE asset are routinely written together, so the tie is normal.
+  it("is TOTAL when two adjustments share an instant (id floor decides)", async () => {
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[faAdjustments, rows]] }),
+        })
+      ).inject({ url: "/api/v1/fa/adjustments" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    expect(await ids([adjRow("aaa"), adjRow("bbb")])).toEqual(["aaa", "bbb"]);
+    expect(await ids([adjRow("bbb"), adjRow("aaa")])).toEqual(["aaa", "bbb"]);
   });
 });
 

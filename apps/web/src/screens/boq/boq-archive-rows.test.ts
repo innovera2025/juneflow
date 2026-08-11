@@ -6,7 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 import type { BoqRow } from "./boq-rows";
-import { filterArchiveRows } from "./boq-archive-rows";
+import {
+  filterArchiveRows,
+  toArchiveApproval,
+  archiveApprovalById,
+  formatApprovedAt,
+} from "./boq-archive-rows";
 
 function row(over: Partial<BoqRow>): BoqRow {
   return {
@@ -73,5 +78,72 @@ describe("filterArchiveRows", () => {
     const orphan = [row({ id: "z", projectId: "missing", no: "N", name: "N", scope: "N" })];
     // A query that would only match a project name must NOT match when the id is unmapped.
     expect(filterArchiveRows(orphan, names, { projectId: "", status: "", q: "rachaphruek" })).toHaveLength(0);
+  });
+});
+
+/* B-355 — the approver / approve-date columns, narrowed off the real GET /boq payload. */
+describe("toArchiveApproval", () => {
+  it("narrows the server's snake_case approval fields", () => {
+    expect(
+      toArchiveApproval({
+        id: "d0",
+        approved_by: "u-dir",
+        approved_by_name: "Wipha Chancharoen",
+        approved_at: "2025-10-22T03:15:00.000Z",
+      }),
+    ).toEqual({
+      id: "d0",
+      approverName: "Wipha Chancharoen",
+      approvedAt: "2025-10-22T03:15:00.000Z",
+    });
+  });
+
+  it("accepts camelCase for robustness (mirrors toBoqRow)", () => {
+    const a = toArchiveApproval({ id: "d0", approvedByName: "Wipha", approvedAt: "2025-10-22T00:00:00Z" });
+    expect(a.approverName).toBe("Wipha");
+    expect(a.approvedAt).toBe("2025-10-22T00:00:00Z");
+  });
+
+  it("reports an unapproved doc as empty, never as a placeholder name", () => {
+    expect(toArchiveApproval({ id: "d1", approved_by: null, approved_by_name: null, approved_at: null })).toEqual({
+      id: "d1",
+      approverName: "",
+      approvedAt: "",
+    });
+  });
+});
+
+describe("archiveApprovalById", () => {
+  it("keys each served row by its doc id", () => {
+    const map = archiveApprovalById([
+      { id: "d0", approved_by_name: "Wipha", approved_at: "2025-10-22T00:00:00Z" },
+      { id: "d1", approved_by_name: null, approved_at: null },
+    ]);
+    expect(map.get("d0")?.approverName).toBe("Wipha");
+    expect(map.get("d1")?.approverName).toBe("");
+  });
+
+  it("skips a row with no id rather than keying it under an empty string", () => {
+    expect(archiveApprovalById([{ approved_by_name: "Ghost" }]).size).toBe(0);
+  });
+
+  it("tolerates an undefined payload (query not settled)", () => {
+    expect(archiveApprovalById(undefined).size).toBe(0);
+  });
+});
+
+describe("formatApprovedAt", () => {
+  it("renders a wire instant as an ISO/UTC calendar date", () => {
+    expect(formatApprovedAt("2025-10-22T03:15:00.000Z")).toBe("2025-10-22");
+  });
+
+  it("uses UTC, not the runner's local zone", () => {
+    // 23:30Z is still the 22nd in UTC even where local time has rolled over.
+    expect(formatApprovedAt("2025-10-22T23:30:00.000Z")).toBe("2025-10-22");
+  });
+
+  it("returns empty for a missing or unparseable value (the view em-dashes it)", () => {
+    expect(formatApprovedAt("")).toBe("");
+    expect(formatApprovedAt("not-a-date")).toBe("");
   });
 });

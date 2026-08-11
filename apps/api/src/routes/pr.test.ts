@@ -14,7 +14,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { boqItems, projects, prItems, prs, roles, users, vendors } from "@juneflow/db";
+import {
+  boqItems,
+  notifications,
+  projects,
+  prItems,
+  prs,
+  roles,
+  users,
+  vendors,
+} from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -390,6 +399,58 @@ describe("POST /api/v1/pr — create", () => {
     expect(foreign.json().message).toBe("project not found");
   });
 
+  // ── B-372 (Wei, ก): an ordered line must carry a quantity ────────────────
+  //
+  // `qty: 0` was accepted here, and gr.ts skips its over-receipt ceiling for a line
+  // ordered at 0 (a ceiling of 0 would make an un-quantified line unreceivable). That
+  // handed an ordinary user a switch that turns the receipt ceiling OFF. Proven live
+  // at 016308e through the public API: PR one line qty 0 → submit → approve → PO
+  // (total 0.00) → approve → POST /gr qty_ok 99,999,999 → 201 → JV-2026-0438
+  // Dr 5020 / Cr 2010 14,199,999,858.00. 14.2 billion on an order totalling zero.
+  const prCreateDb = () =>
+    stubDb({
+      rows: [[projects, [project]], [prs, []], [boqItems, [boqItemPriced("b0", "168.50")]]],
+    });
+  const prCreate = (items: unknown[]) => ({
+    method: "POST" as const,
+    url: "/api/v1/pr",
+    payload: { no: "PR-QTY", type: "material", project_id: PROJECT, items },
+  });
+
+  it("400s a BOQ line ordered at qty 0 — the receipt ceiling's off switch (B-372)", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([{ boq_item_id: "b0", qty: 0 }]));
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("qty > 0");
+  });
+
+  it("still 400s a NEGATIVE qty — the pre-existing rule is not what closed the hole", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([{ boq_item_id: "b0", qty: -1 }]));
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain(">= 0");
+  });
+
+  it("a NON-BOQ line (expense / advance) may still carry qty 0 — it has no price basis to exploit", async () => {
+    // pr_item.boq_item_id is nullable exactly for expense/advance lines. gr.ts can
+    // never price or receive against one, so the narrowest form of the ruling leaves
+    // it alone rather than breaking a shape the schema exists to support.
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([{ qty: 0 }]));
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("a PR with NO lines at all is still valid — Wei accepted it, and it is a different thing", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: prCreateDb() })
+    ).inject(prCreate([]));
+    expect(res.statusCode).toBe(201);
+  });
+
   it("400s when a line references a BOQ item outside the tenant", async () => {
     const res = await (
       await buildTestApp({
@@ -705,5 +766,157 @@ describe("PR action endpoints — tenant scope", () => {
       });
       expect(res.statusCode).toBe(404);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-367 — the notification EMITTER, at the route
+// ---------------------------------------------------------------------------
+// These are the route-level half of notify.test.ts. They assert not only that a
+// row is written but WHO it is addressed to and — the part that matters for
+// "emit nothing you cannot address" — the emit COUNT, so a fan-out that grew an
+// extra recipient fails here.
+
+/** Every notification row a request wrote (the stub records all inserts). */
+const notifRowsOf = (inserted: Inserted[]) =>
+  inserted
+    .filter((i) => i.table === notifications)
+    .flatMap((i) => i.rows as Record<string, unknown>[]);
+
+describe("PR notifications (B-367)", () => {
+  it("submit notifies EVERY user at or above the tier the amount demands — and nobody else", async () => {
+    const P0 = pr("p0", "N", "draft");
+    const inserted: Inserted[] = [];
+    // 6000 × 100 = 600,000 → over the 500K line → tier 3 (ผจก.โครงการ).
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [projects, [project]],
+            [prItems, [prLine("l0", "p0", "b0", "6000")]],
+            [boqItems, [boqItemPriced("b0", "100.00")]],
+            [
+              roles,
+              [
+                { ...roleRow(2), id: "role-proc" },
+                { ...roleRow(3), id: "role-pm" },
+                { ...roleRow(4), id: "role-md" },
+              ],
+            ],
+            [
+              users,
+              [
+                { ...userRow, id: "u-proc", roleId: "role-proc" },
+                { ...userRow, id: "u-pm", roleId: "role-pm" },
+                { ...userRow, id: "u-md", roleId: "role-md" },
+              ],
+            ],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/submit" });
+
+    expect(res.statusCode).toBe(200);
+    const rows = notifRowsOf(inserted);
+    // level 2 is BELOW the tier this 600,000 PR demands → not an approver of it.
+    expect(rows.map((r) => r.userId).sort()).toEqual(["u-md", "u-pm"]);
+    expect(rows.every((r) => r.type === "approval")).toBe(true);
+    expect(rows.every((r) => r.ref === "pr:p0")).toBe(true);
+  });
+
+  it("approve notifies the requester, exactly one row", async () => {
+    const P0 = pr("p0", "N", "pending", "material", 0, { requesterId: "u-requester" });
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [prItems, [prLine("l0", "p0", "b0", "10")]],
+            [boqItems, [boqItemPriced("b0", "100.00")]],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/approve" });
+
+    expect(res.statusCode).toBe(200);
+    const rows = notifRowsOf(inserted);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: "u-requester", type: "info", ref: "pr:p0" });
+  });
+
+  it("reject notifies the requester too", async () => {
+    const P0 = pr("p0", "N", "pending", "material", 0, { requesterId: "u-requester" });
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [prItems, []],
+            [boqItems, []],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/reject", payload: { reason: "ราคาสูง" } });
+
+    expect(res.statusCode).toBe(200);
+    const rows = notifRowsOf(inserted);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: "u-requester", type: "info" });
+  });
+
+  it("a decision on a PR with NO recorded requester emits nothing (never guesses)", async () => {
+    const P0 = pr("p0", "N", "pending"); // requesterId null — the seed's shape
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [prs, [P0]],
+            [prItems, []],
+            [boqItems, []],
+            [projects, [project]],
+            [users, [userRow]],
+            [roles, [roleRow(4)]],
+          ],
+          inserted,
+          updateBase: P0,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/approve" });
+
+    expect(res.statusCode).toBe(200);
+    expect(notifRowsOf(inserted)).toHaveLength(0);
+  });
+
+  it("a REFUSED transition writes no notification (the 409 path is silent)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[prs, [pr("p0", "N", "pending")]]], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/pr/p0/submit" });
+
+    expect(res.statusCode).toBe(409);
+    expect(notifRowsOf(inserted)).toHaveLength(0);
   });
 });

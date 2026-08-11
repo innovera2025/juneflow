@@ -476,6 +476,46 @@ describe("GET /api/v1/ap/pv", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  // B-323: both AP lists used an inline created_at-only comparator that returned 0 for
+  // two rows sharing an instant, handing the pair back to the join plan. Billings and
+  // PVs are routinely created together in one transaction, so the tie is not exotic.
+  it("lists are TOTAL when two rows share an instant (id floor decides)", async () => {
+    const billingIds = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [
+              [apBillings, rows],
+              [vendors, [vendorRow]],
+              [pos, [poRow]],
+              [wos, [woRow]],
+              [grs, [grRow]],
+            ],
+          }),
+        })
+      ).inject({ url: "/api/v1/ap/billing" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    // `apBilling()` / `pvRow()` hardcode the same createdAt — a genuine tie.
+    expect(await billingIds([apBilling("aaa"), apBilling("bbb")])).toEqual(["aaa", "bbb"]);
+    expect(await billingIds([apBilling("bbb"), apBilling("aaa")])).toEqual(["aaa", "bbb"]);
+
+    const pvIds = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [[pvs, rows], [apBillings, [apBilling(AP0)]], [vendors, [vendorRow]]],
+          }),
+        })
+      ).inject({ url: "/api/v1/ap/pv" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    expect(await pvIds([pvRow("aaa"), pvRow("bbb")])).toEqual(["aaa", "bbb"]);
+    expect(await pvIds([pvRow("bbb"), pvRow("aaa")])).toEqual(["aaa", "bbb"]);
+  });
+
   it("lists PVs with payee, method/cheque fields, WHT via calcWht, net + retention", async () => {
     const res = await (
       await buildTestApp({
@@ -523,10 +563,23 @@ describe("GET /api/v1/ap/pv", () => {
 // POST /ap/pv
 // ===========================================================================
 describe("POST /api/v1/ap/pv", () => {
-  const okDb = (inserted: Inserted[] = []) =>
+  /**
+   * The prototype's AP-2026-0180 row verbatim (ap.jsx AP_BILL[4] — the one its PV
+   * create form settles): amount 645,000 VAT-INCLUSIVE (vat 42,196 = 645000 × 7/107
+   * is the tax INSIDE it, never an addend), wht 19,350 = 3% of 645,000, retention
+   * 64,500. ap.jsx's own net box prints 645,000 → −19,350 → −64,500 → 561,150.
+   */
+  const proto180 = () =>
+    apBilling(AP0, {
+      amount: "645000.00",
+      vat: "42196.00",
+      wht: "19350.00",
+      retention: "64500.00",
+    });
+  const okDb = (inserted: Inserted[] = [], bills = [proto180()]) =>
     stubDb({
       rows: [
-        [apBillings, [apBilling(AP0)]],
+        [apBillings, bills],
         [vendors, [vendorRow]],
       ],
       inserted,
@@ -551,7 +604,6 @@ describe("POST /api/v1/ap/pv", () => {
       payload: {
         billing_ids: [AP0],
         method: "cheque",
-        amount: 645000,
         wht_pct: 3,
         retention: 64500,
         cheque_no: "CH-040128",
@@ -569,6 +621,160 @@ describe("POST /api/v1/ap/pv", () => {
     expect(ins!.values.companyId).toBe(COMPANY);
     expect(ins!.values.net).toBe("561150.00");
     expect(ins!.values.status).toBe("pending");
+  });
+
+  // -------------------------------------------------------------------------
+  // B-315 (Wei = ก) — money = SERVER: the payable is derived from the billing
+  // rows, and any client `amount` is IGNORED. The stored gross decides WHO MAY
+  // APPROVE (approvePv reads pv.amount alone), so an understated client figure
+  // used to route a large payment past the Finance Manager / MD.
+  // -------------------------------------------------------------------------
+  it("B-315: creates a PV with NO amount in the body — the server derives it", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: okDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      payload: { billing_ids: [AP0], wht_pct: 3, retention: 64500 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().amount).toBe(645000);
+    expect(inserted.find((i) => i.table === pvs)!.values.amount).toBe("645000.00");
+  });
+
+  it("B-315: IGNORES a client amount ABOVE the true payable (no invented payable)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: okDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      payload: { billing_ids: [AP0], amount: 9_000_000, wht_pct: 3, retention: 64500 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().amount).toBe(645000);
+    const ins = inserted.find((i) => i.table === pvs)!;
+    expect(ins.values.amount).toBe("645000.00");
+    // the LEDGER + BANK-FILE basis follows the server's figure, not the client's
+    expect(ins.values.net).toBe("561150.00"); // 645000 − 19350 − 64500
+  });
+
+  it("B-315: never adds `vat` — a VAT-bearing billing yields amount alone (the old bug)", async () => {
+    // The browser used to send amount + vat. ap_billing.vat is the tax portion
+    // CONTAINED IN amount (645000 × 7/107 = 42196), so adding it overstated the
+    // payable by 6.54% (645,000 → 687,196). This is the regression pin.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: okDb(inserted) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      payload: { billing_ids: [AP0], amount: 645000 + 42196, wht_pct: 3, retention: 64500 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().amount).toBe(645000);
+    expect(res.json().amount).not.toBe(687196);
+  });
+
+  it("B-315: SUMS every covered billing — not billingIds[0]", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: okDb(inserted, [
+          apBilling(AP0, { amount: "645000.00", vat: "42196.00" }),
+          apBilling(AP1, { amount: "96800.00", vat: "6334.00" }),
+        ]),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      payload: { billing_ids: [AP0, AP1], amount: 645000, wht_pct: 0, retention: 0 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().amount).toBe(741800); // 645000 + 96800, NOT 645000
+    expect(inserted.find((i) => i.table === pvs)!.values.amount).toBe("741800.00");
+  });
+
+  it("B-315: 400s when the covered billings carry no payable amount (no zero PV)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: okDb(inserted, [apBilling(AP0, { amount: "0.00", vat: "0.00" })]),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      // even a generous client amount cannot conjure a payable
+      payload: { billing_ids: [AP0], amount: 500_000 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/no payable amount/);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("B-315 EXPLOIT CLOSED: an understated amount cannot demote the approval tier", async () => {
+    // A caller with finance.create posts a token `amount` against a 3,000,000
+    // billing. Before the fix the row stored 500,000 → needed = 0 → the accountant
+    // (approvalLevel 0) could approve a 3M payment with MD/FinMgr never seeing it.
+    const inserted: Inserted[] = [];
+    const created = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: okDb(inserted, [apBilling(AP0, { amount: "3000000.00", vat: "196261.00" })]),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/ap/pv",
+      payload: { billing_ids: [AP0], amount: 500_000, wht_pct: 0, retention: 0 },
+    });
+    expect(created.statusCode).toBe(201);
+
+    // Feed the row the handler ACTUALLY persisted into the approval ladder — no
+    // hand-written amount, so this proves the gate on the real stored value.
+    const stored = inserted.find((i) => i.table === pvs)!.values;
+    const persisted = pvRow(PV0, {
+      amount: stored.amount as string,
+      net: stored.net as string,
+      createdBy: null, // isolate the tier gate from the SoD gate
+    });
+    const ladder = (approvalLevel: number) =>
+      stubDb({
+        rows: [
+          [pvs, [persisted]],
+          [users, [userRow]],
+          [roles, [roleRow(approvalLevel, true)]],
+          [apBillings, [apBilling(AP0)]],
+          [vendors, [vendorRow]],
+        ],
+        updateBase: persisted,
+      });
+
+    // 1) THE POINT, asserted FIRST so nothing shields it: the tier derived from
+    // the persisted row must refuse a tier-1 approver. Revert the handler and it
+    // is THIS line that goes red (stored 500,000 → needed 0 → 200 approved).
+    const accountant = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: ladder(0) })
+    ).inject({ method: "POST", url: `/api/v1/pv/${PV0}/approve` });
+    expect(accountant.statusCode, "tier-1 approver on a 3M PV must be refused").toBe(403);
+    expect(accountant.json().message).toMatch(/requires approval level 4/);
+
+    const finMgr = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: ladder(3) })
+    ).inject({ method: "POST", url: `/api/v1/pv/${PV0}/approve` });
+    expect(finMgr.statusCode).toBe(403); // even the Finance Manager is short of MD
+
+    const md = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: ladder(4) })
+    ).inject({ method: "POST", url: `/api/v1/pv/${PV0}/approve` });
+    expect(md.statusCode).toBe(200);
+    expect(md.json().status).toBe("approved");
+
+    // 2) and the stored figure itself is the server's, not the caller's
+    expect(stored.amount).toBe("3000000.00");
+    expect(created.json().amount).toBe(3_000_000);
   });
 
   it("400s on empty billing_ids", async () => {

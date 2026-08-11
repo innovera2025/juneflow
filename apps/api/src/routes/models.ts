@@ -37,6 +37,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { models, projectNodes, projects, boms } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
 
 /** Model card accent palette — server rotates it at create time (master.jsx:449). */
@@ -120,7 +121,8 @@ export function registerModelsRoute(app: FastifyInstance): void {
     return reply.code(200).send(
       // B-014 list envelope; the full tenant-scoped list is one page.
       listEnvelope(
-        rows.map((m) =>
+        // B-323: total-order the master list (created_at DESC, id ASC).
+        newestFirst(rows).map((m) =>
           toWire(
             m,
             unitsByModel.get(m.id) ?? 0,

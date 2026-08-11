@@ -1,0 +1,54 @@
+{
+  "override": "wei-approved:B-296",
+  "_note": "mobile FOREMAN/FIELD group (fm-accept · field-progress · field-pr) NEW phrase-layer strings (phrase-as-key, referenced via tp() + the assets/i18n/screens/{fm_accept,field_progress,field_pr}_strings.json sidecars). Every Thai value below was GREPPED out of the raw .jsx this round and is asserted byte-exact by the three sidecar tests (test/screens/*/[screen]_sidecar_test.dart). Every prototype line number in this file was verified by grep against the raw source in the same round — see _verify. The three screens ALREADY render honest Thai without this file (tp() returns the key itself for lang=th — the merged pm_jobs / st_grlist / notif / approve / pm_checklist / pm_notes precedent, B-254..B-258, B-273, B-280); this handoff lets the sacred round mint the entries into i18n-full.json.phrases so en/zh/ar light up. docs/extract/i18n-full.json is UNTOUCHED by feature/mobile-field-group (verified: the mobile asset is still byte-identical to the sacred source). en/zh/ar are intentionally NOT fabricated here (Juneflow: never translate anew) — the translator fills them, per the en=zh=ar=th fallback convention of B-247/B-248.",
+  "_verify": "grep -n 'รอตรวจรับ' pototype/mobile-field.jsx -> L153 (MobileHeader title) · 'ตีกลับ' -> L165 (MPill) + L177 (reject button) + L155 (rejected tab) · 'รับของ' -> L164 (gr MPill) · 'ตรวจรับผ่าน' -> L176 (accept button) · grep -n 'บันทึกความคืบหน้า' pototype/mobile-screens.jsx -> L319 (MobileHeader title) · 'ขอซื้อด่วน' -> L432 (title) · 'PR ด่วนจากหน้างาน' -> L432 (sub) · 'รายการที่ขอซื้อ' -> L441 (MField label) · 'รูปประกอบ + เหตุผล' -> L456 (MField label)",
+  "layer": "phrases",
+  "_net_new": "9 distinct values, verified programmatically against docs/extract/i18n-full.json on dev (1065 phrases · 3701 dict entries): each is absent from the phrases layer AND from every dict.*.th value. ONE value ('ตีกลับ') backs THREE sidecar slots (fm_accept tabRejected / pillRejected / btnReject) because the prototype uses the same word in all three places — it is minted once.",
+  "_zero_mint_reused": {
+    "_comment": "Already present in the sacred phrases layer and referenced by the sidecars WITHOUT minting anything.",
+    "รอตรวจ": "fm_accept.tabWait (mobile-field.jsx L155)",
+    "งวดงาน": "fm_accept.pillPeriod (mobile-field.jsx L164)",
+    "งาน": "field_progress.labelWork (mobile-screens.jsx L324, the label before the colon)",
+    "เลือกจาก BOQ": "field_pr.fieldBoq (mobile-screens.jsx L436)",
+    "ความเร่งด่วน": "field_pr.fieldUrgency (mobile-screens.jsx L450)"
+  },
+  "_dict_ids_reused": {
+    "_comment": "Existing stable dict ids the three sidecars point at, so these slots need NO mint at all. Each is asserted to resolve (and, where the wording is load-bearing, to resolve to exactly this text) by the sidecar tests.",
+    "accept.crumbSelf": "fm_accept.centre — the acceptance centre name, byte-exact with the first half of the L153 eyebrow",
+    "common.all": "fm_accept.tabAll (L155, minus the count the view composes from real rows)",
+    "accept.unitPhase": "fm_accept.unitPeriod + field_progress.unitPeriod — the period-ordinal word the client composes around the REAL work_period.seq, because the server deliberately refuses to compose it (apps/api/src/routes/subcon.ts L513-518)",
+    "subcon.subcontractor": "field_progress.labelSubcon (L323 label)",
+    "subcon.colProgressLong": "field_progress.progressTitle (the first half of the L326 section title)",
+    "common.status": "field_progress.statusLabel — labels the REAL status column shown where the prototype shows a percentage",
+    "wo.form.deliverWork": "field_progress.deliver — names the real POST /periods/{id}/deliver",
+    "gl.inbox.colDocNo": "field_pr.fieldNo",
+    "inv.colQty": "field_pr.fieldQty",
+    "common.submit": "field_pr.submit — names the real POST /pr + POST /pr/{id}/submit",
+    "labor.att.savedBadge": "fm_accept (n/a) · field_progress.sent · field_pr.submitted — B-268(ก) honest-state copy",
+    "tax.etax.statusPending": "field_progress.queued — B-268(ก)",
+    "pr.form.draftSavedToast": "field_pr.draftOnly — exact for 'the PR exists as a draft, only the submit failed'",
+    "admin.common.actionFailedToast": "all three screens' failed state — B-268(ก)",
+    "boq.edEmptyRowsFilter": "all three screens' GENUINELY-empty state (an UNREADABLE list renders an em-dash and no key at all)"
+  },
+  "_not_minted_deliberately": {
+    "_comment": "Prototype strings this slice DROPPED rather than keyed. Each is a CLAIM, not a missing value, and a claim cannot be em-dashed the way a value can. BLOCKERS.md B-297 files them.",
+    "fmAcceptDoneBanner": "mobile-field.jsx L173 '✓ ตรวจแล้ว · ส่งผลเข้าระบบ' — set by a LOCAL boolean (setDone, L150/L176) while nothing was sent. The port proves a successful inspection by RE-READING the acceptance queue instead.",
+    "fieldProgressCta": "mobile-screens.jsx L353 'ขออนุมัติงวด · 645,000 ฿' — the amount is hardcoded and money = SERVER. The button is labelled with wo.form.deliverWork, which names what it actually does.",
+    "fieldProgressPercent": "mobile-screens.jsx L331/L334 '78%' / 'เดิม 65%' / '+13 ppt วันนี้' — a work period carries a STATUS, not a completion percentage, and none may be derived from a count of delivered periods (the bases make periods unequal by construction).",
+    "fieldPrEstimate": "mobile-screens.jsx L447 'ราคาประมาณ 82,000 ฿' — qty x price is client money math.",
+    "fieldPrCta": "mobile-screens.jsx L473 'ส่ง PR ด่วน · 82,000 ฿' — same reason; the PR's value is rendered only after POST /pr returns it.",
+    "fieldPrApprovalChain": "mobile-screens.jsx L467 'ส่ง → หน.จัดซื้อ → ผจก.โครงการ → ผอ.ก่อสร้าง (วงเงิน ≥ 100K)' — the implemented tiers are 500,000 / 2,000,000 (apps/api/src/routes/pr.ts, B-070), so this text states something FALSE about the requester's own document."
+  },
+  "_payload_shape": "Same shape as pm-checklist-i18n.apply.json / pm-close-i18n.apply.json: with layer='phrases' the VALUES below are what gets minted into i18n-full.json.phrases (the Thai text IS the key in that layer); the map keys are the sidecar slots that reference them, prefixed with the screen because this handoff covers three sidecars. fm_accept.tabRejected / pillRejected / btnReject all carry the same value — ONE phrase, three slots.",
+  "dict": {
+    "fm_accept.title": "รอตรวจรับ",
+    "fm_accept.tabRejected": "ตีกลับ",
+    "fm_accept.pillGr": "รับของ",
+    "fm_accept.btnPass": "ตรวจรับผ่าน",
+    "field_progress.title": "บันทึกความคืบหน้า",
+    "field_pr.title": "ขอซื้อด่วน",
+    "field_pr.sub": "PR ด่วนจากหน้างาน",
+    "field_pr.fieldItems": "รายการที่ขอซื้อ",
+    "field_pr.fieldPhotos": "รูปประกอบ + เหตุผล"
+  }
+}

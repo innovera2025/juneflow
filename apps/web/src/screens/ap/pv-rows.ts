@@ -272,10 +272,30 @@ export function pvNet(gross: number, whtPct: number, retention: number): PvNet {
 }
 
 /**
+ * The gross payable of ONE AP billing — B-315.
+ *
+ * `amount` is VAT-INCLUSIVE: the row's `vat` is the tax portion CONTAINED IN it,
+ * not an addend (every seeded row satisfies vat = amount x 7/107, and ap.jsx's PV
+ * net box prints AP-2026-0180 as 645,000 under the label "มูลค่า AP รวม (รวม VAT)"
+ * while that billing's vat is 42,196 — excluded). This screen previously previewed
+ * `amount + vat`, which double-counted the VAT by 6.54%.
+ *
+ * PREVIEW ONLY. The server derives the STORED gross from the same billing rows
+ * (ap.ts createPv) and ignores anything the client sends — the approval tier, the
+ * JV and the bank file all read the SERVER's figure. One helper here so the
+ * preview cannot silently drift from the number the server will store.
+ */
+export function pvGross(billing: { amount: number }): number {
+  return round2(billing.amount);
+}
+
+/**
  * Derive the WHT rate percent implied by a billing's stored wht amount over its
- * gross (base + vat). Used to preview + submit a wht_pct the server re-applies via
- * the tax-engine. Returns 0 when the gross is 0 or the wht is null (honest — no
- * fabricated rate). Rounded to 2dp.
+ * gross (pvGross — the VAT-inclusive `amount`, NOT amount + vat: only that base
+ * yields the seeded 3.00%). Used to preview + submit a wht_pct the server re-applies
+ * via the tax-engine over its OWN gross — so an inflated base here no longer
+ * self-cancels (it would understate the stored WHT). Returns 0 when the gross is 0
+ * or the wht is null (honest — no fabricated rate). Rounded to 2dp.
  */
 export function impliedWhtPct(wht: number | null, gross: number): number {
   if (wht == null || gross <= 0) return 0;
@@ -286,7 +306,11 @@ export function impliedWhtPct(wht: number | null, gross: number): number {
 export interface PvDraft {
   /** The single selected AP billing id (billing_ids = [this]). */
   billingId: string;
-  /** Gross payable (defaults from the selected billing's amount + vat). */
+  /**
+   * Gross payable PREVIEW (pvGross of the selected billing). B-315: never sent —
+   * the server derives the stored gross from billing_ids itself. Kept in the draft
+   * because the net box renders it and pvSubmittable gates on it.
+   */
   gross: number;
   /** WHT rate percent (derived from the selected billing). */
   whtPct: number;
@@ -308,11 +332,18 @@ export function pvSubmittable(d: PvDraft): boolean {
  * Compose the opaque POST /ap/pv body from the draft. billing_ids is the single
  * chosen AP; method + cheque fields are sent only when present; the server owns
  * status ("pending") + re-derives wht/net via the tax-engine. Never fabricated.
+ *
+ * B-315 (Wei = ก): `amount` is NOT sent. The server computes the gross from
+ * billing_ids and ignores any client value, so a field on the wire that has no
+ * effect would only mislead the next reader. d.gross stays a screen-local preview.
+ * (The server ignores `amount` regardless of who sends it — that is the security
+ * property; dropping it here is the honesty half.) The request body has no
+ * `required` list in openapi.yaml and `amount` is optional there, so omitting it
+ * needs no contract change.
  */
 export function buildPvBody(d: PvDraft): Record<string, unknown> {
   const body: Record<string, unknown> = {
     billing_ids: [d.billingId.trim()],
-    amount: d.gross,
     wht_pct: d.whtPct,
     retention: d.retention,
   };

@@ -15,6 +15,19 @@ import 'package:juneflow_mobile/offline/sync_operation.dart';
 import 'package:juneflow_mobile/offline/sync_processor.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_repository.dart';
 import 'package:juneflow_mobile/screens/pm_checkin/pm_checkin_screen.dart';
+import 'package:juneflow_mobile/screens/pm_checklist/pm_checklist_screen.dart';
+
+/// Records the routes pushed onto the navigator, so the onward-checklist push can be
+/// asserted WITHOUT mounting the destination: [PmChecklistScreenHost] resolves its
+/// services through an AppScope, which this hermetic test deliberately does not build.
+class _RecordingObserver extends NavigatorObserver {
+  final List<Route<dynamic>> pushes = <Route<dynamic>>[];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushes.add(route);
+  }
+}
 
 /// A canned coordinate source. [fix] null = no fix available (denied / off).
 class _FakeGps implements GpsSource {
@@ -111,9 +124,11 @@ Future<void> _pump(
   GpsSource? gps,
   String? workOrderId = 'w1',
   String? assetName = 'Lift MX-1000',
+  NavigatorObserver? observer,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      navigatorObservers: <NavigatorObserver>[if (observer != null) observer],
       home: Scaffold(
         body: PmCheckinScreen(
           repo: repo,
@@ -173,9 +188,48 @@ void main() {
       // The success card + the real coordinate in the map caption.
       expect(find.textContaining('Check-in หน้างานสำเร็จ · '), findsOneWidget);
       expect(find.text(_fix), findsOneWidget);
-      // On success the sticky button becomes the (disabled) onward checklist step.
+      // On success the sticky button becomes the onward checklist step, which now
+      // NAVIGATES (pm-checklist is built) — the push is asserted in its own test
+      // below ('confirmed -> the checklist CTA pushes ...').
       expect(find.text('Checklist ตรวจเช็ค'), findsOneWidget);
       expect(find.text('Check-in หน้างาน'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'confirmed -> the checklist CTA pushes pm-checklist carrying the REAL '
+    'work-order id',
+    (WidgetTester tester) async {
+      final _RecordingObserver observer = _RecordingObserver();
+      // A distinctive id, so a hardcoded/stale value cannot pass by coincidence.
+      await _pump(
+        tester,
+        _FakeRepo(outcome: SyncOutcome.synced),
+        workOrderId: 'wo-42-real',
+        observer: observer,
+      );
+      await _tapCheckin(tester);
+
+      // Precondition: confirmed, so the onward affordance is the button on screen.
+      expect(find.text('Checklist ตรวจเช็ค'), findsOneWidget);
+      observer.pushes.clear(); // drop the initial home route
+
+      await tester.tap(find.text('Checklist ตรวจเช็ค'));
+
+      // It really navigates now (it used to be honest-disabled: onTap null).
+      expect(observer.pushes, hasLength(1));
+      final Route<dynamic> route = observer.pushes.single;
+      expect(route, isA<MaterialPageRoute<void>>());
+
+      // Build the destination without mounting it and assert it carries the REAL
+      // work-order id. This is the seam a later refactor must not drop: pushing
+      // without the id would mount pm-checklist honest-EMPTY (em-dash on every
+      // entry) while every other assertion still passed.
+      final Widget dest = (route as MaterialPageRoute<void>).builder(
+        tester.element(find.byType(PmCheckinScreen)),
+      );
+      expect(dest, isA<PmChecklistScreenHost>());
+      expect((dest as PmChecklistScreenHost).workOrderId, 'wo-42-real');
     },
   );
 

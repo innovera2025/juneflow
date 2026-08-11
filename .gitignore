@@ -47,3 +47,14 @@ BLOCKERS 2.md
 # promote helper (not tracked)
 /promote-batch5.sh
 /promote.sh
+
+# Playwright storageState / auth-state files (B-323 round 4). These are written by the
+# live-gate scripts and contain a REAL bearer token in localStorage. One of them
+# (agents/orch-b-recon/b323-proof/baseline-impact/state.json) reached a COMMIT as a side
+# effect of a script whose output dir happens to be tracked — a credential landed in the
+# repo because nobody chose to put it there. Ignore the SHAPE, not that one path:
+# every sibling script already writes its state file to /tmp or a scratch dir, and this
+# keeps the next one from having to remember.
+*state.json
+*storage-state.json
+*auth-state.json

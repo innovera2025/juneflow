@@ -308,6 +308,29 @@ for (const N of NOTES) {
       expect(row.currency_code).toBe("THB");
       expect(row.vat).toBeUndefined(); // Model-A is NO-VAT (no derived vat field)
     });
+
+    // B-323: the local `newestFirst` here was a hand-rolled shadow of list-order.ts's
+    // export, and it was tie-BLIND — `msOf(b) - msOf(a)` returns 0 for two notes
+    // sharing an instant, which leaves the pair in whatever order the join plan
+    // produced. Two notes created in ONE transaction share now() exactly, so this is
+    // not hypothetical. The shared helper breaks the tie on id.
+    it("is TOTAL when two notes share an instant — the join plan cannot decide", async () => {
+      const tied = new Date("2024-03-10T00:00:00Z");
+      const a = N.seed("aaa", { createdAt: tied, no: `${N.noPrefix}-2026-0003` });
+      const b = N.seed("bbb", { createdAt: tied, no: `${N.noPrefix}-2026-0004` });
+      const ids = async (rows: unknown[]): Promise<string[]> => {
+        const res = await (
+          await buildTestApp({
+            resolveTenant: async () => SESSION,
+            db: stubDb({ rows: [[N.noteTable, rows]] }),
+          })
+        ).inject({ method: "GET", url: `/api/v1/ap/${N.base}` });
+        return res.json().data.map((r: { id: string }) => r.id);
+      };
+      // Both join-plan orders must agree, and on the id tiebreak (ASC).
+      expect(await ids([a, b])).toEqual(["aaa", "bbb"]);
+      expect(await ids([b, a])).toEqual(["aaa", "bbb"]);
+    });
   });
 
   // -------------------------------------------------------------------------

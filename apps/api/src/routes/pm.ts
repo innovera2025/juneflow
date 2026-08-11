@@ -64,6 +64,7 @@ import {
 } from "@juneflow/db/schema";
 import type { PmChecklistRow, PmQuotePartRow } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { newestFirst } from "./list-order.js";
 
 type PmAssetRow = typeof pmAssets.$inferSelect;
 type ChecklistTemplateRow = typeof checklistTemplates.$inferSelect;
@@ -326,8 +327,9 @@ export function registerPmRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-323: selectThrough = INNER JOIN with no ORDER BY — total-order the list.
     const rows = await db.selectThrough(pmContracts, CONTRACT_HOPS);
-    return reply.code(200).send(listEnvelope(rows.map(contractWire)));
+    return reply.code(200).send(listEnvelope(newestFirst(rows).map(contractWire)));
   });
 
   // POST /pm/contracts — create a PM contract for a tenant-owned project
@@ -465,7 +467,7 @@ export function registerPmRoute(app: FastifyInstance): void {
     // are undefined — inventing filter behavior would violate PLAN.md §0 rule 4);
     // the full tenant-scoped list is returned as one page (like cost-centers.ts).
     const rows = await db.selectThrough(pmAssets, ASSET_HOPS);
-    return reply.code(200).send(listEnvelope(rows.map(assetWire)));
+    return reply.code(200).send(listEnvelope(newestFirst(rows).map(assetWire)));
   });
 
   // POST /pm/assets — register an asset under a PM contract (pm.jsx PMAssetForm).
@@ -537,7 +539,7 @@ export function registerPmRoute(app: FastifyInstance): void {
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
     const rows = await db.select(checklistTemplates);
-    return reply.code(200).send(listEnvelope(rows.map(templateWire)));
+    return reply.code(200).send(listEnvelope(newestFirst(rows).map(templateWire)));
   });
 
   // POST /pm/checklist-templates — create a reusable checklist set
@@ -580,7 +582,7 @@ export function registerPmRoute(app: FastifyInstance): void {
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
     const rows = await db.selectThrough(pmWorkOrders, WO_HOPS);
-    return reply.code(200).send(listEnvelope(rows.map(workOrderWire)));
+    return reply.code(200).send(listEnvelope(newestFirst(rows).map(workOrderWire)));
   });
 
   // POST /pm/workorders — open a work order on an asset (pm3.jsx PMWOForm). The
@@ -820,7 +822,7 @@ export function registerPmRoute(app: FastifyInstance): void {
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
     const rows = await db.selectThrough(pmQuotes, QUOTE_HOPS);
-    return reply.code(200).send(listEnvelope(rows.map(quoteWire)));
+    return reply.code(200).send(listEnvelope(newestFirst(rows).map(quoteWire)));
   });
 
   // POST /pm/quotes — raise a spare-parts quote off a work order (erd pmq; data-

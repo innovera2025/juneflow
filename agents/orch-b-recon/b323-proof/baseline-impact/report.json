@@ -1,0 +1,3898 @@
+{
+  "summary": {
+    "total": 110,
+    "pass": 92,
+    "fail": 18,
+    "generatedBy": "P0-QA-04 visual gate harness"
+  },
+  "results": [
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/accept.png",
+      "candLabel": "capture:accept",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "accept",
+      "kind": "capture",
+      "diffPath": "diff/accept.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/admin-invoices.png",
+      "candLabel": "capture:admin.invoices",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 72088,
+      "maskedDiffPixels": 1295,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 1104,
+          "y": 374,
+          "width": 78,
+          "height": 366,
+          "reason": "B-187 (class B-160 / B-120) - admin.invoices date (วันที่) column renders each invoice seed-day date as YYYY-MM-DD (baseline froze 2026-07-28; a fresh stack re-seeds to the current day) so the day digits drift vs an older baseline. Covers only the date-text data cells (measured text x1110-1172 y381-731; changing digits x1160-1173), clear of the amount column (starts x1285)"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 72088 px (1295 differing) per B-120, B-120, B-187",
+      "screen": "admin-invoices",
+      "kind": "capture",
+      "diffPath": "diff/admin-invoices.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/admin-overview.png",
+      "candLabel": "capture:admin.overview",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "admin-overview",
+      "kind": "capture",
+      "diffPath": "diff/admin-overview.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/admin-plans.png",
+      "candLabel": "capture:admin.plans",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "admin-plans",
+      "kind": "capture",
+      "diffPath": "diff/admin-plans.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/admin-subs.png",
+      "candLabel": "capture:admin.subs",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 97540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 1322,
+          "y": 290,
+          "width": 100,
+          "height": 540,
+          "reason": "B-187 (class B-160 / B-120) - admin.subs renew (ต่ออายุ) column renders renew_at overdue-TINTED (admin-subs.tsx: REAL renew_at, tint flips as now() passes the seed date) so the cell colour/text drifts vs an older platform-mode baseline. Covers only the renew data cells (measured red x1341-1398 y294-824; cell band x1330-1417), clear of MRR (ends x1304) and the status badges (start x1480)"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 97540 px (0 differing) per B-120, B-120, B-187",
+      "screen": "admin-subs",
+      "kind": "capture",
+      "diffPath": "diff/admin-subs.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ap-aging.png",
+      "candLabel": "capture:ap.aging",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "ap-aging",
+      "kind": "capture",
+      "diffPath": "diff/ap-aging.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ap-billing.png",
+      "candLabel": "capture:ap.billing",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 6270,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 1364,
+          "y": 427,
+          "width": 66,
+          "height": 19,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 1: seed dueDate = isoDaysFromToday(-10) re-anchors to the seed day, so the ISO digits drift daily. Covers only the measured date text run (x1366.77-1426.80 y429.25-446.25); the aging sub-line below (ink from y449) and the retention/status neighbours stay gated"
+        },
+        {
+          "x": 1364,
+          "y": 487,
+          "width": 66,
+          "height": 19,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 2 (isoDaysFromToday(+3)); same daily digit drift. Covers only the measured date text run (y489.25-506.25), aging sub-line below stays gated"
+        },
+        {
+          "x": 1364,
+          "y": 547,
+          "width": 66,
+          "height": 19,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 3 (isoDaysFromToday(+14)); same daily digit drift. Covers only the measured date text run (y549.25-566.25), aging sub-line below stays gated"
+        },
+        {
+          "x": 1364,
+          "y": 607,
+          "width": 66,
+          "height": 19,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 4 (isoDaysFromToday(+30)); same daily digit drift. Covers only the measured date text run (y609.25-626.25), aging sub-line below stays gated"
+        },
+        {
+          "x": 1364,
+          "y": 667,
+          "width": 66,
+          "height": 19,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.billing due-date row 5 (isoDaysFromToday(+5)); same daily digit drift. Covers only the measured date text run (y669.25-686.25), aging sub-line below stays gated"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 6270 px (0 differing) per B-205, B-205, B-205, B-205, B-205",
+      "screen": "ap-billing",
+      "kind": "capture",
+      "diffPath": "diff/ap-billing.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ap-cn-dn.png",
+      "candLabel": "capture:ap.cn-dn",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "ap-cn-dn",
+      "kind": "capture",
+      "diffPath": "diff/ap-cn-dn.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ap-deposit.png",
+      "candLabel": "capture:ap.deposit",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "ap-deposit",
+      "kind": "capture",
+      "diffPath": "diff/ap-deposit.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ap-pv.png",
+      "candLabel": "capture:ap.pv",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 4602,
+      "maskedDiffPixels": 552,
+      "maskRegions": [
+        {
+          "x": 419,
+          "y": 371,
+          "width": 59,
+          "height": 19,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.pv row 1 created_at date (formatDate(r.createdAt), ap-pv.tsx:294): defaultNow() = the seed-insert day, so it renders TODAY and drifts against any older baseline. Covers only the measured date run (x421.00-475.81 y372.75-388.75); the payee name above it is untouched (proven: a payee-text change still FAILs with 0 px absorbed)"
+        },
+        {
+          "x": 419,
+          "y": 431,
+          "width": 59,
+          "height": 20,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.pv row 2 created_at date; same daily drift. Covers only the measured date run (y433.25-449.25), payee name above stays gated"
+        },
+        {
+          "x": 419,
+          "y": 491,
+          "width": 59,
+          "height": 20,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.pv row 3 created_at date; same daily drift. Covers only the measured date run (y493.25-509.25), payee name above stays gated"
+        },
+        {
+          "x": 419,
+          "y": 552,
+          "width": 59,
+          "height": 19,
+          "reason": "B-205 (class B-160 / B-120(ข)) — ap.pv row 4 created_at date; same daily drift. Covers only the measured date run (y553.75-569.75), payee name above stays gated"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 4602 px (552 differing) per B-205, B-205, B-205, B-205",
+      "screen": "ap-pv",
+      "kind": "capture",
+      "diffPath": "diff/ap-pv.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ap-retention.png",
+      "candLabel": "capture:ap.retention",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 70180,
+      "maskedDiffPixels": 477,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 1165,
+          "y": 416,
+          "width": 144,
+          "height": 185,
+          "reason": "B-160 (class B-120(ข)) — ap.retention due-date column: rows 1-3 render a SEED_TODAY-relative due date ('2027-07-29') that drifts vs an older baseline; row 0 is a fixed literal ('2025-01-15') and is left UNMASKED. Covers only the 3 drifting rows (measured cells x1167-1307 y418-599), no neighbouring cell"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 70180 px (477 differing) per B-120, B-120, B-160",
+      "screen": "ap-retention",
+      "kind": "capture",
+      "diffPath": "diff/ap-retention.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/dashboard.png",
+      "candLabel": "capture:dashboard",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 45580,
+      "maskedDiffPixels": 175,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 513,
+          "y": 123,
+          "width": 50,
+          "height": 24,
+          "reason": "B-160 (class B-120(ข)) — dashboard subtitle `dashboard.tplAsOf` prints the SERVER as_of (dashboard.ts:200 new Date()) as Thai-short text; its {date} half renders left of header-update-time-b120 and drifts vs an older baseline (measured live: date value x515.31-574.58 y125-145; drifting day digits x515-529 = 100 of 146 unmasked px). Covers only the strip of that date value left of the existing mask, inside the subtitle line band — no neighbouring element"
+        },
+        {
+          "x": 798,
+          "y": 123,
+          "width": 40,
+          "height": 24,
+          "reason": "B-160 (class B-120(ข)) — reflow tail of the same dashboard as_of drift: a shorter date (1-digit day / 5-char Thai month) slides the one-line subtitle leftwards, pushing the trailing '● online' glyphs (measured run x780.80-834.11 y125-145) past header-update-time-b120's right edge (x800) — measured 222-231 px, enough to FAIL on its own. Covers only x798-838 inside the subtitle line band; the same phrase is already masked from x560-800 by header-update-time-b120. Static copy that MOVES — flagged for Wei ratification in the G5 audit report"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 45580 px (175 differing) per B-120, B-120, B-160, B-160",
+      "screen": "app-shell",
+      "kind": "capture",
+      "diffPath": "diff/app-shell.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ar-aging.png",
+      "candLabel": "capture:ar.aging",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "ar-aging",
+      "kind": "capture",
+      "diffPath": "diff/ar-aging.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ar-cn.png",
+      "candLabel": "capture:ar.cn",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 60492,
+      "maskedDiffPixels": 561,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 1245,
+          "y": 356,
+          "width": 104,
+          "height": 163,
+          "reason": "B-160 (class B-120(ข)) — ar.cn date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 3-row date column (measured cells x1247-1347 y358-517), no neighbouring cell"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 60492 px (561 differing) per B-120, B-120, B-160",
+      "screen": "ar-cn",
+      "kind": "capture",
+      "diffPath": "diff/ar-cn.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ar-invoice.png",
+      "candLabel": "capture:ar.invoice",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "ar-invoice",
+      "kind": "capture",
+      "diffPath": "diff/ar-invoice.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ar-rv.png",
+      "candLabel": "capture:ar.rv",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "ar-rv",
+      "kind": "capture",
+      "diffPath": "diff/ar-rv.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/ar-tax.png",
+      "candLabel": "capture:ar.tax",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 74092,
+      "maskedDiffPixels": 912,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 505,
+          "y": 409,
+          "width": 114,
+          "height": 268,
+          "reason": "B-160 (class B-120(ข)) — ar.tax date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 6-row date column (measured cells x507-617 y411-675), no neighbouring cell"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 74092 px (912 differing) per B-120, B-120, B-160",
+      "screen": "ar-tax",
+      "kind": "capture",
+      "diffPath": "diff/ar-tax.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/bank-cheque.png",
+      "candLabel": "capture:bank.cheque",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "bank-cheque",
+      "kind": "capture",
+      "diffPath": "diff/bank-cheque.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/bank-export.png",
+      "candLabel": "capture:bank.export",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "bank-export",
+      "kind": "capture",
+      "diffPath": "diff/bank-export.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/bank-recon.png",
+      "candLabel": "capture:bank.recon",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "bank-recon",
+      "kind": "capture",
+      "diffPath": "diff/bank-recon.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-aiqto.png",
+      "candLabel": "capture:boq.aiqto",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-aiqto",
+      "kind": "capture",
+      "diffPath": "diff/boq-aiqto.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-approval.png",
+      "candLabel": "capture:boq.approval",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-approval",
+      "kind": "capture",
+      "diffPath": "diff/boq-approval.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-archive.png",
+      "candLabel": "capture:boq.archive",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-archive",
+      "kind": "capture",
+      "diffPath": "diff/boq-archive.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-bom.png",
+      "candLabel": "capture:boq.bom",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-bom",
+      "kind": "capture",
+      "diffPath": "diff/boq-bom.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-editor.png",
+      "candLabel": "capture:boq.editor",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 13,
+      "totalPixels": 1600000,
+      "diffRatio": 0.000008125,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-editor",
+      "kind": "capture",
+      "diffPath": "diff/boq-editor.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-list.png",
+      "candLabel": "capture:boq.list",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-list",
+      "kind": "capture",
+      "diffPath": "diff/boq-list.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-overview.png",
+      "candLabel": "capture:boq.overview",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-overview",
+      "kind": "capture",
+      "diffPath": "diff/boq-overview.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/boq-reports.png",
+      "candLabel": "capture:boq.reports",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "boq-reports",
+      "kind": "capture",
+      "diffPath": "diff/boq-reports.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/dms.png",
+      "candLabel": "capture:dms",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 1286,
+      "totalPixels": 1600000,
+      "diffRatio": 0.00080375,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.000804 > maxDiffPixelRatio 0.0001 · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "dms",
+      "kind": "capture",
+      "diffPath": "diff/dms.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/exec.png",
+      "candLabel": "capture:exec",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "exec",
+      "kind": "capture",
+      "diffPath": "diff/exec.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/fa-adjust.png",
+      "candLabel": "capture:fa.adjust",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "fa-adjust",
+      "kind": "capture",
+      "diffPath": "diff/fa-adjust.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/fa-depr.png",
+      "candLabel": "capture:fa.depr",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "fa-depr",
+      "kind": "capture",
+      "diffPath": "diff/fa-depr.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/fa-register.png",
+      "candLabel": "capture:fa.register",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "fa-register",
+      "kind": "capture",
+      "diffPath": "diff/fa-register.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-cashflow.png",
+      "candLabel": "capture:gl.cashflow",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "gl-cashflow",
+      "kind": "capture",
+      "diffPath": "diff/gl-cashflow.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-close.png",
+      "candLabel": "capture:gl.close",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "gl-close",
+      "kind": "capture",
+      "diffPath": "diff/gl-close.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-coa.png",
+      "candLabel": "capture:gl.coa",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 4,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (4 differing) per B-120, B-120",
+      "screen": "gl-coa",
+      "kind": "capture",
+      "diffPath": "diff/gl-coa.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-inbox.png",
+      "candLabel": "capture:gl.inbox",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 800,
+      "totalPixels": 1600000,
+      "diffRatio": 0.0005,
+      "maskedPixels": 96488,
+      "maskedDiffPixels": 2256,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 1315,
+          "y": 414,
+          "width": 124,
+          "height": 427,
+          "reason": "B-160 (class B-120(ข)) — gl.inbox time column renders each row's created_at (defaultNow at seed) as 'YYYY-MM-DD HH:mm'; the value = the seed day and drifts vs an older baseline. Covers only the 9-row date/time column (measured cells x1317-1437 y416-839), no neighbouring cell"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.000500 > maxDiffPixelRatio 0.0001 · masked 96488 px (2256 differing) per B-120, B-120, B-160",
+      "screen": "gl-inbox",
+      "kind": "capture",
+      "diffPath": "diff/gl-inbox.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-jv.png",
+      "candLabel": "capture:gl.jv",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 79108,
+      "maskedDiffPixels": 1281,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 415,
+          "y": 447,
+          "width": 114,
+          "height": 312,
+          "reason": "B-160 (class B-120(ข)) — gl.jv date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 7-row date column (measured cells x417-527 y449-757), no neighbouring cell"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 79108 px (1281 differing) per B-120, B-120, B-160",
+      "screen": "gl-jv",
+      "kind": "capture",
+      "diffPath": "diff/gl-jv.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-projectpl.png",
+      "candLabel": "capture:gl.projectpl",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "gl-projectpl",
+      "kind": "capture",
+      "diffPath": "diff/gl-projectpl.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-statements.png",
+      "candLabel": "capture:gl.statements",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "gl-statements",
+      "kind": "capture",
+      "diffPath": "diff/gl-statements.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gl-trial.png",
+      "candLabel": "capture:gl.trial",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "gl-trial",
+      "kind": "capture",
+      "diffPath": "diff/gl-trial.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/gr-list.png",
+      "candLabel": "capture:gr.list",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 888,
+      "totalPixels": 1600000,
+      "diffRatio": 0.000555,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.000555 > maxDiffPixelRatio 0.0001",
+      "screen": "gr-list",
+      "kind": "capture",
+      "diffPath": "diff/gr-list.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/inventory-issue.png",
+      "candLabel": "capture:inv.issue",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "inventory-issue",
+      "kind": "capture",
+      "diffPath": "diff/inventory-issue.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/inventory-items.png",
+      "candLabel": "capture:inv.items",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "inventory-items",
+      "kind": "capture",
+      "diffPath": "diff/inventory-items.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/inventory-stock.png",
+      "candLabel": "capture:inv.stock",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "inventory-stock",
+      "kind": "capture",
+      "diffPath": "diff/inventory-stock.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/inventory-transfer.png",
+      "candLabel": "capture:inv.transfer",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "inventory-transfer",
+      "kind": "capture",
+      "diffPath": "diff/inventory-transfer.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/labor-attendance.png",
+      "candLabel": "capture:labor.attendance",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "labor-attendance",
+      "kind": "capture",
+      "diffPath": "diff/labor-attendance.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/labor-payroll.png",
+      "candLabel": "capture:labor.payroll",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "labor-payroll",
+      "kind": "capture",
+      "diffPath": "diff/labor-payroll.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/labor-workers.png",
+      "candLabel": "capture:labor.workers",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "labor-workers",
+      "kind": "capture",
+      "diffPath": "diff/labor-workers.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/land-bank.png",
+      "candLabel": "capture:land.bank",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "land-bank",
+      "kind": "capture",
+      "diffPath": "diff/land-bank.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/land-dd.png",
+      "candLabel": "capture:land.dd",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "land-dd",
+      "kind": "capture",
+      "diffPath": "diff/land-dd.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/land-pipeline.png",
+      "candLabel": "capture:land.pipeline",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "land-pipeline",
+      "kind": "capture",
+      "diffPath": "diff/land-pipeline.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/land-survey.png",
+      "candLabel": "capture:land.survey",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "land-survey",
+      "kind": "capture",
+      "diffPath": "diff/land-survey.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/line.png",
+      "candLabel": "capture:line",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 4,
+      "totalPixels": 1600000,
+      "diffRatio": 0.0000025,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "line",
+      "kind": "capture",
+      "diffPath": "diff/line.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/login.png",
+      "candLabel": "capture:login",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "login",
+      "kind": "capture",
+      "diffPath": "diff/login.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-cc.png",
+      "candLabel": "capture:master.cc",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "master-cc",
+      "kind": "capture",
+      "diffPath": "diff/master-cc.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-company.png",
+      "candLabel": "capture:master.company",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "master-company",
+      "kind": "capture",
+      "diffPath": "diff/master-company.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-customer.png",
+      "candLabel": "capture:master.customer",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "master-customer",
+      "kind": "capture",
+      "diffPath": "diff/master-customer.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-docnum.png",
+      "candLabel": "capture:master.docnum",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "master-docnum",
+      "kind": "capture",
+      "diffPath": "diff/master-docnum.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-model.png",
+      "candLabel": "capture:master.model",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "master-model",
+      "kind": "capture",
+      "diffPath": "diff/master-model.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-project.png",
+      "candLabel": "capture:master.project",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "master-project",
+      "kind": "capture",
+      "diffPath": "diff/master-project.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-ptype.png",
+      "candLabel": "capture:master.ptype",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "master-ptype",
+      "kind": "capture",
+      "diffPath": "diff/master-ptype.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/master-vendor.png",
+      "candLabel": "capture:master.vendor",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "master-vendor",
+      "kind": "capture",
+      "diffPath": "diff/master-vendor.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/notifications.png",
+      "candLabel": "capture:notifications",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 1195,
+      "totalPixels": 1600000,
+      "diffRatio": 0.000746875,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.000747 > maxDiffPixelRatio 0.0001 · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "notifications",
+      "kind": "capture",
+      "diffPath": "diff/notifications.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/opex-budget.png",
+      "candLabel": "capture:opex",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "opex-budget",
+      "kind": "capture",
+      "diffPath": "diff/opex-budget.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/petty.png",
+      "candLabel": "capture:petty",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 1997,
+      "totalPixels": 1600000,
+      "diffRatio": 0.001248125,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.001248 > maxDiffPixelRatio 0.0001 · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "petty",
+      "kind": "capture",
+      "diffPath": "diff/petty.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/pm-assets.png",
+      "candLabel": "capture:pm.assets",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 18115,
+      "totalPixels": 1600000,
+      "diffRatio": 0.011321875,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.011322 > maxDiffPixelRatio 0.0001 · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "pm-assets",
+      "kind": "capture",
+      "diffPath": "diff/pm-assets.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/pm-contracts.png",
+      "candLabel": "capture:pm.contracts",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "pm-contracts",
+      "kind": "capture",
+      "diffPath": "diff/pm-contracts.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/pm-dashboard.png",
+      "candLabel": "capture:pm.dashboard",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 4401,
+      "totalPixels": 1600000,
+      "diffRatio": 0.002750625,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.002751 > maxDiffPixelRatio 0.0001 · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "pm-dashboard",
+      "kind": "capture",
+      "diffPath": "diff/pm-dashboard.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/pm-schedule.png",
+      "candLabel": "capture:pm.schedule",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 13555,
+      "totalPixels": 1600000,
+      "diffRatio": 0.008471875,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.008472 > maxDiffPixelRatio 0.0001 · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "pm-schedule",
+      "kind": "capture",
+      "diffPath": "diff/pm-schedule.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/pm-wo.png",
+      "candLabel": "capture:pm.wo",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 5292,
+      "totalPixels": 1600000,
+      "diffRatio": 0.0033075,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.003308 > maxDiffPixelRatio 0.0001 · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "pm-wo",
+      "kind": "capture",
+      "diffPath": "diff/pm-wo.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/po-form.png",
+      "candLabel": "capture:po.form",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "po-form",
+      "kind": "capture",
+      "diffPath": "diff/po-form.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/po-list.png",
+      "candLabel": "capture:po.list",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 188,
+      "totalPixels": 1600000,
+      "diffRatio": 0.0001175,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.000117 > maxDiffPixelRatio 0.0001",
+      "screen": "po-list",
+      "kind": "capture",
+      "diffPath": "diff/po-list.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/pr-list.png",
+      "candLabel": "capture:pr.list",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "pr-list",
+      "kind": "capture",
+      "diffPath": "diff/pr-list.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/reports.png",
+      "candLabel": "capture:reports",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "reports",
+      "kind": "capture",
+      "diffPath": "diff/reports.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sales-crm.png",
+      "candLabel": "capture:sales.crm",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "sales-crm",
+      "kind": "capture",
+      "diffPath": "diff/sales-crm.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sales-down.png",
+      "candLabel": "capture:sales.down",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "sales-down",
+      "kind": "capture",
+      "diffPath": "diff/sales-down.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sales-loan.png",
+      "candLabel": "capture:sales.loan",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "sales-loan",
+      "kind": "capture",
+      "diffPath": "diff/sales-loan.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sales-process.png",
+      "candLabel": "capture:sales.process",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "sales-process",
+      "kind": "capture",
+      "diffPath": "diff/sales-process.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sales-service.png",
+      "candLabel": "capture:sales.service",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "sales-service",
+      "kind": "capture",
+      "diffPath": "diff/sales-service.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/settings.png",
+      "candLabel": "capture:settings",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "settings",
+      "kind": "capture",
+      "diffPath": "diff/settings.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/solar-monitor.png",
+      "candLabel": "capture:solar.monitor",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "solar-monitor",
+      "kind": "capture",
+      "diffPath": "diff/solar-monitor.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/solar-permit.png",
+      "candLabel": "capture:solar.permit",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "solar-permit",
+      "kind": "capture",
+      "diffPath": "diff/solar-permit.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/solar-ppa.png",
+      "candLabel": "capture:solar.ppa",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "solar-ppa",
+      "kind": "capture",
+      "diffPath": "diff/solar-ppa.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/solar-roi.png",
+      "candLabel": "capture:solar.roi",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "solar-roi",
+      "kind": "capture",
+      "diffPath": "diff/solar-roi.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/solar-warranty.png",
+      "candLabel": "capture:solar.warranty",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "solar-warranty",
+      "kind": "capture",
+      "diffPath": "diff/solar-warranty.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sub-billing.png",
+      "candLabel": "capture:sub.billing",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 65240,
+      "maskedDiffPixels": 561,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 445,
+          "y": 209,
+          "width": 124,
+          "height": 175,
+          "reason": "B-160 (class B-120(ข)) — sub.billing invoice-date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 3-row date column (measured cells x447-567 y211-382), no neighbouring cell"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 65240 px (561 differing) per B-120, B-120, B-160",
+      "screen": "sub-billing",
+      "kind": "capture",
+      "diffPath": "diff/sub-billing.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sub-mine.png",
+      "candLabel": "capture:sub.mine",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 2,
+      "totalPixels": 1600000,
+      "diffRatio": 0.00000125,
+      "maskedPixels": 22641,
+      "maskedDiffPixels": 191,
+      "maskRegions": [
+        {
+          "x": 293,
+          "y": 511,
+          "width": 498,
+          "height": 42,
+          "reason": "B-186 first-time G5 app-baseline (sub.mine) — the daysLeft warn strip is a live wall-clock element (daysLeft(renewAt, new Date()) decrements daily); masking this class is pre-authorised by B-120(ข) live-time-widget ruling + B-160 body relative-time follow-up. Covers only the measured strip bbox (x295 y513 w494 h37), not neighbouring content"
+        },
+        {
+          "x": 721,
+          "y": 399,
+          "width": 75,
+          "height": 23,
+          "reason": "B-160 (class B-120(ข)) — sub.mine contract-start value (formatDate(me.startedAt), sub-mine.tsx:161) renders the seed-time start date '2026-07-29' (= seed day); latent daily drift (passes today only by margin). Covers ONLY the startedAt value cell (measured x723-788 y401-420), not its label nor the fixed renewAt row below"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 22641 px (191 differing) per B-186, B-160",
+      "screen": "sub-mine",
+      "kind": "capture",
+      "diffPath": "diff/sub-mine.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/sub-plans.png",
+      "candLabel": "capture:sub.plans",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "sub-plans",
+      "kind": "capture",
+      "diffPath": "diff/sub-plans.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/subcon-accept.png",
+      "candLabel": "capture:subcon.accept",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "subcon-accept",
+      "kind": "capture",
+      "diffPath": "diff/subcon-accept.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/subcon-contracts.png",
+      "candLabel": "capture:subcon.contracts",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "subcon-contracts",
+      "kind": "capture",
+      "diffPath": "diff/subcon-contracts.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/subcon-handover.png",
+      "candLabel": "capture:subcon.handover",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "subcon-handover",
+      "kind": "capture",
+      "diffPath": "diff/subcon-handover.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/subcon-progress.png",
+      "candLabel": "capture:subcon.progress",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "subcon-progress",
+      "kind": "capture",
+      "diffPath": "diff/subcon-progress.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/tax-etax.png",
+      "candLabel": "capture:tax.etax",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 81704,
+      "maskedDiffPixels": 1094,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        },
+        {
+          "x": 1221,
+          "y": 356,
+          "width": 94,
+          "height": 406,
+          "reason": "B-160 (class B-120(ข)) — tax.etax date column renders created_at as 'YYYY-MM-DD' (= seed day); drifts vs an older baseline. Covers only the 6-row date column (measured cells x1223-1313 y358-760), no neighbouring cell"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 81704 px (1094 differing) per B-120, B-120, B-160",
+      "screen": "tax-etax",
+      "kind": "capture",
+      "diffPath": "diff/tax-etax.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/tax-vat.png",
+      "candLabel": "capture:tax.vat",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "tax-vat",
+      "kind": "capture",
+      "diffPath": "diff/tax-vat.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/tax-wht.png",
+      "candLabel": "capture:tax.wht",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "tax-wht",
+      "kind": "capture",
+      "diffPath": "diff/tax-wht.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/users.png",
+      "candLabel": "capture:users",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "users",
+      "kind": "capture",
+      "diffPath": "diff/users.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/wo-form.png",
+      "candLabel": "capture:wo.form",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 43540,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 560,
+          "y": 92,
+          "width": 240,
+          "height": 60,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — live '(อัปเดต HH:MM น.)' last-updated clock in the page header ticks between baseline and gate captures"
+        },
+        {
+          "x": 1120,
+          "y": 92,
+          "width": 470,
+          "height": 62,
+          "reason": "B-120(ข) Wei-approved 2026-07-20 — TODAY date chip ('20 ก.ค. 69') + period-tab strip edge: date text changes daily; strip border AA jitters sub-pixel between captures"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 43540 px (0 differing) per B-120, B-120",
+      "screen": "wo-form",
+      "kind": "capture",
+      "diffPath": "diff/wo-form.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/app-baseline/wo-list.png",
+      "candLabel": "capture:wo.list",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "wo-list",
+      "kind": "capture",
+      "diffPath": "diff/wo-list.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:content-inside",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 1280064,
+      "maskedDiffPixels": 14400,
+      "maskRegions": [
+        {
+          "x": 244,
+          "y": 56,
+          "width": 1356,
+          "height": 944,
+          "reason": "B-048(ก) Wei-approved 2026-07-13 (P0-QA-08) — shell-only G5: content region (x>=244, y>=56) excluded so a shell-bearing route compares ONLY chrome (sidebar+topbar) until its body screen is ported (dashboard → P1-WEB-07); drop this key once full-page G5 returns"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 1280064 px (14400 differing) per B-048",
+      "screen": "self-check/content-inside",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_content-inside.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:content-sidebar",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 3600,
+      "totalPixels": 1600000,
+      "diffRatio": 0.00225,
+      "maskedPixels": 1280064,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 244,
+          "y": 56,
+          "width": 1356,
+          "height": 944,
+          "reason": "B-048(ก) Wei-approved 2026-07-13 (P0-QA-08) — shell-only G5: content region (x>=244, y>=56) excluded so a shell-bearing route compares ONLY chrome (sidebar+topbar) until its body screen is ported (dashboard → P1-WEB-07); drop this key once full-page G5 returns"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.002250 > maxDiffPixelRatio 0.0001 · masked 1280064 px (0 differing) per B-048",
+      "screen": "self-check/content-sidebar",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_content-sidebar.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:content-size",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1640,
+        "h": 1040
+      },
+      "dimensionMismatch": true,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 1280064,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 244,
+          "y": 56,
+          "width": 1356,
+          "height": 944,
+          "reason": "B-048(ก) Wei-approved 2026-07-13 (P0-QA-08) — shell-only G5: content region (x>=244, y>=56) excluded so a shell-bearing route compares ONLY chrome (sidebar+topbar) until its body screen is ported (dashboard → P1-WEB-07); drop this key once full-page G5 returns"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "dimension mismatch ref=1600x1000 cand=1640x1040 (layout change → auto-FAIL per PLAN.md §0) · masked 1280064 px (0 differing) per B-048",
+      "screen": "self-check/content-size-larger",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_content-size-larger.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:content-topbar",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 3600,
+      "totalPixels": 1600000,
+      "diffRatio": 0.00225,
+      "maskedPixels": 1280064,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 244,
+          "y": 56,
+          "width": 1356,
+          "height": 944,
+          "reason": "B-048(ก) Wei-approved 2026-07-13 (P0-QA-08) — shell-only G5: content region (x>=244, y>=56) excluded so a shell-bearing route compares ONLY chrome (sidebar+topbar) until its body screen is ported (dashboard → P1-WEB-07); drop this key once full-page G5 returns"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.002250 > maxDiffPixelRatio 0.0001 · masked 1280064 px (0 differing) per B-048",
+      "screen": "self-check/content-topbar",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_content-topbar.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:identical",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "PASS",
+      "note": "within tolerance",
+      "screen": "self-check/identical",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_identical.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:mask-in+out",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 2500,
+      "totalPixels": 1600000,
+      "diffRatio": 0.0015625,
+      "maskedPixels": 12544,
+      "maskedDiffPixels": 3600,
+      "maskRegions": [
+        {
+          "x": 8,
+          "y": 6,
+          "width": 224,
+          "height": 56,
+          "reason": "B-044(ก) Wei-approved 2026-07-13 — sidebar logo lockup: references show older 'juneflow / Construction ERP'; port renders brand mark + t(\"app.name\") (th: ระบบงานก่อสร้าง)"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.001563 > maxDiffPixelRatio 0.0001 · masked 12544 px (3600 differing) per B-044",
+      "screen": "self-check/mask-in-out",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_mask-in-out.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:mask-inside",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 12544,
+      "maskedDiffPixels": 3600,
+      "maskRegions": [
+        {
+          "x": 8,
+          "y": 6,
+          "width": 224,
+          "height": 56,
+          "reason": "B-044(ก) Wei-approved 2026-07-13 — sidebar logo lockup: references show older 'juneflow / Construction ERP'; port renders brand mark + t(\"app.name\") (th: ระบบงานก่อสร้าง)"
+        }
+      ],
+      "verdict": "PASS",
+      "note": "within tolerance · masked 12544 px (3600 differing) per B-044",
+      "screen": "self-check/mask-inside",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_mask-inside.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:mask-size",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1640,
+        "h": 1040
+      },
+      "dimensionMismatch": true,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 12544,
+      "maskedDiffPixels": 0,
+      "maskRegions": [
+        {
+          "x": 8,
+          "y": 6,
+          "width": 224,
+          "height": 56,
+          "reason": "B-044(ก) Wei-approved 2026-07-13 — sidebar logo lockup: references show older 'juneflow / Construction ERP'; port renders brand mark + t(\"app.name\") (th: ระบบงานก่อสร้าง)"
+        }
+      ],
+      "verdict": "FAIL",
+      "note": "dimension mismatch ref=1600x1000 cand=1640x1040 (layout change → auto-FAIL per PLAN.md §0) · masked 12544 px (0 differing) per B-044",
+      "screen": "self-check/mask-size-larger",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_mask-size-larger.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:perturbed",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "dimensionMismatch": false,
+      "diffPixels": 2500,
+      "totalPixels": 1600000,
+      "diffRatio": 0.0015625,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "FAIL",
+      "note": "diffRatio 0.001563 > maxDiffPixelRatio 0.0001",
+      "screen": "self-check/perturbed",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_perturbed.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:size-larger",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 1640,
+        "h": 1040
+      },
+      "dimensionMismatch": true,
+      "diffPixels": 0,
+      "totalPixels": 1600000,
+      "diffRatio": 0,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "FAIL",
+      "note": "dimension mismatch ref=1600x1000 cand=1640x1040 (layout change → auto-FAIL per PLAN.md §0)",
+      "screen": "self-check/size-larger",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_size-larger.png"
+    },
+    {
+      "refPath": "/Users/innovera/juneflow-wt/w22-seeddet/tests/visual/reference/gallery/g1/01-s.jpg",
+      "candLabel": "self:size-mismatch",
+      "refDims": {
+        "w": 1600,
+        "h": 1000
+      },
+      "candDims": {
+        "w": 8,
+        "h": 8
+      },
+      "dimensionMismatch": true,
+      "diffPixels": 1600000,
+      "totalPixels": 1600000,
+      "diffRatio": 1,
+      "maskedPixels": 0,
+      "maskedDiffPixels": 0,
+      "maskRegions": [],
+      "verdict": "FAIL",
+      "note": "dimension mismatch ref=1600x1000 cand=8x8 (layout change → auto-FAIL per PLAN.md §0)",
+      "screen": "self-check/size-mismatch",
+      "kind": "self-check",
+      "diffPath": "diff/self-check_size-mismatch.png"
+    }
+  ]
+}

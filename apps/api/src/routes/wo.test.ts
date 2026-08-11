@@ -235,6 +235,44 @@ describe("GET /api/v1/wo — auth + list + retention", () => {
     expect(res.json()).toEqual({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
   });
 
+  // B-323: /wo is a selectThrough (INNER JOIN, no ORDER BY). Proven live — with the
+  // sort removed, forcing a merge join reordered this list on the seeded stack.
+  it("emits a TOTAL order — the same list whatever order the join plan returns", async () => {
+    const at = (iso: string): Date => new Date(iso);
+    const rows = [
+      { ...wo("w1", "WO-2026-0101", "approved", 1), createdAt: at("2026-07-20T09:00:00Z") },
+      { ...wo("w2", "WO-2026-0102", "approved", 1), createdAt: at("2026-07-20T08:59:59Z") },
+      { ...wo("w3", "WO-2026-0103", "approved", 1), createdAt: at("2026-07-20T08:59:58Z") },
+      { ...wo("w4", "WO-2026-0104", "approved", 1), createdAt: at("2026-07-20T08:59:57Z") },
+    ];
+    const listIds = async (r: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[wos, r]] }) })
+      ).inject({ url: "/api/v1/wo" });
+      return res.json().data.map((x: { id: string }) => x.id);
+    };
+    const expected = ["w1", "w2", "w3", "w4"];
+    expect(await listIds(rows)).toEqual(expected);
+    expect(await listIds([rows[3]!, rows[1]!, rows[0]!, rows[2]!])).toEqual(expected);
+    expect(await listIds([...rows].reverse())).toEqual(expected);
+  });
+
+  it("breaks a same-instant tie on id, so two WOs raised in one second still order", async () => {
+    const same = new Date("2026-07-20T09:00:00Z");
+    const rows = [
+      { ...wo("zz", "WO-Z", "approved", 1), createdAt: same },
+      { ...wo("aa", "WO-A", "approved", 1), createdAt: same },
+    ];
+    const listIds = async (r: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[wos, r]] }) })
+      ).inject({ url: "/api/v1/wo" });
+      return res.json().data.map((x: { id: string }) => x.id);
+    };
+    expect(await listIds(rows)).toEqual(["aa", "zz"]);
+    expect(await listIds([...rows].reverse())).toEqual(["aa", "zz"]);
+  });
+
   it("returns the envelope with retention_amount + scope/progress/installments (F3)", async () => {
     // Contract c0 plan: งวด1 645k passed + งวด2 645k pending + งวด3 860k pending →
     // done 645k / total 2,150k → progress round(30%) = 30.

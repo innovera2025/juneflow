@@ -154,6 +154,51 @@ describe("GET /api/v1/notifications", () => {
     expect(Object.keys(n0).sort()).toEqual(["created_at", "id", "read", "ref", "type"]);
   });
 
+  it("orders NEWEST-FIRST regardless of the order the read returned (B-367)", async () => {
+    // The seed used to be the only writer — one INSERT, so the heap order WAS the
+    // seed array order and this endpoint's total lack of ordering was invisible.
+    // With apps/api emitting real rows the read can return them in any order, and
+    // the web groups into day sections PRESERVING input order. Feed the stub a
+    // scrambled read and require the response to come back sorted.
+    const old = { ...notif("n-old", "info", true), createdAt: new Date(1_600_000_000_000) };
+    const mid = { ...notif("n-mid", "info", true), createdAt: new Date(1_650_000_000_000) };
+    const fresh = {
+      ...notif("n-fresh", "approval", false),
+      createdAt: new Date(1_700_000_000_000),
+    };
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [userRow]],
+            [notifications, [mid, fresh, old]], // deliberately NOT sorted
+          ],
+        }),
+      })
+    ).inject({ url: "/api/v1/notifications" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.map((n: { id: string }) => n.id)).toEqual([
+      "n-fresh",
+      "n-mid",
+      "n-old",
+    ]);
+  });
+
+  it("breaks a created_at TIE by id, so two runs can never disagree (B-367)", async () => {
+    // The real tie case: rows written by ONE statement share its now(). Without a
+    // total order that pair falls straight back to whatever the read produced.
+    const b = { ...notif("n-b", "info", false), createdAt: D };
+    const a = { ...notif("n-a", "info", false), createdAt: D };
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[users, [userRow]], [notifications, [b, a]]] }),
+      })
+    ).inject({ url: "/api/v1/notifications" });
+    expect(res.json().data.map((n: { id: string }) => n.id)).toEqual(["n-a", "n-b"]);
+  });
+
   it("scopes the read by BOTH company_id (tenant) and the session user_id", async () => {
     const captured: Captured[] = [];
     await (

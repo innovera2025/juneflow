@@ -514,6 +514,36 @@ describe("GET /api/v1/dashboard/phase-progress", () => {
     expect(b.data[1]).toMatchObject({ name: "เฟส 3", units: 0, sold: 0, built: 0 });
   });
 
+  // B-323: the HARD case. These rows are DERIVED — {name, units, sold, built, …} —
+  // they carry no id and no created_at, so no amount of post-hoc sorting can order
+  // them; the order has to be imposed on the project_node read they are built from,
+  // and it has to be imposed ONCE, before both the parent->children index and the
+  // phase list are derived. Proven live: with the sort removed, forcing a merge join
+  // reordered all 16 phases on the seeded stack.
+  //
+  // project_node is an ASCENDING_STAGGER table (a phase ladder reads top-down), so the
+  // expected order is created_at ASC — asserting DESC here would pass a broken fix.
+  it("emits phases in a fixed order however the join plan returns project_node", async () => {
+    const at = (iso: string): Date => new Date(iso);
+    const nodes = [
+      { id: "ph1", kind: "phase", name: "เฟส 1", parentId: null, projectId: "p", createdAt: at("2026-07-20T08:59:57Z") },
+      { id: "ph2", kind: "phase", name: "เฟส 2", parentId: null, projectId: "p", createdAt: at("2026-07-20T08:59:58Z") },
+      { id: "ph3", kind: "phase", name: "เฟส 3", parentId: null, projectId: "p", createdAt: at("2026-07-20T08:59:59Z") },
+      { id: "ph4", kind: "phase", name: "เฟส 4", parentId: null, projectId: "p", createdAt: at("2026-07-20T09:00:00Z") },
+    ];
+    const names = async (order: number[]): Promise<string[]> => {
+      const res = await get(
+        "/api/v1/dashboard/phase-progress",
+        stubJoinDb([[projectNodes, order.map((i) => nodes[i]!)], [salesUnits, []]]),
+      );
+      return res.json().data.map((r: { name: string }) => r.name);
+    };
+    const expected = ["เฟส 1", "เฟส 2", "เฟส 3", "เฟส 4"];
+    expect(await names([0, 1, 2, 3])).toEqual(expected);
+    expect(await names([2, 0, 3, 1])).toEqual(expected);
+    expect(await names([3, 2, 1, 0])).toEqual(expected);
+  });
+
   it("scopes project_node through a join + tenant scope on every read", async () => {
     const captured: Captured[] = [];
     await get("/api/v1/dashboard/phase-progress", db(captured));

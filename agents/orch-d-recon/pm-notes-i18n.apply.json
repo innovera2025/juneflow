@@ -1,0 +1,38 @@
+{
+  "override": "wei-approved:B-280",
+  "_note": "mobile pm-notes NEW phrase-layer string (phrase-as-key, referenced via tp() + the assets/i18n/screens/pm_notes_strings.json sidecar). Thai verbatim from pototype/mobile-pm.jsx MPMNotes L148-179 — the value was GREPPED out of the raw .jsx and asserted byte-exact by test/screens/pm_notes/pm_notes_sidecar_test.dart (no curly quotes, no middot, no U+00B7 in this set). Every prototype line number IN THIS FILE was re-grepped and CORRECTED in review round 2 and re-verified against the raw .jsx in round 3; the first pass cited them ~3 lines short, which would have made the byte-verification procedure below fail on its own coordinates. That round-2 sweep was NOT exhaustive across the slice, and the claim here is scoped to this file's own citations: review round 3 found one survivor outside it — apps/mobile/lib/screens/pm_notes/pm_notes_agg.dart cited the third static value div as L159 instead of L162, on a wrapped comment continuation line the round-2 edit did not reach — now corrected. The mint SHRANK from 2 phrases to 1 in that round: 'ไปสรุป + ปิดงาน' (L175) is no longer minted because the screen no longer renders it — see _not_minted_deliberately.ctaLabel. The screen ALREADY renders honest Thai without this file (tp() returns the key itself for lang=th — the merged pm_jobs / st_grlist / notif / approve / pm_checklist precedent, B-254..B-258, B-273); this handoff lets the sacred round mint the entry into i18n-full.json.phrases so en/zh/ar light up. docs/extract/i18n-full.json is UNTOUCHED by feature/mobile-pm-notes. en/zh/ar are intentionally NOT fabricated here (Juneflow: never translate anew) — the translator fills them, per the en=zh=ar=th fallback convention of B-247/B-248.",
+  "_verify": "grep -n 'อะไหล่ที่ใช้' pototype/mobile-pm.jsx  ->  L164:  <MField label=\"อะไหล่ที่ใช้\">",
+  "layer": "phrases",
+  "_zero_mint_reused": {
+    "_comment": "NOT minted — already resolvable, so the sidecar points at these instead. This screen is a near-total zero-mint because the MERGED WEB PM screen renders the same maintenance log, so the prototype's exact words already live in the dict. Listed so a reviewer can see the mint was minimised rather than skipped; each th was re-read from docs/extract/i18n-full.json this round and asserted byte-exact against the .jsx line by the sidecar test.",
+    "title": "dict pm.maintLogTitle — th 'บันทึกการบำรุงรักษา' is byte-identical to the prototype header (L151)",
+    "fieldCause": "dict pm.fieldCause — th 'สาเหตุการเสีย / ความผิดปกติ' byte-identical to L155",
+    "fieldFix": "dict pm.fieldFix — th 'การแก้ไข / งานที่ทำ' byte-identical to L158",
+    "fieldAdvice": "dict pm.fieldAdvice — th 'ข้อเสนอแนะ / งานที่ควรทำเพิ่ม' byte-identical to L161",
+    "phCause": "dict pm.phCause 'อธิบายอาการ/สาเหตุที่พบ' — the web PM screen's own placeholder for the same column. The prototype's static divs carry no placeholder (they hold mock sentences), so this is the honest empty-field prompt",
+    "phFix": "dict pm.phFix 'อธิบายการแก้ไขและอะไหล่ที่เปลี่ยน' — same rationale",
+    "phAdvice": "dict pm.phAdvice 'เช่น แนะนำเปลี่ยนสลิงในรอบหน้า' — same rationale",
+    "saved": "dict labor.att.savedBadge 'บันทึกแล้ว' (pm_checkin / pm_checklist precedent)",
+    "queued": "dict tax.etax.statusPending 'รอส่ง' (pm_checkin / pm_checklist precedent)",
+    "failed": "dict admin.common.actionFailedToast (pm_checkin / pm_checklist precedent)",
+    "save": "dict common.save 'บันทึก' (en 'Save', zh, ar all present) — the primary button, which saves the three columns and STAYS on the screen. Copy the mock prototype never had: its button performs no save at all",
+    "next": "dict pm.btnNext 'ถัดไป' — the onward affordance after a confirmed save, honest-DISABLED (pm-close is unbuilt)"
+  },
+  "_rejected_near_misses": {
+    "_comment": "Existing dict keys that are semantically adjacent but NOT this screen's copy. Recorded so Wei can alias/consolidate instead of minting, if preferred.",
+    "pm.closeWithSignBtn": "'ปิดงาน + ลายเซ็น' — claims a signature step and a close this screen does not perform",
+    "pm.closeWoBtn": "'ปิดงาน' — a bare close claim; this screen never closes a job",
+    "pm.closeModalTitle": "'ปิดงาน + ลายเซ็นลูกค้า' — the web close modal's title",
+    "pm.phFix": "'อธิบายการแก้ไขและอะไหล่ที่เปลี่ยน' contains the word อะไหล่ but is a PLACEHOLDER for the fix field, not the parts LABEL (L164) — reused for its own slot, not for fieldParts"
+  },
+  "_not_minted_deliberately": {
+    "banner": "The prototype's amber banner (L171, 'มีการเปลี่ยนอะไหล่ — ระบบจะสร้างใบเสนอราคาส่งลูกค้าผ่าน LINE OA อัตโนมัติ') is DROPPED, not keyed. It promises an automation that does not exist: nothing auto-raises a pmQuote (POST /pm/quotes is a manual route, apps/api/src/routes/pm.ts L830) and LINE is a verified no-op stub (lineNotifyStub L218-220, B-108b). A missing VALUE can be em-dashed; a false PROMISE cannot. Minting a key for it would leave the screen one edit away from making the claim again — so the sidecar test asserts that no sidecar slot RESOLVES to text containing 'LINE OA' or 'ใบเสนอราคา'. See BLOCKERS.md B-281.",
+    "ctaLabel": "The prototype's CTA label (L175, 'ไปสรุป + ปิดงาน') is DROPPED for the same reason, and was REMOVED from this mint in review round 2 (it was staged in round 1). In the prototype that button is a pure NAVIGATION — onClick={() => setScreen('pm-close')} — and performs no save. pm-close is not built here, and this port's button performs the SAVE the prototype never had and stays on the screen, so the label would promise BOTH a destination the app does not have AND an action the button does not perform. The sidecar test forbids any slot resolving to text containing 'ปิดงาน' or 'ไปสรุป', including via an existing dict id. What ships instead: common.save before a durable save, pm.btnNext (honest-DISABLED) after one. This is NOT the only deviation from tests/visual/reference/mobile/pm-notes.png in the slice — that image also renders the amber banner as a full orange-bordered section (dropped here, see .banner), the parts row as 'Safety Edge Sensor MX-SE12' / '1 ชุด · 3,200 ฿' (em-dashed here, see .partsValue), and the three note boxes as the static mock sentences (editable inputs over the real cause/fix/advice columns here). BLOCKERS.md B-285 enumerates that whole set and files THIS label for a ruling — if Wei rules fidelity wins there, restore this entry to the mint, noting that restoring the label alone still does not make the screen match the reference image.",
+    "partsValue": "'Safety Edge Sensor MX-SE12' / '1 ชุด · 3,200 ฿' (L166) are mock DATA, not keys — and money. pm_workorder has no parts column (parts live on pmQuotes.parts), so the kept label renders over an em-dash.",
+    "woNumber": "'PMWO-2569-0312' (L151 eyebrow) is mock data, not a key. pm_workorder stores no document number and workOrderWire exposes none, so the eyebrow em-dashes (the pm_jobs agg omits the same field for the same reason)."
+  },
+  "dict": {
+    "fieldParts": "อะไหล่ที่ใช้"
+  },
+  "_net_new": "The single value above is absent from the 1065 phrases on dev AND from every dict.*.th entry (verified programmatically against docs/extract/i18n-full.json at branch point 2dfb8c4, re-verified in review round 2). Nothing else on this screen needs minting — 12 of the 13 sidecar slots resolve today."
+}

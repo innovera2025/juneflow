@@ -1,0 +1,47 @@
+{
+  "override": "wei-approved:B-287",
+  "_note": "mobile pm-close NEW phrase-layer strings (phrase-as-key, referenced via tp() + the assets/i18n/screens/pm_close_strings.json sidecar). Thai verbatim from pototype/mobile-pm.jsx MPMClose L181-217 — every value was GREPPED out of the raw .jsx this round and is asserted byte-exact by test/screens/pm_close/pm_close_sidecar_test.dart. Line citations were re-verified against the raw file (the pm-notes slice shipped citations ~3 lines short in its first pass, so each coordinate below was re-grepped rather than carried over): L197 = the MobileHeader title, L200 = the MSection title, L201 = the 5-row summary array (one source line holding all five label/value pairs), L209 = the caption under the signature pad. GLYPH DISCIPLINE: 'เริ่ม-เสร็จ' uses an ASCII HYPHEN U+002D (not U+2013) — the en-dash DOES appear on L201, but only inside the mock VALUE '09:14 – 10:48 น.', which is data and is never keyed. The composed check-results value joins its two units with an ASCII middot U+00B7 exactly as the prototype does; the middot lives in the screen's Dart (punctuation, not a Thai literal — the pr_detail_agg.projectLine precedent), not in any key. No curly quotes and no ฿ appear in this set. The screen ALREADY renders honest Thai without this file (tp() returns the key itself for lang=th — the merged pm_jobs / st_grlist / notif / approve / pm_checklist / pm_notes precedent, B-254..B-258, B-273, B-280); this handoff lets the sacred round mint the entries into i18n-full.json.phrases so en/zh/ar light up. docs/extract/i18n-full.json is UNTOUCHED by feature/mobile-pm-close. en/zh/ar are intentionally NOT fabricated here (Juneflow: never translate anew) — the translator fills them, per the en=zh=ar=th fallback convention of B-247/B-248.",
+  "_verify": [
+    "grep -n 'สรุป + ปิดงาน' pototype/mobile-pm.jsx  ->  L197:  <MobileHeader sub=\"PMWO-2569-0312\" title=\"สรุป + ปิดงาน\"",
+    "grep -n 'สรุปงาน' pototype/mobile-pm.jsx        ->  L200:  <MSection title=\"สรุปงาน\">",
+    "grep -n 'ผลตรวจ' pototype/mobile-pm.jsx         ->  L201:  [\"ผลตรวจ\", \"5/5 รายการ · ซ่อม 1\"]",
+    "grep -n 'เริ่ม-เสร็จ' pototype/mobile-pm.jsx     ->  L201:  [\"เริ่ม-เสร็จ\", \"09:14 – 10:48 น.\"]",
+    "grep -n 'ผู้รับบริการ' pototype/mobile-pm.jsx    ->  L209:  ผู้รับบริการ: คุณวีรชัย (นิติบุคคล อาคาร A)"
+  ],
+  "layer": "phrases",
+  "_zero_mint_reused": {
+    "_comment": "NOT minted — already resolvable, so the sidecar points at these instead. 5 of the 12 slots reuse existing keys because the MERGED WEB PM screens (apps/web/src/screens/pm/wo-detail.tsx) render this same close panel, so the prototype's exact words already live in the dict. Listed so a reviewer can see the mint was minimised rather than skipped; each th was re-read from docs/extract/i18n-full.json this round and asserted byte-exact against the .jsx line by the sidecar test.",
+    "rowAsset": "dict pm.fieldAsset — th 'อุปกรณ์' is byte-identical to the prototype's row-1 label (L201)",
+    "rowTotalTime": "dict pm.timeTotal — th 'รวมเวลา' byte-identical to the prototype's row-4 label (L201)",
+    "signatureTitle": "dict pm.signatureLabel — th 'ลายเซ็นลูกค้า / ผู้ดูแลอาคาร' byte-identical to the signature card title (L205)",
+    "checkProgress": "dict pm.checkProgress '{n}/{count} รายการ' — the web PM screen's own count sentence, whose rendered shape is exactly the prototype's '5/5 รายการ' (L201). Fed through tf() with n=checked, count=total. The sidecar test pins that BOTH placeholders survive, so a future edit to the dict entry cannot silently ship a literal '{count}'",
+    "rowParts": "phrases 'อะไหล่' — already present in the phrases layer on dev (L201). The parts VALUE is not keyed: pm_workorder has no parts column (parts live on pmQuotes.parts via POST /pm/quotes and carry money), so the kept label renders over an em-dash",
+    "close": "dict pm.closeWithSignBtn 'ปิดงาน + ลายเซ็น' — the web close modal's own button key. It replaces the prototype's CTA label (see _not_minted_deliberately.ctaLabel) and sits on a PERMANENTLY DISABLED control (B-288). It names a capability, not an outcome: it does not say a job IS closed"
+  },
+  "_rejected_near_misses": {
+    "_comment": "Existing dict keys that are semantically adjacent but NOT this screen's copy. Recorded so Wei can alias/consolidate instead of minting, if preferred. Each was found by an exact-value scan over all 3701 dict entries + 1065 phrases; none is byte-equal to the prototype string it would replace.",
+    "pm.rowCustomer": "'ลูกค้า / นิติบุคคล' — the web PM contract panel's customer row. Semantically the same slot as the prototype's 'ผู้รับบริการ' caption (L209) but NOT the same words; per the B-061 ruling a near-miss label becomes a new verbatim key rather than a substitution",
+    "pm.timeSummaryTitle": "'สรุปเวลาทำงาน' — the web time panel's title. The prototype's card is 'สรุปงาน' (job summary, L200), which is wider than time alone",
+    "pm.timeStart / pm.timeEnd": "'เริ่มงาน' / 'เสร็จงาน' — two SEPARATE web rows. The prototype fuses them into one 'เริ่ม-เสร็จ' row (L201), so neither key is that label. Both values are em-dashed here anyway (no clock column exists)",
+    "pm.readyToClose": "'ตรวจครบ {count} รายการ · พร้อมปิดงาน' — asserts the checklist is COMPLETE and the job is ready to close. Deliberately unused: it turns an aggregate (checked==total) into a readiness claim, and closing is blocked regardless (B-288)",
+    "pm.closedNote": "'ปิดงานแล้ว · ลูกค้าลงนามรับงาน' — states the job IS closed. There is no status column; see _not_minted_deliberately.successHeading",
+    "pm.signHere": "'ลงนาม ✓' — an imperative on a pad that cannot capture anything (B-288); see _not_minted_deliberately.padHint",
+    "pm.resultRepair": "'เปลี่ยน/ซ่อม (Change-Repair)' — the checklist screen's RESULT-BUTTON label, not the summary's compact 'ซ่อม {n}' tail (L201)"
+  },
+  "_not_minted_deliberately": {
+    "_comment": "Four prototype strings are DROPPED rather than keyed. Each is a CLAIM about state, and a claim cannot be em-dashed the way a missing value can — the pm-notes banner precedent (B-280/B-285). Minting keys for them would leave the screen one edit from making the claim again, so pm_close_sidecar_test.dart asserts that NO sidecar slot RESOLVES to text containing any of them (asserted on the resolved string, not the raw slot, so pointing a slot at an existing dict id such as pm.toastClosed cannot smuggle one back in).",
+    "successHeading": "L189 'ปิดงาน PM สำเร็จ' — announces a completion status. pm_workorder has NO status column and NO certificate column, and the close handler's own comment says close never invents one (apps/api/src/routes/pm.ts L753-760). NB there IS a DERIVED 'done' — apps/web/src/screens/pm/wo-rows.ts deriveStatus L206 reads customerSign != '' — but this screen cannot write customer_sign (B-288), so it can never be the thing that makes a job done, and it must not announce that it was.",
+    "successSubtitle": "L190 'ส่งใบรับรองผล PM ให้ลูกค้าผ่าน LINE แล้ว' — states a PM certificate was pushed to the customer over LINE. No certificate exists anywhere in the schema, and lineNotifyStub is a verified no-op (pm.ts L218-220, B-108b). The whole success view (L185-194) is dropped with it, including its 'กลับรายการงาน' back button (L191), and is unreachable anyway: it is entered by a close this screen cannot perform.",
+    "ctaLabel": "L213 'ปิดงาน PM + ส่งรายงาน' — the 'ส่งรายงาน' half is the same LINE promise as the subtitle. Replaced by the existing dict key pm.closeWithSignBtn on a permanently DISABLED control. This IS a visible deviation from tests/visual/reference/mobile/pm-close.png, and it is not the only one — that image also renders the success-view path, a cursive signature inside the pad, and mock values in the start-end / total-time / parts rows where this port prints em-dashes. B-288 enumerates the set and files it for a ruling.",
+    "padHint": "L207 'แตะเพื่อให้ลูกค้าลงนาม' ('tap to have the customer sign') — promises an interaction the pad does not have. Signature capture is unbuilt (B-288), so the pad renders the STORED customer_sign state and is inert; an instruction to tap it would be a false affordance. The signed state's cursive 'คุณวีรชัย ✓' (L207) and the caption's 'คุณวีรชัย (นิติบุคคล อาคาร A)' (L209) are mock DATA, not keys — the customer name is three hops away and stops at a uuid (contractWire exposes only customer_id, pm.ts L276-288), so the caption's label is kept and its value em-dashed."
+  },
+  "dict": {
+    "title": "สรุป + ปิดงาน",
+    "summaryTitle": "สรุปงาน",
+    "rowChecks": "ผลตรวจ",
+    "rowTime": "เริ่ม-เสร็จ",
+    "repairCount": "ซ่อม {n}",
+    "recipient": "ผู้รับบริการ"
+  },
+  "_net_new": "All 6 values above are absent from the 1065 phrases on dev AND from every dict.*.th entry (verified programmatically against docs/extract/i18n-full.json at branch point 5ff55d2, including a substring near-miss scan whose only hits are recorded in _rejected_near_misses). 'ซ่อม {n}' is the PARAMETERISED form of the prototype's literal 'ซ่อม 1' (L201) — the same treatment pm_checklist gave 'ตรวจแล้ว {n}/{count}' (B-273), which is likewise still unminted on dev. The other 6 of the screen's 12 slots resolve today (see _zero_mint_reused)."
+}

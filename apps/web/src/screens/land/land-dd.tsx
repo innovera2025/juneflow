@@ -9,13 +9,30 @@
  *
  * HONEST reads / no fabrication (§0 rule 3):
  *   - DD CHECKLIST (READ): the 7 item labels are static UI structure (land.dd.check* keys).
- *     Their pass/issue/wait STATUS has NO wire (no DD-status endpoint is merged), so every
- *     row renders a NEUTRAL em-dash status — never a fabricated pass/issue — and the
- *     click-to-cycle control is honest-DISABLED (it is a mock local write, §0 rule 3). With
- *     no confirmed status, 0 of 7 checks are "passed" and the progress bar sits at 0.
+ *     Every row renders a NEUTRAL em-dash status — never a fabricated pass/issue — and the
+ *     click-to-cycle control is honest-DISABLED, so 0 of 7 checks are "passed" and the
+ *     progress bar sits at 0.
+ *     CORRECTED 2026-08-10 — the reason this comment used to give, "no DD-status endpoint
+ *     is merged", was FALSE on both halves: PUT /land/plots/{id}/dd is mounted
+ *     (land-sales.ts:520, registered :1080) and the READ side already carries dd_checklist
+ *     on plotWire (:318). The real blocker is a CONTRACT/HANDLER key mismatch that fails
+ *     SILENTLY (B-348): openapi.yaml:3647-3663 declares the body with exactly one property,
+ *     `checklist` (:3661), and the generated client types it as `checklist?` only — but the
+ *     handler reads pick(body, "dd", "dd_checklist", "ddChecklist") at land-sales.ts:533,
+ *     and `checklist` is not in that list.
+ *     A contract-shaped PUT therefore builds an empty patch, merges nothing, and answers
+ *     200: the UI would appear to save and silently revert on the next refetch. It was
+ *     never caught because the api test sends the HANDLER shape ({ dd: ... },
+ *     land-sales.test.ts:649), not the contract shape. Wiring this control before that is
+ *     fixed would ship a save button that lies — the exact defect class this file's own
+ *     comment belonged to. Second-order: the jsonb is unvalidated, so a typo mints a
+ *     phantom checklist entry server-side. Both fixes are api/contracts zone, not web.
  *   - DEAL TERMS: the buy tab's four price fields (total / 10% deposit / 2% transfer fee /
- *     3.3% SBT) are derived CLIENT-SIDE from a REAL plot (GET /land/plots, pickDealPlot ->
- *     dealTerms), replacing the prototype's hardcoded 'L-071' mock. The buy contract-type +
+ *     3.3% SBT) are ALL SERVER money, read off a REAL plot's wire (GET /land/plots,
+ *     pickDealPlot -> dealTerms), replacing the prototype's hardcoded 'L-071' mock. The
+ *     browser computes none of them: the total + deposit moved server-side in B-316/A2 and
+ *     the fee + SBT in B-319, whose statutory rates now live in @juneflow/tax-engine/
+ *     thailand (THAILAND_RATES) instead of in a screen file. The buy contract-type +
  *     transfer-appointment and the ENTIRE lease tab were hardcoded mock figures with no
  *     wire (land2.jsx L239/242/255-260), so those values render an em-dash. No plot in the
  *     register -> the deal is honest-empty (all em-dash).
@@ -269,8 +286,15 @@ export function LandDueDiligence() {
   const itemCount = DD_ITEM_KEYS.length;
   const passedPct = itemCount > 0 ? (passed / itemCount) * 100 : 0;
 
-  /** A price term as a `num` money string, or the honest em-dash when no plot is available. */
-  const money = (n: number | undefined): string => (n == null ? DASH : formatMoney(n));
+  /**
+   * A price term as a `num` money string, or the honest em-dash.
+   *
+   * B-316/A2 + B-319: null is a REAL state, not just "no plot" — all four buy terms come
+   * from the server (plotWire.total_value / deal_deposit / transfer_fee / sbt) and are
+   * null for a plot with no area/price. The em-dash is the correct render for that; there
+   * is no local fallback formula, and 0 would be a fabricated figure.
+   */
+  const money = (n: number | null | undefined): string => (n == null ? DASH : formatMoney(n));
 
   return (
     <Page

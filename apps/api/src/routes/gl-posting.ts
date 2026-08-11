@@ -25,8 +25,9 @@
 // prototype's other sources (FA depreciation, Allocate) have no per-document
 // table in the schema/seed and are therefore not enumerable — omitted rather
 // than fabricated.
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
+  grItems,
   grs,
   jvs,
   payrolls,
@@ -37,6 +38,8 @@ import {
   vendors,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+import { bySourceThenNewest } from "./list-order.js";
+import { round2 } from "./money.js";
 
 /**
  * jv.source_doc "<table>:<uuid>" polymorphic ref (finance.ts GLPosting model).
@@ -54,6 +57,85 @@ import type { TenantDb } from "../db/tenant-db.js";
 export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn|ret|dep|petty):([0-9a-fA-F-]{36})(:\d{4}-\d{2}|:\d+)?$/;
 
 /**
+ * The chain the posting inbox reaches a goods receipt through: gr → po → vendor.
+ * `gr` carries no company_id, and this is the ONE definition of its inbox scope —
+ * the enumeration, the per-line money read and the B-361 posting lock all use it,
+ * so the three can never drift on which receipts this tenant may post.
+ * (Carried limitation, unchanged: PO-anchored receipts only — see the enumeration.)
+ */
+const GR_INBOX_HOPS = [
+  { fk: grs.poId, parent: pos },
+  { fk: pos.vendorId, parent: vendors },
+];
+
+/**
+ * B-361 — the posting transaction found the receipt no longer postable: a
+ * concurrent return/cancel got the row first. Thrown from INSIDE the posting
+ * transaction so the whole post rolls back; the caller answers an honest per-doc
+ * skip — never a 500, and never a JV against returned goods.
+ */
+export class GrNoLongerPostableError extends Error {
+  constructor() {
+    super("the receipt left the received state before its JV committed");
+    this.name = "GrNoLongerPostableError";
+  }
+}
+
+/**
+ * B-361 — TAKE THE RECEIPT'S ROW LOCK, THEN RE-DECIDE. Called FIRST inside the
+ * posting transaction, before the JV insert.
+ *
+ * WHAT WAS BROKEN. B-368 froze a POSTED receipt against return/cancel with two
+ * plain SELECTs on `jv` (one before the flip, one inside the transaction), while
+ * the poster read `gr.status` with a plain SELECT of its own — in
+ * listGlPostingDocs, OUTSIDE any transaction, once per batch. Under READ COMMITTED
+ * none of those conflict, so both writers could commit. gr.ts filed it as a
+ * one-statement residual between "humans at operating pace"; measured with two OS
+ * PROCESSES on a 700 ms barrier and a fresh postable receipt each round, it was the
+ * DEFAULT outcome — 5 of 6 rounds committed the post AND the return, leaving a
+ * `returned` receipt with a live Dr 5020 / Cr 2010 standing against it.
+ *
+ * THAT IS NOT A STRAY RACE: this freeze is the ENTIRE mitigation for the
+ * deliberately-deferred reversing-JV ruling. While it leaks, that deferral is not
+ * safe.
+ *
+ * HOW THIS CLOSES IT WITHOUT A NEW LOCK DOOR. `gr` carries no company_id, so
+ * TenantDb.selectForUpdate (company_id-scoped by construction) cannot reach it —
+ * but a guarded UPDATE takes the SAME row-level exclusive lock, and now both
+ * writers take it on the same row:
+ *   · gr.ts return/cancel already flips `gr` with a guarded updateThroughChain,
+ *     which holds that row for the rest of its transaction;
+ *   · this issues the same UPDATE, re-asserting `status = 'received'` on the FINAL
+ *     update's WHERE (the B-149 rule — a guard on the resolve SELECT is a TOCTOU).
+ * Whoever takes the lock decides. Return first → this update re-matches
+ * `id = … AND status = 'received'` against the NEW row version, matches 0 rows, and
+ * the post is refused. Post first → the return's own in-transaction JV re-check
+ * sees the committed JV and rolls back → 409. Every interleaving ends with exactly
+ * one of the two, which is why the in-transaction re-check on the other side stays.
+ *
+ * THE WRITE IS THE LOCK, and `updated_at` is the only column it touches: honest
+ * (the post did touch this receipt) and it invents no state — posted-ness still
+ * derives ONLY from the jv.source_doc ref, so nothing else has to learn a column.
+ *
+ * THE HAZARD, written down because it is invisible at the call site: this is
+ * correct BECAUSE READ COMMITTED re-evaluates a blocked UPDATE's WHERE against the
+ * winner's committed row (EPQ). Under REPEATABLE READ the blocked writer aborts
+ * with a serialization failure instead — safe, but a 500 rather than a skip — so
+ * anyone raising the isolation level must revisit BOTH sides of this pair. The same
+ * warning tenant-db.ts carries over selectForUpdate, for the same reason.
+ */
+export async function lockPostableGr(tx: TenantDb, grId: string): Promise<void> {
+  const [held] = await tx.updateThroughChain(
+    grs,
+    GR_INBOX_HOPS,
+    { updatedAt: new Date() },
+    eq(grs.id, grId),
+    eq(grs.status, "received"),
+  );
+  if (!held) throw new GrNoLongerPostableError();
+}
+
+/**
  * Every source-doc kind the shared source_doc convention can reference. The
  * posting INBOX enumerates the FIVE that have a real backing table here
  * (pv/rv/gr/payroll/petty); fa/cn are valid refs written by their own
@@ -62,6 +144,18 @@ export const SOURCE_DOC_REF = /^(pv|rv|gr|payroll|fa|cn|ret|dep|petty):([0-9a-fA
  * the shared /gl/post path (Dr 5100 / Cr 1010, Wei C-177).
  */
 export type GlSourceKind = "pv" | "rv" | "gr" | "payroll" | "fa" | "cn" | "petty";
+
+/** The order listGlPostingDocs() appends its source blocks in — the shipped screen
+ *  order, pinned here so a determinism sort cannot silently regroup the inbox. */
+const GL_SOURCE_ORDER: readonly GlSourceKind[] = [
+  "pv",
+  "rv",
+  "gr",
+  "payroll",
+  "petty",
+  "fa",
+  "cn",
+];
 
 /**
  * One posting-inbox row: a source money doc + its resolved posting state. The
@@ -107,10 +201,18 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
     // chain counts.ts uses. NOTE (carried limitation): this covers PO-anchored
     // GRs only; WO-anchored GRs (grs.wo_id) are not enumerated here, exactly as
     // in the original badge query — kept identical so the two never diverge.
-    db.selectThrough(grs, [
-      { fk: grs.poId, parent: pos },
-      { fk: pos.vendorId, parent: vendors },
-    ]),
+    // B-368: `status = 'received'` ONLY. Before this round every gr row was
+    // enumerated regardless of status, which was invisible because every gr row
+    // carried `amount: null` and was therefore unpostable anyway. The moment a
+    // receipt has a money value that stops being harmless in BOTH directions: a
+    // RETURNED or CANCELLED receipt would become postable and book a cost plus an
+    // AP liability for goods that went back to the vendor. Filtering here also
+    // takes them off the gl.inbox badge, which is correct — a receipt that will
+    // never post is not "awaiting posting" — and countGlInbox derives from this
+    // same function by design, so the list and the badge move together.
+    // (The mirror case, POST-then-return, is closed in gr.ts: a posted receipt
+    // can no longer be returned or cancelled. See the notes there.)
+    db.selectThrough(grs, GR_INBOX_HOPS, eq(grs.status, "received")),
     // petty (B-233): only CLAIM rows enter the posting inbox (a claim-MVP —
     // clear/topup are out of scope). petty_cash_txn carries company_id → the
     // scoped select() door. Posted-ness derives from the jv source_doc
@@ -133,6 +235,77 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
     const key = `${source}:${id.toLowerCase()}`;
     if (!postedJvNo.has(key)) return { posted: false, jvNo: null };
     return { posted: true, jvNo: postedJvNo.get(key) ?? null };
+  };
+
+  // -------------------------------------------------------------------------
+  // B-368 — THE RECEIPT'S MONEY VALUE. One extra read, not N+1.
+  // -------------------------------------------------------------------------
+  // listGlPostingDocs runs on EVERY shell load (counts.ts asks it for the
+  // gl.inbox badge), so the line values are fetched with a single
+  // `inArray(gr_item.gr_id, …)` over the receipts already enumerated above rather
+  // than a read per receipt. gr_item is indexed on gr_id.
+  //
+  // The scope chain is gr_item → gr → po → vendor, i.e. the gr chain above with
+  // one hop in front — the same root, so a line can never be read for a receipt
+  // this tenant could not read. (Deliberately NOT gr.ts's gr_item → gr → po → pr →
+  // project chain: this function's gr enumeration anchors on vendor, and reading
+  // the lines through a DIFFERENT root than their own receipt is how a list and
+  // its totals drift apart.)
+  const grIds = grRows.map((g) => g.id);
+  const linesByGr = new Map<string, (typeof grItems.$inferSelect)[]>();
+  if (grIds.length > 0) {
+    const lines = await db.selectThrough(
+      grItems,
+      [{ fk: grItems.grId, parent: grs }, ...GR_INBOX_HOPS],
+      and(inArray(grItems.grId, grIds), eq(grs.status, "received")),
+    );
+    for (const line of lines) {
+      const bucket = linesByGr.get(line.grId);
+      if (bucket) bucket.push(line);
+      else linesByGr.set(line.grId, [line]);
+    }
+  }
+
+  /**
+   * A receipt's postable value, or null when it has none.
+   *
+   * Σ(received_qty × price) over the receipt's gr_item rows, 2-dp rounded — the
+   * SAME expression gr.ts's `grWire` already puts on the list wire as `money`, so
+   * the GL inbox and the GR screen cannot quote different figures for one receipt.
+   * Every input is a stored server-owned column: `price` is derived from
+   * `boq_item.price` at create (B-368, gr.ts) and is never client-supplied.
+   *
+   * NULL — i.e. "no postable money amount", the honest gap — in three cases, each
+   * a real receipt shape rather than a defensive hypothetical:
+   *
+   *  1. NO gr_item ROWS AT ALL. This is the mobile shape: st_receive posts bare
+   *     `{qty_ok}` lines with no `name`, so no per-line detail is written. Σ over
+   *     an empty list is 0, and 0 here would mean "this delivery was worth nothing"
+   *     — it means "nobody recorded what it was worth". apps/web already refuses to
+   *     render that 0 (gr-rows.ts hasLineDetail, whose header reads "Those zeroes
+   *     mean 'unknown', not 'zero baht'"); the GL must refuse to POST it.
+   *
+   *  2. Σ <= 0. Reachable with lines present: a named line carrying no
+   *     `boq_item_id` has no server price source and stores 0.00. A zero-amount JV
+   *     is two zero legs — balanced, meaningless, and it marks the document posted
+   *     forever, which is strictly worse than leaving it pending.
+   *
+   *  3. MORE THAN ONE CURRENCY across the lines. POST /gr enforces one currency per
+   *     receipt (B-085 fix 4), but as a create-time check rather than a constraint,
+   *     so rows written before that guard can still be mixed. Σ across currencies
+   *     under a single label is a fabricated number, and gl.ts would otherwise
+   *     default the label to "THB".
+   */
+  const grValue = (grId: string): { amount: number | null; currency: string | null } => {
+    const lines = linesByGr.get(grId) ?? [];
+    if (lines.length === 0) return { amount: null, currency: null };
+    const currencies = new Set(lines.map((l) => l.currencyCode));
+    if (currencies.size > 1) return { amount: null, currency: null };
+    const total = round2(
+      lines.reduce((sum, l) => sum + Number(l.receivedQty) * Number(l.price), 0),
+    );
+    if (!Number.isFinite(total) || total <= 0) return { amount: null, currency: null };
+    return { amount: total, currency: lines[0]!.currencyCode ?? null };
   };
 
   const docs: GlPostingDoc[] = [];
@@ -167,12 +340,19 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
 
   for (const r of grRows) {
     const { posted, jvNo } = resolvePosting("gr", r.id);
+    // B-368 — the former GAP ("gr carries received/rejected QUANTITY, not a money
+    // value") is CLOSED. The value was always there: gr_item carries `price` +
+    // `currency_code` as real columns and gr.ts already derives Σ(received × price)
+    // for the list wire. Lifting that same derivation here is what turns FLOW-A
+    // from a document chain into a COST chain — a receipt now posts Dr 5020 /
+    // Cr 2010 (gl-post.ts POSTING_MAP.gr) for what actually arrived.
+    const { amount, currency } = grValue(r.id);
     docs.push({
       source: "gr",
       id: r.id,
       doc_no: r.no ?? null, // gr.no is a real (nullable) column.
-      amount: null, // GAP: gr carries received/rejected QUANTITY, not a money value.
-      currency_code: null,
+      amount,
+      currency_code: currency,
       posted,
       jv_no: jvNo,
       created_at: r.createdAt ?? null,
@@ -207,7 +387,14 @@ export async function listGlPostingDocs(db: TenantDb): Promise<GlPostingDoc[]> {
     });
   }
 
-  return docs;
+  // B-323: the feed is assembled source-block by source-block, and within each block
+  // the rows arrive in whatever order the scoped read produced — five of the six reads
+  // are joined chains, whose row order is a join-plan artefact. Pin the order WITHIN
+  // each block and leave the block sequence exactly as it ships (see bySourceThenNewest:
+  // sorting across sources would interleave them and change the screen, which is a
+  // product decision, not a determinism one).
+  const rank = (d: GlPostingDoc): number => GL_SOURCE_ORDER.indexOf(d.source);
+  return bySourceThenNewest(docs, rank);
 }
 
 /**

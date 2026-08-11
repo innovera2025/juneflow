@@ -56,11 +56,26 @@ interface StubOpts {
   rows: Array<[unknown, RowSource]>;
   captured?: Captured[];
   inserted?: Inserted[];
+  /**
+   * B-313: make an insert into a table THROW (models a 23505 unique-violation on the
+   * ap_deposit_idempotency_uq partial index). Receives the table and the running
+   * 0-based per-table insert count, so a test can let the 1st create through and trip
+   * only the replay. Return null to insert normally. (inventory.test.ts B-312 shape.)
+   */
+  insertThrows?: (table: unknown, nth: number) => Error | null;
+  /**
+   * B-313: called with the rows an insert actually RETURNED (id + createdAt stamped).
+   * Lets a test derive its stored-row view from what the handler really wrote instead
+   * of hand-seeding it — so a handler that writes twice really IS seen twice by the
+   * later JV / register assertions (a hand-seeded array would hide the defect).
+   */
+  onInsert?: (table: unknown, rows: Record<string, unknown>[]) => void;
 }
 
 /** Db stub: canned rows per table (reads, incl. selectThrough joins) + write capture. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [] } = opts;
+  const { rows, captured = [], inserted = [], insertThrows, onInsert } = opts;
+  const insertCount = new Map<unknown, number>();
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -88,14 +103,20 @@ function stubDb(opts: StubOpts): Db {
     insert: (table: unknown) => ({
       values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
         returning: () => {
+          const nth = insertCount.get(table) ?? 0;
+          insertCount.set(table, nth + 1);
+          const boom = insertThrows?.(table, nth);
+          // Thrown BEFORE the capture: a rejected insert wrote no row, so it must not
+          // be counted as one (the "exactly one row / one JV" assertions depend on it).
+          if (boom) return Promise.reject(boom);
           inserted.push({ table, values });
           const arr = Array.isArray(values) ? values : [values];
-          return Promise.resolve(
-            arr.map((v) => {
-              const row = v as Record<string, unknown>;
-              return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
-            }),
-          );
+          const out = arr.map((v) => {
+            const row = v as Record<string, unknown>;
+            return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
+          });
+          onInsert?.(table, out as Record<string, unknown>[]);
+          return Promise.resolve(out);
         },
       }),
     }),
@@ -117,6 +138,18 @@ function stubDb(opts: StubOpts): Db {
 function paramsOf(where: SQL | undefined): unknown[] {
   if (!where) return [];
   return new PgDialect().sqlToQuery(where).params;
+}
+
+/**
+ * The rendered WHERE text (quoted column names + $n placeholders). B-313 needs this,
+ * not just the params: a stub that models an AND-ed column by looking for its VALUE in
+ * the params filters MORE when that column is dropped from the query, so deleting the
+ * anchor would make the wrong-payee test pass for the wrong reason. Reading which
+ * COLUMNS the handler actually bound is what makes the stub behave like the database.
+ */
+function sqlOf(where: SQL | undefined): string {
+  if (!where) return "";
+  return new PgDialect().sqlToQuery(where).sql;
 }
 
 let app: FastifyInstance;
@@ -305,6 +338,27 @@ describe("GET /api/v1/ap/deposit", () => {
     const read = captured.find((c) => c.table === apDeposits);
     expect(read).toBeTruthy();
     expect(paramsOf(read!.where)).toContain(COMPANY);
+  });
+
+  // B-323: the local `newestFirst` here was a hand-rolled shadow of list-order.ts's
+  // export, and it was tie-BLIND — `msOf(b) - msOf(a)` returns 0 for two deposits
+  // sharing an instant, handing the pair back to the join plan. The shared helper
+  // breaks the tie on id, so the list cannot reorder between two identical reads.
+  it("is TOTAL when two deposits share an instant — the join plan cannot decide", async () => {
+    const tied = new Date("2024-03-10T00:00:00Z");
+    const a = depRow("aaa", { createdAt: tied });
+    const b = depRow("bbb", { createdAt: tied });
+    const ids = async (rows: unknown[]): Promise<string[]> => {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({ rows: [[apDeposits, rows], [vendors, [vendorRow]], [pos, [poRow]]] }),
+        })
+      ).inject({ url: "/api/v1/ap/deposit" });
+      return res.json().data.map((r: { id: string }) => r.id);
+    };
+    expect(await ids([a, b])).toEqual(["aaa", "bbb"]);
+    expect(await ids([b, a])).toEqual(["aaa", "bbb"]);
   });
 
   it("ships a fully-offset deposit as balance 0 (web renders the หักครบ badge from it)", async () => {
@@ -594,3 +648,682 @@ describe("POST /api/v1/ap/deposit", () => {
     expect(fired[0]!.userId).toBe("u-0");
   });
 });
+
+// ===========================================================================
+// B-313 — POST /ap/deposit idempotency (client key + partial index + replay)
+// ---------------------------------------------------------------------------
+// WHY this is a MONEY contract, not data hygiene: createDeposit MINTS a fresh
+// deposit id per request and posts a Dr 1160 / Cr 1010 JV keyed `dep:<that fresh
+// id>`, so a replay produces a SECOND source_doc. jv_source_doc_uq is real and its
+// predicate DOES list `dep:` (verified live — a same-source_doc insert raises
+// 23505), but it can only ever see a re-post of the SAME deposit; on a replayed
+// CREATE the two source_docs differ and both JVs are individually clean and
+// balanced. Proven live on the un-patched build, byte-identical body posted twice:
+//   201, 201 → DP-2026-0001 + DP-2026-0002, JV-2026-0419 + JV-2026-0420,
+//   Σ Dr 1160 = Σ Cr 1010 = 500,000.00 for ONE intended ฿250,000 payment.
+// apps/mobile/sync_processor.dart replays a create it never heard back on, so the
+// LOAD-BEARING assertions below are the JV COUNT and the Σ posted to 1160/1010 — a
+// row count alone would not encode this defect, and neither would a status code.
+// ===========================================================================
+
+const IDEMP_KEY = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+const SECOND_KEY = "b7c8d9e0-1f2a-4b3c-8d4e-5f6a7b8c9d0e";
+/** Every client key this suite sends — a read binding one of these IS a dedup resolve. */
+const CLIENT_KEYS: readonly string[] = [IDEMP_KEY, SECOND_KEY];
+const DEPOSIT_IDEMP_UQ = "ap_deposit_idempotency_uq";
+const JV_SOURCE_DOC_UQ = "jv_source_doc_uq";
+
+/** A second tenant + its own supplier id, for the cross-tenant replay test. */
+const COMPANY_B = "33333333-3333-3333-3333-333333333333";
+const VENDOR_B = "ven00000-0000-0000-0000-0000000000b0";
+
+/**
+ * A raw pg unique-violation (SQLSTATE 23505) — the DatabaseError node-postgres throws,
+ * naming the violated index on `.constraint`. `null` models a 23505 naming nothing.
+ */
+const pgUniqueViolation = (constraint: string | null = DEPOSIT_IDEMP_UQ): Error =>
+  Object.assign(
+    new Error(`duplicate key value violates unique constraint "${constraint ?? "?"}"`),
+    constraint === null ? { code: "23505" } : { code: "23505", constraint },
+  );
+
+/**
+ * The shape the HANDLER actually sees: every insert goes through drizzle, which wraps
+ * the driver error in a DrizzleQueryError and nests the DatabaseError under `.cause`.
+ * isUniqueViolation() / violatedConstraint() must BOTH look one level down — a suite
+ * that only ever threw the FLAT shape would stay green against a gate reading
+ * `err.constraint` directly while production silently lost its replay path (B-263).
+ */
+const uniqueViolation = (constraint: string | null = DEPOSIT_IDEMP_UQ): Error =>
+  Object.assign(new Error("Failed query"), { cause: pgUniqueViolation(constraint) });
+
+type DepRow = typeof apDeposits.$inferSelect;
+
+/**
+ * A keyed create issues TWO kinds of ap_deposit read — the keyed dedup resolve
+ * (pre-check, and again from the catch) and allocDepositNo's unkeyed running-number
+ * scan. The row-blind stub would answer both the same, so this behaves like the
+ * DATABASE: it applies exactly the filters the handler's WHERE actually declares,
+ * decided by which COLUMNS the rendered SQL binds —
+ *   - company_id: TenantDb.select always ANDs it, so a row of another company is
+ *     invisible to both kinds of read;
+ *   - idempotency_key: a read binding one of the suite's client keys IS the dedup
+ *     resolve (everything else is allocDepositNo's running-number scan);
+ *   - vendor_id: the payee anchor, applied ONLY if the handler bound it.
+ * That last clause is the load-bearing one. Keying off the column NAME (not the
+ * presence of its value in the params) is what makes deleting the anchor from the
+ * resolver LEAK the other payee's row here, exactly as it would in Postgres — a
+ * params-only model would filter MORE when the anchor is dropped and the wrong-payee
+ * test would pass for the wrong reason. Verified by mutation, not by inspection.
+ */
+const keyedDeposits =
+  (stored: () => unknown[]) =>
+  (where: SQL | undefined): unknown[] => {
+    const params = paramsOf(where);
+    const sql = sqlOf(where);
+    let rows = stored();
+    if (sql.includes('"company_id"')) {
+      rows = rows.filter((d) => params.includes((d as DepRow).companyId));
+    }
+    const key = params.find(
+      (p): p is string => typeof p === "string" && CLIENT_KEYS.includes(p),
+    );
+    if (key === undefined) return rows; // allocDepositNo's running-number scan
+    rows = rows.filter((d) => (d as DepRow).idempotencyKey === key);
+    if (sql.includes('"vendor_id"')) {
+      rows = rows.filter((d) => params.includes((d as DepRow).vendorId));
+    }
+    return rows;
+  };
+
+/** Every ap_deposit read this app made whose WHERE bound the client key. */
+const keyedDepositReads = (captured: Captured[]): Captured[] =>
+  captured.filter(
+    (c) => c.table === apDeposits && paramsOf(c.where).includes(IDEMP_KEY),
+  );
+
+/** Σ debits posted to 1160 advance-to-supplier across EVERY jv_line insert made. */
+const sumAdvanceDebits = (inserted: Inserted[]): number =>
+  inserted
+    .filter((i) => i.table === jvLines)
+    .flatMap((i) => i.values as Record<string, unknown>[])
+    .filter((l) => l.accountId === ACC_ADVANCE)
+    .reduce((s, l) => s + Number(l.dr), 0);
+
+/** Σ credits posted to 1010 cash — the leg that pays the money OUT. */
+const sumCashCredits = (inserted: Inserted[]): number =>
+  inserted
+    .filter((i) => i.table === jvLines)
+    .flatMap((i) => i.values as Record<string, unknown>[])
+    .filter((l) => l.accountId === ACC_CASH)
+    .reduce((s, l) => s + Number(l.cr), 0);
+
+/**
+ * The B-313 stub. The stored ap_deposit / jv views are DERIVED from what the handler
+ * actually WROTE (onInsert) — never hand-seeded — so if a replay wrote a second row
+ * the register and JV assertions really would see it. That is the whole point.
+ * `storedDeposits` can be SHARED between two tenants, so a cross-tenant replay is
+ * tested against a table that genuinely contains the other company's row.
+ */
+const idempWorld = (
+  opts: {
+    company?: string;
+    supplier?: unknown;
+    captured?: Captured[];
+    inserted?: Inserted[];
+    insertThrows?: (table: unknown, nth: number) => Error | null;
+    /** Overrides the keyed ap_deposit resolve (models a race). */
+    keyedResolve?: (where: SQL | undefined) => unknown[];
+    storedDeposits?: unknown[];
+  } = {},
+) => {
+  const company = opts.company ?? COMPANY;
+  const storedDeposits: unknown[] = opts.storedDeposits ?? [];
+  const storedJvs: unknown[] = [jvSeed];
+  const db = stubDb({
+    rows: [
+      [users, [{ ...userRow, companyId: company }]],
+      [roles, [{ ...roleRow(true), companyId: company }]],
+      [vendors, [opts.supplier ?? vendorRow]],
+      [pos, [poRow]],
+      [glAccounts, COA_ROWS],
+      [jvs, () => storedJvs],
+      [apDeposits, opts.keyedResolve ?? keyedDeposits(() => storedDeposits)],
+    ],
+    captured: opts.captured,
+    inserted: opts.inserted,
+    insertThrows: opts.insertThrows,
+    onInsert: (table, out) => {
+      if (table === apDeposits) storedDeposits.push(...out);
+      else if (table === jvs) storedJvs.push(...out);
+    },
+  });
+  return { db, storedDeposits, storedJvs };
+};
+
+const AMOUNT = 250_000;
+const depositPost = (extra: Record<string, unknown> = {}, payee = VENDOR0) => ({
+  method: "POST" as const,
+  url: "/api/v1/ap/deposit",
+  payload: {
+    vendor_id: payee,
+    po_id: PO0,
+    amount: AMOUNT,
+    pct: 10,
+    reason: "มัดจำ PO 10%",
+    ...extra,
+  },
+});
+
+describe("POST /api/v1/ap/deposit — B-313 idempotency (client key + replay)", () => {
+  it("same idempotency_key twice → ONE deposit, ONE JV (Σ Dr 1160 = 250,000, not 500,000) and cash credited ONCE", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+
+    // THE MONEY ASSERTIONS FIRST (they are the point), inspecting what was WRITTEN.
+    // Without the dedup there are TWO clean balanced JVs — each individually
+    // well-formed, so no downstream double-entry guard can see the duplication —
+    // and the company's cash is credited twice for one disbursement.
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+    expect(sumAdvanceDebits(inserted)).toBe(AMOUNT);
+    expect(sumAdvanceDebits(inserted)).not.toBe(2 * AMOUNT);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT);
+    expect(sumCashCredits(inserted)).not.toBe(2 * AMOUNT);
+
+    // ONE deposit row across BOTH requests, carrying the client key, and the JV
+    // posted from the STORED amount (money=SERVER) against that ONE row.
+    const depIns = inserted.filter((i) => i.table === apDeposits);
+    expect(depIns).toHaveLength(1);
+    const stored = depIns[0]!.values as Record<string, unknown>;
+    expect(stored.idempotencyKey).toBe(IDEMP_KEY);
+    expect(stored.amount).toBe("250000.00");
+    expect(world.storedDeposits).toHaveLength(1);
+    const jvIns = inserted.find((i) => i.table === jvs)!.values as Record<string, unknown>;
+    expect(jvIns.sourceDoc).toBe(`dep:${stored.id}`);
+
+    // The replay is idempotent — the client sees its OWN deposit (same id, same
+    // server-allocated `no`, same joined name/ref), never a 409, never a duplicate.
+    // Byte-identical BY CONSTRUCTION (one serializer, one ref resolver, one sender).
+    expect(res2.json()).toEqual(res1.json());
+    expect(res2.json().id).toBe(res1.json().id);
+    expect(res2.json().no).toBe(res1.json().no);
+    expect(res2.json().amount).toBe(AMOUNT);
+    expect(res2.json().balance).toBe(AMOUNT);
+    expect(res2.json().ref).toBe(`PO-${YEAR}-0291`);
+  });
+
+  it("the SAME key against a DIFFERENT payee is a 409 — it never hands back the first one's deposit", async () => {
+    // A key reused against another payee must not confirm a payment that party never
+    // received (and hide the one actually made). The resolver AND-binds the payee id,
+    // so the pre-check misses, the insert trips the GLOBAL partial index, and the
+    // catch re-resolves — finds nothing for THIS payee — and answers the honest 409.
+    const inserted: Inserted[] = [];
+    const otherPayee = { ...vendorRow, id: VENDOR_B, name: "บจก. อีกเจ้า" };
+    const storedDeposits: unknown[] = [];
+    const storedJvs: unknown[] = [jvSeed];
+    const db = stubDb({
+      rows: [
+        [users, [userRow]],
+        [roles, [roleRow(true)]],
+        // Both payees resolvable in this tenant (the 400 gate must not be what fires).
+        [vendors, (w) => (paramsOf(w).includes(VENDOR_B) ? [otherPayee] : [vendorRow])],
+        [pos, [poRow]],
+        [glAccounts, COA_ROWS],
+        [jvs, () => storedJvs],
+        [apDeposits, keyedDeposits(() => storedDeposits)],
+      ],
+      inserted,
+      onInsert: (table, out) => {
+        if (table === apDeposits) storedDeposits.push(...out);
+        else if (table === jvs) storedJvs.push(...out);
+      },
+      insertThrows: (table, nth) =>
+        table === apDeposits && nth >= 1 ? uniqueViolation() : null,
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db });
+
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }, VENDOR_B));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(409);
+    expect(res2.json().message).toBe("idempotency_key already used");
+    // NOT the first document, under any field.
+    expect(res2.json().id).toBeUndefined();
+    expect(JSON.stringify(res2.json())).not.toContain(res1.json().id);
+    expect(JSON.stringify(res2.json())).not.toContain(VENDOR0);
+    // And no money moved for the refused request.
+    expect(inserted.filter((i) => i.table === apDeposits)).toHaveLength(1);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT);
+  });
+
+  it("company B replaying company A's key gets NOTHING of A's — 409, and A's deposit is untouched", async () => {
+    // ap_deposit_idempotency_uq is a GLOBAL partial index on the key alone, so a
+    // cross-tenant key clash is physically possible. The resolver is tenant-scoped
+    // (db.select AND-binds company_id), so B's pre-check and B's catch both resolve
+    // nothing — B gets an honest 409, never a window into A's ledger.
+    const insertedA: Inserted[] = [];
+    const insertedB: Inserted[] = [];
+    const shared: unknown[] = []; // ONE ap_deposit table both tenants read
+    const worldA = idempWorld({ inserted: insertedA, storedDeposits: shared });
+    const appA = await buildTestApp({ resolveTenant: async () => SESSION, db: worldA.db });
+    const resA = await appA.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    expect(resA.statusCode).toBe(201);
+    await appA.close();
+
+    const worldB = idempWorld({
+      company: COMPANY_B,
+      supplier: { ...vendorRow, id: VENDOR_B, companyId: COMPANY_B },
+      inserted: insertedB,
+      storedDeposits: shared,
+      // The GLOBAL index sees A's row even though B's tenant-scoped reads cannot.
+      insertThrows: (table) => (table === apDeposits ? uniqueViolation() : null),
+    });
+    const appB = await buildTestApp({
+      resolveTenant: async () => ({ ...SESSION, companyId: COMPANY_B }),
+      db: worldB.db,
+    });
+    const resB = await appB.inject(depositPost({ idempotency_key: IDEMP_KEY }, VENDOR_B));
+
+    expect(resB.statusCode).toBe(409);
+    expect(resB.json().message).toBe("idempotency_key already used");
+    expect(JSON.stringify(resB.json())).not.toContain(resA.json().id);
+    expect(JSON.stringify(resB.json())).not.toContain(String(resA.json().no));
+    // A's row is the ONLY row, and B posted no JV at all.
+    expect(shared).toHaveLength(1);
+    expect((shared[0] as DepRow).companyId).toBe(COMPANY);
+    expect(insertedB.filter((i) => i.table === jvs)).toHaveLength(0);
+    expect(sumCashCredits(insertedB)).toBe(0);
+  });
+
+  it("a fresh write with NO key still creates (the web form is unchanged)", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app1.inject(depositPost());
+    const res2 = await app1.inject(depositPost());
+
+    // Two key-less posts are two DISTINCT deposits — the partial index exempts nulls
+    // and no dedup path fires, so this contract is unchanged by B-313.
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json().id).not.toBe(res1.json().id);
+    expect(inserted.filter((i) => i.table === apDeposits)).toHaveLength(2);
+    const first = inserted.find((i) => i.table === apDeposits)!.values as Record<string, unknown>;
+    expect(first.idempotencyKey ?? null).toBeNull();
+    expect(sumCashCredits(inserted)).toBe(2 * AMOUNT);
+  });
+
+  it("a DIFFERENT key creates a second deposit (dedup is per-key, not per-payee)", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({ inserted });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app1.inject(depositPost({ idempotency_key: SECOND_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json().id).not.toBe(res1.json().id);
+    expect(world.storedDeposits).toHaveLength(2);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(2);
+    // Two genuine instalments to one payee for the same amount = ordinary business,
+    // and exactly why a natural key on (company, payee, po, amount) is wrong here.
+    expect(sumCashCredits(inserted)).toBe(2 * AMOUNT);
+  });
+
+  it("a PRESENT but NON-STRING idempotency_key is a 400 and writes NOTHING (B-309 contract)", async () => {
+    for (const bad of [123, 1.5, true, ["k"], { key: "k" }]) {
+      const inserted: Inserted[] = [];
+      const world = idempWorld({ inserted });
+      const appN = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+      const res = await appN.inject(depositPost({ idempotency_key: bad }));
+      expect(res.statusCode, `${JSON.stringify(bad)} → 400`).toBe(400);
+      expect(res.json().code).toBe("VALIDATION");
+      // The whole point of B-309: silence here means the request takes the NO-KEY path
+      // and double-posts while the client believes it sent a key.
+      expect(inserted, `${JSON.stringify(bad)} wrote nothing`).toHaveLength(0);
+      await appN.close();
+    }
+  });
+
+  it("an EXPLICIT null key is ABSENT, not invalid — it still creates", async () => {
+    const world = idempWorld({});
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject(depositPost({ idempotency_key: null }));
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("the 23505 backstop still fires when the PRE-CHECK misses (the real race) → 201 with the ORIGINAL, still one deposit / one JV", async () => {
+    const inserted: Inserted[] = [];
+    const captured: Captured[] = [];
+    // The real race: the pre-checks of BOTH requests run before the original is
+    // visible (keyed reads 0 and 1 resolve nothing); our insert then trips the partial
+    // unique index, and read 2 — issued from the catch, after that commit — finds it.
+    // Exactly the window an app-level pre-check cannot close, which is why the catch
+    // is kept (money-post-idempotency lesson).
+    let keyedReadNo = 0;
+    const stored: unknown[] = [];
+    const faithful = keyedDeposits(() => stored);
+    const world = idempWorld({
+      inserted,
+      captured,
+      storedDeposits: stored,
+      keyedResolve: (where) => {
+        const isKeyed = paramsOf(where).some(
+          (p) => typeof p === "string" && CLIENT_KEYS.includes(p),
+        );
+        if (!isKeyed) return faithful(where);
+        return keyedReadNo++ < 2 ? [] : faithful(where);
+      },
+      insertThrows: (table, nth) =>
+        table === apDeposits && nth >= 1 ? uniqueViolation() : null,
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json()); // the ORIGINAL, from the same sender
+    // STRUCTURAL replay-safety: the ap_deposit row is the FIRST write in the tx, so
+    // the 23505 aborts the block before the JV header or either leg is attempted — the
+    // replay needs no compensating action. Nothing after the deposit ran on request 2.
+    expect(inserted.filter((i) => i.table === apDeposits)).toHaveLength(1);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+    expect(sumAdvanceDebits(inserted)).toBe(AMOUNT);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT);
+    // 3 keyed resolves: create#1's pre-check, create#2's pre-check (missed), the catch.
+    expect(keyedDepositReads(captured)).toHaveLength(3);
+  });
+
+  it("a 23505 naming a DIFFERENT index (jv_source_doc_uq) is the honest 'already posted' 409 — never the replay path (B-263 name gate)", async () => {
+    // 23505 alone only says "SOME unique constraint", and this table now has two
+    // reachable ones. Without the BY-NAME gate a source_doc collision would be
+    // answered with somebody's stored deposit instead of the honest conflict.
+    const inserted: Inserted[] = [];
+    const world = idempWorld({
+      inserted,
+      insertThrows: (table) => (table === jvs ? uniqueViolation(JV_SOURCE_DOC_UQ) : null),
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toMatch(/already posted/);
+    expect(res.json().message).not.toMatch(/idempotency_key already used/);
+  });
+
+  it("a flat 23505 with NO constraint name falls through to the honest 409 — never a double post, never a wrong document", async () => {
+    const inserted: Inserted[] = [];
+    const world = idempWorld({
+      inserted,
+      insertThrows: (table, nth) =>
+        table === apDeposits && nth >= 1 ? uniqueViolation(null) : null,
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    // A DIFFERENT key, so the pre-check cannot resolve it — only the catch decides.
+    const res2 = await app1.inject(depositPost({ idempotency_key: SECOND_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(409);
+    expect(res2.json().message).toMatch(/already posted/);
+    // The safe direction: no replay convenience, but no second JV either.
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT);
+  });
+
+  it("the replay is answered BEFORE the COA gate — a deposit already paid is never 409'd because an account was removed afterwards", async () => {
+    // B-264 class: sync_processor.dart dead-letters every 4xx PERMANENTLY. The
+    // original could only have posted with 1160 + 1010 present, but the COA is
+    // editable; if one is removed afterwards, a replay must still return the original
+    // rather than fail for cash that has already left the company. This pins the
+    // pre-check's position above the COA resolution.
+    const inserted: Inserted[] = [];
+    const stored: unknown[] = [];
+    let coa = COA_ROWS;
+    const storedJvs: unknown[] = [jvSeed];
+    const db = stubDb({
+      rows: [
+        [users, [userRow]],
+        [roles, [roleRow(true)]],
+        [vendors, [vendorRow]],
+        [pos, [poRow]],
+        [glAccounts, () => coa],
+        [jvs, () => storedJvs],
+        [apDeposits, keyedDeposits(() => stored)],
+      ],
+      inserted,
+      onInsert: (table, out) => {
+        if (table === apDeposits) stored.push(...out);
+        else if (table === jvs) storedJvs.push(...out);
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db });
+
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    coa = [COA_ROWS[0]!]; // 1010 cash removed after the original posted
+    const res2 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.statusCode).not.toBe(409);
+    expect(res2.json()).toEqual(res1.json());
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+  });
+
+  it("a foreign payee is a 400 REGARDLESS of the key — a replay against something not ours is never answered from our data", async () => {
+    const inserted: Inserted[] = [];
+    const stored: unknown[] = [];
+    const storedJvs: unknown[] = [jvSeed];
+    const db = stubDb({
+      rows: [
+        [users, [userRow]],
+        [roles, [roleRow(true)]],
+        // Only VENDOR0 belongs to this tenant; anything else resolves to nothing.
+        [vendors, (w) => (paramsOf(w).includes(VENDOR0) ? [vendorRow] : [])],
+        [pos, [poRow]],
+        [glAccounts, COA_ROWS],
+        [jvs, () => storedJvs],
+        [apDeposits, keyedDeposits(() => stored)],
+      ],
+      inserted,
+      onInsert: (table, out) => {
+        if (table === apDeposits) stored.push(...out);
+        else if (table === jvs) storedJvs.push(...out);
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db });
+    await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+
+    const res = await app1.inject(
+      depositPost({ idempotency_key: IDEMP_KEY }, "ven00000-0000-0000-0000-00000000ffff"),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/not found in this tenant/);
+    expect(inserted.filter((i) => i.table === apDeposits)).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// B-318 / B-168 — DOC-NUMBER ALLOCATION UNDER CONCURRENCY (migration 0061)
+// ===========================================================================
+// THE DEFECT, observed live on a real PG 16 before 0061: six concurrent, genuinely
+// DISTINCT POST /ap/deposit minted DP-2026-0001 ×3 · DP-2026-0002 ×2 and shared JV
+// numbers too (JV-2026-0419 ×2). allocDepositNo / allocJvNo are `max(suffix)+1`
+// reads with no index behind them, so concurrent readers all see the same max. This
+// SURVIVES the B-313 idempotency key: a key dedupes REPLAYS of one request, while
+// this is two different payments colliding on a voucher number.
+//
+// AND THE INDEX ALONE IS A REGRESSION, also measured: with 0061 applied and no
+// retry, four of six legitimate deposits came back 409 "already posted" — false,
+// nothing was posted — and sync_processor.dart dead-letters every 4xx PERMANENTLY.
+// So these tests are about the RETRY, not the index.
+//
+// WHAT THESE TESTS CAN PROVE. The stub has no unique index and no rollback, so it
+// cannot prove uniqueness or atomicity; those are proven against a live PG 16 with
+// a negative control. What it CAN prove — and what would otherwise ship untested —
+// is the handler's branch wiring: that the collision is retried with a FRESH
+// number, that exhaustion answers 503 rather than the bare 409 sitting right below
+// it in the same catch, and that the B-313 replay is still NOT retried.
+const DEPOSIT_COMPANY_NO_UQ = "ap_deposit_company_no_uq";
+const JV_COMPANY_NO_UQ = "jv_company_no_uq";
+
+describe("POST /api/v1/ap/deposit — B-318 doc-number collision", () => {
+  it("a colliding deposit number is RETRIED with a freshly allocated one, not refused", async () => {
+    const inserted: Inserted[] = [];
+    // The racer that beat us COMMITTED DP-<yr>-0001 between our read and our write.
+    // Modelled honestly: the row is visible to the next allocDepositNo read (that is
+    // what makes the retry pick a different number) and our insert trips 0061.
+    const storedDeposits: unknown[] = [];
+    const year = new Date().getFullYear();
+    const world = idempWorld({
+      inserted,
+      storedDeposits,
+      insertThrows: (table, nth) => {
+        if (table === apDeposits && nth === 0) {
+          storedDeposits.push({
+            id: "racer",
+            companyId: COMPANY,
+            no: `DP-${year}-0001`,
+            vendorId: VENDOR0,
+            idempotencyKey: null,
+          });
+          return uniqueViolation(DEPOSIT_COMPANY_NO_UQ);
+        }
+        return null;
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res = await app1.inject(depositPost());
+
+    // The payment goes through — this is the whole point. Before the retry existed,
+    // the index turned this into a 409 for a deposit that was never posted.
+    expect(res.statusCode).toBe(201);
+    // …under a DIFFERENT number: 0001 is the racer's, we must not re-offer it.
+    expect(res.json().no).toBe(`DP-${year}-0002`);
+    // The money still posts exactly once and still balances.
+    expect(sumAdvanceDebits(inserted)).toBe(AMOUNT);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT);
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(1);
+  });
+
+  it("a colliding JV number is retried too — the deposit tx writes TWO numbered rows", async () => {
+    const inserted: Inserted[] = [];
+    const storedDeposits: unknown[] = [];
+    const world = idempWorld({
+      inserted,
+      storedDeposits,
+      insertThrows: (table, nth) => {
+        if (table === jvs && nth === 0) {
+          // The racer committed our JV number. Its deposit row is NOT ours, so it
+          // does not advance our deposit sequence — only the JV sequence moves.
+          world.storedJvs.push({ id: "racer-jv", companyId: COMPANY, no: `JV-${year2()}-0002` });
+          // Model the ROLLBACK the fake transaction does not do: our own ap_deposit
+          // insert, which ran first inside this tx, never survives a failed tx. Left
+          // in place it would fake-advance the deposit sequence and the assertion
+          // below would pass for the wrong reason.
+          storedDeposits.pop();
+          return uniqueViolation(JV_COMPANY_NO_UQ);
+        }
+        return null;
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res = await app1.inject(depositPost());
+
+    expect(res.statusCode).toBe(201);
+    // The deposit number is unchanged (nothing took it); the JV number moved past
+    // the racer's. Both are re-allocated on the retry — the deposit just re-reads
+    // the same free number, which is the correct outcome, not a stale carry-over.
+    expect(res.json().no).toBe(`DP-${year2()}-0001`);
+    const jvIns = inserted.filter((i) => i.table === jvs);
+    expect(jvIns).toHaveLength(1); // only the winning attempt wrote
+    expect((jvIns[0]!.values as Record<string, unknown>).no).toBe(`JV-${year2()}-0003`);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT); // cash still leaves exactly once
+  });
+
+  it("exhaustion answers 503 RETRY — NOT the bare 409 'already posted' in the same catch", async () => {
+    // The regression this guards is precise: the catch arm below the new one reads
+    // `if (isUniqueViolation(err)) return conflict(..., 'already posted')`. If
+    // exhaustion re-threw the raw 23505, a real vendor payment would be refused with
+    // a message claiming it was already made, and mobile would dead-letter it.
+    const inserted: Inserted[] = [];
+    const storedDeposits: unknown[] = [];
+    const world = idempWorld({
+      inserted,
+      storedDeposits,
+      insertThrows: (table) =>
+        table === apDeposits ? uniqueViolation(DEPOSIT_COMPANY_NO_UQ) : null,
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res = await app1.inject(depositPost());
+
+    expect(res.statusCode).toBe(503);
+    expect(res.statusCode).toBeGreaterThanOrEqual(500); // 5xx = mobile defers, 4xx = dead-letters
+    const body = res.json();
+    expect(body.code).toBe("RETRY");
+    expect(body.message).not.toMatch(/already/i);
+    // Nothing was posted: no JV, no cash movement.
+    expect(inserted.filter((i) => i.table === jvs)).toHaveLength(0);
+    expect(sumCashCredits(inserted)).toBe(0);
+  });
+
+  it("a B-313 idempotency 23505 is still NOT retried — ONE attempt, then the replay resolves", async () => {
+    // The name gate is load-bearing in BOTH directions. Retrying a replay would
+    // re-attempt a write that has already succeeded, ten times, before answering —
+    // and each attempt would burn a deposit number. This is the same real-race setup
+    // as the B-313 backstop test above, with the attempt COUNT asserted.
+    const inserted: Inserted[] = [];
+    let keyedReadNo = 0;
+    let depositAttempts = 0;
+    const stored: unknown[] = [];
+    const faithful = keyedDeposits(() => stored);
+    const world = idempWorld({
+      inserted,
+      storedDeposits: stored,
+      keyedResolve: (where) => {
+        const isKeyed = paramsOf(where).some(
+          (p) => typeof p === "string" && CLIENT_KEYS.includes(p),
+        );
+        if (!isKeyed) return faithful(where);
+        return keyedReadNo++ < 2 ? [] : faithful(where);
+      },
+      insertThrows: (table, nth) => {
+        if (table !== apDeposits) return null;
+        depositAttempts += 1;
+        return nth >= 1 ? uniqueViolation(DEPOSIT_IDEMP_UQ) : null;
+      },
+    });
+    const app1 = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+    const res1 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+    const res2 = await app1.inject(depositPost({ idempotency_key: IDEMP_KEY }));
+
+    expect(res1.statusCode).toBe(201);
+    expect(res2.statusCode).toBe(201);
+    expect(res2.json()).toEqual(res1.json()); // the ORIGINAL, not a re-attempt
+    // 2 = the original write + the ONE racing attempt. A retried replay would be 11.
+    expect(depositAttempts).toBe(2);
+    expect(stored).toHaveLength(1);
+    expect(sumCashCredits(inserted)).toBe(AMOUNT); // cash left exactly once
+  });
+});
+
+/** The CE year allocDepositNo / allocJvNo stamp (they read the wall clock). */
+function year2(): number {
+  return new Date().getFullYear();
+}

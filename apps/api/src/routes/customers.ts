@@ -20,6 +20,7 @@ import { eq } from "drizzle-orm";
 import { customers } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
 import { listEnvelope } from "./list-envelope.js";
+import { byIdAsc } from "./list-order.js";
 
 type CustomerRow = typeof customers.$inferSelect;
 
@@ -47,7 +48,9 @@ export function registerCustomersRoute(app: FastifyInstance): void {
     if (!db) return unauthenticated(reply);
     const rows = (await db.select(customers)) as CustomerRow[];
     const wire = [...rows]
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      // B-323: name is a free-text label with no unique constraint, so two customers
+      // sharing one returned 0 and their order fell back to the join plan.
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || byIdAsc(a, b))
       .map(customerWire);
     return reply.code(200).send(listEnvelope(wire));
   });
