@@ -27,6 +27,10 @@ import {
   boqDocs,
   jvs,
   stockLedgers,
+  users,
+  roles,
+  warehouses,
+  inventoryItems,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
@@ -94,9 +98,67 @@ interface StubOpts {
   insertThrows?: (table: unknown, nth: number) => unknown;
 }
 
+// ---------------------------------------------------------------------------
+// B-377 — the authz rows every WRITE handler now resolves
+// ---------------------------------------------------------------------------
+// POST /gr, /gr/:id/return and /gr/:id/cancel run the REAL loadCaller →
+// permAllowed against the stubbed `user` + `role` tables (the inventory.test.ts
+// precedent). Nothing about the gate is faked: the production authz module does
+// the resolving and the deciding here, and only the two rows it reads are canned.
+//
+// stubDb APPENDS these as DEFAULTS so the ~70 pre-existing write tests keep
+// describing what they were written to describe (receipt aggregation, the state
+// machine, the ceiling) instead of all turning into 403 assertions. rowsFor takes
+// the FIRST matching entry, so a test that supplies its own [users, …] / [roles, …]
+// still wins — which is exactly how the deny-path tests below revoke a right.
+const grUserRow = {
+  id: "u-0",
+  companyId: COMPANY,
+  email: SESSION.user.email,
+  name: SESSION.user.name,
+  roleId: "role-0",
+  status: "active",
+};
+/**
+ * A role carrying (or not) the gr create/edit/cancel rights the gates read.
+ * Defaults mirror the seeded Director (the only role holding all three), so the
+ * default caller can drive every existing test; a deny test passes `false`.
+ */
+const grRoleRow = (
+  gr: { create?: boolean; edit?: boolean; cancel?: boolean } = {},
+) => ({
+  id: "role-0",
+  companyId: COMPANY,
+  name: "Ops",
+  approvalLimits: {},
+  perms: {
+    gr: {
+      view: true,
+      create: gr.create ?? true,
+      edit: gr.edit ?? true,
+      approve: true,
+      cancel: gr.cancel ?? true,
+    },
+  },
+  approvalLevel: 4,
+  approvalLimit: null,
+  currencyCode: "THB",
+  createdAt: D,
+  updatedAt: D,
+});
+/** The two rows loadCaller resolves, as a rows[] fragment a test can prepend. */
+const grAuthzRows = (
+  gr: { create?: boolean; edit?: boolean; cancel?: boolean } = {},
+): Array<[RowKey, RowSource]> => [
+  [users, [grUserRow]],
+  [roles, [grRoleRow(gr)]],
+];
+
 /** Base Db stub: canned rows per table (join-aware); capture of write ops. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false, insertThrows } = opts;
+  const { captured = [], inserted = [], updated = [], updateBase = {}, updateEmpty = false, insertThrows } = opts;
+  // B-377: authorized-caller defaults, APPENDED so an explicit per-test override wins.
+  const rows: Array<[RowKey, RowSource]> = [...opts.rows, ...grAuthzRows()];
   const resolve = (src: RowSource, where: SQL | undefined): unknown[] =>
     typeof src === "function" ? src(where) : src;
   const rowsFor = (
@@ -137,19 +199,41 @@ function stubDb(opts: StubOpts): Db {
   const handle: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: unknown) => ({
-        returning: () => {
+      // B-376 FIXTURE AUDIT — this used to capture ONLY the `.returning()` path.
+      // TenantDb.insertThrough() calls .returning(), but the plain scoped
+      // TenantDb.insert() does NOT (tenant-db.ts:226 returns
+      // `db.insert(table).values(row)` and the caller awaits it directly). The
+      // stock_ledger writes go through that second door, so NO insert into
+      // stock_ledger was ever recorded here — which silently made every
+      // `expect(inserted.find(w => w.table === stockLedgers)).toBeFalsy()` in this
+      // file VACUOUS: it could not have failed even if a ledger row were written.
+      // Capturing both doors is what turns those absence assertions, and the
+      // presence assertion in the B-376 block, into real evidence.
+      values: (values: unknown) => {
+        const record = () => {
           const nth = insertCalls.get(table) ?? 0;
           insertCalls.set(table, nth + 1);
           const thrown = insertThrows?.(table, nth);
-          if (thrown) return Promise.reject(thrown);
+          if (thrown) return { thrown, list: [] as unknown[] };
           const list = Array.isArray(values) ? values : [values];
           inserted.push({ table, rows: list });
-          return Promise.resolve(
-            list.map((r) => ({ id: `new-${seq++}`, ...(r as object) })),
-          );
-        },
-      }),
+          return { thrown: undefined, list };
+        };
+        return {
+          returning: () => {
+            const { thrown, list } = record();
+            if (thrown) return Promise.reject(thrown);
+            return Promise.resolve(list.map((r) => ({ id: `new-${seq++}`, ...(r as object) })));
+          },
+          // The awaited-directly door (scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) => {
+            const { thrown, list } = record();
+            return thrown
+              ? Promise.reject(thrown).then(onOk, onErr)
+              : Promise.resolve(list).then(onOk, onErr);
+          },
+        };
+      },
     }),
     update: (table: unknown) => ({
       set: (set: Record<string, unknown>) => ({
@@ -563,6 +647,165 @@ describe("GET /api/v1/gr — auth + list", () => {
 // ---------------------------------------------------------------------------
 // POST /gr — create against a PO or a WO
 // ---------------------------------------------------------------------------
+
+// ===========================================================================
+// B-377 — function-level authorization on the three write doors
+// ===========================================================================
+// Each deny test uses a payload that WOULD otherwise succeed (the same rows as
+// the 201/200 happy paths above/below), so the 403 can only be the gate — a
+// fixture that could not reach the handler would prove nothing about it. Each
+// also asserts NOTHING WAS WRITTEN, because the harm this closes is a stock
+// movement, not a status code.
+describe("gr write doors — B-377 function-level authz", () => {
+  /** The rows a create needs to reach 201; authz is layered on top per test. */
+  const createRows = (): Array<[RowKey, RowSource]> => [
+    [pos, [poRow("approved")]],
+    [prs, [prRow]],
+    [projects, [project]],
+    [prItems, [prLine("l0", "1000")]],
+    [grs, [gr("new-0", { poId: PO, received: 300 })]],
+  ];
+  const createPayload = { po_id: PO, lines: [{ qty_ok: 300, qty_rejected: 0 }] };
+
+  it("POST /gr 403s a caller without gr.create, and writes nothing", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [...grAuthzRows({ create: false }), ...createRows()], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: createPayload });
+    expect(res.statusCode).toBe(403);
+    // Flat {code,message} — the shape every other refusal in the API uses, and a
+    // 4xx so sync_processor.dart dead-letters it instead of stalling the drain.
+    expect(res.json()).toEqual({
+      code: "FORBIDDEN",
+      message: "this action requires the gr create permission",
+    });
+    expect(inserted).toEqual([]);
+  });
+
+  it("POST /gr 201s the SAME payload once gr.create is held (the fixture can reach 201)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [...grAuthzRows({ create: true }), ...createRows()], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: createPayload });
+    expect(res.statusCode).toBe(201);
+    expect(inserted.find((w) => w.table === grs)).toBeDefined();
+  });
+
+  it("POST /gr 403s an UNATTRIBUTABLE caller (no dictionary row) — fail closed", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // No `user` row resolves → loadCaller returns null → no perms at all.
+        db: stubDb({ rows: [[users, []], [roles, []], ...createRows()], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: createPayload });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({
+      code: "FORBIDDEN",
+      message: "caller cannot be attributed",
+    });
+    expect(inserted).toEqual([]);
+  });
+
+  it("POST /gr 403s a caller whose role carries NO gr module at all (absent ≠ granted)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          // The seeded `sale` role's shape: a perms matrix with no gr grants.
+          rows: [
+            [users, [grUserRow]],
+            [roles, [{ ...grRoleRow(), perms: { finance: { view: true, create: true, edit: true, approve: true, cancel: true } } }]],
+            ...createRows(),
+          ],
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: createPayload });
+    expect(res.statusCode).toBe(403);
+    expect(inserted).toEqual([]);
+  });
+
+  it("POST /gr/:id/return 403s without gr.edit, and flips nothing", async () => {
+    const updated: Updated[] = [];
+    const G = gr("g0", { poId: PO });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [...grAuthzRows({ edit: false }), [grs, [G]], [jvs, []]],
+          updated,
+          updateBase: G,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr/g0/return" });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({
+      code: "FORBIDDEN",
+      message: "this action requires the gr edit permission",
+    });
+    expect(updated).toEqual([]);
+  });
+
+  it("POST /gr/:id/cancel 403s without gr.cancel EVEN WITH gr.edit (cancel is the Director's alone)", async () => {
+    const updated: Updated[] = [];
+    const G = gr("g0", { poId: PO });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          // edit granted, cancel withheld — the wh/proc/pm shape. If cancel were
+          // (mis)gated on `edit`, this test would go green wrongly; it is the one
+          // that pins the two doors to DIFFERENT rights.
+          rows: [...grAuthzRows({ edit: true, cancel: false }), [grs, [G]], [jvs, []]],
+          updated,
+          updateBase: G,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr/g0/cancel" });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({
+      code: "FORBIDDEN",
+      message: "this action requires the gr cancel permission",
+    });
+    expect(updated).toEqual([]);
+  });
+
+  it("POST /gr/:id/return 200s with gr.edit but WITHOUT gr.cancel (return is not gated on cancel)", async () => {
+    const updated: Updated[] = [];
+    const G = gr("g0", { poId: PO });
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [...grAuthzRows({ edit: true, cancel: false }), [grs, [G]], [jvs, []]],
+          updated,
+          updateBase: G,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr/g0/return" });
+    expect(res.statusCode).toBe(200);
+    expect(updated.find((u) => u.table === grs)).toBeDefined();
+  });
+
+  it("the gate runs BEFORE the resource lookup — an unknown id is still 403, never 404", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [...grAuthzRows({ cancel: false }), [grs, []]] }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr/does-not-exist/cancel" });
+    expect(res.statusCode).toBe(403);
+  });
+});
 
 describe("POST /api/v1/gr — create receipt", () => {
   it("creates a receipt against a PO (201), aggregating lines into received/rejected", async () => {
@@ -1139,6 +1382,272 @@ describe("POST /api/v1/gr — create receipt", () => {
       })
     ).inject({ method: "POST", url: "/api/v1/gr", payload: receipt(99_999_999) });
     expect(res.statusCode).toBe(201);
+  });
+
+  // ── B-376: the ceiling is bound to THE LINE THAT WRITES STOCK ─────────────────
+  //
+  // B-372's ceiling was unreachable on exactly the shape that moves stock: the
+  // movement is gated on `item_id` while itemDrafts — the ceiling's only input —
+  // was gated on `name`, so display metadata decided whether a money guard ran.
+  // Measured live before the fix: {item_id, qty_ok: 99999999} with no `name`
+  // answered 201, wrote 0 gr_item rows and a +99,999,999 stock_ledger row.
+  //
+  // EVERY FIXTURE HERE MUST BE ABLE TO REACH A STOCK WRITE, which the shared
+  // overReceiptDb above cannot: it stubs neither `warehouse` nor `inventory_item`,
+  // so a stock line would 400 on the axis checks long before the ceiling and prove
+  // nothing about it. stockDb adds exactly those two rows — and the 201 case below
+  // is what demonstrates the fixture really does reach the ledger write.
+  const WAREHOUSE = "99999999-9999-9999-9999-999999999999";
+  const INV_ITEM = "88888888-8888-8888-8888-888888888888";
+  const stockDb = (opts: Parameters<typeof overReceiptDb>[0] & { updated?: Updated[] } = {}) =>
+    stubDb({
+      rows: [
+        [pos, [poRow("approved")]],
+        [prs, [prRow]],
+        [projects, [project]],
+        [prItems, [prLine("l0", opts.orderedQty ?? String(ORDERED))]],
+        [grs, [gr("new-0", { poId: PO, received: 0 })]],
+        [[grItems, pos], cumulativeGrItems(opts.prior ?? [], [])],
+        [[grItems, wos], cumulativeGrItems(opts.priorWo ?? [], [])],
+        [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
+        [vendors, [vendorRow]],
+        [warehouses, [{ id: WAREHOUSE, companyId: COMPANY, name: "คลังกลาง", location: null, code: "WH-01", type: "main", owner: null, capacity: null, createdAt: D, updatedAt: D }]],
+        [inventoryItems, [{ id: INV_ITEM, companyId: COMPANY, warehouseId: WAREHOUSE, code: "CEM-01", cat: null, name: "ปูนซีเมนต์", unit: "ถุง", price: "50.00", currencyCode: "THB", stock: "0", minStock: null, maxStock: null, createdAt: D, updatedAt: D }]],
+      ],
+      inserted: opts.inserted,
+      captured: opts.captured,
+      updated: opts.updated,
+    });
+  /**
+   * A receipt whose line MOVES STOCK, in its now-VALID shape: item_id + the ordered
+   * line it receives against + a name. All three are required together, so the
+   * helper supplies all three and each refusal test below removes exactly one.
+   */
+  const stockReceipt = (
+    qtyOk: number,
+    line: Record<string, unknown> = {},
+  ) => ({
+    po_id: PO,
+    warehouse_id: WAREHOUSE,
+    lines: [
+      { item_id: INV_ITEM, qty_ok: qtyOk, boq_item_id: BOQ_ITEM, name: "ปูนซีเมนต์", ...line },
+    ],
+  });
+
+  it("THE B-376 EXPLOIT, closed: {item_id, qty_ok: 99999999} with no name is refused, nothing written", async () => {
+    // The exact body measured live at 201 before this round, which wrote a
+    // +99,999,999 stock_ledger row and zero gr_item rows.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        warehouse_id: WAREHOUSE,
+        lines: [{ item_id: INV_ITEM, qty_ok: 99_999_999 }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
+  });
+
+  it("a stock line WITH a name is now genuinely ceilinged: 99,999,999 against 100 is 400", async () => {
+    // The other half of the exploit's closure — the shape that IS recordable must
+    // actually hit the ceiling, not merely be accepted for being well-formed.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({ inserted }) })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: stockReceipt(99_999_999) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("over-receipt tolerance");
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+  });
+
+  it("a stock line with NO name is refused — an unrecordable line escapes the CUMULATIVE ceiling", async () => {
+    // MEASURED, not reasoned. With only the boq_item_id refusal in place, NINE units
+    // were received against an order of SIX (ceiling 6.6) on the live seeded stack —
+    // nine consecutive 201s — because the cumulative half of the ceiling reads
+    // gr_item rows and a no-name line writes none, so every repeat measured
+    // prior = 0. The identical sequence WITH a name stopped at 6. Recordability is
+    // therefore part of whether a line may move stock at all.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      // Well within the ceiling — so ONLY the missing name can refuse this.
+      payload: stockReceipt(3, { name: undefined }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("must carry a name");
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+  });
+
+  it("a received stock line IS recorded as gr_item — the row the next receipt's accumulator reads", async () => {
+    // The property the refusal above exists to guarantee. Without a gr_item row
+    // carrying this boq_item_id and received_qty, the cumulative ceiling is blind to
+    // this receipt and the next request starts from zero again.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({ inserted }) })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: stockReceipt(3) });
+    expect(res.statusCode).toBe(201);
+    const items = inserted.find((w) => w.table === grItems);
+    expect(items).toBeTruthy();
+    const row = items!.rows[0] as { boqItemId: string; receivedQty: string };
+    expect(row.boqItemId).toBe(BOQ_ITEM);
+    expect(row.receivedQty).toBe("3");
+  });
+
+  it("a stock line WITHOUT a boq_item_id is refused — it has no ceilingable basis", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, warehouse_id: WAREHOUSE, lines: [{ item_id: INV_ITEM, qty_ok: 5 }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+    expect(res.json().message).toContain("boq_item_id");
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+    // Refused BEFORE the header insert (it is a body-shape check in the parse loop),
+    // so unlike the ceiling this one leaves no gr row even in this non-rolling stub.
+    expect(inserted.find((w) => w.table === grs)).toBeFalsy();
+  });
+
+  it("a stock line against an UN-QUANTIFIED order (pr_item.qty = 0) is refused — it cannot be ceilinged", async () => {
+    // The named-line residual pinned above (no ceiling when ordered = 0) is tolerable
+    // for a line that only records detail. It is NOT tolerable for one that moves
+    // stock: that is the unbounded quantity this whole guard exists to bound, so the
+    // stock-moving variant of the very same order is refused instead.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stockDb({ orderedQty: "0", inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: stockReceipt(99_999_999) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("cannot be ceilinged");
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+  });
+
+  it("a LEGITIMATE stock line still receives: at the ceiling, 201 and the ledger row IS written", async () => {
+    // The discriminating half. Without this the three refusals above could all be
+    // passing because the fixture cannot reach a stock write at all.
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({ inserted }) })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: stockReceipt(CEILING) });
+    expect(res.statusCode).toBe(201);
+    const ledger = inserted.find((w) => w.table === stockLedgers);
+    expect(ledger).toBeTruthy();
+    expect((ledger!.rows[0] as { qty: string }).qty).toBe(String(CEILING.toFixed(4)));
+  });
+
+  it("a line that is BOTH named and stock-moving counts ONCE, not twice", async () => {
+    // The widening's own hazard: if the ceiling summed itemDrafts AND the stock
+    // drafts, this single line would count 2 × CEILING and a legitimate receipt at
+    // the ceiling would start failing. One entry per BODY LINE is what prevents it.
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({}) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: stockReceipt(CEILING, { name: "ปูนซีเมนต์", ordered_qty: ORDERED }),
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("splitting a stock line in two does not evade the widened ceiling", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: stockDb({ inserted }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: {
+        po_id: PO,
+        warehouse_id: WAREHOUSE,
+        lines: [
+          { item_id: INV_ITEM, qty_ok: CEILING, boq_item_id: BOQ_ITEM, name: "ปูนซีเมนต์" },
+          { item_id: INV_ITEM, qty_ok: 1, boq_item_id: BOQ_ITEM, name: "ปูนซีเมนต์" },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("over-receipt tolerance");
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+  });
+
+  it("a PRIOR receipt still counts against a no-name stock line (cumulative, across documents)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stockDb({ prior: [priorLine("p0", ORDERED)], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: stockReceipt(CEILING) });
+    expect(res.statusCode).toBe(400);
+    expect(inserted.find((w) => w.table === stockLedgers)).toBeFalsy();
+  });
+
+  it("the PR row lock now covers a stock-only receipt (the lock must widen with the ceiling)", async () => {
+    // The lock and the ceiling are gated on the SAME condition; widening one without
+    // the other would leave the widened ceiling racing. Asserted by the column the
+    // lock's guarded UPDATE sets, the way the B-372 lock tests do.
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [pos, [poRow("approved")]],
+            [prs, [prRow]],
+            [projects, [project]],
+            [prItems, [prLine("l0", String(ORDERED))]],
+            [grs, [gr("new-0", { poId: PO, received: 0 })]],
+            [[grItems, pos], cumulativeGrItems([], [])],
+            [[grItems, wos], cumulativeGrItems([], [])],
+            [boqItems, [boqItemPriced(BOQ_ITEM, "300.00")]],
+            [vendors, [vendorRow]],
+            [warehouses, [{ id: WAREHOUSE, companyId: COMPANY, name: "คลังกลาง", location: null, code: "WH-01", type: "main", owner: null, capacity: null, createdAt: D, updatedAt: D }]],
+            [inventoryItems, [{ id: INV_ITEM, companyId: COMPANY, warehouseId: WAREHOUSE, code: "CEM-01", cat: null, name: "ปูนซีเมนต์", unit: "ถุง", price: "50.00", currencyCode: "THB", stock: "0", minStock: null, maxStock: null, createdAt: D, updatedAt: D }]],
+          ],
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/gr", payload: stockReceipt(3) });
+    expect(res.statusCode).toBe(201);
+    expect(updated.find((u) => u.table === prs && "updatedAt" in u.set)).toBeTruthy();
+  });
+
+  it("the SHIPPED client shape {qty_ok, qty_rejected} is untouched — no lock, no ceiling, 201", async () => {
+    // apps/web gr-rows.ts buildLines() and apps/mobile st_receive_agg.dart
+    // buildReceiptPayload() both send exactly this: no item_id, no name, no
+    // boq_item_id. It must keep working unchanged, and must still take no PR lock.
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stockDb({ updated }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/gr",
+      payload: { po_id: PO, lines: [{ qty_ok: 99_999_999, qty_rejected: 0 }] },
+    });
+    expect(res.statusCode).toBe(201);
+    // Still no PR row lock: this shape has no ordered-quantity basis, so serialising
+    // storekeepers on it would cost contention for nothing (B-372's own reasoning).
+    expect(updated.find((u) => u.table === prs)).toBeFalsy();
   });
 
   // ── B-323 round 2: the PRODUCTION tie the seed can never reproduce ────────────
