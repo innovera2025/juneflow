@@ -171,6 +171,16 @@ jobs:
       - name: Unit tests (posting rules · BOQ remain · retention · approval matrix · quota · 4-basis work periods)
         if: hashFiles('package.json') != ''
         run: pnpm run --if-present test:unit
+      # B-378 (wei-approved): the line above runs `tests/unit` ONLY — 6 files, 48
+      # cases. Every package suite (apps/api, apps/web, packages/db, and the rest)
+      # hangs off `turbo run test`, which no stage invoked, so ~3,600 cases were
+      # ungated: the pre-promote audit reverted a live money guard and watched all
+      # six stages go green. @juneflow/tests is filtered out because its own `test`
+      # script chains playwright e2e + visual, which need the compose stack Stage 5
+      # brings up — running them here would fail for an environmental reason.
+      - name: Package test suites (apps/api · apps/web · packages/*)
+        if: hashFiles('package.json') != ''
+        run: pnpm exec turbo run test --filter='!@juneflow/tests'
       - name: Pre-scaffold pass
         if: hashFiles('package.json') == ''
         run: echo "No package.json yet — stage passes by design."
@@ -215,6 +225,36 @@ jobs:
       - name: Pre-scaffold pass
         if: hashFiles('tests/e2e/**') == ''
         run: echo "tests/e2e not present yet (P0-QA-03 pending) — stage passes by design."
+
+  flutter-tests:
+    name: "Stage 5b — mobile (Flutter)"
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # B-378 (wei-approved): apps/mobile had NO stage at all. 1,043 tests and
+      # `flutter analyze` were ungated, which is how a tautological phrase test
+      # (B-382) let two staged sacred phrases go missing with the suite green.
+      - name: Set up Flutter
+        if: hashFiles('apps/mobile/pubspec.yaml') != ''
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Resolve packages
+        if: hashFiles('apps/mobile/pubspec.yaml') != ''
+        working-directory: apps/mobile
+        run: flutter pub get
+      - name: Analyze
+        if: hashFiles('apps/mobile/pubspec.yaml') != ''
+        working-directory: apps/mobile
+        run: flutter analyze
+      - name: Tests
+        if: hashFiles('apps/mobile/pubspec.yaml') != ''
+        working-directory: apps/mobile
+        run: flutter test
+      - name: Pre-scaffold pass
+        if: hashFiles('apps/mobile/pubspec.yaml') == ''
+        run: echo "apps/mobile not scaffolded yet — stage passes by design."
 
   visual-gate:
     name: "Stage 6 — visual gate"
