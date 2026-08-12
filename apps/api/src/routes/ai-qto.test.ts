@@ -93,19 +93,49 @@ function stubDb(opts: StubOpts): Db {
   const handle: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: unknown) => ({
-        returning: () => {
+      // B-386 FIXTURE AUDIT (the gr.test.ts / B-376 precedent, applied here).
+      // This used to capture ONLY the `.returning()` path. TenantDb has TWO insert
+      // doors: insertThrough() and insert(...).returning() end in `.returning()`,
+      // but the plain scoped TenantDb.insert() does NOT — db/tenant-db.ts:226-229
+      // returns `db.insert(table).values(row)` and the caller awaits THAT directly.
+      // A row written through the second door hit an object with no `then`, so
+      // `await` resolved to the builder itself and NOTHING was recorded here.
+      //
+      // BE PRECISE ABOUT WHAT THIS BOUGHT IN THIS FILE. ai-qto.ts's only insert
+      // (line 88, the ai_usage meter) already ends in `.returning()`, so neither
+      // absence assertion below was vacuous in practice and neither changed verdict.
+      // What the second door adds is that "402s WITHOUT incrementing" stays evidence
+      // if the meter is ever switched to the bare door — an uncaptured ai_usage
+      // insert would otherwise let a quota-exceeded request bill the tenant silently.
+      // Proven to discriminate: a bare-door ai_usage insert injected into the
+      // over-quota path turns these RED here and leaves them GREEN with the old stub.
+      values: (values: unknown) => {
+        const record = (): { thrown: unknown; list: unknown[] } => {
           const nth = insertCalls.get(table) ?? 0;
           insertCalls.set(table, nth + 1);
           const thrown = insertThrows?.(table, nth);
-          if (thrown) return Promise.reject(thrown);
+          if (thrown) return { thrown, list: [] };
           const list = Array.isArray(values) ? values : [values];
           inserted.push({ table, rows: list });
-          return Promise.resolve(
-            list.map((r) => ({ id: `new-${seq++}`, ...(r as object) })),
-          );
-        },
-      }),
+          return { thrown: undefined, list };
+        };
+        return {
+          returning: () => {
+            const { thrown, list } = record();
+            if (thrown) return Promise.reject(thrown);
+            return Promise.resolve(
+              list.map((r) => ({ id: `new-${seq++}`, ...(r as object) })),
+            );
+          },
+          // The awaited-directly door (scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) => {
+            const { thrown, list } = record();
+            return thrown
+              ? Promise.reject(thrown).then(onOk, onErr)
+              : Promise.resolve(list).then(onOk, onErr);
+          },
+        };
+      },
     }),
     update: (table: unknown) => ({
       set: (set: Record<string, unknown>) => ({
