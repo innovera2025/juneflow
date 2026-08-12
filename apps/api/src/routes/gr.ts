@@ -65,7 +65,7 @@
 //   3. A POSTED receipt can no longer be returned or cancelled (409). See the
 //      note above GrAlreadyPostedError for why, what it costs, and the residual
 //      race that is filed rather than hidden.
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   grs,
@@ -86,6 +86,7 @@ import {
   warehouses,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+import { loadCaller, permAllowed, type CallerAuthz } from "./authz.js";
 import { listEnvelope } from "./list-envelope.js";
 import { entryOrder, newestFirst, stampEntryOrder } from "./list-order.js";
 import { inLockOrder } from "./lock-order.js";
@@ -144,6 +145,110 @@ class GrOverReceiptError extends Error {
     super(detail);
     this.name = "GrOverReceiptError";
   }
+}
+
+// ---------------------------------------------------------------------------
+// B-377 — FUNCTION-LEVEL AUTHORIZATION FOR THE RECEIPT DOORS
+// ---------------------------------------------------------------------------
+// Until this round this file read NO permission at all (`grep -c
+// 'loadCaller|permAllowed' gr.ts` = 0). That was harmless only for as long as a
+// receipt was a bookkeeping record. It is not one any more: B-340 made POST /gr
+// the stock_ledger's INBOUND writer, and B-368 made gl-posting.ts derive a POSTED
+// GL amount from its lines (the `amount: null, // GAP: gr carries QUANTITY, not a
+// money value` note there is gone, replaced by grValue()).
+//
+// PROVEN LIVE on the seeded stack before this guard: a bearer for the `exec` role
+// (ผู้บริหาร / ดูได้อย่างเดียว — "executive / read-only", whose perms row is
+// view-only on EVERY module) was refused 403 on POST /inventory/issues and
+// ACCEPTED 201 on POST /gr, taking MAT-CEM-001 @ คลังกลาง from no ledger row at
+// all to on_hand 1, then erased it again with 200 on POST /gr/:id/cancel. Two
+// doors onto one effect — moving stock — and only one of them was guarded.
+//
+// THE MODULE IS `gr`, NOT `finance`, and that is Wei's ruling rather than a
+// preference. The perms matrix (packages/db seed MODULE_IDS) is
+// [dashboard, boq, pr, po, wo, gr, subcon, inventory, petty, finance, master] —
+// `gr` is its own module at index 5 and every seeded role's grant already encodes
+// the real-world division of labour, so no new module and no widened role is
+// needed:
+//   wh Warehouse      view create edit approve      ← the storekeeper, st-receive
+//   proc Procurement  view create edit approve
+//   dir Director      view create edit approve cancel  ← the ONLY holder of cancel
+//   pm  Project Mgr   view create edit
+//   site Site Eng     view create
+//   acc Accounting    view                          ← read-only
+//   exec ผู้บริหาร     view                          ← read-only (the exploit above)
+//   sale Sales        —
+// Gating on `finance` (as inventory.ts does) would have 403'd the field
+// storekeeper's own st-receive screen, which is POST /gr's PRIMARY caller.
+//
+// THE RIGHT PER DOOR, and the return/cancel split is settled from evidence:
+//   POST /gr            → gr.create. Closes the exploit exactly: exec + acc lose
+//     the door, wh/site/proc/pm/dir keep it. `qty_rejected` on a create line is
+//     the spec's "ตีกลับ" (FUNCTIONS.md:72 / flows.html:39 — reject AT RECEIPT,
+//     generating a defect report and notifying the vendor), so the storekeeper's
+//     reject path rides on `create` and needs nothing further.
+//   POST /gr/:id/return → gr.edit (wh, proc, pm, dir). This is NOT the spec's
+//     receipt-time ตีกลับ above; it is the prototype's separate "คืนสินค้าให้
+//     ผู้ขาย" (gr.jsx:158 → forms.jsx:119 openReturnGR → ReturnForm:523), an
+//     AMENDMENT to a receipt already recorded. The prototype raises it with
+//     "บันทึก + ส่งอนุมัติ" and a `รออนุมัติ` toast, and RETURN_ROWS carry
+//     status pending|approved (gr.jsx:11-15) — but that pending/approved lifecycle
+//     belongs to the RT-#### RETURN DOCUMENT, an entity this API does not model at
+//     all. What this endpoint actually does is flip the GR and reverse its stock,
+//     which is an edit of the receipt by its operational owners. It is also
+//     already impossible once the cost is posted (409 on a posted GR, B-368), so
+//     it can only ever unwind an unposted receipt.
+//   POST /gr/:id/cancel → gr.cancel (dir ONLY). The prototype reaches it through
+//     the GENERIC cancelDoc (forms.jsx:72, shared by every document), which
+//     REQUIRES a reason "จะถูกบันทึกใน audit log" and states the act "คืนงบ +
+//     ยกเลิกการผูกพัน โดยอัตโนมัติ — ไม่สามารถย้อนกลับได้" (restores budget,
+//     releases the commitment, IRREVERSIBLE). The seed gives `cancel` to the
+//     Director alone on every one of the 11 modules, so honouring it here follows
+//     the matrix's own consistent intent rather than inventing a policy. It
+//     strands no flow: a storekeeper who receives in error still has the `return`
+//     remedy above, and no mobile client calls either door.
+//
+// Neither the Approval Matrix (flows.html:84-93) nor FUNCTIONS.md rules on GR
+// return/cancel — they carry no row for either — so the seeded matrix is the only
+// evidence with an opinion, and this follows it.
+//
+// Resolution is fail-closed exactly like ownerOnly/requireFinance: an
+// unattributable caller (no session, no dictionary row, no role) has no perms and
+// is denied.
+
+/** The perms-matrix module (seed MODULE_IDS index 5) that governs goods receipts. */
+const GR_MODULE = "gr";
+
+/** Flat 403 FORBIDDEN error — the same shape inventory.ts/ar.ts send. */
+function forbidden(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(403).send({ code: "FORBIDDEN", message });
+}
+
+/**
+ * Fail-closed gate: the caller must be attributable AND carry the given `gr`
+ * right. Returns the resolved caller or null after sending the 403, so the handler
+ * bails with `if (!(await requireGr(...))) return reply;` (the inventory.ts shape).
+ *
+ * 403 and NOT 5xx deliberately: apps/mobile/lib/offline/sync_processor.dart
+ * dead-letters a 4xx but DEFERS a 5xx and stops the whole offline drain, so a
+ * denied receipt must be a terminal client answer rather than something that
+ * wedges a field phone's queue behind it.
+ */
+async function requireGr(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  right: "create" | "edit" | "cancel",
+): Promise<CallerAuthz | null> {
+  const caller = await loadCaller(request);
+  if (!caller) {
+    forbidden(reply, "caller cannot be attributed");
+    return null;
+  }
+  if (!permAllowed(caller.perms, GR_MODULE, right)) {
+    forbidden(reply, `this action requires the gr ${right} permission`);
+    return null;
+  }
+  return caller;
 }
 
 /**
@@ -728,6 +833,10 @@ export function registerGrRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-377: recording a receipt MOVES STOCK and originates a postable cost.
+    // FIRST statement after the tenant check — ahead of every parse, read and
+    // state gate, so a caller without the right cannot probe this door.
+    if (!(await requireGr(request, reply, "create"))) return reply;
 
     const body = (request.body ?? {}) as Record<string, unknown>;
     const poId = str(pick(body, "po_id", "poId")).trim();
@@ -1490,6 +1599,9 @@ export function registerGrRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-377: an amendment to a recorded receipt that reverses its stock — the
+    // receipt's operational owners (wh/proc/pm/dir). Reasoning above requireGr.
+    if (!(await requireGr(request, reply, "edit"))) return reply;
 
     const { id } = request.params as { id: string };
     const found = await findGr(db, id);
@@ -1570,6 +1682,9 @@ export function registerGrRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-377: the irreversible one (คืนงบ + ยกเลิกการผูกพัน) — Director only, the
+    // sole holder of `cancel` in the seeded matrix. Reasoning above requireGr.
+    if (!(await requireGr(request, reply, "cancel"))) return reply;
 
     const { id } = request.params as { id: string };
     const found = await findGr(db, id);
