@@ -104,18 +104,41 @@ function stubDb(opts: StubOpts): Db {
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
-        returning: () => {
+      // B-386 FIXTURE AUDIT (the gr.test.ts / B-376 precedent, applied here).
+      // This used to capture ONLY the `.returning()` path. TenantDb has TWO insert
+      // doors: insertThrough() and insert(...).returning() end in `.returning()`,
+      // but the plain scoped TenantDb.insert() does NOT — db/tenant-db.ts:226-229
+      // returns `db.insert(table).values(row)` and the caller awaits THAT directly.
+      // A row written through the second door hit an object with no `then`, so
+      // `await` resolved to the builder itself and NOTHING was recorded here —
+      // which would silently make every `expect(inserted.find(...)).toBeUndefined()`
+      // below vacuous for such a write: it could not fail however the handler behaved.
+      //
+      // BE PRECISE ABOUT WHAT THIS BOUGHT IN THIS FILE. Every insert land-sales.ts
+      // performs today already ends in `.returning()` (lines 449/480/572/707/718/
+      // 818/821/922/932/1006/1015), so no assertion below was vacuous in practice and
+      // none changed verdict when this landed. What the second door adds is that the
+      // absence assertions stay evidence if a write is ever switched to the bare door
+      // — the money handlers here post revenue, and a silently-uncaptured JV insert is
+      // exactly the defect this file exists to catch. Proven to discriminate: a
+      // bare-door jvs insert injected into the deny path turns these RED with this
+      // stub and leaves them GREEN with the `.returning()`-only one.
+      values: (values: Record<string, unknown> | Record<string, unknown>[]) => {
+        const record = () => {
           inserted.push({ table, values });
           const arr = Array.isArray(values) ? values : [values];
-          return Promise.resolve(
-            arr.map((v) => {
-              const row = v as Record<string, unknown>;
-              return { id: row.id ?? `new-${seq++}`, createdAt: D0, ...row };
-            }),
-          );
-        },
-      }),
+          return arr.map((v) => {
+            const row = v as Record<string, unknown>;
+            return { id: row.id ?? `new-${seq++}`, createdAt: D0, ...row };
+          });
+        };
+        return {
+          returning: () => Promise.resolve(record()),
+          // The awaited-directly door (scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+            Promise.resolve(record()).then(onOk, onErr),
+        };
+      },
     }),
     update: (table: unknown) => ({
       set: (set: Record<string, unknown>) => ({

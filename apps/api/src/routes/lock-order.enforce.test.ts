@@ -429,6 +429,83 @@ describe("B-340 · every lock taker on inventory_item acquires ascending", () =>
     ).toBeLessThan(ledger);
   });
 
+  it("keeps the BOQ cut-remain ASCENDING by item id, and guarded (B-379)", () => {
+    // THE SECOND ORDERED TABLE, and it needs its own check because the registry above
+    // derives its population from the FK children of `inventory_item` — a boq_item entry
+    // would fail that derivation rather than document anything (lock-order.ts says so).
+    //
+    // What generate-PR does: cut each selected item's remain_qty with a compare-and-swap,
+    // ONE guarded UPDATE per item, where the previous code was one bulk CASE statement.
+    // A single statement locks in its own scan order, which two concurrent copies share;
+    // N statements take the order the caller wrote, which was the client's item_ids[]
+    // body order. Measured: two sessions updating boq_item X-then-Y and Y-then-X deadlock
+    // (PG 40P01, ROLLBACK). So the loop must iterate a SORTED list, and the UPDATE must
+    // carry the old-value predicate that makes the loser match 0 rows.
+    //
+    // Blind spot 1 from the header applies here too: this reads the SOURCE — that the
+    // sorted array is what the loop consumes, and that the update passes a guard. It does
+    // not prove the comparator is ascending (asserted separately below for inLockOrder,
+    // and here by reading the `<`/`>` comparator out of the sort) or that the guard names
+    // the value the ceiling was decided against. Those are read-and-believe, and boq.ts
+    // states them.
+    const boqPath = "apps/api/src/routes/boq.ts";
+    const text = readFileSync(join(REPO_ROOT, boqPath), "utf8");
+    const sf = ts.createSourceFile(boqPath, text, ts.ScriptTarget.ES2022, true);
+
+    // The generate-PR transaction callback = the one whose body writes pr_item.
+    let body: string | undefined;
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "transaction" &&
+        node.arguments.length === 1
+      ) {
+        const arg = codeOnly(node.arguments[0]!.getText(sf));
+        if (arg.includes("prItems")) body = arg.replace(/\s+/g, "");
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    expect(
+      body,
+      "no db.transaction callback in boq.ts writes pr_item — generate-PR was " +
+        "restructured, so the cut-remain claims have to be re-read, not re-run",
+    ).toBeDefined();
+
+    // The cut is a guarded per-item UPDATE, not a predicate-less bulk write. The bulk
+    // door (updateThroughChainMany) takes NO predicate at all, so its return here would
+    // silently reopen B-379: eight racers, eight 201s, 80 units requisitioned against a
+    // budget decremented by 30 (measured on the seeded stack at 2245b73).
+    expect(
+      body!.includes("updateThroughChain(boqItems,"),
+      "generate-PR no longer cuts remain_qty through the GUARDED per-item door. The " +
+        "cut is a read-then-write: without the old value in the final UPDATE's WHERE, " +
+        "concurrent callers all pass the ceiling and the last absolute write wins.",
+    ).toBe(true);
+    expect(
+      body!.includes("updateThroughChainMany("),
+      "generate-PR is cutting remain_qty through the BULK door again. It takes no " +
+        "predicate, which is exactly the shape B-379 closed.",
+    ).toBe(false);
+
+    // The loop consumes the SORTED array. `cuts` is built outside the transaction (the
+    // reads that decide the writes stay outside it), so the sort is asserted on the file.
+    const flat = codeOnly(text).replace(/\s+/g, "");
+    expect(
+      /constcuts=lines\.map\(.*\)\.sort\(byIdAsc\);/.test(flat),
+      "the cut plan is no longer built by sorting `lines` ascending on item id. N " +
+        "separate UPDATEs take the order the caller wrote them in — the client's " +
+        "item_ids[] body order — and two overlapping selections in opposite directions " +
+        "deadlock (measured: PG 'deadlock detected … in relation \"boq_item\"').",
+    ).toBe(true);
+    expect(
+      body!.includes("for(constcutofcuts)"),
+      "the cut loop no longer iterates `cuts` — whatever it iterates now is not the " +
+        "sorted plan the ordering claim is about.",
+    ).toBe(true);
+  });
+
   it("probes inLockOrder: the guard token names a real ascending sort", () => {
     // The registry's `guard: "sort"` entries are only worth the token if the token still
     // sorts. A comparator emptied out would leave every one of them passing.

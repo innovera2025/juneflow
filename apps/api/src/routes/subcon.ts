@@ -56,7 +56,7 @@
 // updateThroughChain() (resolves the target THROUGH the chain to the tenant root,
 // then updates only the resolved ids — a foreign id resolves to nothing → 404 and
 // is never written). Without a resolved tenant, request.db is absent → 401.
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   subconContracts,
@@ -76,6 +76,7 @@ import {
   prs,
 } from "@juneflow/db/schema";
 import type { TenantDb } from "../db/tenant-db.js";
+import { loadCaller, permAllowed, type CallerAuthz } from "./authz.js";
 import { round2 } from "./money.js";
 import { listEnvelope } from "./list-envelope.js";
 import { byIdAsc, newestFirst } from "./list-order.js";
@@ -92,6 +93,122 @@ type ApBillingRow = typeof apBillings.$inferSelect;
 type GrRow = typeof grs.$inferSelect;
 type PmWorkOrderRow = typeof pmWorkOrders.$inferSelect;
 type PmAssetRow = typeof pmAssets.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// B-380 — FUNCTION-LEVEL AUTHORIZATION FOR THE SUBCON WRITE DOORS
+// ---------------------------------------------------------------------------
+// Until this round this file read NO permission at all: `grep -c
+// "loadCaller\|permAllowed\|requireFinance" subcon.ts` was 0, on a file that mints
+// an ap_billing and a retention_ledger row.
+//
+// PROVEN LIVE on the seeded stack at 2245b73, before this gate: a bearer for the
+// `wh` Warehouse role — whose stored subcon perms row is
+// {view:false, create:false, edit:false, approve:false, cancel:false}, i.e. NO
+// right of any kind on this module — drove the entire money path end to end.
+// POST /subcon-contracts 201 (value 1,000,000), POST /periods/{id}/deliver 200,
+// POST /periods/{id}/inspect{result:pass} 200, POST /periods/{id}/approve-payment
+// 200. Read back out of Postgres: ap_billing.amount 9,999,990.00 and
+// retention_ledger.withheld 99,999,800.00, status `held`, against a contract worth
+// 1,000,000.00. Four doors onto a payable, and not one of them looked at a perm.
+//
+// THE MODULE IS `subcon`, and it is not a choice this round made. The perms matrix
+// (packages/db seed MODULE_IDS, transcribed from master.jsx's MODULES_LBL) is
+// [dashboard, boq, pr, po, wo, gr, subcon, inventory, petty, finance, master] —
+// `subcon` is its own column at index 6. B-377 set the precedent on the same class
+// one round earlier: use the module the matrix already has rather than invent one,
+// and never widen a role or touch the seed to make a gate fit. Every seeded role's
+// subcon grant, read out of the running DB:
+//   dir  Director        view create edit approve cancel   ← the only approve/cancel
+//   site Site Engineer   view create edit                  ← the on-site role
+//   pm   Project Manager view
+//   proc Procurement Mgr view
+//   acc  Accounting      view
+//   finmgr Finance Mgr   view          (migration 0026, clones `acc`)
+//   exec ผู้บริหาร        view          (read-only by design)
+//   wh   Warehouse       —             ← the exploit identity above
+//   sale Sales / REM     —
+//
+// THE RIGHT PER DOOR:
+//   POST /subcon-contracts    → subcon.create (site, dir). Creating a contract sets
+//     `value` and `retention_pct`, which are the two operands every later payment is
+//     computed from — it is the origin of the commitment, not a note about one.
+//   POST /periods/:id/deliver → subcon.edit (site, dir). It records the
+//     contractor's submission against an existing period (flows.html L46
+//     "ผู้รับเหมาส่งมอบ + เอกสาร/รูป"); its live caller is the mobile field-progress
+//     screen, which is the site engineer's phone.
+//   POST /periods/:id/inspect → subcon.edit (site, dir). flows.html MATRIX row
+//     "รับงวดงาน (ตรวจรับ)" col 1 is โฟร์แมน (ตรวจหน้างาน) and FUNCTIONS.md:108
+//     puts the same act on the foreman's mobile — the on-site role, which in the
+//     seed is Site Engineer. NOT subcon.approve: the MATRIX puts the inspection and
+//     the payment approval in two different columns held by two different people.
+//   POST /defects/:id/fix     → subcon.edit (site, dir). flows.html L47
+//     "ผู้รับเหมาแก้ไข (กำหนดเวลา)" — recorded on site against an open defect.
+//   POST /defects/:id/recheck → subcon.edit (site, dir). L47 "ตรวจซ้ำ" — the same
+//     foreman act as inspect, one level down the tree.
+//   POST /periods/:id/approve-payment → subcon.approve (dir ONLY). This is the
+//     money: it writes the ap_billing, the retention hold and the `paid` flip. The
+//     seed gives `approve` on subcon to the Director alone, and B-377 took exactly
+//     this reading for `cancel` — honour the matrix's own consistent intent rather
+//     than invent a policy.
+//
+// AND THE ONE CONFLICT THIS DOES NOT GET TO SETTLE, stated rather than papered
+// over: flows.html MATRIX row "รับงวดงาน (ตรวจรับ)" col 2 names ผจก.โครงการ as the
+// payment approver ("อนุมัติจ่าย"), while the seeded matrix gives Project Manager
+// only `view` on subcon. Two spec sources, opposite answers, and PLAN.md §0 says a
+// conflict is Wei's. The gate above takes the FAIL-CLOSED side of it — dir-only —
+// because an over-tight door is a 403 somebody reports while an open one mints
+// payables. The consequence is real and is reported, not hidden: apps/web
+// login-screen.tsx prefills somchai@rungrueang.co.th (the PM), so a browser signed
+// in as the default identity now gets 403 on create / inspect / accept, and only
+// `dir` completes the AcceptForm chain. If Wei rules for the MATRIX, the change is
+// one line — `callerApprovalLevel(request) >= 3` (the ผจก.โครงการ tier, the
+// mechanism boq.ts/pr.ts/po.ts already use for a MATRIX-named tier) in place of the
+// permAllowed call — and it needs no other edit.
+//
+// READS ARE NOT GATED, deliberately and for the same reason B-377 gated only the
+// write doors: GET /acceptance-center is a FOUR-feed screen (period / pm / house /
+// gr), so a subcon.view gate on it would also take the GR feed away from the
+// warehouse — a strictly wider change than the hole being closed, on a door that
+// mints nothing.
+//
+// Resolution is fail-closed exactly like ownerOnly/requireFinance/requireGr: an
+// unattributable caller (no session, no dictionary row, no role) has no perms and
+// is denied.
+
+/** The perms-matrix module (seed MODULE_IDS index 6) that governs subcon work. */
+const SUBCON_MODULE = "subcon";
+
+/** Flat 403 FORBIDDEN error — the same shape gr.ts / inventory.ts / ar.ts send. */
+function forbidden(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(403).send({ code: "FORBIDDEN", message });
+}
+
+/**
+ * Fail-closed gate: the caller must be attributable AND carry the given `subcon`
+ * right. Returns the resolved caller, or null after sending the 403 — so a handler
+ * bails with `if (!(await requireSubcon(...))) return reply;` (the gr.ts shape).
+ *
+ * 403 and NOT 5xx deliberately: apps/mobile/lib/offline/sync_processor.dart
+ * dead-letters a 4xx but DEFERS a 5xx and stops the whole offline drain, so a
+ * denied delivery must be a terminal client answer rather than something that
+ * wedges a foreman's queue behind it.
+ */
+async function requireSubcon(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  right: "create" | "edit" | "approve",
+): Promise<CallerAuthz | null> {
+  const caller = await loadCaller(request);
+  if (!caller) {
+    forbidden(reply, "caller cannot be attributed");
+    return null;
+  }
+  if (!permAllowed(caller.perms, SUBCON_MODULE, right)) {
+    forbidden(reply, `this action requires the subcon ${right} permission`);
+    return null;
+  }
+  return caller;
+}
 
 /** work_period_basis enum (schema C2): percent | distance(m) | milestone | unit. */
 const PERIOD_BASES = new Set(["percent", "distance", "milestone", "unit"]);
@@ -646,6 +763,11 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-380: creating a contract fixes `value` and `retention_pct` — the two
+    // operands every later payment is computed from. FIRST statement after the
+    // tenant check, ahead of every parse and read, so an unauthorized caller
+    // cannot probe this door.
+    if (!(await requireSubcon(request, reply, "create"))) return reply;
 
     const body = (request.body ?? {}) as Record<string, unknown>;
     const projectId = str(pick(body, "project_id", "projectId")).trim();
@@ -833,6 +955,9 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-380: records the contractor's submission against an existing period
+    // (flows.html L46). Its live caller is the mobile field-progress screen.
+    if (!(await requireSubcon(request, reply, "edit"))) return reply;
 
     const { id } = request.params as { id: string };
     const resolved = await resolvePeriod(db, id);
@@ -921,6 +1046,10 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-380: the on-site inspection — flows.html MATRIX "รับงวดงาน (ตรวจรับ)" col 1
+    // โฟร์แมน, FUNCTIONS.md:108 the foreman's mobile. NOT `approve`: the MATRIX
+    // holds the inspection and the payment approval in two different columns.
+    if (!(await requireSubcon(request, reply, "edit"))) return reply;
 
     const { id } = request.params as { id: string };
     const body = (request.body ?? {}) as Record<string, unknown>;
@@ -1103,6 +1232,12 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-380: THE MONEY DOOR — it writes the ap_billing, the retention hold and the
+    // `paid` flip. `approve` on subcon is the Director's alone in the seeded
+    // matrix. See the conflict noted above requireSubcon: flows.html names
+    // ผจก.โครงการ here and the matrix does not give the PM the right; this takes
+    // the fail-closed side and reports it.
+    if (!(await requireSubcon(request, reply, "approve"))) return reply;
 
     const { id } = request.params as { id: string };
     const resolved = await resolvePeriod(db, id);
@@ -1223,6 +1358,8 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-380: flows.html L47 "ผู้รับเหมาแก้ไข" — recorded on site against a defect.
+    if (!(await requireSubcon(request, reply, "edit"))) return reply;
 
     const { id } = request.params as { id: string };
     const [defect] = await db.selectThrough(defects, DEFECT_HOPS, eq(defects.id, id));
@@ -1258,6 +1395,8 @@ export function registerSubconRoute(app: FastifyInstance): void {
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
+    // B-380: flows.html L47 "ตรวจซ้ำ" — the foreman act, one level down the tree.
+    if (!(await requireSubcon(request, reply, "edit"))) return reply;
 
     const { id } = request.params as { id: string };
     const [defect] = await db.selectThrough(defects, DEFECT_HOPS, eq(defects.id, id));
