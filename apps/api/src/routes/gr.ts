@@ -1181,9 +1181,18 @@ export function registerGrRoute(app: FastifyInstance): void {
     // this set drives the B-360 "is it a line of THIS order?" check, the tenant-
     // scoped price read, the population of orderedQtyByBoqItem, and therefore both
     // the PR row lock and the ceiling. Adding a stock line's id to the ORDERABLE
-    // check is not optional — without it an id that is not on the order would fall
-    // through to `ordered = 0` and be skipped by the ceiling, which is the same
-    // vacuous guard in a new disguise.
+    // check guards against an id that is not on the order falling through to
+    // `ordered = 0` and being skipped by the ceiling — the same vacuous guard in a
+    // new disguise.
+    //
+    // BUT AS SHIPPED IT IS REDUNDANT, AND SAYING OTHERWISE WOULD BE THE DEFECT THIS
+    // ROUND EXISTS TO REMOVE. The `!name` refusal above means `movesStock ⟹ name`,
+    // so `ceilingDrafts` and the `boqItemId != null` subset of `itemDrafts` are the
+    // same set with the same quantities — gate-4.5 measured it: this is one of only
+    // two mutations in the diff that survive its own revert (122/122 green). It is
+    // kept because it becomes load-bearing the moment the `!name` refusal is
+    // relaxed, which is exactly the change a later reader is most likely to make.
+    // Do not delete it; do not trust it to be catching anything today either.
     const boqItemIds = [
       ...new Set(
         [...itemDrafts.map((d) => d.boqItemId), ...ceilingDrafts.map((d) => d.boqItemId)].filter(
