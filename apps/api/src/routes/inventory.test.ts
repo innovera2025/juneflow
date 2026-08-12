@@ -1447,7 +1447,20 @@ describe("POST /api/v1/inventory/issues — B-312 idempotency (client key + repl
     const world = idempWorld({
       inserted,
       keyedResolve: () => [],
-      insertThrows: (table) => (table === materialIssues ? uniqueViolation() : null),
+      // B-386: the throw is narrowed to the FIRST material_issue insert (nth 0)
+      // instead of firing on every one. It has to be the first: the colliding row
+      // here belongs to ANOTHER tenant, so this handler's one-and-only insert is the
+      // one that hits the index — unlike a replay, where the collision is a second
+      // insert by the SAME caller. Unconditional was the problem, not the position.
+      //
+      // WHY IT MATTERS: a throwing insert is deliberately not recorded (see stubDb —
+      // a rejected insert wrote no row). So while EVERY material_issue insert threw,
+      // `inserted.filter(materialIssues)` was empty by construction and the
+      // toHaveLength(0) below could not fail however this handler behaved. Narrowed,
+      // any SECOND insert — a catch path that retried, or fabricated the issue it
+      // failed to resolve — now lands in `inserted` and turns that assertion red.
+      insertThrows: (table, nth) =>
+        table === materialIssues && nth === 0 ? uniqueViolation() : null,
     });
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
