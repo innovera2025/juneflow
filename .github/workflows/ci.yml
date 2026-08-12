@@ -295,7 +295,12 @@ jobs:
     # main is locked: this job merges into dev ONLY and never pushes to main —
     # dev -> main promotion is done manually by Wei (branch protection on main).
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
-    needs: visual-gate
+    # B-378: `needs:` is the ONLY ordering GitHub Actions has, so a stage outside
+    # this list executes and blocks nothing — it goes red AFTER the merge. The
+    # first version of this commit added flutter-tests as a sibling leaf and
+    # reproduced exactly the defect it exists to remove. Every gating stage must
+    # appear here; visual-gate transitively covers stages 1-5.
+    needs: [visual-gate, flutter-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write
