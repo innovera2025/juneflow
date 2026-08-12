@@ -79,6 +79,37 @@
 // ATTENDANCE_COSTED_DAY_CONSTRAINT comment was written to avoid, reintroduced by a
 // different mechanism.
 
+// THE SECOND TABLE WITH AN ORDER: `boq_item` (B-379), and it is a SEPARATE order that
+// does not touch the one above. It is written here because this file is where the next
+// person will look, and because the mechanism differs from inventory_item's in a way
+// that is easy to get backwards — as the first draft of the B-379 comment did.
+//
+// WHAT TAKES THE LOCK. boq.ts generate-PR cuts each selected item's `remain_qty` with a
+// compare-and-swap, one guarded UPDATE per item, where the code it replaced was ONE bulk
+// CASE statement. A single statement locks the rows it touches in its own scan order,
+// which two concurrent copies of that statement share; N statements take the order the
+// caller wrote them in, which was the client's `item_ids[]` body order. So the loop is
+// what created the hazard, and it holds the invariant by SORTING — ascending by item id,
+// the same direction and for the same reason as above.
+//
+// MEASURED, not asserted: two psql sessions updating boq_item X-then-Y and Y-then-X with
+// a sleep between produced `ERROR: deadlock detected … while updating tuple in relation
+// "boq_item"` and a ROLLBACK on the second. Ascending, they both commit.
+//
+// WHAT IS *NOT* TRUE HERE, probed because the wrong version is the intuitive one:
+// `pr_item.boq_item_id` and `gr_item.boq_item_id` are FKs, so INSERT INTO either takes
+// FOR KEY SHARE on the referenced boq_item row — exactly the shape that makes an
+// UPDATE-after-INSERT a KEY-SHARE-to-exclusive UPGRADE on inventory_item. It does not
+// upgrade on boq_item: `remain_qty` belongs to no key, so its UPDATE takes FOR NO KEY
+// UPDATE, which is COMPATIBLE with FOR KEY SHARE. Two psql sessions that each inserted a
+// pr_item referencing the same boq_item and then updated its remain_qty BOTH committed.
+// The upgrade above exists because inventory.ts takes an explicit FOR UPDATE
+// (selectForUpdate); nothing takes FOR UPDATE on boq_item. Hence there is no
+// cross-statement POSITION rule for the boq cut — only the ascending one — and hence no
+// WRITERS entry below: that registry derives its population from the FK children of
+// inventory_item, and a boq_item row in it would fail the derivation, not document it.
+// The boq ordering is pinned instead by its own test in lock-order.enforce.test.ts.
+
 /**
  * A copy of `rows` in the repo-wide lock order: ASCENDING by `itemId` (never mutates).
  *

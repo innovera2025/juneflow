@@ -63,11 +63,25 @@ interface StubOpts {
   updated?: Updated[];
   /** Base row merged with the update SET to synthesize the RETURNING row. */
   updateBase?: Record<string, unknown>;
+  /**
+   * Tables whose UPDATE ... RETURNING resolves to NO ROWS — i.e. the guarded write
+   * MISSED. Without this the stub always hands back one row, so every 0-row branch
+   * (B-149's stale-state guards, B-379's cut compare-and-swap) is unreachable and a
+   * test that claims to exercise one cannot fail. Mirrors gr.test.ts's updateEmpty.
+   */
+  updateEmptyFor?: unknown[];
 }
 
 /** Base Db stub: canned rows per table for reads; capture of write ops. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const {
+    rows,
+    captured = [],
+    inserted = [],
+    updated = [],
+    updateBase = {},
+    updateEmptyFor = [],
+  } = opts;
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
@@ -106,6 +120,7 @@ function stubDb(opts: StubOpts): Db {
         where: (where: SQL) => ({
           returning: () => {
             updated.push({ table, set, where });
+            if (updateEmptyFor.includes(table)) return Promise.resolve([]);
             return Promise.resolve([{ ...updateBase, ...set }]);
           },
         }),
@@ -1027,16 +1042,119 @@ describe("POST /api/v1/boq/:id/generate-pr — split + cut-remain", () => {
     const prLines = inserted.filter((w) => w.table === prItems);
     expect((prLines[0]!.rows[0] as { boqItemId: string }).boqItemId).toBe("im");
 
-    // Cut-remain: a SINGLE bulk CASE update decrements every PR'd item's
-    // remain_qty (10−5, 8−3 → both "5") in one statement — not one update per
-    // row (0024 perf fix, updateThroughChainMany). The CASE binds each item id
-    // with its new remainder; the WHERE scopes to the resolved ids.
+    // Cut-remain (B-379): ONE GUARDED update per PR'd item — 10−5 and 8−3, both
+    // "5" — replacing the single bulk CASE statement the 0024 perf pass had left
+    // here. The bulk door (updateThroughChainMany) accepts NO predicate, and this
+    // write is a read-then-write: its ceiling was checked against a remain_qty read
+    // outside the transaction, so without the old value in the final UPDATE's own
+    // WHERE every concurrent caller passes and the last absolute write wins.
+    // Measured on the seeded stack before the change: 8 racers on one epoch-ms
+    // barrier, 8×201, 8 pr_item rows, 80 units requisitioned, remain cut by 30.
     const remainWrites = updated.filter((u) => u.table === boqItems);
-    expect(remainWrites).toHaveLength(1);
-    const caseParams = paramsOf(remainWrites[0]!.set.remainQty as SQL);
-    expect(caseParams).toEqual(expect.arrayContaining(["im", "is", "5"]));
-    const whereParams = paramsOf(remainWrites[0]!.where);
-    expect(whereParams).toEqual(expect.arrayContaining(["im", "is"]));
+    expect(remainWrites).toHaveLength(2);
+    // Each SET carries a PLAIN new remainder (no CASE expression to decode).
+    expect(remainWrites.map((w) => w.set.remainQty)).toEqual(["5", "5"]);
+    // …and each final WHERE ends with the remain_qty the cut was DECIDED AGAINST.
+    // That trailing param is the compare-and-swap and the only thing here that can
+    // fail: updateThroughChain composes `and(inArray(id, <resolved ids>), guard)`,
+    // and this stub's resolve ignores the predicate and hands back EVERY canned row,
+    // so the id half of that WHERE is the stub's list, not the handler's choice —
+    // asserting on it would pass with the guard deleted. The old value cannot come
+    // from anywhere but the guard. im's remain was "10", is's "8" (the item()
+    // factory seeds remainQty = qty), and their order is the ascending cut order.
+    expect(remainWrites.map((w) => paramsOf(w.where).at(-1))).toEqual(["10", "8"]);
+  });
+
+  // B-379 — the losing racer. The stub always handed back one updated row, which
+  // made this branch unreachable; `updateEmptyFor` is what lets the guard MISS.
+  it("409s CONCURRENT_UPDATE when the cut's compare-and-swap matches no row", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM]],
+            [projects, [project]],
+            [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+          inserted,
+          updated,
+          updateBase: IM,
+          // remain_qty moved under this caller: the guarded UPDATE matches 0 rows.
+          updateEmptyFor: [boqItems],
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      payload: { item_ids: ["im"], qty: { im: 5 } },
+    });
+
+    // 409 and NOT 5xx: sync_processor.dart dead-letters a 4xx but DEFERS a 5xx,
+    // which would wedge a field phone's whole offline drain behind one lost race.
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("CONCURRENT_UPDATE");
+    // The cut was ATTEMPTED — the refusal follows a write that matched nothing,
+    // not a write that never ran. (What makes a real write match nothing is the
+    // old-value predicate, and that is asserted by the two tests above: this stub
+    // returns [] whatever the WHERE says, so deleting the guard leaves this green.)
+    expect(updated.filter((u) => u.table === boqItems)).toHaveLength(1);
+    // And nothing was issued. NOTE precisely what this proves: the stub's
+    // `transaction` runs the callback against the same handle with no BEGIN/COMMIT,
+    // so it cannot roll anything back — an empty `inserted` here proves the cut runs
+    // BEFORE the PR writes, not that they were undone. The rollback itself is proven
+    // live (8-racer barrier: exactly one pr row, no orphan pr headers).
+    expect(inserted.filter((w) => w.table === prs)).toHaveLength(0);
+    expect(inserted.filter((w) => w.table === prItems)).toHaveLength(0);
+  });
+
+  // B-379 — N separate UPDATEs take the order the caller wrote them in. Two
+  // generate-PR calls whose selections overlap in opposite directions deadlock
+  // (measured: PG "deadlock detected … in relation \"boq_item\""), so the cut plan
+  // is sorted ascending by item id regardless of the body order.
+  it("cuts remain in ASCENDING item-id order even when item_ids arrive descending", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [boqDocs, [D0]],
+            [boqItems, [IM, IS]],
+            [projects, [project]],
+            [prs, []],
+            [users, [userRow]],
+            [roles, [prCreatorRole]],
+          ],
+          updated,
+          updateBase: IM,
+        }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/boq/d0/generate-pr",
+      // "is" > "im", so body order here is DESCENDING — the hazardous direction.
+      // Distinct quantities so each cut is identifiable by its own numbers (both
+      // items are otherwise cut to the same remainder, which would prove nothing).
+      payload: { item_ids: ["is", "im"], qty: { is: 3, im: 4 } },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const cuts = updated
+      .filter((u) => u.table === boqItems)
+      // The trailing WHERE param is the guard's old remain_qty — im was 10, is was
+      // 8. The id half of that WHERE is the stub's unfiltered resolve, so it cannot
+      // tell the two cuts apart; the old value can.
+      .map((u) => [paramsOf(u.where).at(-1), u.set.remainQty]);
+    expect(cuts).toEqual([
+      ["10", "6"], // im first — 10 − 4
+      ["8", "5"], // then is — 8 − 3
+    ]);
   });
 
   it("single category (only Material) → one PR, no subcon PR", async () => {

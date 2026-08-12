@@ -29,6 +29,8 @@ import {
   pos,
   wos,
   prs,
+  users,
+  roles,
 } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import type { AuditRecord } from "../plugins/audit-log.js";
@@ -82,9 +84,67 @@ interface StubOpts {
   updateEmptyFor?: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// B-380 — the authz rows every WRITE handler now resolves
+// ---------------------------------------------------------------------------
+// The six write doors run the REAL loadCaller → permAllowed against the stubbed
+// `user` + `role` tables (the gr.test.ts / inventory.test.ts precedent). Nothing
+// about the gate is faked: the production authz module resolves and decides here,
+// and only the two rows it reads are canned.
+//
+// stubDb APPENDS these as DEFAULTS so the pre-existing write tests keep describing
+// what they were written to describe (the state machines, the server-computed
+// money, the tx atomicity) instead of all becoming 403 assertions. rowsFor takes
+// the FIRST matching entry, so a test supplying its own [users, …] / [roles, …]
+// still wins — which is how the deny-path tests below revoke a right.
+const subUserRow = {
+  id: "u-0",
+  companyId: COMPANY,
+  email: SESSION.user.email,
+  name: SESSION.user.name,
+  roleId: "role-0",
+  status: "active",
+};
+/**
+ * A role carrying (or not) the subcon create/edit/approve rights the gates read.
+ * The defaults mirror the seeded Director — the only role that holds all three —
+ * so the default caller can drive every existing test; a deny test passes `false`.
+ */
+const subRoleRow = (
+  subcon: { create?: boolean; edit?: boolean; approve?: boolean } = {},
+) => ({
+  id: "role-0",
+  companyId: COMPANY,
+  name: "Ops",
+  approvalLimits: {},
+  perms: {
+    subcon: {
+      view: true,
+      create: subcon.create ?? true,
+      edit: subcon.edit ?? true,
+      approve: subcon.approve ?? true,
+      cancel: true,
+    },
+  },
+  approvalLevel: 4,
+  approvalLimit: null,
+  currencyCode: "THB",
+  createdAt: D,
+  updatedAt: D,
+});
+/** The two rows loadCaller resolves, as a rows[] fragment a test can prepend. */
+const subAuthzRows = (
+  subcon: { create?: boolean; edit?: boolean; approve?: boolean } = {},
+): Array<[unknown, unknown[]]> => [
+  [users, [subUserRow]],
+  [roles, [subRoleRow(subcon)]],
+];
+
 /** Base Db stub: canned rows per table for reads; capture of write ops. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {}, updateEmptyFor } = opts;
+  const { captured = [], inserted = [], updated = [], updateBase = {}, updateEmptyFor } = opts;
+  // B-380: authorized-caller defaults, APPENDED so an explicit per-test override wins.
+  const rows: Array<[unknown, unknown[]]> = [...opts.rows, ...subAuthzRows()];
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
@@ -1852,5 +1912,235 @@ describe("GET /api/v1 acceptance-center + periods — META-1 display enrichment"
     expectAbsent(r1);
     expectAbsent(r2);
     boundOn(captured, [projects, acceptances, defects]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-380 — function-level authorization on the six write doors
+// ---------------------------------------------------------------------------
+// Before this gate `grep -c "loadCaller\|permAllowed" subcon.ts` was 0. Proven
+// live on the seeded stack at 2245b73: a bearer for the `wh` Warehouse role —
+// whose stored subcon perms are {view:false, create:false, edit:false,
+// approve:false, cancel:false} — answered 2xx on ALL SIX doors, and drove
+// create → deliver → inspect(pass) → approve-payment end to end into an
+// ap_billing of 9,999,990.00 and a retention_ledger HELD row of 99,999,800.00,
+// read back out of Postgres.
+//
+// EVERY DENIAL HERE IS AGAINST A REAL ROW IN THE STATE THE DOOR GUARDS — a
+// `passed` period for approve-payment, an `open` defect for fix, and so on. A 403
+// that a 404 or a 409 would also have produced proves nothing about the gate; the
+// positive control in each case is the SAME fixture with the right granted, which
+// is what the ~74 tests above already are.
+describe("subcon write doors — B-380 function-level authz", () => {
+  /** Deny by revoking exactly one right; every other row is the working fixture. */
+  const denied = (
+    right: "create" | "edit" | "approve",
+    rows: Array<[unknown, unknown[]]>,
+    sinks: { inserted: Inserted[]; updated: Updated[]; tx: { count: number } },
+  ): StubOpts => ({
+    // Prepended, so these win over stubDb's authorized defaults.
+    rows: [...subAuthzRows({ [right]: false }), ...rows],
+    inserted: sinks.inserted,
+    updated: sinks.updated,
+    tx: sinks.tx,
+  });
+
+  const sinks = () => ({ inserted: [] as Inserted[], updated: [] as Updated[], tx: { count: 0 } });
+
+  const cases: Array<{
+    door: string;
+    right: "create" | "edit" | "approve";
+    method: "POST";
+    url: string;
+    payload: Record<string, unknown>;
+    rows: Array<[unknown, unknown[]]>;
+    /** The row the stub's UPDATE … RETURNING echoes — the positive control needs a
+     *  complete row to serialise, exactly as the real door would return one. */
+    updateBase: Record<string, unknown>;
+  }> = [
+    {
+      door: "POST /subcon-contracts",
+      right: "create",
+      method: "POST",
+      url: "/api/v1/subcon-contracts",
+      // A VALID body against a real tenant project + vendor: without the gate this
+      // is a 201, so the 403 can only be the gate's.
+      payload: {
+        project_id: PROJECT,
+        vendor_id: VENDOR,
+        no: "WO-NEW",
+        value: 1000,
+        retention_pct: 5,
+        periods: [{ seq: 1, basis: "percent", pct: 10 }],
+      },
+      rows: [
+        [projects, [project]],
+        [vendors, [vendor]],
+      ],
+      updateBase: {},
+    },
+    {
+      door: "POST /periods/:id/deliver",
+      right: "edit",
+      method: "POST",
+      url: `/api/v1/periods/${PERIOD}/deliver`,
+      payload: { docs: ["d.pdf"], photos: ["p.jpg"] },
+      // A really-`pending` period — the deliverable state.
+      rows: [
+        [workPeriods, [period(PERIOD, "pending")]],
+        [subconContracts, [contract(CONTRACT, "WO-1")]],
+        [acceptances, []],
+        // insertThrough re-verifies the parent project belongs to this tenant, so
+        // without this row the acceptance insert throws and the POSITIVE CONTROL
+        // 500s rather than 200s — a fixture that could not have produced the
+        // success it claims. Caught by the control, which is why each deny test
+        // has one.
+        [projects, [project]],
+      ],
+      updateBase: period(PERIOD, "pending"),
+    },
+    {
+      door: "POST /periods/:id/inspect",
+      right: "edit",
+      method: "POST",
+      url: `/api/v1/periods/${PERIOD}/inspect`,
+      payload: { result: "pass" },
+      // A really-`delivered` period — the inspectable state.
+      rows: [
+        [workPeriods, [period(PERIOD, "delivered")]],
+        [subconContracts, [contract(CONTRACT, "WO-1")]],
+        [acceptances, [acceptance(ACCEPTANCE, PERIOD)]],
+        [projects, [project]],
+      ],
+      updateBase: period(PERIOD, "delivered"),
+    },
+    {
+      door: "POST /periods/:id/approve-payment",
+      right: "approve",
+      method: "POST",
+      url: `/api/v1/periods/${PERIOD}/approve-payment`,
+      payload: {},
+      // A really-`passed` period — the ONLY payable state, so this 403 replaces a
+      // 200 that would have minted the ap_billing + retention row.
+      rows: [
+        [workPeriods, [{ ...period(PERIOD, "passed", "percent"), pct: "20.000" }]],
+        [subconContracts, [contract(CONTRACT, "WO-1")]],
+      ],
+      updateBase: { ...period(PERIOD, "passed", "percent"), pct: "20.000" },
+    },
+    {
+      door: "POST /defects/:id/fix",
+      right: "edit",
+      method: "POST",
+      url: `/api/v1/defects/${DEFECT}/fix`,
+      payload: { photo_after: "after.jpg" },
+      rows: [[defects, [defect(DEFECT, "open")]]],
+      updateBase: defect(DEFECT, "open"),
+    },
+    {
+      door: "POST /defects/:id/recheck",
+      right: "edit",
+      method: "POST",
+      url: `/api/v1/defects/${DEFECT}/recheck`,
+      payload: { result: "pass" },
+      rows: [[defects, [defect(DEFECT, "fixing")]]],
+      updateBase: defect(DEFECT, "fixing"),
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.door} → 403 without subcon.${c.right}, and writes nothing`, async () => {
+      const s = sinks();
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb(denied(c.right, c.rows, s)),
+        })
+      ).inject({ method: c.method, url: c.url, payload: c.payload });
+
+      // 403 and NOT 5xx: sync_processor.dart dead-letters a 4xx but DEFERS a 5xx
+      // and stops the phone's whole offline drain behind it.
+      expect(res.statusCode).toBe(403);
+      expect(res.json().code).toBe("FORBIDDEN");
+      // Flat {code,message} — the envelope every other gated route sends.
+      expect(Object.keys(res.json()).sort()).toEqual(["code", "message"]);
+      expect(s.inserted).toHaveLength(0);
+      expect(s.updated).toHaveLength(0);
+      expect(s.tx.count).toBe(0);
+    });
+
+    it(`${c.door} → the SAME fixture succeeds WITH subcon.${c.right} (the gate is what denied it)`, async () => {
+      // The positive control. Without it, every assertion above is satisfied by a
+      // fixture that could not have succeeded anyway — the failure mode this repo
+      // keeps finding. Same rows, same payload, one flag flipped.
+      const s = sinks();
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb({
+            rows: [...subAuthzRows({ [c.right]: true }), ...c.rows],
+            inserted: s.inserted,
+            updated: s.updated,
+            tx: s.tx,
+            updateBase: c.updateBase,
+          }),
+        })
+      ).inject({ method: c.method, url: c.url, payload: c.payload });
+      expect(res.statusCode).toBeLessThan(300);
+    });
+  }
+
+  it("denies an UNATTRIBUTABLE caller — a valid tenant bearer with no dictionary user", async () => {
+    // loadCaller returns null (no `user` row for the session email), which must be
+    // a denial and not an unguarded pass. Fail-closed by construction, asserted.
+    const s = sinks();
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, []], // no dictionary row → caller cannot be attributed
+            [roles, []],
+            [workPeriods, [{ ...period(PERIOD, "passed", "percent"), pct: "20.000" }]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+          ],
+          inserted: s.inserted,
+          updated: s.updated,
+          tx: s.tx,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/periods/${PERIOD}/approve-payment`, payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toBe("caller cannot be attributed");
+    expect(s.inserted).toHaveLength(0);
+    expect(s.tx.count).toBe(0);
+  });
+
+  it("gates the money door on `approve`, which the seed gives to the Director ALONE", async () => {
+    // The rights are not interchangeable: a caller with create+edit (the seeded
+    // Site Engineer's subcon grant) still cannot approve a payment. Asserting this
+    // is what stops the money door being quietly re-gated on a right five roles
+    // hold. The flows.html-vs-matrix conflict on this door is stated in subcon.ts
+    // and is Wei's to settle.
+    const s = sinks();
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [
+            [users, [subUserRow]],
+            [roles, [subRoleRow({ create: true, edit: true, approve: false })]],
+            [workPeriods, [{ ...period(PERIOD, "passed", "percent"), pct: "20.000" }]],
+            [subconContracts, [contract(CONTRACT, "WO-1")]],
+          ],
+          inserted: s.inserted,
+          updated: s.updated,
+          tx: s.tx,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/periods/${PERIOD}/approve-payment`, payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().message).toBe("this action requires the subcon approve permission");
+    expect(s.inserted).toHaveLength(0); // no ap_billing, no retention_ledger
   });
 });

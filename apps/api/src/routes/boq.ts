@@ -744,94 +744,209 @@ export function registerBoqRoute(app: FastifyInstance): void {
     const existingNos = (await db.selectThrough(prs, PR_HOPS)).map((p) => p.no);
     const year = new Date().getUTCFullYear();
 
-    // Cut-remain map (pure — decided from the read `lines`): the new remain_qty
-    // per PR'd item. `lines` holds distinct item ids (item_ids[] was de-duped
-    // above), so the id→new-remain map has no key collisions.
-    const remainByItem = new Map(
-      lines.map((l) => [l.item.id, String(Number(l.item.remainQty) - l.qty)]),
-    );
+    // Cut-remain plan (pure — decided from the read `lines`): the OLD remain_qty
+    // each cut was decided against, and the new one it must become. `lines` holds
+    // distinct item ids (item_ids[] was de-duped above), so no id repeats.
+    //
+    // B-379 — ASCENDING BY ITEM ID, and that is a deadlock rule, not tidiness.
+    //
+    // The cut below is N SEPARATE statements where the code it replaces was ONE
+    // bulk CASE UPDATE (updateThroughChainMany). A single statement locks the rows
+    // it touches in ITS OWN scan order, which two concurrent copies of that same
+    // statement share; N statements take the order the CALLER wrote them in, which
+    // is the client's `item_ids[]` body order — so two generate-PR calls whose
+    // selections OVERLAP could take the same two rows in opposite directions. This
+    // loop introduces the ordering hazard; ascending removes it, because a waiter
+    // then only ever holds ids BELOW the one it waits on.
+    //
+    // MEASURED, on this stack, rather than asserted: two psql sessions updating
+    // boq_item rows X then Y and Y then X, with a sleep between, produced
+    // `ERROR: deadlock detected … while updating tuple in relation "boq_item"` and
+    // a ROLLBACK on the second. There is no deadlock handler in apps/api
+    // (`grep -rn "40P01\|deadlock" apps/api/src` finds none), so a victim surfaces
+    // as a 500 — and sync_processor.dart DEFERS a 5xx, wedging a field phone's whole
+    // offline drain. Same invariant lock-order.ts holds for inventory_item; the
+    // boq_item edge is written up there too.
+    //
+    // `byIdAsc` is the repo's own id-ASC total order (list-order.ts). Its doc warns
+    // against using it as a WHOLE comparator — that warning is about RENDERED lists,
+    // where id order means nothing to a reader. Nothing here is rendered: this array
+    // is a lock order, and id ASC is exactly the order intended, the same note
+    // inventory.ts createTransfer carries about its own sorted-but-not-rendered rows.
+    const cuts = lines
+      .map((l) => ({
+        id: l.item.id,
+        // The exact string read out of Postgres — the compare-and-swap predicate.
+        was: l.item.remainQty,
+        now: String(Number(l.item.remainQty) - l.qty),
+      }))
+      .sort(byIdAsc);
 
     // B-098: the PRs (headers + lines) AND the remain_qty cut are ONE issuance —
     // wrap them in a single transaction (the B-097 door) so a failed remain-cut
     // can never leave issued PRs against un-decremented remain_qty (double-issue:
     // the same BOQ qty could be requisitioned twice). The reads that DECIDE the
-    // writes (existingNos, buckets, remainByItem) stay outside; the tx wrapper
-    // carries the same company_id, so every write inside is still tenant-scoped.
-    const createdPrs = await db.transaction(async (tx) => {
-      const createdPrs: Record<string, unknown>[] = [];
-      for (const bucket of buckets) {
-        const no = nextPrNo(existingNos, bucket.def.prefix, year);
-        existingNos.push(no); // reserve so a 2nd bucket this call cannot reuse it
-
-        const [pr] = await tx.insertThrough(prs, projects, doc.projectId, [
-          {
-            projectId: doc.projectId,
-            no,
-            type: bucket.def.type,
-            needDate: null,
-            status: "draft",
-            approvalStep: 0,
-          },
-        ]);
-        const createdLines = await tx.insertThrough(
-          prItems,
-          projects,
-          doc.projectId,
-          bucket.lines.map((l) => ({
-            prId: pr!.id,
-            boqItemId: l.item.id,
-            qty: String(l.qty),
-          })),
-        );
-        const lineById = new Map(createdLines.map((ln) => [ln.boqItemId, ln]));
-
-        // amount = Σ qty × the referenced BOQ item's real unit price (C10).
-        let amount = 0;
-        let currency = "THB";
-        let currencySet = false;
-        const wireLines = bucket.lines.map((l) => {
-          const price = Number(l.item.price);
-          amount += l.qty * price;
-          if (!currencySet) {
-            currency = l.item.currencyCode;
-            currencySet = true;
+    // writes (existingNos, buckets, cuts) stay outside; the tx wrapper carries the
+    // same company_id, so every write inside is still tenant-scoped. B-379: those
+    // outside reads are exactly why the cut has to be a compare-and-swap — the
+    // value they decided against can move before the transaction commits.
+    let createdPrs: Record<string, unknown>[];
+    try {
+      createdPrs = await db.transaction(async (tx) => {
+        // -------------------------------------------------------------------
+        // B-379 — THE CUT IS A COMPARE-AND-SWAP, AND IT RUNS FIRST.
+        // -------------------------------------------------------------------
+        // WHAT THIS CLOSES, measured live on the seeded stack at 2245b73 before this
+        // guard: 8 separate OS curl processes released on one epoch-ms barrier, each
+        // asking for the FULL remaining 1240 of BOQ item MAT-CEM-002, answered
+        // 201 x7 + 409 x1. Read back out of Postgres: remain_qty 0, seven pr_item
+        // rows, Σ pr_item.qty = 8680 against an ordered qty of 1240 — seven times the
+        // budget requisitioned, the ceiling above passed by every one of them.
+        //
+        // The old write took the shape that makes that inevitable: the ceiling was
+        // checked against a remain_qty read OUTSIDE the transaction, and the write
+        // was an ABSOLUTE new value (`updateThroughChainMany`) whose WHERE said only
+        // `id IN (…)` — nothing about what the value had been. Under READ COMMITTED
+        // every racer's UPDATE therefore matched, and the last writer's absolute
+        // value won. Same shape as B-149's status flip and B-342's stock read.
+        //
+        // The fix is the B-149 shape the repo already requires and that inventory.ts,
+        // gr.ts, subcon.ts approve-payment and revrec.ts all follow: fold the value
+        // the decision was made against into the FINAL UPDATE's own WHERE. The loser
+        // re-matches `id = … AND remain_qty = <what I read>` against the committed
+        // row, gets 0 rows, and throws — rolling back its PRs with it. Nothing is
+        // ever half-issued, because the cut and the PRs are one transaction (B-098).
+        //
+        // A CONSERVATIVE 409 IS THE POINT, not a shortcoming. Two callers who each
+        // ask for 30 of 100 would both fit, yet the second is refused because the
+        // number it decided against moved. That is fail-closed: it never issues a PR
+        // the budget cannot cover, and the caller retries against the fresh remainder
+        // (the same answer the 409 above already gives when the qty genuinely no
+        // longer fits). Inventing a relative `remain_qty = remain_qty - qty` write
+        // instead would let both through, but it would also silently re-decide the
+        // ceiling the handler already answered on — the client would be told 201 for
+        // a quantity nobody checked against the value that was actually there.
+        //
+        // COST, stated honestly: this is N guarded round-trips where the 0024 perf
+        // audit had got the cut down to ONE bulk CASE statement
+        // (updateThroughChainMany, which takes no predicate). N here is the number of
+        // BOQ lines in a single generate-PR, and correctness at a money door outranks
+        // the two-query win. If the bulk door ever grows a per-row predicate this
+        // should move back onto it.
+        //
+        // IT RUNS BEFORE THE PR INSERTS SO A LOSER FAILS FAST — and that is a
+        // preference, NOT the deadlock rule it first looked like. The tempting
+        // claim was: `pr_item.boq_item_id` is an FK, so INSERT INTO pr_item takes
+        // `FOR KEY SHARE` on the boq_item row, and this UPDATE would have to
+        // UPGRADE that to an exclusive lock — two callers each holding KEY SHARE
+        // and each wanting the upgrade is PG 40P01 (the gr.ts / lock-order.ts
+        // shape). PROBED, and it is false HERE: two psql sessions that each
+        // inserted a pr_item referencing the same boq_item and then updated
+        // `remain_qty` on it BOTH committed. `remain_qty` is in no key, so the
+        // UPDATE takes FOR NO KEY UPDATE, which does not conflict with the FK's
+        // FOR KEY SHARE — the upgrade lock-order.ts describes exists there because
+        // inventory.ts takes an explicit FOR UPDATE (selectForUpdate), and this
+        // handler takes none. Order still earns its place: a caller whose cut is
+        // going to be refused does no PR/pr_item work first, and the rollback it
+        // triggers has less to undo.
+        for (const cut of cuts) {
+          const [swapped] = await tx.updateThroughChain(
+            boqItems,
+            ITEM_HOPS,
+            { remainQty: cut.now },
+            and(eq(boqItems.id, cut.id), eq(boqItems.remainQty, cut.was)),
+            // The CAS, on the FINAL UPDATE — not only the resolve SELECT. The resolve
+            // → update is two round-trips, so a predicate placed only in `where` does
+            // NOT close the race: the loser's UPDATE would re-check `id IN (ids)`
+            // alone and still match (B-149's exact lesson, subcon.ts:1171-1179).
+            eq(boqItems.remainQty, cut.was),
+          );
+          if (!swapped) {
+            throw new StaleStateError(
+              `remain_qty for BOQ item ${cut.id} changed while this PR was being ` +
+                `generated — re-read the BOQ and retry`,
+            );
           }
-          return {
-            id: lineById.get(l.item.id)?.id ?? null,
-            pr_id: pr!.id,
-            boq_item_id: l.item.id,
-            qty: l.qty,
-            price,
-            amount: l.qty * price,
-          };
-        });
+        }
 
-        createdPrs.push({
-          id: pr!.id,
-          no: pr!.no,
-          type: pr!.type,
-          project_id: pr!.projectId,
-          boq_id: id,
-          status: pr!.status,
-          approval_step: pr!.approvalStep,
-          currency_code: currency,
-          amount,
-          items: wireLines,
-        });
+        const createdPrs: Record<string, unknown>[] = [];
+        for (const bucket of buckets) {
+          const no = nextPrNo(existingNos, bucket.def.prefix, year);
+          existingNos.push(no); // reserve so a 2nd bucket this call cannot reuse it
+
+          const [pr] = await tx.insertThrough(prs, projects, doc.projectId, [
+            {
+              projectId: doc.projectId,
+              no,
+              type: bucket.def.type,
+              needDate: null,
+              status: "draft",
+              approvalStep: 0,
+            },
+          ]);
+          const createdLines = await tx.insertThrough(
+            prItems,
+            projects,
+            doc.projectId,
+            bucket.lines.map((l) => ({
+              prId: pr!.id,
+              boqItemId: l.item.id,
+              qty: String(l.qty),
+            })),
+          );
+          const lineById = new Map(createdLines.map((ln) => [ln.boqItemId, ln]));
+
+          // amount = Σ qty × the referenced BOQ item's real unit price (C10).
+          let amount = 0;
+          let currency = "THB";
+          let currencySet = false;
+          const wireLines = bucket.lines.map((l) => {
+            const price = Number(l.item.price);
+            amount += l.qty * price;
+            if (!currencySet) {
+              currency = l.item.currencyCode;
+              currencySet = true;
+            }
+            return {
+              id: lineById.get(l.item.id)?.id ?? null,
+              pr_id: pr!.id,
+              boq_item_id: l.item.id,
+              qty: l.qty,
+              price,
+              amount: l.qty * price,
+            };
+          });
+
+          createdPrs.push({
+            id: pr!.id,
+            no: pr!.no,
+            type: pr!.type,
+            project_id: pr!.projectId,
+            boq_id: id,
+            status: pr!.status,
+            approval_step: pr!.approvalStep,
+            currency_code: currency,
+            amount,
+            items: wireLines,
+          });
+        }
+
+        // The cut-remain already ran, at the TOP of this transaction — see B-379
+        // above for why it is a compare-and-swap, and why going first is a
+        // fail-fast preference rather than the deadlock rule it first looked like.
+        return createdPrs;
+      });
+    } catch (err) {
+      // B-379: a cut whose compare-and-swap matched 0 rows. The whole transaction
+      // is already rolled back (no PR, no pr_item, no partial cut), so this is a
+      // clean, retryable client answer — 409 and NOT 5xx, because
+      // sync_processor.dart dead-letters a 4xx but DEFERS a 5xx and stops the
+      // phone's entire offline drain behind it (lock-order.ts states this at length).
+      if (err instanceof StaleStateError) {
+        return reply.code(409).send({ code: "CONCURRENT_UPDATE", message: err.message });
       }
-
-      // Cut-remain atomically with the PR writes. boq_item has no direct tenant
-      // FK, so the scoped-write door resolves the items THROUGH their ancestry to
-      // the company_id root before updating. Perf (0024 audit): a SINGLE bulk
-      // CASE update keyed by item id — N cut lines cost 2 queries, not 2·N.
-      await tx.updateThroughChainMany(
-        boqItems,
-        ITEM_HOPS,
-        boqItems.remainQty,
-        remainByItem,
-      );
-      return createdPrs;
-    });
+      throw err;
+    }
 
     return reply.code(201).send({ prs: createdPrs });
   });
