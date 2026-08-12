@@ -892,6 +892,28 @@ export function registerGrRoute(app: FastifyInstance): void {
     // B-340: the stock movements this receipt will make, accumulated as the lines are
     // parsed and written INSIDE the create transaction below.
     const stockDrafts: { itemId: string; qty: number }[] = [];
+    // -----------------------------------------------------------------------
+    // B-376 — THE CEILING'S INPUT SET, BOUND TO THE LINE THAT WRITES STOCK.
+    // -----------------------------------------------------------------------
+    // WHAT THIS CLOSES. B-372's ceiling was unreachable on exactly the shape that
+    // moves stock. The stock movement is gated on `item_id`; `itemDrafts` — the
+    // SOLE source of `boqItemIds`, hence of orderedQtyByBoqItem, hence of BOTH the
+    // PR row lock and the ceiling — was gated on `name`. So `name`, pure display
+    // metadata, decided whether a money guard ran. Proven live on the seeded stack
+    // before this fix: POST /gr {po_id, warehouse_id, lines:[{item_id,
+    // qty_ok: 99999999}]} with no `name` answered 201, wrote ZERO gr_item rows (so
+    // the ceiling never evaluated) and a +99,999,999.0000 stock_ledger row, taking
+    // MAT-CEM-001 @ คลังกลาง to 99,999,999 on hand — which inflates valued on-hand
+    // for every later material issue, and an issue DOES post to the GL at moving-
+    // average cost.
+    //
+    // WEI'S RULING: bind it to the stock-writing line. Every line that produces a
+    // stock movement is subject to the ceiling and to the PR lock.
+    //
+    // ONE ENTRY PER BODY LINE, which is what stops the widening from double
+    // counting: a line that carries BOTH a name and an item_id contributed to
+    // `requestedByBoqItem` once before and must contribute once now.
+    const ceilingDrafts: { boqItemId: string; qty: number; movesStock: boolean }[] = [];
     for (const raw of rawLines) {
       const line = (raw ?? {}) as Record<string, unknown>;
       const qtyOk = toNum(pick(line, "qty_ok", "qtyOk")) ?? 0;
@@ -905,23 +927,94 @@ export function registerGrRoute(app: FastifyInstance): void {
       received += qtyOk;
       rejected += qtyRejected;
 
+      // B-376: read the ordered-line reference and the name ONCE per line, BEFORE
+      // the stock decision. Both used to be read only inside the `if (name)` branch
+      // below, which is precisely how a stock-moving line could carry a
+      // boq_item_id and have it ignored — and how an absent name could switch the
+      // guard off instead of refusing the write.
+      const boqItemId = uuidOrNull(pick(line, "boq_item_id", "boqItemId"));
+      const name = str(pick(line, "name")).trim();
+
       // B-340: a line that names an inventory_item MOVES STOCK. qty_ok only —
       // REJECTED QUANTITY IS NOT RECEIVED INTO STOCK (it generates the defect report
       // below and goes back to the vendor), so a receipt of 100 with 10 rejected adds
       // 90, not 100. A zero-qty_ok line is skipped rather than writing a no-op 0 row.
       const itemId = uuidOrNull(pick(line, "item_id", "itemId"));
-      if (itemId && qtyOk > 0) stockDrafts.push({ itemId, qty: qtyOk });
+      const movesStock = itemId != null && qtyOk > 0;
+      if (movesStock) {
+        // B-376: A STOCK-MOVING LINE THAT CANNOT BE CEILINGED IS REFUSED, and this
+        // refusal is what makes the binding above mean anything. The ceiling's basis
+        // is pr_item.qty reached THROUGH boq_item_id; a line with no boq_item_id has
+        // no basis, so letting it through would leave the guard present but
+        // unreachable — the very defect this closes, reintroduced one field over.
+        // Inventing a basis instead is what B-372 explicitly refused to do for
+        // un-quantified lines, and it is refused here for the same reason.
+        //
+        // 400 VALIDATION (the B-360 / B-372 shape on this endpoint): the request is
+        // what is incoherent — it claims to receive stock against nothing the order
+        // ordered — and no retry of that body will ever become valid. 4xx because
+        // sync_processor.dart dead-letters a 4xx but DEFERS a 5xx and stalls the
+        // whole offline drain.
+        //
+        // THIS BREAKS NO SHIPPING CLIENT. `item_id` + `warehouse_id` is a door
+        // B-340 opened deliberately with its selectors named as a follow-up, and
+        // NOTHING sends it today: apps/web gr-rows.ts buildLines() returns
+        // {qty_ok, qty_rejected} only, and apps/mobile st_receive_agg.dart
+        // buildReceiptPayload() sends {po_id, idempotency_key,
+        // lines:[{qty_ok, qty_rejected}]} — neither sends item_id OR name, so
+        // neither writes stock and neither is affected.
+        if (boqItemId == null) {
+          return reply.code(400).send({
+            code: "VALIDATION",
+            message:
+              "a line that receives stock (item_id) must name the ordered line it " +
+              "receives against (boq_item_id) — received quantity is ceilinged " +
+              "against pr_item.qty and there is no other basis",
+          });
+        }
+        // B-376, SECOND HALF — AND IT MUST BE RECORDABLE, or the ceiling is
+        // per-request only and the whole binding is theatre.
+        //
+        // MEASURED, not reasoned: with only the boq_item_id refusal above in place,
+        // NINE units were received against an order of SIX (ceiling 6.6) on the live
+        // seeded stack — nine separate 201s, on_hand 9.0000. The reason is that the
+        // cumulative half of the ceiling reads `gr_item` rows
+        // (priorByBoqItem, below), and `gr_item` is written only for a line carrying
+        // a `name`. A no-name stock line therefore leaves NO trace the next request's
+        // accumulator can see: every repeat measured `prior = 0` and passed. The
+        // control arm proves it is the cause — the identical sequence WITH a name
+        // stopped at 6 with a 400 on the 7th.
+        //
+        // So a stock-moving line must also be recordable as per-line detail. This is
+        // fail-CLOSED coupling, the inverse of the defect: before, an absent `name`
+        // silently switched a money guard OFF; now an absent `name` refuses the
+        // write. Deriving a name server-side instead was considered and rejected —
+        // it invents per-line detail nobody supplied, and B-360/B-372 both refused
+        // to invent a basis rather than name the gap.
+        //
+        // Breaks nothing today for the same measured reason as above: no shipped
+        // client sends `item_id` at all, so none reaches this branch.
+        if (!name) {
+          return reply.code(400).send({
+            code: "VALIDATION",
+            message:
+              "a line that receives stock (item_id) must carry a name — its received " +
+              "quantity is recorded as gr_item detail, which is what the cumulative " +
+              "over-receipt ceiling measures later receipts against",
+          });
+        }
+        stockDrafts.push({ itemId, qty: qtyOk });
+      }
       const linePhotos = pick(line, "photos");
       if (Array.isArray(linePhotos)) {
         for (const p of linePhotos) if (typeof p === "string") photos.push(p);
       }
 
-      const name = str(pick(line, "name")).trim();
       if (name) {
         const orderedQty = toNum(pick(line, "ordered_qty", "orderedQty")) ?? qtyOk;
         const unit = has(line, "unit") ? str(pick(line, "unit")).trim() || null : null;
         itemDrafts.push({
-          boqItemId: uuidOrNull(pick(line, "boq_item_id", "boqItemId")),
+          boqItemId,
           name,
           orderedQty: String(orderedQty),
           // received_qty of the line = its good-received quantity (qty_ok).
@@ -932,6 +1025,12 @@ export function registerGrRoute(app: FastifyInstance): void {
           price: "0.00",
           currencyCode: "THB",
         });
+      }
+
+      // B-376: the union — a named line (unchanged behaviour) OR a stock-moving one
+      // (the widening). Recorded per BODY LINE, so a line that is both counts once.
+      if (boqItemId != null && (name || movesStock)) {
+        ceilingDrafts.push({ boqItemId, qty: qtyOk, movesStock });
       }
     }
 
@@ -1077,8 +1176,20 @@ export function registerGrRoute(app: FastifyInstance): void {
     // qty_ok/qty_rejected; mobile sends neither name nor price), so refusing it
     // would break a documented shape to fix a hole that closing the READ already
     // closes.
+    // B-376: the UNION of the named lines' ids and the stock-moving lines' ids.
+    // Widening it here is what carries the fix through the rest of the handler:
+    // this set drives the B-360 "is it a line of THIS order?" check, the tenant-
+    // scoped price read, the population of orderedQtyByBoqItem, and therefore both
+    // the PR row lock and the ceiling. Adding a stock line's id to the ORDERABLE
+    // check is not optional — without it an id that is not on the order would fall
+    // through to `ordered = 0` and be skipped by the ceiling, which is the same
+    // vacuous guard in a new disguise.
     const boqItemIds = [
-      ...new Set(itemDrafts.map((d) => d.boqItemId).filter((v): v is string => v != null)),
+      ...new Set(
+        [...itemDrafts.map((d) => d.boqItemId), ...ceilingDrafts.map((d) => d.boqItemId)].filter(
+          (v): v is string => v != null,
+        ),
+      ),
     ];
     // B-372: the ORDERED QUANTITY per boq_item, Σ pr_item.qty. Populated from
     // the SAME B-360 read below — those rows were already being loaded and their
@@ -1114,6 +1225,29 @@ export function registerGrRoute(app: FastifyInstance): void {
             message: `boq_item ${id} is not a line of this order (a receipt is priced ONLY from what its own PR ordered)`,
           });
         }
+      }
+      // B-376: THE SECOND WAY A STOCK LINE ESCAPES THE CEILING, closed for the same
+      // reason as the missing-id refusal above. The ceiling skips a line whose
+      // ordered quantity is 0 ("AN UN-QUANTIFIED LINE HAS NO CEILING" below) —
+      // pr_item.qty defaults to '0' and a tolerance on 0 is 0, so ceilinging it
+      // would make such a line impossible to receive at all. That documented
+      // residual is tolerable for a line that only records detail; it is NOT
+      // tolerable for one that MOVES STOCK, because it is exactly the unbounded
+      // quantity this fix exists to bound. A stock-moving line against an
+      // un-quantified order is therefore refused rather than silently unguarded.
+      //
+      // Same 400 VALIDATION, same reasoning as above, and it breaks no shipping
+      // client for the same measured reason: nothing sends item_id today.
+      for (const d of ceilingDrafts) {
+        if (!d.movesStock) continue;
+        if ((orderedQtyByBoqItem.get(d.boqItemId) ?? 0) > 0) continue;
+        return reply.code(400).send({
+          code: "VALIDATION",
+          message:
+            `boq_item ${d.boqItemId} carries no ordered quantity on this order, so a ` +
+            `received quantity against it cannot be ceilinged — a line that receives ` +
+            `stock (item_id) requires a quantified ordered line`,
+        });
       }
       const priced = await db.selectThrough(
         boqItems,
@@ -1389,12 +1523,18 @@ export function registerGrRoute(app: FastifyInstance): void {
         if (orderedQtyByBoqItem.size > 0) {
           // What THIS request adds, per line — two drafts naming the same
           // boq_item must be summed, or splitting one line in two evades the check.
+          //
+          // B-376: read from ceilingDrafts, NOT itemDrafts. That is the whole fix at
+          // the point of use: itemDrafts holds only `name`-carrying lines, so a
+          // stock-moving line without one contributed nothing here and the ceiling
+          // measured a quantity smaller than the one being written to stock.
+          // ceilingDrafts carries one entry per BODY LINE that either names detail
+          // or moves stock, so a line that does both is still counted exactly once.
           const requestedByBoqItem = new Map<string, number>();
-          for (const d of itemDrafts) {
-            if (!d.boqItemId) continue;
+          for (const d of ceilingDrafts) {
             requestedByBoqItem.set(
               d.boqItemId,
-              (requestedByBoqItem.get(d.boqItemId) ?? 0) + Number(d.receivedQty),
+              (requestedByBoqItem.get(d.boqItemId) ?? 0) + d.qty,
             );
           }
           // What THE PR's ACTIVE receipts already hold, per line.
