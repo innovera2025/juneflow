@@ -132,14 +132,37 @@ function stubDb(opts: StubOpts): Db {
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
-        returning: () => {
+      // B-386 FIXTURE AUDIT (the gr.test.ts / B-376 precedent, applied here).
+      // This used to capture ONLY the `.returning()` path. TenantDb has TWO insert
+      // doors: insertThrough() and insert(...).returning() end in `.returning()`,
+      // but the plain scoped TenantDb.insert() does NOT — db/tenant-db.ts:226-229
+      // returns `db.insert(table).values(row)` and the caller awaits THAT directly.
+      // A row written through the second door hit an object with no `then`, so
+      // `await` resolved to the builder itself and NOTHING was recorded here —
+      // which would silently make every `expect(inserted...).toHaveLength(0)` /
+      // `.toBeUndefined()` below vacuous for such a write.
+      //
+      // BE PRECISE ABOUT WHAT THIS BOUGHT IN THIS FILE. Every insert inventory.ts
+      // performs today already ends in `.returning()` (lines 711/752/817/977/1314/
+      // 1345/1349), so no assertion below was vacuous in practice and none changed
+      // verdict when this landed. What the second door adds is that the absence
+      // assertions — including the negative-stock rollback guards, which are the
+      // money-shaped ones — stay evidence if a stock_ledger or JV write is ever
+      // switched to the bare door. gr.ts:353/1653 write stock_ledger through exactly
+      // that door today, so this is a live shape in this codebase, not a hypothetical.
+      // Proven to discriminate: a bare-door stock_ledger insert injected into the
+      // deny path turns these RED here and leaves them GREEN with the old stub.
+      //
+      // insertThrows/onInsert are threaded through BOTH doors, so a 23505 model and
+      // the derived stored-row view behave identically whichever door the write took.
+      values: (values: Record<string, unknown> | Record<string, unknown>[]) => {
+        const record = (): { boom: Error | null; out: Record<string, unknown>[] } => {
           const nth = insertCount.get(table) ?? 0;
           insertCount.set(table, nth + 1);
           const boom = insertThrows?.(table, nth);
           // Thrown BEFORE the capture: a rejected insert wrote no row, so it must not
           // be counted as one (the "exactly one row" assertions depend on that).
-          if (boom) return Promise.reject(boom);
+          if (boom) return { boom, out: [] };
           inserted.push({ table, values });
           const arr = Array.isArray(values) ? values : [values];
           const out = arr.map((v) => {
@@ -147,9 +170,22 @@ function stubDb(opts: StubOpts): Db {
             return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
           });
           onInsert?.(table, out as Record<string, unknown>[]);
-          return Promise.resolve(out);
-        },
-      }),
+          return { boom: null, out };
+        };
+        return {
+          returning: () => {
+            const { boom, out } = record();
+            return boom ? Promise.reject(boom) : Promise.resolve(out);
+          },
+          // The awaited-directly door (scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) => {
+            const { boom, out } = record();
+            return boom
+              ? Promise.reject(boom).then(onOk, onErr)
+              : Promise.resolve(out).then(onOk, onErr);
+          },
+        };
+      },
     }),
     update: (table: unknown) => ({
       set: (set: Record<string, unknown>) => ({
@@ -1411,7 +1447,20 @@ describe("POST /api/v1/inventory/issues — B-312 idempotency (client key + repl
     const world = idempWorld({
       inserted,
       keyedResolve: () => [],
-      insertThrows: (table) => (table === materialIssues ? uniqueViolation() : null),
+      // B-386: the throw is narrowed to the FIRST material_issue insert (nth 0)
+      // instead of firing on every one. It has to be the first: the colliding row
+      // here belongs to ANOTHER tenant, so this handler's one-and-only insert is the
+      // one that hits the index — unlike a replay, where the collision is a second
+      // insert by the SAME caller. Unconditional was the problem, not the position.
+      //
+      // WHY IT MATTERS: a throwing insert is deliberately not recorded (see stubDb —
+      // a rejected insert wrote no row). So while EVERY material_issue insert threw,
+      // `inserted.filter(materialIssues)` was empty by construction and the
+      // toHaveLength(0) below could not fail however this handler behaved. Narrowed,
+      // any SECOND insert — a catch path that retried, or fabricated the issue it
+      // failed to resolve — now lands in `inserted` and turns that assertion red.
+      insertThrows: (table, nth) =>
+        table === materialIssues && nth === 0 ? uniqueViolation() : null,
     });
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
