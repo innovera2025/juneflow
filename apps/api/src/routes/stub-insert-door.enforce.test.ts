@@ -51,11 +51,10 @@
 //  1. SHAPE OF THE STUB. The door must be spelled as an object property/method named
 //     `insert` containing one named `values`. A stub built by a factory, spread in from
 //     another object, or assigned (`raw.insert = ...`) is not matched. Checked, not
-//     assumed: every stub in apps/api today uses the literal shape (the scan finds 39
-//     doors across 36 files — admin.test.ts carries three, tenant-db.test.ts two — and
-//     the believability floor below fails if that collapses; the floor asserts a
-//     threshold, not this number, so the count is documentation and nothing depends
-//     on it).
+//     assumed: every stub in apps/api today uses the literal shape (the scan finds 38
+//     doors across 36 files — admin.test.ts carries three — and the believability floor
+//     below fails if that collapses; the floor asserts a threshold, not this number, so
+//     the count is documentation and nothing depends on it).
 //  2. WHAT THE DOOR DOES WITH THE CALL. It proves a `then` key exists on the returned
 //     object. It does NOT prove `then` records into the same array `returning` does, nor
 //     that it models a throw identically. A THIRD limit, worth stating because the
@@ -448,8 +447,8 @@ describe("B-386 · stub insert doors are enforced, not swept for", () => {
     expect(
       insertBody!.includes(".returning()"),
       "TenantDb.insert() now ends in .returning(). The two-door hazard is gone, so this " +
-        "entire file — and the `then` door on all 39 stubs — should be deleted rather " +
-        "than maintained.",
+        "entire file — and the `then` door on all 38 doors across 36 stub files — " +
+        "should be deleted rather than maintained.",
     ).toBe(false);
   });
 
