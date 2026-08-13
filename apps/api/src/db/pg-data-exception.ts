@@ -58,20 +58,39 @@
 //   · Over-including candidates can only ADD a parameter the client did not send,
 //     which fails the test and keeps the 500. Over-inclusion is therefore SAFE.
 //   · A server-computed overflow (`amount = round2(qty × rate)` = 1e20 into
-//     numeric(16,2)) is not in the body — the body carried the OPERANDS, not the
-//     product — so it never satisfies EVERY, and it keeps its loud 500.
+//     numeric(16,2)) is normally absent from the request — the body carried the
+//     OPERANDS, not the product — so it fails EVERY and keeps its loud 500.
 //   · Zero candidates (the value was computed inside SQL, or `.params` is absent
 //     because the statement did not go through drizzle) → no attribution is possible
 //     → 500. Silence is read as "cannot attribute", never as "client's fault".
 //
-// This also disposes of the canonical server-bug shapes for free, which is the check
-// that the reasoning is sound rather than merely convenient:
+// WHAT THIS DOES **NOT** GUARANTEE — read this before trusting the paragraph above.
+// An earlier draft of this comment claimed a server-computed value "never" satisfies
+// EVERY. That is FALSE, and it was disproved by execution, so it is corrected here
+// rather than left as a comforting sentence someone would later rely on:
+//
+//   · Bodies are opaque `Entity` and collectScalars() walks EVERY scalar leaf to depth
+//     8, including keys no route ever reads. So a caller who PLANTS the computed value
+//     — or whose payload merely coincides with it — supplies the alibi themselves:
+//     measured, `{}` → 500 but `{_echo: 999998999999990}` → 400 for the same error.
+//   · Value-identity provenance also cannot separate a client-sent literal from an
+//     IDENTICAL server-produced one. `String(undefined)` raises 22P02 'invalid input
+//     syntax for type numeric: "undefined"'; that is 500 on a clean body, but 400 the
+//     moment the payload carries the string "undefined" anywhere — which JS and Dart
+//     serializers do emit. Type-aware matching (below) does NOT close this: both sides
+//     are strings, so they are genuinely indistinguishable by value.
+//
+// In BOTH residual cases the status code is the wrong signal and the ERROR-LEVEL LOG is
+// the right one: app.ts logs `request.log.error(error)` on the remap path precisely so a
+// server-side fault stays loud in the logs even when the response says 400. Do not read
+// "400" as "the server is fine". The compensating control is the log, not the status.
+//
+// The canonical server-bug shape that IS closed structurally, for contrast:
 //   · `String(Infinity)` (a JS divide-by-zero reaching the DB) raises 22003 with
 //     detail "cannot hold an infinite value" — measured routine `apply_typmod_special`.
-//     No "10^N" appears, so there is NO threshold, so there are NO candidates → 500.
-//   · `String(undefined)` raises 22P02 'invalid input syntax for type numeric:
-//     "undefined"'. The value IS in the message, so it becomes the sole candidate —
-//     and "undefined" is not in the request, so it fails EVERY → 500.
+//     No "10^N" appears, so there is NO threshold and NO candidates → 500, and no
+//     payload can talk it out of that, because nothing is attributable in the first
+//     place. That is what a real guarantee looks like here; the two above are not it.
 //
 // KNOWN LIMIT, stated because the next reader's instinct will be to widen this.
 // The candidate set is "bound parameters at or above the threshold", which assumes the
@@ -274,10 +293,28 @@ export function clientDataException(
   if (numbers.length === 0 && strings.length === 0) return null;
 
   const supplied = clientScalars(client);
+  // TYPE-AWARE ON PURPOSE, and asymmetric — the asymmetry is the point, not an oversight.
+  //
+  //  · NUMERIC candidates accept any client scalar that PARSES to the same finite
+  //    number, because the routes' own toNum() coerces: a body carrying "100,000" is
+  //    genuinely the 100000 that got bound, and refusing that would misread a client
+  //    value as server-made.
+  //  · STRING candidates require an actual client STRING. A previous version compared
+  //    `String(v)` over every scalar of every type, which collapsed them: a client-sent
+  //    NUMBER 2026 matched a server-authored STRING "2026", and a boolean true matched
+  //    "true". That hands a server-produced literal a client alibi purely by coincidence
+  //    of rendering, which is the exact misattribution this module exists to prevent.
+  //
+  // Cost, stated rather than hidden: a client who sends a NUMBER where the column wants
+  // text (`{"id": 12345}` into a uuid → 22P02 …: "12345") no longer matches, so that
+  // request keeps its 500 and still wedges. That is the safe direction — a false 500,
+  // not a false 400 — and it is the same trade as the `every` quantifier below.
   const suppliedNumbers = supplied
     .map(asFiniteNumber)
     .filter((n): n is number => n !== null);
-  const suppliedStrings = new Set(supplied.map((v) => String(v)));
+  const suppliedStrings = new Set(
+    supplied.filter((v): v is string => typeof v === "string"),
+  );
 
   // EVERY candidate must be traceable to the request. One that is not means the server
   // produced a value its own schema refuses, and that must not be dressed up as the

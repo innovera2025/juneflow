@@ -182,26 +182,22 @@ describe("B-390 clientDataException — the server-computed case STAYS a 500", (
 });
 
 describe("B-390 the code list is a decision, not a prefix match", () => {
-  it.each([
-    ["22012", "division by zero", "the server performed the division"],
-    ["22023", 'unit "bogus" not recognized for type timestamp with time zone', "server SQL literal"],
-    ["22001", "value too long for type character varying(4)", "no varchar(n) column exists"],
-  ])("%s stays a 500 (%s)", (code, message) => {
-    const err = drizzleErr({ code, message }, ["whatever"]);
-    expect(clientDataException(err, { body: { a: "whatever" } })).toBeNull();
-  });
-
+  // DELETED here: three cases asserting that 22012 / 22023 / 22001 stay 500 with the
+  // messages `division by zero`, `unit "bogus" not recognized…` and `value too long for
+  // type character varying(4)`. None of them could fail. Their messages carry no
+  // trailing quoted literal, so candidate extraction refuses them whatever the
+  // allow-list says — proved by revert probe: swapping the Set for
+  // `code.startsWith("22")` left all three green. Keeping tests that cannot fail inside
+  // the module whose own bug class is "passes for a second reason" would be the same
+  // mistake this file exists to catch, so they are gone rather than annotated. The
+  // measured bytea case below covers the property they claimed to cover, and the set
+  // assertion after it keeps the per-code decision itself on the record.
   it("THE ALLOW-LIST IS THE ONLY THING refusing an excluded code that IS attributable", () => {
-    // The three cases above pass for a second reason — their messages carry no
-    // trailing quoted literal, so candidate extraction finds nothing regardless of the
-    // allow-list. They therefore do NOT prove the exclusions are load-bearing, and a
-    // revert probe (swap the Set for `code.startsWith("22")`) left them all green.
-    //
-    // This one does prove it. `select '\xZZ'::bytea` raises SQLSTATE 22023 with the
-    // measured message `invalid hexadecimal digit: "Z"` — an EXCLUDED code whose
-    // message DOES end in a quoted literal, so the value is fully attributable and the
-    // client really did send it. Only PG_CLIENT_INPUT_CODES stands between that and a
-    // 400. Widen the gate to a class-22 prefix and this test dies.
+    // `select '\xZZ'::bytea` raises SQLSTATE 22023 with the measured message
+    // `invalid hexadecimal digit: "Z"` — an EXCLUDED code whose message DOES end in a
+    // quoted literal, so the value is fully attributable and the client really did send
+    // it. Only PG_CLIENT_INPUT_CODES stands between that and a 400. Widen the gate to a
+    // class-22 prefix and this test dies (probed: it does).
     const err = drizzleErr({ code: "22023", message: 'invalid hexadecimal digit: "Z"' }, ["Z"]);
     expect(clientDataException(err, { body: { data: "Z" } })).toBeNull();
   });
@@ -224,6 +220,84 @@ describe("B-390 the code list is a decision, not a prefix match", () => {
   it("a plain non-database Error is untouched", () => {
     expect(clientDataException(new Error("null deref"), { body: {} })).toBeNull();
     expect(clientDataException(undefined, { body: {} })).toBeNull();
+  });
+});
+
+describe("B-390 provenance matching is TYPE-AWARE (a rendering coincidence is not an alibi)", () => {
+  // A previous version compared String(v) across every client scalar, so any scalar
+  // that merely RENDERED the same as a server-authored literal supplied it an alibi.
+  it("a client NUMBER does not vouch for a server-authored STRING of the same digits", () => {
+    const err = drizzleErr(
+      { code: "22P02", message: 'invalid input syntax for type uuid: "2026"' },
+      ["2026"],
+    );
+    expect(clientDataException(err, { body: { year: 2026 } })).toBeNull();
+  });
+
+  it("a client BOOLEAN does not vouch for the string \"true\"", () => {
+    const err = drizzleErr(
+      { code: "22P02", message: 'invalid input syntax for type uuid: "true"' },
+      ["true"],
+    );
+    expect(clientDataException(err, { body: { flag: true } })).toBeNull();
+  });
+
+  it("but a client STRING of the same text still does (the genuine client error)", () => {
+    // The other half of the probe: type-awareness must not break the real 400. If this
+    // and the two above cannot BOTH hold, the change was a blunt disable, not a fix.
+    const err = drizzleErr(
+      { code: "22P02", message: 'invalid input syntax for type uuid: "2026"' },
+      ["2026"],
+    );
+    expect(clientDataException(err, { body: { year: "2026" } })).not.toBeNull();
+  });
+
+  it("the NUMERIC side still coerces on purpose — toNum() does, so provenance must", () => {
+    // Deliberately asymmetric: numeric candidates accept any scalar that PARSES to the
+    // same number ("100,000" really is the bound 100000). Making the numeric side
+    // type-strict too would reintroduce the false-500 this module set out to remove.
+    const err = drizzleErr(
+      { code: "22003", message: "numeric field overflow", detail: OVERFLOW_6_3 },
+      ["100000"],
+    );
+    expect(clientDataException(err, { body: { pct: "100,000" } })).not.toBeNull();
+    expect(clientDataException(err, { body: { pct: 100000 } })).not.toBeNull();
+  });
+});
+
+describe("B-390 the residuals, asserted as they ACTUALLY behave (not as I would like)", () => {
+  // These two tests exist to stop the module's own comment from drifting back into an
+  // overclaim. They pin behaviour that is NOT what a reader would hope for, so that if
+  // someone ever does close these gaps the tests fail and force the comment to be
+  // updated with them.
+  it("String(undefined) is 500 on a clean body but 400 once the payload carries \"undefined\"", () => {
+    // Value-identity provenance cannot separate a client-sent literal from an IDENTICAL
+    // server-produced one — both are the string "undefined", and JS/Dart serializers do
+    // emit it. Type-aware matching does NOT close this (both sides are strings). The
+    // ERROR-level log in app.ts is what carries the server-side signal here, not the
+    // status code.
+    const err = drizzleErr(
+      { code: "22P02", message: 'invalid input syntax for type numeric: "undefined"' },
+      ["undefined"],
+    );
+    expect(clientDataException(err, { body: { pct: 5 } })).toBeNull();
+    expect(clientDataException(err, { body: { note: "undefined" } })).not.toBeNull();
+  });
+
+  it("a planted echo of a server-computed value buys a 400 — bodies are opaque", () => {
+    // Disproves the "a server-computed value NEVER satisfies EVERY" claim the module
+    // comment used to make. collectScalars walks every leaf to depth 8, including keys
+    // no route reads, so a caller can supply the alibi themselves.
+    const err = drizzleErr(
+      {
+        code: "22003",
+        message: "numeric field overflow",
+        detail: "A field with precision 16, scale 2 must round to an absolute value less than 10^14.",
+      },
+      ["999998999999990.00"],
+    );
+    expect(clientDataException(err, { body: {} })).toBeNull();
+    expect(clientDataException(err, { body: { _echo: 999998999999990 } })).not.toBeNull();
   });
 });
 
