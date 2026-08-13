@@ -76,12 +76,24 @@ function stubDb(
   return {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: Record<string, unknown>) => ({
-        returning: () => {
+      // B-388 · BOTH insert doors. TenantDb.insert() returns the builder WITHOUT
+      // .returning() and the caller awaits it directly, so a `.returning()`-only
+      // stub records nothing for such a write and every absence assertion about
+      // it is vacuous. One `record()` closure sits behind both doors — invoked
+      // once per DOOR CALL, never in the `values(...)` body (which would make
+      // `.returning()` double-count). Evidence at the foot of this file.
+      values: (values: Record<string, unknown>) => {
+        const record = (): Record<string, unknown>[] => {
           mutated.push({ table, values, kind: "insert" });
-          return Promise.resolve([{ id: `new-${seq++}`, currencyCode: "THB", approvalLimits: {}, ...values }]);
-        },
-      }),
+          return [{ id: `new-${seq++}`, currencyCode: "THB", approvalLimits: {}, ...values }];
+        };
+        return {
+          returning: () => Promise.resolve(record()),
+          // The awaited-directly door (plain scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+            Promise.resolve(record()).then(onOk, onErr),
+        };
+      },
     }),
     update: (table: unknown) => ({
       set: (values: Record<string, unknown>) => ({
@@ -443,5 +455,54 @@ describe("audit actor (B-082 F2)", () => {
     // The resolved DICTIONARY user id — never the better-auth auth_user id ("au-0").
     expect(records[0]!.userId).toBe("u-admin");
     expect(records[0]!.userId).not.toBe(SESSION.user.id);
+  });
+});
+
+// ===========================================================================
+// B-388 · SINGLE-RECORDING EVIDENCE for the both-doors insert stub.
+//
+// Converting a `.returning()`-only stub is behaviourally INERT in this file —
+// nothing this route does today writes through the bare TenantDb.insert() door,
+// so no assertion above changed verdict when this landed and a green suite is
+// NOT evidence the conversion is right. The defect a conversion can introduce is
+// a DOUBLE-count (the recording closure invoked on the way in as well as per
+// door) or a second door that records somewhere else. Neither is visible to
+// stub-insert-door.enforce.test.ts, which proves a `then` KEY EXISTS — not that
+// it records correctly. So the recording is asserted here, directly.
+// ===========================================================================
+describe("B-388 · stubDb's two insert doors record identically, once each", () => {
+  interface Door {
+    values: (v: Record<string, unknown>) => PromiseLike<Record<string, unknown>[]> & {
+      returning: () => Promise<Record<string, unknown>[]>;
+    };
+  }
+  const doorOf = (db: Db, table: unknown): Door =>
+    (db as unknown as { insert: (t: unknown) => Door }).insert(table);
+
+  it("records exactly +1 per write and resolves identically, through EITHER door", async () => {
+    const mutated: Mutated[] = [];
+    const db = stubDb([], COMPANY, [], mutated);
+
+    expect(mutated).toHaveLength(0);
+    // The awaited-directly door (what the plain scoped TenantDb.insert() hits).
+    const bare = await doorOf(db, roles).values({ name: "bare" });
+    expect(mutated).toHaveLength(1);
+    // The .returning() door (insertThrough / insert(...).returning()).
+    const ret = await doorOf(db, roles).values({ name: "ret" }).returning();
+    expect(mutated).toHaveLength(2);
+
+    // Both doors record through the SAME closure, so both carry kind "insert" —
+    // an insert recorded as an update would make the kind filters below lie.
+    expect(mutated).toEqual([
+      { table: roles, values: { name: "bare" }, kind: "insert" },
+      { table: roles, values: { name: "ret" }, kind: "insert" },
+    ]);
+    // The ids prove `seq` advanced exactly ONCE per write — no door double-recorded.
+    expect(bare).toEqual([
+      { id: "new-0", currencyCode: "THB", approvalLimits: {}, name: "bare" },
+    ]);
+    expect(ret).toEqual([
+      { id: "new-1", currencyCode: "THB", approvalLimits: {}, name: "ret" },
+    ]);
   });
 });
