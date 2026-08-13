@@ -242,6 +242,132 @@ describe("flat error envelopes (audit debts 1+2)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// B-390 — the data-exception remap is WIRED to the one shared error handler.
+//
+// db/pg-data-exception.test.ts proves the DECISION (which errors are the client's
+// fault). This block proves the WIRING: that the handler actually feeds it the
+// request's body / path params, and that its answer reaches the response. A correct
+// decision function that nobody consults would leave every route still 500ing, and
+// the unit tests alone cannot see that.
+// ---------------------------------------------------------------------------
+
+/** A Db whose every read fails with `err` — stands in for a statement Postgres refused. */
+function throwingDb(err: unknown): Db {
+  const fail = () => Promise.reject(err);
+  const builder = {
+    $dynamic: () => builder,
+    innerJoin: () => builder,
+    where: fail,
+    then: (onOk: (rows: unknown[]) => unknown, onErr: (e: unknown) => unknown) =>
+      fail().then(onOk, onErr),
+  };
+  return {
+    select: () => ({ from: () => builder }),
+  } as unknown as Db;
+}
+
+/** DrizzleQueryError { cause: DatabaseError, params } — the shape drizzle really throws. */
+function drizzleQueryError(
+  fields: { code: string; message?: string; detail?: string },
+  params: unknown[],
+): Error {
+  const cause = new Error(fields.message ?? "db error") as Error & Record<string, unknown>;
+  cause.code = fields.code;
+  if (fields.detail !== undefined) cause.detail = fields.detail;
+  const e = new Error("Failed query: ...") as Error & Record<string, unknown>;
+  e.cause = cause;
+  e.params = params;
+  return e;
+}
+
+const NUMERIC_6_3 =
+  "A field with precision 6, scale 3 must round to an absolute value less than 10^3.";
+
+describe("B-390 client-caused data exceptions answer 4xx (the phone must not wedge)", () => {
+  it("a value from the BODY that Postgres refuses → 400 flat VALIDATION", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: throwingDb(
+          drizzleQueryError(
+            { code: "22003", message: "numeric field overflow", detail: NUMERIC_6_3 },
+            ["100000"],
+          ),
+        ),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/subcon-contracts",
+      payload: { periods: [{ basis: "percent", pct: 100000 }] },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.code).toBe("VALIDATION");
+    // Still the flat contract Error — a 4xx must not grow a new envelope.
+    expect(Object.keys(body).sort()).toEqual(["code", "message"]);
+  });
+
+  it("a value from a PATH PARAM that Postgres refuses → 400 (provenance is not body-only)", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: throwingDb(
+          drizzleQueryError(
+            { code: "22P02", message: 'invalid input syntax for type uuid: "not-a-uuid"' },
+            ["not-a-uuid"],
+          ),
+        ),
+      })
+    ).inject({ url: "/api/v1/subcon-contracts/not-a-uuid/periods" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+  });
+
+  it("a SERVER-COMPUTED overflow keeps its 500 — the remap is not a cover-up", async () => {
+    // Same SQLSTATE, same handler, same route as the 400 above. The ONLY difference is
+    // that the offending value appears nowhere in the request, because the server
+    // computed it. If this ever flips to 400, a money bug has been turned into a quiet
+    // "you sent something wrong" — which is worse than the wedge B-390 fixed.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: throwingDb(
+          drizzleQueryError(
+            {
+              code: "22003",
+              message: "numeric field overflow",
+              detail:
+                "A field with precision 16, scale 2 must round to an absolute value less than 10^14.",
+            },
+            ["999998999999990.00"],
+          ),
+        ),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/subcon-contracts",
+      payload: { periods: [{ basis: "percent", pct: 50 }] },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({
+      code: "INTERNAL_ERROR",
+      message: "Internal server error",
+    });
+  });
+
+  it("an ordinary server crash is untouched by the remap", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: throwingDb(new TypeError("Cannot read properties of undefined")),
+      })
+    ).inject({ url: "/api/v1/subcon-contracts/11111111-1111-1111-1111-111111111111/periods" });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().code).toBe("INTERNAL_ERROR");
+  });
+});
+
 describe("GET /api/v1/me", () => {
   it("answers the Me shape from seed-backed rows", async () => {
     const res = await (
