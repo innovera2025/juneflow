@@ -16,6 +16,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { Db } from "@juneflow/db/client";
 import { PlatformDb } from "./db/platform-db.js";
 import { PlatformWriteDb } from "./db/platform-write-db.js";
+import { clientDataException } from "./db/pg-data-exception.js";
 import {
   registerTenantScope,
   DEFAULT_PUBLIC_PATHS,
@@ -150,6 +151,25 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         ? err.statusCode
         : 500;
     if (statusCode >= 500) {
+      // B-390: a value the CLIENT sent that Postgres refuses is a client error, and
+      // answering 500 wedges a field phone's whole offline queue (sync_processor.dart
+      // defers a 5xx and stops draining, but dead-letters a 4xx and continues).
+      // clientDataException() returns non-null ONLY when the offending value is
+      // traceable to this request; a value the SERVER computed keeps its 500 rather
+      // than being misreported as the caller's mistake (full reasoning in
+      // db/pg-data-exception.ts — read it before widening this).
+      const clientInput = clientDataException(error, {
+        body: request.body,
+        params: request.params,
+        query: request.query,
+      });
+      if (clientInput) {
+        // Logged at ERROR level even though the answer is a 400: if the provenance
+        // test above ever misjudges a server-side overflow, this line is what keeps
+        // it visible instead of silently downgraded.
+        request.log.error(error);
+        return reply.code(400).send(clientInput);
+      }
       request.log.error(error);
       return reply
         .code(statusCode)
