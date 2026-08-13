@@ -23,6 +23,12 @@
 // looked at have the blind shape. A third hand-sweep would be the same move a third
 // time, so this file derives the population instead of listing it.
 //
+// B-388 then converted all 32 (34 doors — admin.test.ts carried three) and deleted the
+// allowlist B-386 had parked them in; see the note where it used to live, below. Every
+// stub insert door in apps/api now captures both doors, and each converted file carries
+// its own single-recording evidence, because this test proves a `then` key exists and
+// NOT that it records correctly (blind spot 2).
+//
 // WHAT THIS MECHANISM CAN SEE
 // ---------------------------
 //  · Every stub insert door under apps/api/src: a `insert:` property (or method) whose
@@ -45,10 +51,11 @@
 //  1. SHAPE OF THE STUB. The door must be spelled as an object property/method named
 //     `insert` containing one named `values`. A stub built by a factory, spread in from
 //     another object, or assigned (`raw.insert = ...`) is not matched. Checked, not
-//     assumed: every stub in apps/api today uses the literal shape (the scan finds 38
-//     doors across 36 files — two files carry two — and the believability floor below
-//     fails if that collapses; the floor asserts a threshold, not this number, so the
-//     count is documentation and nothing depends on it).
+//     assumed: every stub in apps/api today uses the literal shape (the scan finds 39
+//     doors across 36 files — admin.test.ts carries three, tenant-db.test.ts two — and
+//     the believability floor below fails if that collapses; the floor asserts a
+//     threshold, not this number, so the count is documentation and nothing depends
+//     on it).
 //  2. WHAT THE DOOR DOES WITH THE CALL. It proves a `then` key exists on the returned
 //     object. It does NOT prove `then` records into the same array `returning` does, nor
 //     that it models a throw identically. A THIRD limit, worth stating because the
@@ -59,9 +66,12 @@
 //     from a vacuous assertion today (audit-log.test.ts defines no insert door, and
 //     createDbAuditSink is wired only in app.ts), but "the only bare-door calls in
 //     apps/api/src" is true of TenantDb.insert(table, values) and of nothing wider. A `then: () => Promise.resolve([])` that
-//     records nothing would pass this scan and still be blind — which is why the three
-//     files fixed under B-386 each carry a 2x2 in their comment rather than relying on
-//     this test alone.
+//     records nothing would pass this scan and still be blind — which is why B-388 gave
+//     every converted stub its own SINGLE-RECORDING EVIDENCE (one bare-door write records
+//     exactly +1, asserted at the foot of each file) rather than relying on this test
+//     alone. admin.test.ts's wFake is the case in point: its door recorded nothing through
+//     EITHER path, so a bare `then` would have satisfied this scan and left the "INSERT is
+//     denied" assertion exactly as unfalsifiable — it was given a recorder instead.
 //  3. INDIRECTION IN THE WRITE. A bare-door write reached through a variable table
 //     (`const t = stockLedgers; db.insert(t, row)`) or via a helper taking the table as
 //     a parameter is still FOUND (the scan keys on argument count, not on the argument
@@ -117,48 +127,26 @@ const BARE_DOOR_WRITERS: BareDoorWriter[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// The blind-stub allowlist.
+// B-388 · THE ALLOWLIST IS GONE — this is the note that explains the empty space.
 //
-// A `.returning()`-only stub is only a LATENT defect: it is blind to a door none of the
-// routes it covers uses today. These 32 are named so they are visible and so a NEW blind
-// stub cannot be added silently — the allowlist is a ceiling, not a licence. Entries are
-// expected to be deleted as stubs are converted, and a stale entry fails just as loudly
-// as a missing one.
+// B-386 shipped with a BLIND_STUBS_ALLOWED array naming the 32 stubs that still
+// captured only `.returning()`, so nothing went red on the day the guard landed. All 32
+// have since been converted (34 doors — admin.test.ts carried three), which left the
+// array empty and its staleness test with nothing to check.
+//
+// It was DELETED rather than kept empty, for one reason: an empty allowlist whose
+// staleness test can never fail is a test that reports green without discriminating —
+// the exact pathology the believability floor below exists to catch, in miniature. It
+// also advertises an escape hatch this file's own instruction contradicts ("capture both
+// doors rather than extending the allowlist"). With it gone, re-admitting a blind stub
+// means weakening the assertion itself: a visible, reviewable act rather than one more
+// name on a list.
+//
+// NOTHING THE GUARD CAN CATCH CHANGED. The offender test below filtered `blind` by
+// `!allowed.has(file)`; against an empty allowlist that filter was already a no-op, so
+// dropping it reports exactly the same set, with the same message naming the same files.
+// Only the (by then vacuous) staleness test is gone.
 // ---------------------------------------------------------------------------
-const BLIND_STUBS_ALLOWED: string[] = [
-  "apps/api/src/db/tenant-db.test.ts",
-  "apps/api/src/routes/admin.test.ts",
-  "apps/api/src/routes/ap-cndn.test.ts",
-  "apps/api/src/routes/ap-deposit.test.ts",
-  "apps/api/src/routes/ap.test.ts",
-  "apps/api/src/routes/ar.test.ts",
-  "apps/api/src/routes/bank.test.ts",
-  "apps/api/src/routes/boq.test.ts",
-  "apps/api/src/routes/cost-centers.test.ts",
-  "apps/api/src/routes/fa.test.ts",
-  "apps/api/src/routes/gl.test.ts",
-  "apps/api/src/routes/labor.test.ts",
-  "apps/api/src/routes/models.test.ts",
-  "apps/api/src/routes/notify.test.ts",
-  "apps/api/src/routes/opex.test.ts",
-  "apps/api/src/routes/org-units.test.ts",
-  "apps/api/src/routes/petty.test.ts",
-  "apps/api/src/routes/pm.test.ts",
-  "apps/api/src/routes/po.test.ts",
-  "apps/api/src/routes/pr.test.ts",
-  "apps/api/src/routes/project-nodes.test.ts",
-  "apps/api/src/routes/project-types.test.ts",
-  "apps/api/src/routes/projects.test.ts",
-  "apps/api/src/routes/retention.test.ts",
-  "apps/api/src/routes/revrec.test.ts",
-  "apps/api/src/routes/roles.test.ts",
-  "apps/api/src/routes/sales-service.test.ts",
-  "apps/api/src/routes/solar.test.ts",
-  "apps/api/src/routes/subcon.test.ts",
-  "apps/api/src/routes/users.test.ts",
-  "apps/api/src/routes/vendors.test.ts",
-  "apps/api/src/routes/wo.test.ts",
-];
 
 // ---------------------------------------------------------------------------
 // File walking
@@ -459,8 +447,9 @@ describe("B-386 · stub insert doors are enforced, not swept for", () => {
     expect(insertBody, "TenantDb.insert() was not found — this scan's premise moved").toBeDefined();
     expect(
       insertBody!.includes(".returning()"),
-      "TenantDb.insert() now ends in .returning(). The two-door hazard is gone, so the " +
-        "allowlist below and this entire file should be deleted rather than maintained.",
+      "TenantDb.insert() now ends in .returning(). The two-door hazard is gone, so this " +
+        "entire file — and the `then` door on all 39 stubs — should be deleted rather " +
+        "than maintained.",
     ).toBe(false);
   });
 
@@ -515,29 +504,20 @@ describe("B-386 · stub insert doors are enforced, not swept for", () => {
     }
   });
 
-  it("admits no NEW blind stub", () => {
-    const blind = doors.filter((d) => d.kind !== "BOTH");
-    const allowed = new Set(BLIND_STUBS_ALLOWED);
-    const offenders = blind
-      .filter((d) => !allowed.has(d.file))
+  it("admits NO blind stub, anywhere (B-388: the allowlist is empty and deleted)", () => {
+    const offenders = doors
+      .filter((d) => d.kind !== "BOTH")
       .map((d) => `  ${d.file}:${d.line}  [${d.kind}] exposes [${d.exposes.join(", ")}]`);
     expect(
       offenders,
-      `\n${offenders.length} stub insert door(s) capture only \`.returning()\` and are not on ` +
-        `the allowlist. A write through the plain scoped TenantDb.insert() would go ` +
-        `unrecorded, making absence assertions about it unfalsifiable. Capture both doors ` +
-        `(gr.test.ts, land-sales.test.ts, inventory.test.ts and ai-qto.test.ts are the ` +
-        `worked examples) rather than extending the allowlist.\n\n${offenders.join("\n")}\n`,
-    ).toEqual([]);
-  });
-
-  it("has no stale allowlist entry", () => {
-    const blindFiles = new Set(doors.filter((d) => d.kind !== "BOTH").map((d) => d.file));
-    const stale = BLIND_STUBS_ALLOWED.filter((f) => !blindFiles.has(f));
-    expect(
-      stale,
-      "an allowlisted stub is no longer blind — it was fixed, moved or deleted. Remove " +
-        "the entry; the allowlist is meant to shrink to nothing:\n  " + stale.join("\n  "),
+      `\n${offenders.length} stub insert door(s) capture only \`.returning()\`. A write ` +
+        `through the plain scoped TenantDb.insert() would go unrecorded, making absence ` +
+        `assertions about it unfalsifiable. Capture both doors — every stub in apps/api ` +
+        `already does, so copy the nearest one (gr.test.ts and inventory.test.ts are the ` +
+        `richest: they thread insertThrows/onInsert through both paths). Route both doors ` +
+        `through ONE record() closure invoked once per door call, and carry the ` +
+        `single-recording evidence at the foot of the file: one bare-door write must ` +
+        `record exactly +1. Do NOT re-introduce an allowlist.\n\n${offenders.join("\n")}\n`,
     ).toEqual([]);
   });
 

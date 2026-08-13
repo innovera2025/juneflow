@@ -299,14 +299,23 @@ function writeStub(opts: WriteStubOpts & { updated?: Updated[] }): Db {
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
-        returning: () => {
+      // B-388 · BOTH insert doors. TenantDb.insert() returns the builder WITHOUT
+      // .returning() and the caller awaits it directly, so a `.returning()`-only
+      // stub records nothing for such a write and every absence assertion about
+      // it is vacuous. One `record()` closure sits behind both doors — invoked
+      // once per DOOR CALL, never in the `values(...)` body (which would make
+      // `.returning()` double-count). insertThrows / onInsert / the per-table
+      // `nth` counter are therefore threaded IDENTICALLY down both paths: a 23505
+      // model and the derived stored-row view behave the same whichever door the
+      // write took. Evidence at the foot of this file.
+      values: (values: Record<string, unknown> | Record<string, unknown>[]) => {
+        const record = (): { boom: Error | null; out: Record<string, unknown>[] } => {
           const nth = insertCount.get(table) ?? 0;
           insertCount.set(table, nth + 1);
           const boom = insertThrows?.(table, nth);
           // Thrown BEFORE the capture: a rejected insert wrote no row, so it must not
           // be counted as one (the "exactly one row" assertions depend on that).
-          if (boom) return Promise.reject(boom);
+          if (boom) return { boom, out: [] };
           inserted.push({ table, values });
           const arr = Array.isArray(values) ? values : [values];
           const out = arr.map((v) => {
@@ -314,9 +323,22 @@ function writeStub(opts: WriteStubOpts & { updated?: Updated[] }): Db {
             return { id: row.id ?? `new-${seq++}`, createdAt: D, ...row };
           });
           onInsert?.(table, out as Record<string, unknown>[]);
-          return Promise.resolve(out);
-        },
-      }),
+          return { boom: null, out };
+        };
+        return {
+          returning: () => {
+            const { boom, out } = record();
+            return boom ? Promise.reject(boom) : Promise.resolve(out);
+          },
+          // The awaited-directly door (plain scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) => {
+            const { boom, out } = record();
+            return boom
+              ? Promise.reject(boom).then(onOk, onErr)
+              : Promise.resolve(out).then(onOk, onErr);
+          },
+        };
+      },
     }),
   };
   // B-332: the UPDATE door. Captures the SET payload AND the composed WHERE, so a
@@ -3300,5 +3322,111 @@ describe("B-337: the SELF-SERVICE day is bound to the business clock", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(updated.filter((u) => u.table === attendances)).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// B-388 · SINGLE-RECORDING EVIDENCE for the both-doors insert stub.
+//
+// Converting a `.returning()`-only stub is behaviourally INERT in this file —
+// nothing this route does today writes through the bare TenantDb.insert() door,
+// so no assertion above changed verdict when this landed and a green suite is
+// NOT evidence the conversion is right. The defect a conversion can introduce is
+// a DOUBLE-count (the recording closure invoked on the way in as well as per
+// door), a door that records somewhere else, or — the one that matters most in
+// THIS file — a throw/callback that fires on one path and not the other. None of
+// those is visible to stub-insert-door.enforce.test.ts, which proves a `then`
+// KEY EXISTS, not that it records correctly. So it is asserted here, directly.
+// ===========================================================================
+describe("B-388 · writeStub's two insert doors record identically, once each", () => {
+  interface Door {
+    values: (
+      v: Record<string, unknown> | Record<string, unknown>[],
+    ) => PromiseLike<Record<string, unknown>[]> & {
+      returning: () => Promise<Record<string, unknown>[]>;
+    };
+  }
+  const doorOf = (db: Db, table: unknown): Door =>
+    (db as unknown as { insert: (t: unknown) => Door }).insert(table);
+
+  it("records exactly +1 per write and resolves identically, through EITHER door", async () => {
+    const inserted: Inserted[] = [];
+    const db = writeStub({ rows: [], inserted });
+
+    expect(inserted).toHaveLength(0);
+    // The awaited-directly door (what the plain scoped TenantDb.insert() hits).
+    const bare = await doorOf(db, attendances).values({ no: "bare" });
+    expect(inserted).toHaveLength(1);
+    // The .returning() door (insertThrough / insert(...).returning()).
+    const ret = await doorOf(db, attendances).values({ no: "ret" }).returning();
+    expect(inserted).toHaveLength(2);
+
+    expect(inserted).toEqual([
+      { table: attendances, values: { no: "bare" } },
+      { table: attendances, values: { no: "ret" } },
+    ]);
+    // The ids prove `seq` advanced exactly ONCE per write — no door double-recorded.
+    expect(bare).toEqual([{ id: "new-0", createdAt: D, no: "bare" }]);
+    expect(ret).toEqual([{ id: "new-1", createdAt: D, no: "ret" }]);
+  });
+
+  it("advances the per-table `nth` ONCE per door call, whichever door is used", async () => {
+    // The counter is what lets a test trip only the REPLAY (nth === 1). If the
+    // bare door skipped it, or ticked it twice, an idempotency test keyed on nth
+    // would silently arm on the wrong write.
+    const nths: number[] = [];
+    const inserted: Inserted[] = [];
+    const db = writeStub({
+      rows: [],
+      inserted,
+      insertThrows: (_t, nth) => {
+        nths.push(nth);
+        return null;
+      },
+    });
+
+    await doorOf(db, attendances).values({ no: "a" });                 // bare
+    await doorOf(db, attendances).values({ no: "b" }).returning();     // returning
+    await doorOf(db, attendances).values({ no: "c" });                 // bare
+
+    expect(nths).toEqual([0, 1, 2]);
+    expect(inserted).toHaveLength(3);
+  });
+
+  it("models a 23505 identically: EITHER door rejects, and a rejected write records nothing", async () => {
+    const boom = new Error("duplicate key value violates unique constraint");
+    const inserted: Inserted[] = [];
+    const onInsertRows: Record<string, unknown>[][] = [];
+    const db = writeStub({
+      rows: [],
+      inserted,
+      insertThrows: () => boom,
+      onInsert: (_t, r) => onInsertRows.push(r),
+    });
+
+    // Promise.resolve() adopts the thenable with exactly ONE `then` call, so this
+    // measures the door and not the assertion helper.
+    await expect(Promise.resolve(doorOf(db, attendances).values({ no: "x" }))).rejects.toBe(boom);
+    await expect(doorOf(db, attendances).values({ no: "y" }).returning()).rejects.toBe(boom);
+
+    // The throw happens BEFORE the capture on both paths: no phantom row, and no
+    // onInsert for a write that never landed.
+    expect(inserted).toHaveLength(0);
+    expect(onInsertRows).toHaveLength(0);
+  });
+
+  it("fires onInsert once per door call, with the same stamped rows from either door", async () => {
+    const onInsertRows: Record<string, unknown>[][] = [];
+    const db = writeStub({ rows: [], onInsert: (_t, r) => onInsertRows.push(r) });
+
+    const bare = await doorOf(db, attendances).values({ no: "a" });
+    expect(onInsertRows).toHaveLength(1);
+    const ret = await doorOf(db, attendances).values({ no: "b" }).returning();
+    expect(onInsertRows).toHaveLength(2);
+
+    // onInsert sees exactly what the door resolved to — the derived stored-row
+    // view a replay test reads back is therefore the same whichever door wrote.
+    expect(onInsertRows[0]).toEqual(bare);
+    expect(onInsertRows[1]).toEqual(ret);
   });
 });

@@ -285,13 +285,29 @@ function rwStub(opts: {
       from: () => ({ where: () => Promise.resolve(visible) }),
     }),
     // TenantDb.insert force-sets company_id; the route chains .returning()
+    //
+    // B-388 · BOTH insert doors. TenantDb.insert() returns the builder WITHOUT
+    // .returning() and the caller awaits it directly, so a `.returning()`-only
+    // stub records nothing for such a write and every absence assertion about it
+    // is vacuous. One `record()` closure sits behind both doors — invoked once
+    // per DOOR CALL, never in the `values(...)` body (which would make
+    // `.returning()` double-count). `sink.inserted` now ACCUMULATES instead of
+    // being overwritten so "one write records exactly one row" is assertable;
+    // every test above writes at most once, so `sink.inserted[0]` is unchanged.
+    // Evidence at the foot of this file.
     insert: () => ({
-      values: (values: Record<string, unknown>) => ({
-        returning: () => {
-          sink.inserted = [values];
-          return Promise.resolve([{ id: `pt-new-${seq++}`, ...values }]);
-        },
-      }),
+      values: (values: Record<string, unknown>) => {
+        const record = (): Record<string, unknown>[] => {
+          sink.inserted = [...(sink.inserted ?? []), values];
+          return [{ id: `pt-new-${seq++}`, ...values }];
+        };
+        return {
+          returning: () => Promise.resolve(record()),
+          // The awaited-directly door (plain scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+            Promise.resolve(record()).then(onOk, onErr),
+        };
+      },
     }),
     // TenantDb.update scopes WHERE company_id = tenant AND id = :id; .returning()
     update: () => ({
@@ -474,5 +490,46 @@ describe("PUT /api/v1/project-types/:id — edit only an OWN custom type", () =>
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe("VALIDATION");
+  });
+});
+
+// ===========================================================================
+// B-388 · SINGLE-RECORDING EVIDENCE for the both-doors insert stub.
+//
+// Converting a `.returning()`-only stub is behaviourally INERT in this file —
+// nothing project-types.ts does today writes through the bare TenantDb.insert()
+// door, so no assertion above changed verdict when this landed and a green suite
+// is NOT evidence the conversion is right. The defect a conversion can introduce
+// is a DOUBLE-count (the recording closure invoked on the way in as well as per
+// door) or a second door that records somewhere else. Neither is visible to
+// stub-insert-door.enforce.test.ts, which proves a `then` KEY EXISTS — not that
+// it records correctly. So the recording is asserted here, directly.
+// ===========================================================================
+describe("B-388 · rwStub's two insert doors record identically, once each", () => {
+  interface Door {
+    values: (v: Record<string, unknown>) => PromiseLike<Record<string, unknown>[]> & {
+      returning: () => Promise<Record<string, unknown>[]>;
+    };
+  }
+  const doorOf = (db: Db): Door =>
+    (db as unknown as { insert: () => Door }).insert();
+
+  it("records exactly +1 per write and resolves identically, through EITHER door", async () => {
+    const sink: WriteSink = {};
+    const db = rwStub({ sink });
+
+    expect(sink.inserted).toBeUndefined();
+    // The awaited-directly door (what the plain scoped TenantDb.insert() hits).
+    const bare = await doorOf(db).values({ name: "bare" });
+    expect(sink.inserted).toHaveLength(1);
+    // The .returning() door (insertThrough / insert(...).returning()).
+    const ret = await doorOf(db).values({ name: "ret" }).returning();
+    expect(sink.inserted).toHaveLength(2);
+
+    expect(sink.inserted).toEqual([{ name: "bare" }, { name: "ret" }]);
+    // The ids prove `seq` advanced exactly ONCE per write, so neither door
+    // invoked the recording closure twice.
+    expect(bare).toEqual([{ id: "pt-new-0", name: "bare" }]);
+    expect(ret).toEqual([{ id: "pt-new-1", name: "ret" }]);
   });
 });

@@ -59,18 +59,28 @@ function stubDb(opts: StubOpts): Db {
   const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
-      values: (values: Record<string, unknown> | Record<string, unknown>[]) => ({
-        returning: () => {
+      // B-388 · BOTH insert doors. TenantDb.insert() returns the builder WITHOUT
+      // .returning() and the caller awaits it directly, so a `.returning()`-only
+      // stub records nothing for such a write and every absence assertion about
+      // it is vacuous. One `record()` closure sits behind both doors — invoked
+      // once per DOOR CALL, never in the `values(...)` body (which would make
+      // `.returning()` double-count). Evidence at the foot of this file.
+      values: (values: Record<string, unknown> | Record<string, unknown>[]) => {
+        const record = (): Record<string, unknown>[] => {
           inserted.push({ table, values });
           const arr = Array.isArray(values) ? values : [values];
-          return Promise.resolve(
-            arr.map((v) => {
-              const row = v as Record<string, unknown>;
-              return { id: row.id ?? `new-${seq++}`, createdAt: D, updatedAt: D, ...row };
-            }),
-          );
-        },
-      }),
+          return arr.map((v) => {
+            const row = v as Record<string, unknown>;
+            return { id: row.id ?? `new-${seq++}`, createdAt: D, updatedAt: D, ...row };
+          });
+        };
+        return {
+          returning: () => Promise.resolve(record()),
+          // The awaited-directly door (plain scoped insert, no .returning()).
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+            Promise.resolve(record()).then(onOk, onErr),
+        };
+      },
     }),
   };
   return raw as unknown as Db;
@@ -254,5 +264,71 @@ describe("POST /api/v1/opex/budgets", () => {
     const read = captured.find((c) => c.table === opexBudgets);
     expect(read).toBeTruthy();
     expect(paramsOf(read!.where)).toContain(COMPANY); // tenant scope is load-bearing
+  });
+});
+
+// ===========================================================================
+// B-388 · SINGLE-RECORDING EVIDENCE for the both-doors insert stub.
+//
+// Converting a `.returning()`-only stub is behaviourally INERT in this file —
+// nothing this route does today writes through the bare TenantDb.insert() door,
+// so no assertion above changed verdict when this landed and a green suite is
+// NOT evidence the conversion is right. The defect a conversion can introduce is
+// a DOUBLE-count (the recording closure invoked on the way in as well as per
+// door) or a second door that records somewhere else. Neither is visible to
+// stub-insert-door.enforce.test.ts, which proves a `then` KEY EXISTS — not that
+// it records correctly. So the recording is asserted here, directly.
+// ===========================================================================
+describe("B-388 · stubDb's two insert doors record identically, once each", () => {
+  interface Door {
+    values: (
+      v: Record<string, unknown> | Record<string, unknown>[],
+    ) => PromiseLike<Record<string, unknown>[]> & {
+      returning: () => Promise<Record<string, unknown>[]>;
+    };
+  }
+  const doorOf = (db: Db, table: unknown): Door =>
+    (db as unknown as { insert: (t: unknown) => Door }).insert(table);
+
+  it("records exactly +1 per write and resolves identically, through EITHER door", async () => {
+    const inserted: Inserted[] = [];
+    const db = stubDb({ rows: [], inserted });
+
+    expect(inserted).toHaveLength(0);
+    // The awaited-directly door (what the plain scoped TenantDb.insert() hits).
+    const bare = await doorOf(db, opexBudgets).values({ no: "bare" });
+    expect(inserted).toHaveLength(1);
+    // The .returning() door (insertThrough / insert(...).returning()).
+    const ret = await doorOf(db, opexBudgets).values({ no: "ret" }).returning();
+    expect(inserted).toHaveLength(2);
+
+    expect(inserted).toEqual([
+      { table: opexBudgets, values: { no: "bare" } },
+      { table: opexBudgets, values: { no: "ret" } },
+    ]);
+    // Identical resolution shape. The ids prove `seq` advanced exactly ONCE per
+    // write, so neither door invoked the recording closure twice.
+    expect(bare).toEqual([{ id: "new-0", createdAt: D, updatedAt: D, no: "bare" }]);
+    expect(ret).toEqual([{ id: "new-1", createdAt: D, updatedAt: D, no: "ret" }]);
+  });
+
+  it("expands an ARRAY of child rows identically through EITHER door", async () => {
+    const insertedBare: Inserted[] = [];
+    const bare = await doorOf(stubDb({ rows: [], inserted: insertedBare }), opexBudgets).values([
+      { no: "a" },
+      { no: "b" },
+    ]);
+    const insertedRet: Inserted[] = [];
+    const ret = await doorOf(stubDb({ rows: [], inserted: insertedRet }), opexBudgets)
+      .values([{ no: "a" }, { no: "b" }])
+      .returning();
+
+    // ONE recording for the batch (not one per row), and the SAME shape from both
+    // doors — a divergence here is what a hand-copied `then` typically gets wrong.
+    expect(insertedBare).toEqual(insertedRet);
+    expect(insertedBare).toHaveLength(1);
+    expect(insertedBare[0]).toEqual({ table: opexBudgets, values: [{ no: "a" }, { no: "b" }] });
+    expect(bare).toEqual(ret);
+    expect(bare).toHaveLength(2);
   });
 });

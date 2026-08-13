@@ -299,13 +299,32 @@ describe("insertThrough is the fail-closed WRITE door for parent-FK child tables
           },
         }),
       }),
+      // B-388 · BOTH insert doors. TenantDb has two: insertThrough() ends in
+      // .returning(), but the plain scoped insert() (line 228) returns
+      // `db.insert(table).values(row)` and the CALLER awaits that builder — so a
+      // `.returning()`-only fake never sees such a write at all. This fake sits
+      // under the REAL TenantDb, which makes it the one place the door pair can
+      // be exercised through production code rather than a hand-rolled call.
+      //
+      // `sink.inserted` now ACCUMULATES instead of being overwritten, so "one
+      // write records exactly one row-set" is an assertable property. Every test
+      // above writes at most once, so the two assertions on it are unchanged:
+      // `toBeUndefined()` on the denied path, `toHaveLength(2)` for a 2-row
+      // insertThrough.
       insert: () => ({
-        values: (rows: unknown[]) => ({
-          returning: () => {
-            sink.inserted = rows;
-            return Promise.resolve(rows);
-          },
-        }),
+        values: (rows: unknown[]) => {
+          const record = (): unknown[] => {
+            const list = Array.isArray(rows) ? rows : [rows];
+            sink.inserted = [...(sink.inserted ?? []), ...list];
+            return list;
+          };
+          return {
+            returning: () => Promise.resolve(record()),
+            // The awaited-directly door (plain scoped insert, no .returning()).
+            then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+              Promise.resolve(record()).then(onOk, onErr),
+          };
+        },
       }),
     } as unknown as Db;
   }
@@ -635,5 +654,79 @@ describe("transaction door (B-097) — same-tenant scope, all-or-nothing", () =>
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
+  });
+});
+
+// ===========================================================================
+// B-388 · SINGLE-RECORDING EVIDENCE for the both-doors insert fake.
+//
+// Unlike the route stubs, this one can be driven through the REAL TenantDb — so
+// both doors are exercised by production code rather than a hand-rolled call:
+//   · insertThrough()  → db.insert(t).values(rows).returning()   (returning door)
+//   · insert()         → db.insert(t).values(row), AWAITED       (bare door)
+// That second line is the whole hazard: before this fake grew a `then`, an
+// awaited-directly write resolved to the builder object itself and was NEVER
+// recorded, so `expect(sink.inserted).toBeUndefined()` above could not fail.
+// ===========================================================================
+describe("B-388 · the insertThrough fake records both TenantDb insert doors, once each", () => {
+  const PROJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+  function fakeDb(ownedRows: unknown[], sink: { where?: SQL; inserted?: unknown[] }): Db {
+    return {
+      select: () => ({
+        from: () => ({
+          where: (where: SQL) => {
+            sink.where = where;
+            return Promise.resolve(ownedRows);
+          },
+        }),
+      }),
+      insert: () => ({
+        values: (rows: unknown[]) => {
+          const record = (): unknown[] => {
+            const list = Array.isArray(rows) ? rows : [rows];
+            sink.inserted = [...(sink.inserted ?? []), ...list];
+            return list;
+          };
+          return {
+            returning: () => Promise.resolve(record()),
+            then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+              Promise.resolve(record()).then(onOk, onErr),
+          };
+        },
+      }),
+    } as unknown as Db;
+  }
+
+  it("records a BARE-door TenantDb.insert() exactly once (+1), not zero", async () => {
+    const sink: { where?: SQL; inserted?: unknown[] } = {};
+    const t = new TenantDb(fakeDb([], sink), COMPANY);
+
+    expect(sink.inserted).toBeUndefined();
+    // TenantDb.insert() does NOT call .returning() — the caller awaits the
+    // builder. This is the write a `.returning()`-only fake cannot see.
+    await t.insert(users, { email: "a@b.co", name: "A" });
+    expect(sink.inserted).toHaveLength(1);
+    await t.insert(users, { email: "c@d.co", name: "C" });
+    expect(sink.inserted).toHaveLength(2);
+
+    // The tenant is force-set on both, and the recorded rows are the rows written.
+    expect(sink.inserted).toEqual([
+      { email: "a@b.co", name: "A", companyId: COMPANY },
+      { email: "c@d.co", name: "C", companyId: COMPANY },
+    ]);
+  });
+
+  it("records the SAME sink from the .returning() door, so the two agree", async () => {
+    const sink: { where?: SQL; inserted?: unknown[] } = {};
+    const t = new TenantDb(fakeDb([{ id: PROJECT }], sink), COMPANY);
+
+    await t.insert(users, { email: "a@b.co", name: "A" });
+    expect(sink.inserted).toHaveLength(1);
+    // insertThrough ends in .returning() — the other door, same recorder.
+    await t.insertThrough(projectNodes, projects, PROJECT, [
+      { projectId: PROJECT, kind: "block", name: "B" } as never,
+    ]);
+    expect(sink.inserted).toHaveLength(2);
   });
 });
