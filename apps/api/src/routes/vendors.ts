@@ -61,6 +61,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { vendors } from "@juneflow/db/schema";
 import { listEnvelope } from "./list-envelope.js";
+import { loadCaller, MANAGEMENT_MODULE, permAllowed } from "./authz.js";
 
 type VendorRow = typeof vendors.$inferSelect;
 
@@ -170,6 +171,21 @@ export function registerVendorsRoute(app: FastifyInstance): void {
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
     }
 
+    // B-395 (audit H2): a vendor is `master`-module master-data of the same class
+    // as /models + /cost-centers (B-084), so creating one is gated on the same
+    // master.create right (reusing loadCaller/permAllowed — no new policy). This
+    // is a MONEY gate, not master-data tidiness: `vendor.bank` is the
+    // beneficiaryAccountNo the generated bank payment file pays to (bank.ts:684),
+    // so minting a payee here mints a payment destination. Fail-closed: an
+    // unattributable caller has no perms and is denied — before any body is read.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, MANAGEMENT_MODULE, "create")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `requires ${MANAGEMENT_MODULE}.create permission`,
+      });
+    }
+
     const body = (request.body ?? {}) as Record<string, unknown>;
     const name = str(pick(body, "name")).trim();
     // The web has already mapped its 4-way type to a kind; default to the schema
@@ -249,6 +265,20 @@ export function registerVendorsRoute(app: FastifyInstance): void {
       return reply
         .code(401)
         .send({ code: "UNAUTHENTICATED", message: "Missing tenant context" });
+    }
+
+    // B-395 (audit H2): editing a vendor is master-data administration too, so
+    // gate it on master.edit (same right /roles PUT uses). The money reason is
+    // sharper here than on create: `bank` is the beneficiaryAccountNo the bank
+    // payment file pays to (bank.ts:684), so an ungated PUT lets any tenant
+    // member re-point an existing vendor's AP payout at their own account.
+    // Fail-closed, and BEFORE the body is read — deny, then parse.
+    const caller = await loadCaller(request);
+    if (!permAllowed(caller?.perms, MANAGEMENT_MODULE, "edit")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: `requires ${MANAGEMENT_MODULE}.edit permission`,
+      });
     }
 
     const { id } = request.params as { id: string };

@@ -6,6 +6,8 @@
 // update-empty stub); listGlWip envelope + balance derive; transferGlWip validated
 // amount, BALANCED JV (Dr 5010 / Cr 1140 = amount), 400 on ≤ 0, 409 on over-balance,
 // 409 optimistic-lock; and the company_id tenant-scope predicate on the loads.
+// B-394: the finance.approve gate on BOTH posts (deny / positive control / the
+// create-is-not-approve pin), asserting no JV was written on every refusal.
 // Every expected money value comes from the stub — never hand-computed vs the impl.
 //
 // The routes are registered onto the built app in buildApp (app.ts wiring is the
@@ -21,6 +23,8 @@ import {
   projects,
   revRecTxns,
   revRecs,
+  roles,
+  users,
   wipTransferTxns,
   wips,
 } from "@juneflow/db";
@@ -61,14 +65,71 @@ interface StubOpts {
   updateRows?: (set: Record<string, unknown>) => unknown[];
 }
 
+// ---------------------------------------------------------------------------
+// B-394 — the authz rows the two POST doors now resolve
+// ---------------------------------------------------------------------------
+// POST /gl/revrec/{id}/post and POST /gl/wip/{id}/transfer run the REAL
+// loadCaller → permAllowed against the stubbed `user` + `role` tables. Nothing
+// about the gate is faked: the production authz module does the resolving and the
+// deciding here, and only the two rows it reads are canned.
+//
+// stubDb APPENDS these as DEFAULTS so the pre-existing post tests keep describing
+// what they were written to describe (server-computed money, the balanced JV, the
+// CAS) instead of all turning into 403 assertions. rowsFor takes the FIRST
+// matching entry, so a test that supplies its own [users, …] / [roles, …] still
+// wins — which is exactly how the deny-path tests below revoke a right.
+const callerUser = {
+  id: "u-caller",
+  companyId: COMPANY,
+  email: SESSION.user.email,
+  name: SESSION.user.name,
+  roleId: "role-0",
+  status: "active",
+};
+/**
+ * A role carrying (or not) the finance rights the gate reads. Defaults mirror the
+ * seeded Finance Manager — the role suda@ (this SESSION's email) actually holds,
+ * and one of the three that carry finance.approve; a deny test passes `false`.
+ */
+const financeRole = (
+  finance: { create?: boolean; approve?: boolean } = {},
+) => ({
+  id: "role-0",
+  companyId: COMPANY,
+  name: "Finance Manager",
+  approvalLimits: {},
+  perms: {
+    finance: {
+      view: true,
+      create: finance.create ?? true,
+      edit: true,
+      approve: finance.approve ?? true,
+      cancel: false,
+    },
+  },
+  approvalLevel: 3,
+  approvalLimit: null,
+  currencyCode: "THB",
+  createdAt: D,
+  updatedAt: D,
+});
+/** The two rows loadCaller resolves, as a rows[] fragment a test can prepend. */
+const authzRows = (
+  finance: { create?: boolean; approve?: boolean } = {},
+): Array<[unknown, RowSource]> => [
+  [users, [callerUser]],
+  [roles, [financeRole(finance)]],
+];
+
 function stubDb(opts: StubOpts): Db {
   const {
-    rows,
     captured = [],
     inserted = [],
     updated = [],
     updateRows = (set) => [{ id: "upd", ...set }],
   } = opts;
+  // B-394: authorized-caller defaults, APPENDED so an explicit per-test override wins.
+  const rows: Array<[unknown, RowSource]> = [...opts.rows, ...authzRows()];
   const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
     for (const [t, r] of rows) {
       if (t === table) return typeof r === "function" ? r(where) : r;
@@ -583,6 +644,151 @@ describe("POST /api/v1/gl/wip/{id}/transfer", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().message).toMatch(/concurrently transferred/);
+  });
+});
+
+// ===========================================================================
+// B-394 — function-level authorization on the two JV-POSTING doors
+// ===========================================================================
+// Each deny test uses the SAME fixture the 200 happy path uses (the positive
+// control right beside it proves that), so the 403 can only be the gate — a
+// fixture that could not reach 200 would prove nothing about it. Each also
+// asserts NOTHING WAS WRITTEN, because the harm this closes is a real balanced JV
+// landing in the tenant's ledger, not a status code.
+describe("GL revrec/wip posts — B-394 finance.approve authz", () => {
+  const FORBIDDEN_MSG =
+    "GL posting (revrec / WIP transfer) requires the finance approve permission";
+  /** The rows a revrec post needs to reach 200 (due = 40% × 10M − 2M = 2,000,000). */
+  const revrecRows = (): Array<[unknown, RowSource]> => [
+    [revRecs, [revRecRow({ pct: "40.00", recognized: "2000000.00", posted: false })]],
+    [glAccounts, coaRows],
+    [jvs, jvOwned],
+  ];
+  /** The rows a wip transfer needs to reach 200 (balance 4,500,000). */
+  const wipRows = (): Array<[unknown, RowSource]> => [
+    [wips, [wipRow()]],
+    [glAccounts, coaRows],
+    [jvs, jvOwned],
+  ];
+  const TRANSFER = { amount: 1500000 };
+
+  it("POST /gl/revrec/{id}/post 403s a caller without finance.approve, and posts no JV", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [...authzRows({ create: false, approve: false }), ...revrecRows()],
+          inserted,
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/gl/revrec/${REVREC}/post`, payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ code: "FORBIDDEN", message: FORBIDDEN_MSG });
+    // No jv, no jv_line, no rev_rec_txn — and `recognized` never advanced.
+    expect(inserted).toEqual([]);
+    expect(updated).toEqual([]);
+  });
+
+  it("POST /gl/revrec/{id}/post 200s the SAME fixture once finance.approve is held (the balanced JV still posts)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [...authzRows({ approve: true }), ...revrecRows()], inserted }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/gl/revrec/${REVREC}/post`, payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().due).toBe(2000000);
+    const lines = inserted.find((i) => i.table === jvLines)!.values as Record<string, unknown>[];
+    expect(lines.reduce((s, l) => s + Number(l.dr), 0)).toBe(2000000);
+    expect(lines.reduce((s, l) => s + Number(l.cr), 0)).toBe(2000000); // still BALANCED
+    expect(inserted.find((i) => i.table === revRecTxns)).toBeTruthy();
+  });
+
+  it("POST /gl/revrec/{id}/post 403s a caller holding finance.create but NOT approve (approve, not create)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          // The seeded `sale` role's finance shape: view/create/edit, no approve.
+          rows: [...authzRows({ create: true, approve: false }), ...revrecRows()],
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/gl/revrec/${REVREC}/post`, payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(inserted).toEqual([]);
+  });
+
+  it("POST /gl/revrec/{id}/post 403s an UNATTRIBUTABLE caller (no dictionary row) — fail closed", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        // No `user` row resolves → loadCaller returns null → no perms at all.
+        db: stubDb({ rows: [[users, []], [roles, []], ...revrecRows()], inserted }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/gl/revrec/${REVREC}/post`, payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    expect(inserted).toEqual([]);
+  });
+
+  it("POST /gl/wip/{id}/transfer 403s a caller without finance.approve, and posts no JV", async () => {
+    const inserted: Inserted[] = [];
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [...authzRows({ create: false, approve: false }), ...wipRows()],
+          inserted,
+          updated,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/gl/wip/${WIP}/transfer`, payload: TRANSFER });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ code: "FORBIDDEN", message: FORBIDDEN_MSG });
+    // No jv, no jv_line, no wip_transfer_txn — and `transferred` never advanced.
+    expect(inserted).toEqual([]);
+    expect(updated).toEqual([]);
+  });
+
+  it("POST /gl/wip/{id}/transfer 200s the SAME fixture once finance.approve is held (the balanced JV still posts)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [...authzRows({ approve: true }), ...wipRows()], inserted }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/gl/wip/${WIP}/transfer`, payload: TRANSFER });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().transferred).toBe(2500000);
+    const lines = inserted.find((i) => i.table === jvLines)!.values as Record<string, unknown>[];
+    expect(lines.reduce((s, l) => s + Number(l.dr), 0)).toBe(1500000);
+    expect(lines.reduce((s, l) => s + Number(l.cr), 0)).toBe(1500000); // still BALANCED
+    expect(inserted.find((i) => i.table === wipTransferTxns)).toBeTruthy();
+  });
+
+  it("POST /gl/wip/{id}/transfer 403s a caller holding finance.create but NOT approve (approve, not create)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({
+          rows: [...authzRows({ create: true, approve: false }), ...wipRows()],
+          inserted,
+        }),
+      })
+    ).inject({ method: "POST", url: `/api/v1/gl/wip/${WIP}/transfer`, payload: TRANSFER });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(inserted).toEqual([]);
   });
 });
 

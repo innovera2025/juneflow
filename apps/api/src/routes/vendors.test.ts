@@ -8,12 +8,15 @@
 // code/addr/bank/status) — spend/type are deliberately absent (no AP source /
 // display-derived from kind). B-071 (P2-BE-08): the new columns are returned by
 // every read, accepted by POST/PUT, status defaults active on create, and an
-// out-of-set status is rejected 400.
+// out-of-set status is rejected 400. B-395 (audit H2): POST/PUT are gated on
+// master.create / master.edit — a caller without the right is 403'd BEFORE any
+// write, which is a money property, not master-data tidiness (`vendor.bank` is
+// the beneficiaryAccountNo the bank payment file pays to, bank.ts:684).
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { vendors } from "@juneflow/db";
+import { vendors, users, roles } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -174,6 +177,59 @@ const SUP2 = vendor("v-sup2", "หจก. ช่างเหล็กไทย",
 const SUB1 = vendor("v-sub1", "บจก. รุ่งเรืองก่อสร้าง", null, "subcon", null, { code: "SC-01" });
 const VENDORS = [SUP1, SUP2, SUB1];
 
+// B-395 (audit H2): creating/editing a vendor is master-data administration
+// (B-084 class), now gated on master.create / master.edit. loadCaller resolves
+// the session email → dictionary `user` → `role`, so every WRITE fixture must
+// carry both rows for the caller to be attributable at all (models.test.ts:347).
+const masterRole = {
+  id: "role-admin", companyId: COMPANY, name: "Admin", approvalLimits: {},
+  perms: { master: { view: true, create: true, edit: true, approve: true, cancel: true } },
+  approvalLevel: 4, approvalLimit: null, currencyCode: "THB",
+  createdAt: new Date(), updatedAt: new Date(),
+};
+const callerUser = {
+  id: "u-caller", companyId: COMPANY, email: SESSION.user.email, name: "สมชาย",
+  roleId: "role-admin", status: "active", department: null,
+  createdAt: new Date(), updatedAt: new Date(),
+};
+/** The two dictionary rows loadCaller() reads — caller HOLDS master.create/edit. */
+const AUTHZ_ROWS: Array<[unknown, unknown[]]> = [
+  [users, [callerUser]],
+  [roles, [masterRole]],
+];
+
+// The seed `wh` (warehouse) role holds ZERO master perms — the role the B-395
+// live probe ran as (anucha@rungrueang.co.th → Warehouse): PUT and POST both
+// answered 403 and the target supplier's `bank` column did not move.
+// Attributable, authenticated, and still denied. The perms below mirror the
+// seeded row exactly (master absent entirely; inventory approve IS true).
+const whRole = {
+  ...masterRole, id: "role-wh", name: "คลังสินค้า",
+  perms: { inventory: { view: true, create: true, edit: true, approve: true, cancel: false } },
+  approvalLevel: 1,
+};
+const whUser = { ...callerUser, id: "u-wh", roleId: "role-wh" };
+/** Same two doors, a role WITHOUT master.create/edit. */
+const WH_ROWS: Array<[unknown, unknown[]]> = [
+  [users, [whUser]],
+  [roles, [whRole]],
+];
+
+/**
+ * The vendor's STORED bank string after replaying every captured update onto the
+ * base row — the money value bank.ts:684 exports as beneficiaryAccountNo. An
+ * escaped write shows up here even if the status code looks right, so the
+ * "unchanged" assertions below are not satisfiable by an empty capture alone
+ * (the positive control proves this reducer does observe a real bank write).
+ */
+function bankAfter(updates: Updated[], base: { bank: string | null }): unknown {
+  return updates.reduce<unknown>(
+    (value, u) =>
+      Object.prototype.hasOwnProperty.call(u.set, "bank") ? u.set.bank : value,
+    base.bank,
+  );
+}
+
 describe("GET /api/v1/vendors — auth", () => {
   it("401s flat without a session (fail closed)", async () => {
     const res = await (await buildTestApp()).inject({ url: "/api/v1/vendors" });
@@ -256,7 +312,7 @@ describe("POST /api/v1/vendors — create rules", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
       })
     ).inject({
       method: "POST",
@@ -280,7 +336,7 @@ describe("POST /api/v1/vendors — create rules", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
       })
     ).inject({
       method: "POST",
@@ -310,7 +366,7 @@ describe("POST /api/v1/vendors — create rules", () => {
     await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
       })
     ).inject({ method: "POST", url: "/api/v1/vendors", payload: { name: "ไม่ระบุรายละเอียด" } });
     const v = inserted[0]!.values;
@@ -325,7 +381,7 @@ describe("POST /api/v1/vendors — create rules", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
       })
     ).inject({ method: "POST", url: "/api/v1/vendors", payload: { name: "x", status: "archived" } });
     expect(res.statusCode).toBe(400);
@@ -338,7 +394,7 @@ describe("POST /api/v1/vendors — create rules", () => {
     await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
       })
     ).inject({
       method: "POST",
@@ -356,7 +412,7 @@ describe("POST /api/v1/vendors — create rules", () => {
     await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
       })
     ).inject({ method: "POST", url: "/api/v1/vendors", payload: { name: "ไม่ระบุชนิด" } });
     expect(inserted[0]!.values.kind).toBe("supplier");
@@ -367,7 +423,7 @@ describe("POST /api/v1/vendors — create rules", () => {
     await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
       })
     ).inject({
       method: "POST",
@@ -379,7 +435,10 @@ describe("POST /api/v1/vendors — create rules", () => {
 
   it("400s a missing name", async () => {
     const res = await (
-      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[vendors, VENDORS]] }) })
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS] }),
+      })
     ).inject({ method: "POST", url: "/api/v1/vendors", payload: { kind: "supplier" } });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe("VALIDATION");
@@ -387,7 +446,10 @@ describe("POST /api/v1/vendors — create rules", () => {
 
   it("400s an invalid kind", async () => {
     const res = await (
-      await buildTestApp({ resolveTenant: async () => SESSION, db: stubDb({ rows: [[vendors, VENDORS]] }) })
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS] }),
+      })
     ).inject({ method: "POST", url: "/api/v1/vendors", payload: { name: "x", kind: "material" } });
     expect(res.statusCode).toBe(400);
   });
@@ -440,7 +502,7 @@ describe("PUT /api/v1/vendors/:id — partial merge", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, [SUP1]]], updated, updateBase: SUP1 }),
+        db: stubDb({ rows: [[vendors, [SUP1]], ...AUTHZ_ROWS], updated, updateBase: SUP1 }),
       })
     ).inject({
       method: "PUT",
@@ -459,7 +521,7 @@ describe("PUT /api/v1/vendors/:id — partial merge", () => {
     await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, [SUP1]]], updated, updateBase: SUP1 }),
+        db: stubDb({ rows: [[vendors, [SUP1]], ...AUTHZ_ROWS], updated, updateBase: SUP1 }),
       })
     ).inject({
       method: "PUT",
@@ -475,7 +537,7 @@ describe("PUT /api/v1/vendors/:id — partial merge", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, [SUP1]]], updated, updateBase: SUP1 }),
+        db: stubDb({ rows: [[vendors, [SUP1]], ...AUTHZ_ROWS], updated, updateBase: SUP1 }),
       })
     ).inject({
       method: "PUT",
@@ -498,7 +560,7 @@ describe("PUT /api/v1/vendors/:id — partial merge", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, [SUP1]]], updated }),
+        db: stubDb({ rows: [[vendors, [SUP1]], ...AUTHZ_ROWS], updated }),
       })
     ).inject({ method: "PUT", url: "/api/v1/vendors/v-sup1", payload: { status: "archived" } });
     expect(res.statusCode).toBe(400);
@@ -511,7 +573,7 @@ describe("PUT /api/v1/vendors/:id — partial merge", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, [SUP1]]], updated }),
+        db: stubDb({ rows: [[vendors, [SUP1]], ...AUTHZ_ROWS], updated }),
       })
     ).inject({ method: "PUT", url: "/api/v1/vendors/v-sup1", payload: { kind: "material" } });
     expect(res.statusCode).toBe(400);
@@ -523,7 +585,7 @@ describe("PUT /api/v1/vendors/:id — partial merge", () => {
     const res = await (
       await buildTestApp({
         resolveTenant: async () => SESSION,
-        db: stubDb({ rows: [[vendors, []]], updated }),
+        db: stubDb({ rows: [[vendors, []], ...AUTHZ_ROWS], updated }),
       })
     ).inject({ method: "PUT", url: "/api/v1/vendors/v-ghost", payload: { name: "x" } });
     expect(res.statusCode).toBe(404);
@@ -537,6 +599,160 @@ describe("PUT /api/v1/vendors/:id — partial merge", () => {
       payload: { name: "x" },
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+// ===========================================================================
+// B-395 (audit H2) · the master.create / master.edit gates.
+//
+// Before this, POST /vendors and PUT /vendors/:id had NO authz gate: the global
+// onRequest hook only 401s a MISSING tenant, so ANY tenant member — including
+// the seed `wh` role, which holds zero master perms — could mint a payee or
+// rewrite an existing vendor's `bank`. That column is the beneficiaryAccountNo
+// the generated bank payment file pays to (bank.ts:684), so the hole paid a
+// real vendor's AP to an attacker-controlled account on the next export.
+//
+// Each denial below is asserted on the STATUS, the error CODE, and the absence
+// of the write — a status-only test would still pass if a later edit moved the
+// gate below the insert/update. The positive control on each pair is the SAME
+// fixture and the SAME payload, differing only in the caller's role rows, so a
+// green denial cannot be an artifact of a fixture that never writes anyway.
+//
+// Both mutants were run, not assumed: neutering each `permAllowed` check fails
+// 5 of these (both positive controls stay green, as they must — they do not
+// depend on the gate), and MOVING the PUT gate below the update — which still
+// answers 403 — fails the 3 write-absence assertions. Nothing here passes on a
+// vendors.ts without the gate.
+// ===========================================================================
+const ATTACKER_BANK = "BAY 999-0-00000-1";
+
+describe("B-395 · POST /api/v1/vendors is gated on master.create", () => {
+  it("403s a caller whose role lacks master.create — and inserts nothing", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, VENDORS], ...WH_ROWS], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/vendors",
+      payload: { name: "บจก. ผู้รับเงินปลอม", bank: ATTACKER_BANK },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toBe("requires master.create permission");
+    // No fake payee was minted — the money property, not just the status code.
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("still creates for a caller holding master.create (same fixture, same payload)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, VENDORS], ...AUTHZ_ROWS], inserted }),
+      })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/vendors",
+      payload: { name: "บจก. ผู้รับเงินปลอม", bank: ATTACKER_BANK },
+    });
+    expect(res.statusCode).toBe(201);
+    // The capture list DOES fill on this fixture — so the empty list above is
+    // the gate biting, not a stub that records nothing.
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]!.values.bank).toBe(ATTACKER_BANK);
+  });
+
+  it("403s an unattributable caller (session, but no dictionary user row) — fail closed", async () => {
+    const inserted: Inserted[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, VENDORS]], inserted }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/vendors", payload: { name: "x" } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(inserted).toHaveLength(0);
+  });
+});
+
+describe("B-395 · PUT /api/v1/vendors/:id is gated on master.edit", () => {
+  it("403s a caller whose role lacks master.edit — and updates nothing", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, [SUP1]], ...WH_ROWS], updated, updateBase: SUP1 }),
+      })
+    ).inject({
+      method: "PUT",
+      url: "/api/v1/vendors/v-sup1",
+      payload: { name: "แก้ชื่อ", status: "inactive" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toBe("requires master.edit permission");
+    expect(updated).toHaveLength(0);
+  });
+
+  it("REGRESSION: a caller lacking master.edit cannot rewrite `bank` (the payout account)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, [SUP1]], ...WH_ROWS], updated, updateBase: SUP1 }),
+      })
+    ).inject({
+      method: "PUT",
+      url: "/api/v1/vendors/v-sup1",
+      payload: { bank: ATTACKER_BANK },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    // The MONEY assertion leads deliberately: under a "gate moved below the
+    // update" edit the status is still 403, so this is the assertion that fires.
+    // The stored beneficiary account is untouched — the next bank export still
+    // pays KBANK 012-3-45678-9.
+    expect(bankAfter(updated, SUP1)).toBe("KBANK 012-3-45678-9");
+    // and no captured write carried the attacker's account at all.
+    expect(updated.flatMap((u) => Object.values(u.set))).not.toContain(ATTACKER_BANK);
+    expect(updated).toHaveLength(0);
+  });
+
+  it("still updates `bank` for a caller holding master.edit (same fixture, same payload)", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, [SUP1]], ...AUTHZ_ROWS], updated, updateBase: SUP1 }),
+      })
+    ).inject({
+      method: "PUT",
+      url: "/api/v1/vendors/v-sup1",
+      payload: { bank: ATTACKER_BANK },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(updated).toHaveLength(1);
+    // bankAfter() DOES observe a bank rewrite on this fixture — so the
+    // "unchanged" assertion above is a live property, not a vacuous one.
+    expect(bankAfter(updated, SUP1)).toBe(ATTACKER_BANK);
+    expect(res.json().bank).toBe(ATTACKER_BANK);
+  });
+
+  it("403s an unattributable caller (session, but no dictionary user row) — fail closed", async () => {
+    const updated: Updated[] = [];
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb({ rows: [[vendors, [SUP1]]], updated, updateBase: SUP1 }),
+      })
+    ).inject({ method: "PUT", url: "/api/v1/vendors/v-sup1", payload: { bank: ATTACKER_BANK } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(updated).toHaveLength(0);
   });
 });
 

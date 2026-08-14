@@ -43,11 +43,12 @@
 // re-proves this tenant owns the parent jv inside the same tx). Without a resolved
 // tenant, request.db is absent and every handler answers a flat 401.
 //
-// AUTHZ (flagged design decision · B-230): these mutations are TENANT-gated (401)
-// but NOT finance-perm-gated — consistent with the Program-3 money-write precedent
-// (land-sales down/deal, sales-service) rather than ar.ts/gl-post (finance.create/
-// approve). The spec handler signatures carry no `request`, so no loadCaller gate
-// is wired here; add one if Wei rules revrec/wip posting a priority action.
+// AUTHZ (B-394): both posts are gated on the finance `approve` right, not merely
+// the tenant door — they LOCK money into the ledger, which /gl/post and
+// /gl/close-period (gl.ts) already establish in-code as a priority action. `approve`
+// rather than the land-sales `create`: that gate covers operational sales documents
+// that incidentally post a JV, whereas a /gl/ posting action IS the posting. The
+// spec handler signatures carry no `request`, so the gate sits at the registration.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, isNull } from "drizzle-orm";
@@ -73,6 +74,10 @@ import {
   resolveAccountIds,
   withDocNoRetry,
 } from "./gl-post.js";
+import { loadCaller, permAllowed } from "./authz.js";
+
+/** Financial-authz module key (B-082 F1). */
+const FINANCE_MODULE = "finance";
 
 type RevRecRow = typeof revRecs.$inferSelect;
 type WipRow = typeof wips.$inferSelect;
@@ -102,6 +107,37 @@ function notFound(reply: FastifyReply, message: string): FastifyReply {
 /** Flat 409 INVALID_STATE error. */
 function conflict(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(409).send({ code: "INVALID_STATE", message });
+}
+
+/** Flat 403 FORBIDDEN (financial-authz fail-closed). */
+function forbidden(reply: FastifyReply, message: string): FastifyReply {
+  return reply.code(403).send({ code: "FORBIDDEN", message });
+}
+
+/**
+ * B-394 financial gate for the two JV-POSTING handlers (revrec post / wip
+ * transfer). Locking money into the ledger requires the finance `approve`
+ * permission — not merely a resolved tenant — so a view-only in-tenant user (the
+ * seeded `exec`) cannot recognize revenue. The two GET reads stay tenant-only
+ * (view-level). Sends the 403 and returns false on failure.
+ */
+async function requireFinanceApprove(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean> {
+  const caller = await loadCaller(request);
+  if (!caller) {
+    forbidden(reply, "caller cannot be attributed");
+    return false;
+  }
+  if (!permAllowed(caller.perms, FINANCE_MODULE, "approve")) {
+    forbidden(
+      reply,
+      "GL posting (revrec / WIP transfer) requires the finance approve permission",
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -450,9 +486,11 @@ export function registerRevRecRoute(app: FastifyInstance): void {
     return reply.code(200).send(listEnvelope(await listGlRevRec(db)));
   });
 
+  // B-394 finance.approve gate — posts money (see the AUTHZ header note).
   app.post("/gl/revrec/:id/post", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
+    if (!(await requireFinanceApprove(request, reply))) return reply;
     return postGlRevRec(db, idParam(request), reply);
   });
 
@@ -462,9 +500,11 @@ export function registerRevRecRoute(app: FastifyInstance): void {
     return reply.code(200).send(listEnvelope(await listGlWip(db)));
   });
 
+  // B-394 finance.approve gate — posts money (see the AUTHZ header note).
   app.post("/gl/wip/:id/transfer", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
+    if (!(await requireFinanceApprove(request, reply))) return reply;
     return transferGlWip(db, idParam(request), body(request), reply);
   });
 }
