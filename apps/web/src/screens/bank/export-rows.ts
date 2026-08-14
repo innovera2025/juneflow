@@ -37,6 +37,14 @@ export interface ExportPv {
   method: string;
   /** Lifecycle status; only "approved" PVs are eligible. */
   status: string;
+  /**
+   * The bank batch this PV was already sent in; "" while it is still waiting.
+   * B-397 made the server stamp this on export and refuse a stamped PV, so the
+   * screen must stop listing sent vouchers — otherwise selecting one 409s the
+   * WHOLE batch and nothing is sent. This is the sent half of the two-state
+   * filter the prototype declares at bank.jsx:166.
+   */
+  batchId: string;
   vendorId: string;
   /** Beneficiary bank code parsed from the vendor's `bank` string ("" -> em-dash). */
   bank: string;
@@ -90,6 +98,7 @@ export function toExportPv(
     amount: num(e.amount),
     method: str(e.method),
     status: str(e.status),
+    batchId: str(e.batch_id ?? e.batchId),
     vendorId,
     bank,
     account,
@@ -98,7 +107,11 @@ export function toExportPv(
 
 /** Export eligibility (bank.ts exportBatch): approved status + transfer method. */
 export function isExportEligible(pv: ExportPv): boolean {
-  return pv.status === "approved" && pv.method === "transfer";
+  // batchId === "" is the third term, and it is not cosmetic: buildExportBody
+  // always sends pv_ids, so every export from this screen is an EXPLICIT-ids
+  // call, and B-397 answers 409 for the WHOLE batch if any named voucher was
+  // already sent. Without this term one stale row makes the button send nothing.
+  return pv.status === "approved" && pv.method === "transfer" && pv.batchId === "";
 }
 
 /** Narrow + filter the opaque /ap/pv rows to the export-eligible set. */

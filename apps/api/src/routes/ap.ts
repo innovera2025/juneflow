@@ -430,6 +430,53 @@ async function listPv(db: TenantDb): Promise<Record<string, unknown>[]> {
 // same email→dictionary-user mechanism as the audit actor / approval ladder, NOT
 // the better-auth auth_user id (which would violate the FK). An unattributable
 // caller leaves created_by null (honest — the SoD gate then fails SAFE).
+//
+// B-398 — ONE BILLING MAY BE COVERED BY AT MOST ONE LIVE PV.
+//
+// THIS IS A WEI RULING (2026-08-14), NOT A SPEC TRANSCRIPTION. Read that twice
+// before "correcting" it against the prototype: the prototype does NOT state this
+// rule. pototype/ap.jsx:161-164 gives each PV a single `ref` (one AP number, under
+// the column "อ้างจาก") and the PV form has one fixed Select (ap.jsx:246), and no
+// seed row reuses an AP number across PVs — but that is a shape, not a declared
+// constraint, and docs/handoff/api-contract.md:65 + docs/handoff/erd.html:85 both
+// specify `billing_ids[]` PLURAL. ap_billing has no status column in the data
+// dictionary at all. Asked to decide, Wei ruled ก: a billing already covered by a
+// PV that is not cancelled → 409. `billing_ids[]` STAYS plural — one PV may still
+// pay several billings; what is forbidden is a SECOND PV over a billing some other
+// PV already holds.
+//
+// WHAT WAS ACTUALLY BROKEN. This handler never queried the pv table at all, so no
+// coverage guard could exist, and it ran with NO transaction — a plain read, a
+// plain check, a plain insert. POSTing the same billing_ids twice answered 201
+// twice and wrote two pv rows. B-315 made the amount SERVER-derived from the
+// covered billings, which means the duplicate is not a smaller stray voucher but
+// an EXACT one: the same vendor payable, in full, paid twice.
+//
+// There is no schema help available and none was added: pv has exactly one index
+// (the non-unique pv_company_idx, migration 0007) and no idempotency key;
+// ap_billing.status is never written by ANY handler in apps/api, so it cannot mark
+// coverage; and gl.ts posts sourceDoc `pv:<id>` per PV, so the unique source_doc
+// index cannot correlate two PVs over one billing either. The guard therefore has
+// to be a read, and a read is only a guard if something serialises it — hence the
+// transaction and the row lock below.
+
+/**
+ * B-398 — what createPv's transactional block hands back: either the created row
+ * (plus the locked billings the echo needs to resolve the payee) or the error to
+ * answer with. The reply is sent AFTER the block resolves — i.e. after COMMIT —
+ * so a rolled-back transaction can never have already dispatched a 201. Sending
+ * from inside the block would answer the client before the commit that makes the
+ * answer true.
+ */
+type PvCreateOutcome =
+  | { ok: true; created: PvRow; bills: ApBillingRow[] }
+  | {
+      ok: false;
+      status: 400 | 409;
+      code: "VALIDATION" | "INVALID_STATE";
+      message: string;
+    };
+
 async function createPv(
   db: TenantDb,
   request: FastifyRequest,
@@ -476,77 +523,163 @@ async function createPv(
     ? str(pick(body, "cheque_date", "chequeDate")).trim() || null
     : null;
 
-  // Every referenced billing must belong to this tenant (fail closed) — the
-  // scoped select returns only this tenant's rows, so a foreign id is absent.
-  const ownedBills = (await db.select(
-    apBillings,
-    inArray(apBillings.id, billingIds),
-  )) as ApBillingRow[];
-  const ownedIds = new Set(ownedBills.map((b) => b.id));
-  const foreign = billingIds.find((id) => !ownedIds.has(id));
-  if (foreign) {
-    return badRequest(reply, `billing_id ${foreign} not found in this tenant`);
-  }
-
-  // ── B-315: the SERVER computes the payable ────────────────────────────────
-  // The gross is what the covered billings already carry — Σ ap_billing.amount.
-  //
-  // `ap_billing.amount` is VAT-INCLUSIVE: `vat` is the tax portion CONTAINED IN
-  // it, never an addend. Every seeded row satisfies vat = amount × 7/107
-  // (920000/60187, 96800/6334, 415400/27184, 268000/17542, 645000/42196), and
-  // ap.jsx's own PV net box shows AP-2026-0180 as "645,000.00" under the label
-  // "มูลค่า AP รวม (รวม VAT)" while that billing's vat is 42,196 — excluded.
-  // 645000 − 19350 (3%) − 64500 = 561,150, the prototype's printed net exactly.
-  // The browser was sending amount + vat, which DOUBLE-COUNTED the VAT (+6.54%).
-  //
-  // billing_ids is a SET (deduped above) and the handler accepts N ids, so this
-  // SUMS — it must not read billingIds[0] the way payee/currency do. ownedBills
-  // is exactly the requested set: the select is inArray-scoped and any id missing
-  // from it already returned 400 above, so no row can be counted twice or missed.
-  //
-  // The 400 below replaces the deleted client-side `amount > 0` check: a billing
-  // may legitimately carry amount 0 (the column is notNull default "0", and the
-  // land-sales / subcon inserters write computed values), and a zero-value PV
-  // would post a zero JV and print a zero bank instruction.
-  const amount = round2(ownedBills.reduce((sum, b) => sum + num(b.amount), 0));
-  if (amount <= 0) {
-    return badRequest(reply, "billing_ids cover no payable amount");
-  }
-
-  // WHT leg via the tax engine (F-AP1); net = gross − WHT − retention. Currency
-  // inherits the first covered billing's (C10 — real), else THB.
-  const wht = await computeWht(amount, whtPct);
-  const net = round2(amount - wht - retentionForCalc);
-  const currency =
-    ownedBills.find((b) => b.id === billingIds[0])?.currencyCode ??
-    ownedBills[0]?.currencyCode ??
-    "THB";
-
   // B-094-3 (SoD): stamp the creator's DICTIONARY user id (loadCaller — email→
   // user, tenant-scoped). null when the caller can't be attributed (honest — the
   // approve gate then can't prove self-approval and won't block).
+  //
+  // Resolved BEFORE the transaction on purpose: loadCaller reads through
+  // `request.db` — the OUTER, non-tx handle — so issuing it inside the block would
+  // take a SECOND pool connection while this one holds the billing row locks.
   const caller = await loadCaller(request);
   const createdBy = caller?.userId ?? null;
 
-  const [created] = (await db
-    .insert(pvs, {
-      billingIds,
-      whtPct: whtPct.toFixed(2),
-      amount: moneyStr(amount),
-      net: moneyStr(net),
-      retention: moneyStr(retentionForCalc),
-      method,
-      chequeNo,
-      chequeBank,
-      chequeDate,
-      currencyCode: currency,
-      createdBy,
-      status: "pending",
-    })
-    .returning()) as PvRow[];
+  // ── B-398: lock → check coverage → derive → insert, in ONE transaction ────
+  const outcome = await db.transaction<PvCreateOutcome>(async (tx) => {
+    // 1) TAKE THE ROW LOCKS FIRST, as the first statement in the transaction.
+    // This does DOUBLE DUTY and replaces the plain scoped select that used to sit
+    // here:
+    //   (a) tenant ownership, unchanged — the scoped door returns only THIS
+    //       tenant's rows, so a foreign id is simply absent → the same 400 below;
+    //   (b) serialisation — two concurrent creates over the same billing contend
+    //       on the same ap_billing row, so the loser BLOCKS here until the winner
+    //       COMMITs, and only then runs the coverage read, which by that point can
+    //       see the winner's pv row.
+    // Without (b) the coverage check is a pure TOCTOU: under READ COMMITTED — the
+    // default, and apps/api sets no isolation override anywhere — both readers see
+    // "not covered", both pass, both insert. Same hazard note as the door itself
+    // (tenant-db.ts selectForUpdate): this is correct BECAUSE READ COMMITTED takes
+    // a fresh snapshot PER STATEMENT, so the pv SELECT issued after the lock wait
+    // sees the winner's commit. Raise the isolation level and this guard silently
+    // stops working.
+    // ap_billing is not an FK child of inventory_item, so it is outside the
+    // lock-order registry (routes/lock-order.enforce.test.ts); this handler takes
+    // no second row lock, so there is no acquisition order to cycle against.
+    const ownedBills = (await tx.selectForUpdate(
+      apBillings,
+      inArray(apBillings.id, billingIds),
+    )) as ApBillingRow[];
+    const ownedIds = new Set(ownedBills.map((b) => b.id));
+    const foreign = billingIds.find((id) => !ownedIds.has(id));
+    if (foreign) {
+      return {
+        ok: false,
+        status: 400,
+        code: "VALIDATION",
+        message: `billing_id ${foreign} not found in this tenant`,
+      };
+    }
 
-  const payee = resolvePayees([created!], ownedBills, [])
-    .get(created!.id) ?? { vendorId: null, vendorName: null };
+    // 2) COVERAGE (B-398, Wei = ก). Is any requested billing already held by
+    // another PV? Checked INSIDE the transaction, AFTER the lock — outside either
+    // one it is decoration.
+    //
+    // NO STATUS FILTER, and that is deliberate rather than an omission: EVERY
+    // existing PV counts. There is no cancelled/void PV state in this codebase to
+    // filter out. POST /pv/{id}/approve is the only endpoint that writes
+    // `pv.status`, and its only write is the pending→approved flip; the three
+    // status values that can exist are `draft` (the column default, which no code
+    // path ever writes — createPv always writes `pending`), `pending` and
+    // `approved`. (B-397 added a second pv WRITER, the batch stamp in bank.ts,
+    // but it touches only `batch_id` — so it cannot mint a status this misses.)
+    // Writing `.filter(pv => pv.status !== "cancelled")` here would read like a
+    // guard and do nothing. When a cancel/void path is added, THIS is the line
+    // that must exclude it, or a cancelled PV will keep a billing hostage forever.
+    //
+    // Overlap is computed in JS, not in SQL: `pv.billing_ids` is a JSONB column
+    // ($type<string[]>), so an overlap predicate would be raw `@>` SQL smuggled
+    // through the scoped door, and — since billing_ids carries no index — it would
+    // seq-scan exactly like this read does. Same shape as inventory.ts's in-tx
+    // negative-stock guard (read scoped rows, decide in memory); correctness comes
+    // from the row lock above, not from where the comparison is evaluated. The
+    // read is the tenant's PVs, the same set GET /ap/pv already loads per request.
+    const livePvs = (await tx.select(pvs)) as PvRow[];
+    const coveredBy = new Map<string, string>(); // billing id → the PV holding it
+    for (const pv of livePvs) {
+      // jsonb has no shape constraint at the DB level — treat a non-array as empty.
+      const held = Array.isArray(pv.billingIds) ? pv.billingIds : [];
+      for (const id of held) if (!coveredBy.has(id)) coveredBy.set(id, pv.id);
+    }
+    // PER-ELEMENT, not per-array: a PV over [A, B] must be refused when EITHER A
+    // or B is held, not only when some PV covers the identical set.
+    const clash = billingIds.find((id) => coveredBy.has(id));
+    if (clash) {
+      return {
+        ok: false,
+        status: 409,
+        code: "INVALID_STATE",
+        message:
+          `billing_id ${clash} is already covered by payment voucher ` +
+          `${coveredBy.get(clash)} — a billing may be paid by only one PV`,
+      };
+    }
+
+    // ── B-315: the SERVER computes the payable ──────────────────────────────
+    // The gross is what the covered billings already carry — Σ ap_billing.amount.
+    // Derived INSIDE the transaction because it derives from the LOCKED read.
+    //
+    // `ap_billing.amount` is VAT-INCLUSIVE: `vat` is the tax portion CONTAINED IN
+    // it, never an addend. Every seeded row satisfies vat = amount × 7/107
+    // (920000/60187, 96800/6334, 415400/27184, 268000/17542, 645000/42196), and
+    // ap.jsx's own PV net box shows AP-2026-0180 as "645,000.00" under the label
+    // "มูลค่า AP รวม (รวม VAT)" while that billing's vat is 42,196 — excluded.
+    // 645000 − 19350 (3%) − 64500 = 561,150, the prototype's printed net exactly.
+    // The browser was sending amount + vat, which DOUBLE-COUNTED the VAT (+6.54%).
+    //
+    // billing_ids is a SET (deduped above) and the handler accepts N ids, so this
+    // SUMS — it must not read billingIds[0] the way payee/currency do. ownedBills
+    // is exactly the requested set: the lock is inArray-scoped and any id missing
+    // from it already returned 400 above, so no row can be counted twice or missed.
+    //
+    // The 400 below replaces the deleted client-side `amount > 0` check: a billing
+    // may legitimately carry amount 0 (the column is notNull default "0", and the
+    // land-sales / subcon inserters write computed values), and a zero-value PV
+    // would post a zero JV and print a zero bank instruction.
+    const amount = round2(ownedBills.reduce((sum, b) => sum + num(b.amount), 0));
+    if (amount <= 0) {
+      return {
+        ok: false,
+        status: 400,
+        code: "VALIDATION",
+        message: "billing_ids cover no payable amount",
+      };
+    }
+
+    // WHT leg via the tax engine (F-AP1); net = gross − WHT − retention. Currency
+    // inherits the first covered billing's (C10 — real), else THB.
+    const wht = await computeWht(amount, whtPct);
+    const net = round2(amount - wht - retentionForCalc);
+    const currency =
+      ownedBills.find((b) => b.id === billingIds[0])?.currencyCode ??
+      ownedBills[0]?.currencyCode ??
+      "THB";
+
+    const [created] = (await tx
+      .insert(pvs, {
+        billingIds,
+        whtPct: whtPct.toFixed(2),
+        amount: moneyStr(amount),
+        net: moneyStr(net),
+        retention: moneyStr(retentionForCalc),
+        method,
+        chequeNo,
+        chequeBank,
+        chequeDate,
+        currencyCode: currency,
+        createdBy,
+        status: "pending",
+      })
+      .returning()) as PvRow[];
+
+    return { ok: true, created: created!, bills: ownedBills };
+  });
+
+  if (!outcome.ok) {
+    return reply.code(outcome.status).send({ code: outcome.code, message: outcome.message });
+  }
+  const { created, bills } = outcome;
+
+  const payee = resolvePayees([created], bills, [])
+    .get(created.id) ?? { vendorId: null, vendorName: null };
   // Resolve the payee NAME too (the payee-name map above had no vendor rows).
   const vendorId = payee.vendorId;
   let vendorName: string | null = null;

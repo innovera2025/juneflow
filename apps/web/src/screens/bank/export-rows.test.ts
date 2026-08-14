@@ -50,6 +50,8 @@ describe("toExportPv", () => {
       amount: 920000,
       method: "transfer",
       status: "approved",
+      // absent on the wire row above -> "" (still waiting to be sent)
+      batchId: "",
       vendorId: "v1",
       bank: "KBANK",
       account: "012-3-45678-9",
@@ -71,6 +73,7 @@ describe("isExportEligible + eligibleExportPvs", () => {
     amount: 0,
     method: "transfer",
     status: "approved",
+    batchId: "",
     vendorId: "",
     bank: "",
     account: "",
@@ -84,15 +87,43 @@ describe("isExportEligible + eligibleExportPvs", () => {
     expect(isExportEligible(pv({ method: "cash", status: "approved" }))).toBe(false);
   });
 
+  it("drops a PV the server already sent to the bank (B-397)", () => {
+    // Every export from this screen names pv_ids explicitly, and B-397 answers
+    // 409 for the WHOLE batch when any named voucher carries a batch id. So an
+    // already-sent PV must never reach the selectable list.
+    expect(isExportEligible(pv({ batchId: "b1000000-0000-0000-0000-000000000001" }))).toBe(
+      false,
+    );
+    expect(isExportEligible(pv({ batchId: "" }))).toBe(true);
+  });
+
   it("narrows + filters opaque rows to the eligible set", () => {
     const rows = [
       { id: "a", status: "approved", method: "transfer", vendor_id: "v1", net: 100 },
       { id: "b", status: "pending", method: "transfer", vendor_id: "v1", net: 200 },
       { id: "c", status: "approved", method: "cheque", vendor_id: "v1", net: 300 },
+      // sent already — the wire carries batch_id, so it must not be offered
+      { id: "d", status: "approved", method: "transfer", vendor_id: "v1", net: 400,
+        batch_id: "b1000000-0000-0000-0000-000000000001" },
     ];
     const out = eligibleExportPvs(rows, bankOf({ v1: "KBANK 1" }));
     expect(out.map((p) => p.id)).toEqual(["a"]);
     expect(out[0]!.bank).toBe("KBANK");
+  });
+
+  it("reads batch_id off the opaque wire row", () => {
+    const [row] = eligibleExportPvs(
+      [{ id: "a", status: "approved", method: "transfer", vendor_id: "v1", net: 100 }],
+      bankOf({ v1: "KBANK 1" }),
+    );
+    expect(row!.batchId).toBe("");
+    expect(
+      toExportPv(
+        { id: "x", status: "approved", method: "transfer", vendor_id: "v1", net: 1,
+          batch_id: "b1000000-0000-0000-0000-000000000001" },
+        bankOf({ v1: "KBANK 1" }),
+      ).batchId,
+    ).toBe("b1000000-0000-0000-0000-000000000001");
   });
 });
 
@@ -114,6 +145,7 @@ describe("exportSelection", () => {
     amount: net,
     method: "transfer",
     status: "approved",
+    batchId: "",
     vendorId: "",
     bank: "",
     account: "",

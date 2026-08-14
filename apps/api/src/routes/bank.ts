@@ -54,7 +54,7 @@
 //     (no RV rows are seeded — AR is Phase-5-deferred) → its matched_doc is null.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   apBillings,
   bankStatementLines,
@@ -613,15 +613,52 @@ async function listCheque(db: TenantDb): Promise<Record<string, unknown>[]> {
 // POST /bank/export-batch — Export-to-Bank payment file (bank.jsx BankExport)
 // ---------------------------------------------------------------------------
 // Body (opaque, optional): { pv_ids?[], batch_id?, value_date?, debit_account_no? }.
-// Take the tenant's APPROVED + TRANSFER-method PVs (bank.jsx "อนุมัติแล้ว · โอน"),
-// optionally restricted to pv_ids (a foreign/ineligible id is silently excluded —
-// a foreign PV is NEVER exported), build a KBANK payment batch, and format it via
+// Take the tenant's APPROVED + TRANSFER-method PVs that have NOT been sent yet
+// (bank.jsx "อนุมัติแล้ว · โอน" narrowed to the waiting-to-send set), optionally
+// restricted to pv_ids (a foreign/ineligible id is silently excluded — a foreign
+// PV is NEVER exported), STAMP them with this batch's id, and format the batch via
 // @juneflow/bank-file (mock-first FakeBankFileFormatter by default). Each
 // instruction pays the PV's NET (the cash that leaves the bank) to the payee
 // vendor (resolved billing_ids[0] → ap_billing → vendor); the vendor's stored
 // `bank` string is the only beneficiary-account source (honest — no structured
-// account/bank-code column). This is a pure build+return — it does NOT mutate the
-// PVs (batch_id persistence / post-export lock is out of this task's scope).
+// account/bank-code column).
+//
+// B-397 (the post-export lock). This handler used to be a pure build+return that
+// mutated nothing, so the batch id it minted was stored NOWHERE. pv.status has
+// exactly ONE writer in the repo (ap.ts pending→approved) and no paid/exported
+// state exists at all — an approved transfer PV therefore stayed eligible for
+// EVERY future export forever, and even one CORRECT upload left the same payment
+// to be re-emitted in the next legitimate batch. The prototype states the lock in
+// three places that agree: bank.jsx:226 "ระบบจะ ล็อกการเปลี่ยนแปลง PV ที่ส่งธนาคารแล้ว ·
+// ถ้าต้องแก้ ต้องสร้างใบใหม่", real-forms2.jsx:463-471 (confirm copy + "… + ล็อก PV"),
+// docs/handoff/FUNCTIONS.md:88 "openBatchConfirm Export to Bank (ล็อก PV)"; and
+// bank.jsx:166's filter separates "รอส่งธนาคาร" from "ส่งแล้ว" — a sent PV is not in
+// the waiting-to-send set. The lock is persisted on the column that ALREADY exists,
+// pv.batch_id (data-dictionary:90 + erd:85; schema/finance.ts "batch_id groups PVs
+// for a bank export") — no migration, no new state column, no contract change:
+//   - eligibility now requires batch_id IS NULL (that IS the "รอส่งธนาคาร" set);
+//   - the stamp is ONE guarded UPDATE inside a transaction, with the B-149 guard
+//     (batch_id IS NULL) on the FINAL UPDATE's WHERE — never on the read that
+//     resolved the candidates, or two exports under READ COMMITTED both pass;
+//   - ONLY the rows that UPDATE returned are emitted, so an instruction can exist
+//     only for a PV THIS transaction locked. If the stamp did not happen, the
+//     instruction is not written;
+//   - an explicit pv_ids naming an already-sent PV is a 409 (the caller asked for
+//     that voucher by id and must be told, not silently dropped), and nothing left
+//     to send is a 409 as well — a zero-instruction bank file is a footgun.
+// Nothing else moves: file format, value-date defaulting, payee resolution, the
+// KBANK line shape and the response envelope are unchanged.
+
+/**
+ * uuid matcher — the per-file idiom already in labor.ts / audit-log.ts / gr.ts.
+ *
+ * B-397: batch_id is now PERSISTED into pv.batch_id, a `uuid` column. A caller-
+ * supplied batch_id that is not a uuid used to be harmless (it was only echoed);
+ * writing it would now be `SET batch_id = 'batch-1'` → 22P02 → a 500. Same reason
+ * labor.ts B-340 shape-checks cc_id before it reaches a query: refuse it at the
+ * door rather than let the column decide.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Resolve each PV's payee (billing_ids[0] → ap_billing → vendor), tenant-scoped. */
 function resolvePayees(
@@ -652,7 +689,12 @@ async function exportBatch(
   const requestedIds = Array.isArray(pvIdsRaw)
     ? new Set(pvIdsRaw.map((v) => str(v).trim()).filter((v) => v !== ""))
     : null;
-  const batchId = str(pick(body, "batch_id", "batchId")).trim() || randomUUID();
+  const suppliedBatchId = str(pick(body, "batch_id", "batchId")).trim();
+  // B-397: the id is written to a uuid column now — shape-check it before the write.
+  if (suppliedBatchId !== "" && !UUID_RE.test(suppliedBatchId)) {
+    return badRequest(reply, "batch_id must be a uuid");
+  }
+  const batchId = suppliedBatchId || randomUUID();
   const valueDate =
     str(pick(body, "value_date", "valueDate")).trim() ||
     new Date().toISOString().slice(0, 10);
@@ -664,41 +706,103 @@ async function exportBatch(
     db.select(vendors) as Promise<VendorRow[]>,
   ]);
 
-  // Eligible = approved + transfer-method (bank.jsx), restricted to pv_ids when
-  // given. A foreign id is absent from the tenant-scoped pvRows → never exported.
+  // B-397: an EXPLICIT pv_ids naming an already-sent PV is a 409, not a silent
+  // drop — the caller asked for that voucher BY ID, so it must be told the voucher
+  // is locked (bank.jsx:226 "ถ้าต้องแก้ ต้องสร้างใบใหม่"). An UNFILTERED call carries
+  // no such claim and simply exports whatever is still waiting. Fail before any
+  // stamp: a rejected request leaves the whole batch unstamped.
+  if (requestedIds) {
+    const alreadySent = pvRows.filter((pv) => requestedIds.has(pv.id) && pv.batchId != null);
+    if (alreadySent.length > 0) {
+      return conflict(
+        reply,
+        `already exported to the bank: ${alreadySent.map((pv) => pv.id).join(", ")} — ` +
+          "a sent payment voucher is locked; issue a new voucher to pay it again",
+      );
+    }
+  }
+
+  // Eligible = approved + transfer-method + NOT YET SENT (bank.jsx "อนุมัติแล้ว · โอน"
+  // within the waiting-to-send set — B-397), restricted to pv_ids when given. A
+  // foreign id is absent from the tenant-scoped pvRows → never exported.
   const eligible = pvRows.filter(
     (pv) =>
       pv.status === "approved" &&
       pv.method === "transfer" &&
+      pv.batchId == null &&
       (!requestedIds || requestedIds.has(pv.id)),
   );
+  if (eligible.length === 0) {
+    return conflict(
+      reply,
+      "no payment voucher is waiting to be sent to the bank " +
+        "(approved + transfer method, not yet exported)",
+    );
+  }
 
-  const payees = resolvePayees(eligible, bills, vendorRows);
   const vendorById = new Map(vendorRows.map((v) => [v.id, v]));
+  const candidateIds = eligible.map((pv) => pv.id);
 
-  const instructions: PaymentInstruction[] = eligible.map((pv) => {
-    const payee = payees.get(pv.id);
-    const vendor = payee?.vendorId ? vendorById.get(payee.vendorId) : undefined;
-    return {
-      beneficiaryName: payee?.vendorName ?? "",
-      beneficiaryAccountNo: vendor?.bank ?? "", // honest — free-text bank/account string
-      beneficiaryBankCode: "", // honest — no structured bank code stored
-      amount: { amount: moneyStr(num(pv.net)), currencyCode: pv.currencyCode },
-      reference: pv.id,
+  // STAMP FIRST, THEN EMIT (B-397). The B-149 guard (batch_id IS NULL) sits on the
+  // FINAL UPDATE's WHERE, not on the read above: under READ COMMITTED two exports
+  // resolve the SAME candidate list, and only the re-check at write time makes the
+  // loser update 0 rows for a PV the winner already took. Everything downstream is
+  // derived from the rows the UPDATE RETURNED — a PV the guard excluded is absent
+  // from the instructions, from pv_ids and from the total. The formatter runs
+  // INSIDE the transaction so a formatting failure rolls the stamp back instead of
+  // locking vouchers into a batch file that was never produced.
+  const sent = await db.transaction(async (tx) => {
+    const stamped = (await tx
+      .update(
+        pvs,
+        { batchId },
+        and(inArray(pvs.id, candidateIds), isNull(pvs.batchId)),
+      )
+      .returning()) as PvRow[];
+    if (stamped.length === 0) return null;
+
+    // TOTAL order (B-323). The first cut ranked rows by their position in the
+    // candidate read — but that read is a bare `db.select(pvs)` with no ORDER BY
+    // and no comparator, so "read order" was the join plan's order wearing a map.
+    // newestFirst is the house comparator this file already uses for statements
+    // (:242) and cheques (:609): total by construction (created_at, then id), so
+    // the instruction order in a real bank file is the code's, not the planner's.
+    const rows = newestFirst(stamped);
+    const payees = resolvePayees(rows, bills, vendorRows);
+    const instructions: PaymentInstruction[] = rows.map((pv) => {
+      const payee = payees.get(pv.id);
+      const vendor = payee?.vendorId ? vendorById.get(payee.vendorId) : undefined;
+      return {
+        beneficiaryName: payee?.vendorName ?? "",
+        beneficiaryAccountNo: vendor?.bank ?? "", // honest — free-text bank/account string
+        beneficiaryBankCode: "", // honest — no structured bank code stored
+        amount: { amount: moneyStr(num(pv.net)), currencyCode: pv.currencyCode },
+        reference: pv.id,
+      };
+    });
+
+    const batch: PaymentBatch = {
+      batchId,
+      companyId: tx.companyId,
+      debitAccountNo,
+      valueDate,
+      instructions,
     };
+    return { rows, file: await bankFileFormatter.formatPaymentBatch(batch) };
   });
+  if (!sent) {
+    // Every candidate was taken between the read and the guarded write — nothing
+    // was stamped here, so there is nothing to send (and no file to hand back).
+    return conflict(
+      reply,
+      "every candidate payment voucher was exported by a concurrent batch — " +
+        "nothing left to send",
+    );
+  }
 
-  const batch: PaymentBatch = {
-    batchId,
-    companyId: db.companyId,
-    debitAccountNo,
-    valueDate,
-    instructions,
-  };
-  const file = await bankFileFormatter.formatPaymentBatch(batch);
-
-  const totalAmount = round2(eligible.reduce((sum, pv) => sum + num(pv.net), 0));
-  const currency = eligible[0]?.currencyCode ?? "THB";
+  const { rows, file } = sent;
+  const totalAmount = round2(rows.reduce((sum, pv) => sum + num(pv.net), 0));
+  const currency = rows[0]?.currencyCode ?? "THB";
 
   return reply.code(200).send({
     batch_id: batchId,
@@ -708,8 +812,8 @@ async function exportBatch(
     encoding: file.encoding,
     value_date: valueDate,
     debit_account_no: debitAccountNo || null,
-    pv_count: eligible.length,
-    pv_ids: eligible.map((pv) => pv.id),
+    pv_count: rows.length,
+    pv_ids: rows.map((pv) => pv.id),
     total_amount: totalAmount,
     currency_code: currency,
   });

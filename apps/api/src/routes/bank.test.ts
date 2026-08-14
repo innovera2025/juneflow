@@ -7,8 +7,11 @@
 // 409, fail-closed foreign-doc reject, and the tenant-verified confirm write),
 // GET /bank/cheque (register + honest-null pv_no, tenant scope), and POST
 // /bank/export-batch (approved-transfer filter + @juneflow/bank-file fake output,
-// pv_ids restriction). Every expected value comes from the stub / the real
-// bank-file formatter — not hand-computed against the impl.
+// pv_ids restriction, and the B-397 post-export lock: a sent PV is stamped with
+// the batch id and never re-emitted, an already-sent pv_ids is 409, nothing
+// waiting is 409, and a PV stamped between the read and the guarded write is left
+// out of the file). Every expected value comes from the stub / the real bank-file
+// formatter — not hand-computed against the impl.
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
@@ -55,11 +58,20 @@ interface StubOpts {
   inserted?: Inserted[];
   updated?: Updated[];
   updateBase?: Record<string, unknown>;
+  /**
+   * B-397: the rows `UPDATE ... RETURNING` answers with. Default = the historical
+   * single synthetic row ({...updateBase, ...set}), which is enough for a
+   * one-row status flip. The export-batch world hands in a function instead,
+   * because a batch stamp must be able to return the REAL matching pv rows — and,
+   * when the guard excludes one, FEWER rows than the WHERE asked for.
+   */
+  updateRows?: (u: Updated) => unknown[];
 }
 
 /** Db stub: canned rows per table (reads, incl. selectThrough joins) + write capture. */
 function stubDb(opts: StubOpts): Db {
   const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
+  const { updateRows } = opts;
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
@@ -109,8 +121,9 @@ function stubDb(opts: StubOpts): Db {
       set: (set: Record<string, unknown>) => ({
         where: (where: SQL) => ({
           returning: () => {
-            updated.push({ table, set, where });
-            return Promise.resolve([{ ...updateBase, ...set }]);
+            const write: Updated = { table, set, where };
+            updated.push(write);
+            return Promise.resolve(updateRows ? updateRows(write) : [{ ...updateBase, ...set }]);
           },
         }),
       }),
@@ -126,6 +139,13 @@ function stubDb(opts: StubOpts): Db {
 function paramsOf(where: SQL | undefined): unknown[] {
   if (!where) return [];
   return new PgDialect().sqlToQuery(where).params;
+}
+
+/** The COMPILED SQL text of a captured predicate — so a test can assert the GUARD
+ *  itself (`"pv"."batch_id" is null`), not merely that some UPDATE happened (B-397). */
+function sqlOf(where: SQL | undefined): string {
+  if (!where) return "";
+  return new PgDialect().sqlToQuery(where).sql;
 }
 
 let app: FastifyInstance;
@@ -785,70 +805,310 @@ describe("GET /api/v1/bank/cheque", () => {
 });
 
 // ===========================================================================
-// POST /bank/export-batch — @juneflow/bank-file (fake formatter)
+// POST /bank/export-batch — @juneflow/bank-file (fake formatter) + the B-397
+// post-export lock (pv.batch_id)
 // ===========================================================================
+// B-397 — WHY THE FIXTURE IS A "WORLD" AND NOT CANNED ROWS. The defect being
+// closed here is that the handler stored the batch id NOWHERE, so an approved
+// transfer PV stayed eligible for every future export. That defect is invisible
+// to a stub whose rows never change: the second export reads the same pristine
+// world as the first. exportWorld() therefore PERSISTS the stamp — the guarded
+// UPDATE ... RETURNING answers with the rows it matched and writes the batch id
+// back into the canned pv rows, so a SECOND export reads the world the FIRST one
+// left behind.
+//
+// And it HONORS the handler's real predicate rather than re-implementing the rule
+// it is supposed to be testing: the `batch_id IS NULL` filter is applied only when
+// the COMPILED WHERE actually carries it (sqlOf), and the id set comes from the
+// compiled params. Delete the guard from bank.ts and the stub starts matching
+// already-stamped rows — the re-export and concurrency tests go RED. A stub that
+// filtered on its own would have proved itself instead.
+const PVD = "pv000000-0000-0000-0000-0000000000vd";
+const BATCH1 = "ba100000-0000-0000-0000-0000000000b1";
+const BATCH2 = "ba200000-0000-0000-0000-0000000000b2";
+const OTHER_BATCH = "ba900000-0000-0000-0000-0000000000b9";
+const EXPORT_URL = "/api/v1/bank/export-batch";
+
+type PvSelect = typeof pvs.$inferSelect;
+
+/** The exact fake-KBANK instruction line for a PV (beneficiary = vendorRow, and
+ *  `reference` = the pv id) — so a test asserts on the EMITTED LINE, not a count. */
+const instructionLine = (pvId: string, net: string) =>
+  `D;;${vendorRow.bank};${vendorRow.name};${net};THB;${pvId}`;
+
+/** Two eligible transfer PVs (so a batch can omit one and still emit), plus the
+ *  two shapes that are never eligible: cheque-method and pending. */
+const exportSeed = (): PvSelect[] => [
+  pvRow(PVA, { status: "approved", method: "transfer", net: "892400.00" }), // eligible
+  pvRow(PVB, { status: "approved", method: "cheque", net: "402938.00" }), // excluded (cheque)
+  pvRow(PVC, { status: "pending", method: "transfer", net: "96800.00" }), // excluded (pending)
+  pvRow(PVD, { status: "approved", method: "transfer", net: "561150.00" }), // eligible
+];
+
+interface ExportWorld {
+  db: Db;
+  /** The live pv rows — read by every request, mutated by every stamp. */
+  pvState: PvSelect[];
+  updated: Updated[];
+  /** Queue a concurrent export's commit: it lands BETWEEN the next request's read
+   *  and its guarded write — exactly the window the B-149 guard exists for. */
+  steal: (...ids: string[]) => void;
+}
+
+function exportWorld(seed: PvSelect[] = exportSeed()): ExportWorld {
+  const pvState = seed.map((r) => ({ ...r }));
+  const updated: Updated[] = [];
+  const pendingSteal: string[] = [];
+  const db = stubDb({
+    rows: [
+      [pvs, pvState],
+      [apBillings, [billingRow]],
+      [vendors, [vendorRow]],
+    ],
+    updated,
+    updateRows: (u) => {
+      // The concurrent export commits here — after our read, before our write.
+      for (const id of pendingSteal.splice(0)) {
+        const row = pvState.find((r) => r.id === id);
+        if (row) row.batchId = OTHER_BATCH;
+      }
+      // Membership comes from the handler's OWN compiled predicate: the ids it
+      // asked for, and the batch_id guard only if it really carries one.
+      const params = paramsOf(u.where);
+      const asked = new Set(
+        pvState.filter((r) => params.includes(r.id)).map((r) => r.id),
+      );
+      const guarded = sqlOf(u.where).includes('"batch_id" is null');
+      const matched = pvState.filter(
+        (r) => asked.has(r.id) && (!guarded || r.batchId == null),
+      );
+      const stamp = String((u.set as Record<string, unknown>).batchId ?? "");
+      const returned = matched.map((r) => ({ ...r, batchId: stamp }));
+      for (const r of matched) r.batchId = stamp; // persist — the next export sees it
+      return returned;
+    },
+  });
+  return { db, pvState, updated, steal: (...ids) => pendingSteal.push(...ids) };
+}
+
+/** The batch id a stamped row ended up carrying (null when it was never stamped). */
+const stampOf = (world: ExportWorld, pvId: string): string | null =>
+  world.pvState.find((r) => r.id === pvId)?.batchId ?? null;
+
 describe("POST /api/v1/bank/export-batch", () => {
   it("401s flat without a session (fail closed)", async () => {
     const res = await (await buildTestApp()).inject({
       method: "POST",
-      url: "/api/v1/bank/export-batch",
+      url: EXPORT_URL,
     });
     expect(res.statusCode).toBe(401);
   });
 
-  const exportDb = () =>
-    stubDb({
-      rows: [
-        [
-          pvs,
-          [
-            pvRow(PVA, { status: "approved", method: "transfer", net: "892400.00" }), // included
-            pvRow(PVB, { status: "approved", method: "cheque", net: "402938.00" }), // excluded (cheque)
-            pvRow(PVC, { status: "pending", method: "transfer", net: "96800.00" }), // excluded (pending)
-          ],
-        ],
-        [apBillings, [billingRow]],
-        [vendors, [vendorRow]],
-      ],
-    });
-
+  // POSITIVE CONTROL: the feature itself still works — the eligible PVs are
+  // exported, with the right net, on the real fake-formatter line shape.
   it("builds the file for approved-transfer PVs only, via the bank-file fake formatter", async () => {
+    const world = exportWorld();
     const res = await (
-      await buildTestApp({ resolveTenant: async () => SESSION, db: exportDb() })
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
     ).inject({
       method: "POST",
-      url: "/api/v1/bank/export-batch",
-      payload: { batch_id: "batch-1", value_date: "2026-05-26" },
+      url: EXPORT_URL,
+      payload: { batch_id: BATCH1, value_date: "2026-05-26" },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.format).toBe("kbank-direct");
-    expect(body.file_name).toBe("fake-kbank-direct-batch-1.txt");
-    expect(body.pv_count).toBe(1); // only the approved transfer
-    expect(body.pv_ids).toEqual([PVA]);
-    expect(body.total_amount).toBe(892400); // PVA net
+    expect(body.file_name).toBe(`fake-kbank-direct-${BATCH1}.txt`);
+    expect(body.pv_count).toBe(2); // the two approved transfers
+    expect(body.pv_ids).toEqual([PVA, PVD]);
+    expect(body.total_amount).toBe(1453550); // 892400 + 561150
     expect(body.encoding).toBe("utf-8");
-    // deterministic fake bank-file content — header + one instruction + trailer
-    expect(body.content).toContain("FAKE-KBANK-DIRECT;batch-1;");
-    expect(body.content).toContain("บจก. ซีแพค คอนกรีต");
-    expect(body.content).toContain("892400.00;THB");
-    expect(body.content).toContain("KBANK 012-3-45678-9"); // vendor.bank = beneficiary acct
-    expect(body.content).toContain("T;1");
+    // deterministic fake bank-file content — header + one line per PV + trailer
+    const lines = (body.content as string).split("\n");
+    expect(lines[0]).toBe(`FAKE-KBANK-DIRECT;${BATCH1};${COMPANY};2026-05-26`);
+    expect(lines).toContain(instructionLine(PVA, "892400.00"));
+    expect(lines).toContain(instructionLine(PVD, "561150.00"));
+    expect(body.content).not.toContain(PVB); // cheque-method is never exported
+    expect(body.content).not.toContain(PVC); // pending is never exported
+    expect(lines.at(-1)).toBe("T;2");
   });
 
-  it("restricts to pv_ids and excludes an ineligible (cheque-method) PV", async () => {
+  it("stamps pv.batch_id with the batch id it reports, guarding the FINAL UPDATE", async () => {
+    const world = exportWorld();
     const res = await (
-      await buildTestApp({ resolveTenant: async () => SESSION, db: exportDb() })
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: {} });
+
+    expect(res.statusCode).toBe(200);
+    const reported = res.json().batch_id as string;
+    expect(reported).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+    expect(world.updated).toHaveLength(1);
+    const write = world.updated[0]!;
+    expect(write.table).toBe(pvs);
+    expect(write.set).toEqual({ batchId: reported }); // written id === reported id
+    // Tenant-scoped, narrowed to the candidates, and carrying the B-149 guard on
+    // the UPDATE's OWN where — not on the select that resolved the candidates.
+    expect(paramsOf(write.where)).toContain(COMPANY);
+    expect(paramsOf(write.where)).toEqual(expect.arrayContaining([PVA, PVD]));
+    expect(sqlOf(write.where)).toContain('"batch_id" is null');
+    // The rows really carry it now; an ineligible PV was never touched.
+    expect(stampOf(world, PVA)).toBe(reported);
+    expect(stampOf(world, PVD)).toBe(reported);
+    expect(stampOf(world, PVB)).toBeNull();
+    expect(stampOf(world, PVC)).toBeNull();
+  });
+
+  // THE DEFECT (H4): before B-397 the same approved transfer PV came back in every
+  // batch, forever — one correct upload still re-emitted the payment next time.
+  it("never re-emits a PV a previous export already sent", async () => {
+    const world = exportWorld();
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const first = await app.inject({
+      method: "POST",
+      url: EXPORT_URL,
+      payload: { batch_id: BATCH1, pv_ids: [PVA] },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().pv_ids).toEqual([PVA]);
+    expect((first.json().content as string).split("\n")).toContain(
+      instructionLine(PVA, "892400.00"),
+    );
+
+    const second = await app.inject({
+      method: "POST",
+      url: EXPORT_URL,
+      payload: { batch_id: BATCH2 },
+    });
+    expect(second.statusCode).toBe(200);
+    const body = second.json();
+    const lines = (body.content as string).split("\n");
+    // PVA is SENT — it is not in the waiting-to-send set any more.
+    expect(body.pv_ids).toEqual([PVD]);
+    expect(body.pv_count).toBe(1);
+    expect(body.total_amount).toBe(561150);
+    expect(lines).toContain(instructionLine(PVD, "561150.00"));
+    expect(lines).not.toContain(instructionLine(PVA, "892400.00"));
+    expect(body.content).not.toContain(PVA); // no line references it at all
+    expect(lines.at(-1)).toBe("T;1");
+    // Eligibility excluded it up front: the second UPDATE never even ASKS for PVA,
+    // and the first batch's stamp is not overwritten.
+    expect(paramsOf(world.updated[1]!.where)).not.toContain(PVA);
+    expect(stampOf(world, PVA)).toBe(BATCH1);
+  });
+
+  it("409s an explicit pv_ids naming an already-exported PV, and stamps nothing", async () => {
+    const world = exportWorld();
+    const app = await buildTestApp({ resolveTenant: async () => SESSION, db: world.db });
+
+    const first = await app.inject({
+      method: "POST",
+      url: EXPORT_URL,
+      payload: { batch_id: BATCH1, pv_ids: [PVA] },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: "POST",
+      url: EXPORT_URL,
+      payload: { batch_id: BATCH2, pv_ids: [PVA, PVD] },
+    });
+    expect(second.statusCode).toBe(409);
+    const body = second.json();
+    expect(body.code).toBe("INVALID_STATE");
+    expect(body.message).toContain(PVA); // the caller is TOLD, not silently dropped
+    expect(body.content).toBeUndefined(); // no batch file
+    // The whole request failed before any stamp: only the FIRST export wrote, and
+    // the eligible PVD it also named is untouched.
+    expect(world.updated).toHaveLength(1);
+    expect(stampOf(world, PVD)).toBeNull();
+  });
+
+  it("409s (no batch file) when nothing is waiting to be sent, issuing no UPDATE", async () => {
+    const world = exportWorld([
+      pvRow(PVA, { status: "approved", method: "transfer", batchId: BATCH1 }), // already sent
+      pvRow(PVB, { status: "approved", method: "cheque" }), // never eligible
+      pvRow(PVC, { status: "pending", method: "transfer" }), // never eligible
+    ]);
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: BATCH2 } });
+
+    expect(res.statusCode).toBe(409);
+    const body = res.json();
+    expect(body.code).toBe("INVALID_STATE");
+    expect(body.message).toContain("waiting to be sent");
+    expect(body.file_name).toBeUndefined();
+    expect(body.content).toBeUndefined(); // a zero-instruction bank file is a footgun
+    expect(world.updated).toHaveLength(0); // the sent PV was not even asked for
+    expect(stampOf(world, PVA)).toBe(BATCH1); // and its batch is not overwritten
+  });
+
+  it("restricts to pv_ids: an ineligible (cheque-method) PV leaves nothing to send", async () => {
+    const world = exportWorld();
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
     ).inject({
       method: "POST",
-      url: "/api/v1/bank/export-batch",
-      payload: { batch_id: "batch-2", pv_ids: [PVB] }, // PVB is cheque-method → not exported
+      url: EXPORT_URL,
+      payload: { batch_id: BATCH2, pv_ids: [PVB] }, // PVB is cheque-method → not exported
     });
+    // B-397 changed this from a 200 carrying an empty "T;0" file to a 409.
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().content).toBeUndefined();
+    expect(world.updated).toHaveLength(0);
+    expect(stampOf(world, PVB)).toBeNull();
+  });
+
+  it("excludes a PV stamped between the read and the guarded write (concurrent export)", async () => {
+    const world = exportWorld();
+    world.steal(PVA); // a concurrent batch commits PVA's stamp after our read
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: BATCH2 } });
+
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.pv_count).toBe(0);
-    expect(body.pv_ids).toEqual([]);
-    expect(body.content).toContain("T;0");
+    const lines = (body.content as string).split("\n");
+    // PVA WAS in the candidate list at read time — the guarded UPDATE matched 0
+    // rows for it, so it must not appear in the file this call hands to the bank.
+    expect(paramsOf(world.updated[0]!.where)).toContain(PVA);
+    expect(body.pv_ids).toEqual([PVD]);
+    expect(body.pv_count).toBe(1);
+    expect(body.total_amount).toBe(561150);
+    expect(lines).toContain(instructionLine(PVD, "561150.00"));
+    expect(lines).not.toContain(instructionLine(PVA, "892400.00"));
+    expect(body.content).not.toContain(PVA);
+    expect(lines.at(-1)).toBe("T;1");
+    expect(stampOf(world, PVA)).toBe(OTHER_BATCH); // the winner's batch stands
+  });
+
+  it("409s when every candidate was taken by a concurrent export", async () => {
+    const world = exportWorld();
+    world.steal(PVA, PVD);
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: BATCH2 } });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("INVALID_STATE");
+    expect(res.json().message).toContain("concurrent");
+    expect(res.json().content).toBeUndefined();
+    expect(stampOf(world, PVA)).toBe(OTHER_BATCH);
+    expect(stampOf(world, PVD)).toBe(OTHER_BATCH);
+  });
+
+  it("400s a malformed batch_id (B-397: it is written to a uuid column now)", async () => {
+    const world = exportWorld();
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: "batch-1" } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ code: "VALIDATION", message: "batch_id must be a uuid" });
+    expect(world.updated).toHaveLength(0);
   });
 });
 

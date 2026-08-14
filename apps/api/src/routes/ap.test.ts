@@ -48,38 +48,85 @@ interface Updated {
   set: Record<string, unknown>;
   where: SQL;
 }
+/**
+ * B-398 — one ORDERED log of every DB call, with the two facts the atomicity
+ * assertions need and the `captured` / `inserted` / `updated` arrays cannot carry:
+ * whether the call was issued through the TRANSACTION handle, and whether the read
+ * chain appended `.for("update")` (the row lock). It is a SEPARATE log on purpose —
+ * adding these fields to `Inserted` would break the exact `toEqual` at the foot of
+ * this file, which is a real assertion about the insert doors.
+ */
+interface Call {
+  kind: "read" | "insert" | "update";
+  table: unknown;
+  inTx: boolean;
+  forUpdate: boolean;
+}
 interface StubOpts {
-  rows: Array<[unknown, unknown[]]>;
+  /**
+   * Canned rows per table. The function form receives the WHERE the caller built,
+   * so a fixture can answer the request that was actually made instead of handing
+   * back every row it holds (B-398 needs one fixture to serve both a covered and an
+   * uncovered request — see `billingsByRequest`).
+   */
+  rows: Array<[unknown, unknown[] | ((where: SQL | undefined) => unknown[])]>;
   captured?: Captured[];
   inserted?: Inserted[];
   updated?: Updated[];
+  calls?: Call[];
   updateBase?: Record<string, unknown>;
 }
 
 /** Db stub: canned rows per table (reads, incl. selectThrough joins) + write capture. */
 function stubDb(opts: StubOpts): Db {
-  const { rows, captured = [], inserted = [], updated = [], updateBase = {} } = opts;
-  const rowsFor = (table: unknown): unknown[] => {
-    for (const [t, r] of rows) if (t === table) return r;
+  const {
+    rows,
+    captured = [],
+    inserted = [],
+    updated = [],
+    calls = [],
+    updateBase = {},
+  } = opts;
+  const rowsFor = (table: unknown, where: SQL | undefined): unknown[] => {
+    for (const [t, r] of rows) if (t === table) return typeof r === "function" ? r(where) : r;
     return [];
   };
+  // B-398: set while the transaction door is running its callback, so every call
+  // the block issues records `inTx: true`. The stub has no real BEGIN/COMMIT and
+  // cannot model a row lock — it models the SHAPE so the handler runs, and lets a
+  // test pin WHERE each call sits relative to the tx and the lock.
+  let inTx = false;
   const builderFor = (table: unknown) => {
+    let pendingWhere: SQL | undefined;
+    let awaited = false;
+    let forUpdate = false;
     const builder = {
       $dynamic: () => builder,
       innerJoin: () => builder,
       where: (where: SQL) => {
         captured.push({ table, where });
-        return Promise.resolve(rowsFor(table));
+        pendingWhere = where;
+        awaited = true;
+        // The chain may END here (plain select) or CONTINUE — selectForUpdate
+        // appends `.orderBy(id).for("update")`. Returning a builder that is ALSO a
+        // thenable serves both without the call sites having to know which.
+        return builder;
+      },
+      orderBy: () => builder,
+      for: () => {
+        forUpdate = true;
+        return builder;
       },
       then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) => {
-        captured.push({ table, where: undefined });
-        return Promise.resolve(rowsFor(table)).then(onOk, onErr);
+        if (!awaited) captured.push({ table, where: undefined });
+        calls.push({ kind: "read", table, inTx, forUpdate });
+        return Promise.resolve(rowsFor(table, pendingWhere)).then(onOk, onErr);
       },
     };
     return builder;
   };
   let seq = 0;
-  return {
+  const raw: Record<string, unknown> = {
     select: () => ({ from: (table: unknown) => builderFor(table) }),
     insert: (table: unknown) => ({
       // B-388 · BOTH insert doors. TenantDb.insert() returns the builder WITHOUT
@@ -91,6 +138,7 @@ function stubDb(opts: StubOpts): Db {
       values: (values: Record<string, unknown>) => {
         const record = (): Record<string, unknown>[] => {
           inserted.push({ table, values });
+          calls.push({ kind: "insert", table, inTx, forUpdate: false });
           return [{ id: `new-${seq++}`, createdAt: D, ...values }];
         };
         return {
@@ -106,12 +154,26 @@ function stubDb(opts: StubOpts): Db {
         where: (where: SQL) => ({
           returning: () => {
             updated.push({ table, set, where });
+            calls.push({ kind: "update", table, inTx, forUpdate: false });
             return Promise.resolve([{ ...updateBase, ...set }]);
           },
         }),
       }),
     }),
-  } as unknown as Db;
+  };
+  // B-097 / B-398: the transaction door runs its callback against this SAME stub,
+  // so writes inside a tx still capture (the fake has no real BEGIN/COMMIT — it
+  // proves the door threads one scoped handle, and a throw rejects the block). The
+  // `inTx` flag it raises is what lets a test assert a call sits INSIDE the block.
+  raw.transaction = async (cb: (tx: unknown) => unknown) => {
+    inTx = true;
+    try {
+      return await cb(raw);
+    } finally {
+      inTx = false;
+    }
+  };
+  return raw as unknown as Db;
 }
 
 function paramsOf(where: SQL | undefined): unknown[] {
@@ -873,6 +935,207 @@ describe("POST /api/v1/ap/pv", () => {
     expect(res.statusCode).toBe(201);
     const ins = inserted.find((i) => i.table === pvs);
     expect(ins!.values.createdBy).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // B-398 (Wei = ก · 2026-08-14) — ONE BILLING, AT MOST ONE LIVE PV.
+  //
+  // The defect: createPv never queried the pv table at all and ran with NO
+  // transaction, so the same ap_billing could be covered by two PVs — and since
+  // B-315 derives the amount from the billing rows, the duplicate is EXACT. Two
+  // 201s, two pv rows, both amount 645000 / net 561150: the vendor payable paid
+  // twice in full.
+  //
+  // Every case here dies on revert. The status-code assertions are paired with an
+  // "and NOTHING was inserted" assertion, because a status-only test still passes
+  // if someone later moves the guard to AFTER the insert.
+  // -------------------------------------------------------------------------
+  describe("B-398 · a billing already covered by a PV cannot be covered again", () => {
+    const AP0_AMOUNT = "645000.00";
+    const AP1_AMOUNT = "96800.00";
+
+    /**
+     * ap_billing rows answered against the ids the REQUEST actually asked for.
+     * Without this the stub hands back every billing it holds regardless of the
+     * WHERE, so a fixture carrying both AP0 and AP1 would sum both into any PV and
+     * the positive control below would be measuring the wrong thing.
+     */
+    const billingsByRequest =
+      (all: (typeof apBillings.$inferSelect)[]) => (where: SQL | undefined) => {
+        const asked = new Set(paramsOf(where).map(String));
+        return all.filter((b) => asked.has(b.id));
+      };
+
+    /** ONE fixture: two real billings, plus whatever PVs already exist. */
+    const fixture = (
+      existingPvs: (typeof pvs.$inferSelect)[],
+      capture: { inserted?: Inserted[]; calls?: Call[] } = {},
+    ) =>
+      stubDb({
+        rows: [
+          [
+            apBillings,
+            billingsByRequest([
+              apBilling(AP0, { amount: AP0_AMOUNT, vat: "42196.00" }),
+              apBilling(AP1, { amount: AP1_AMOUNT, vat: "6334.00" }),
+            ]),
+          ],
+          [vendors, [vendorRow]],
+          [pvs, existingPvs],
+        ],
+        inserted: capture.inserted,
+        calls: capture.calls,
+      });
+
+    /** An APPROVED PV already covering `ids` — the live coverage the guard sees. */
+    const coveringPv = (ids: string[]) =>
+      pvRow(PV0, { billingIds: ids, status: "approved" });
+
+    const post = async (db: Db, billingIds: string[]) =>
+      (
+        await buildTestApp({ resolveTenant: async () => SESSION, db })
+      ).inject({
+        method: "POST",
+        url: "/api/v1/ap/pv",
+        payload: { billing_ids: billingIds, wht_pct: 3, retention: 0 },
+      });
+
+    it("refuses a SECOND PV over an already-covered billing → 409, and inserts NOTHING", async () => {
+      const inserted: Inserted[] = [];
+      const res = await post(fixture([coveringPv([AP0])], { inserted }), [AP0]);
+
+      expect(res.statusCode, "a billing held by a live PV must not be paid twice").toBe(409);
+      expect(res.json().code).toBe("INVALID_STATE");
+      // THE point: not merely "the caller saw a 409" but "no second voucher exists".
+      // Before the fix this array held one pv row with amount 645000 — an exact
+      // duplicate of the covering PV's.
+      expect(inserted.filter((i) => i.table === pvs)).toHaveLength(0);
+      expect(inserted).toHaveLength(0);
+    });
+
+    it("names the offending billing id (and the PV holding it) in the 409", async () => {
+      const res = await post(fixture([coveringPv([AP0])]), [AP0]);
+      expect(res.statusCode).toBe(409);
+      expect(res.json().message).toContain(AP0);
+      expect(res.json().message).toContain(PV0);
+    });
+
+    it("POSITIVE CONTROL — same fixture, a DIFFERENT billing still creates a PV", async () => {
+      // Identical db to the 409 case above: AP0 is covered by PV0. Only the request
+      // differs. If the guard were over-broad (any existing PV blocks any create)
+      // THIS is the line that goes red, and the 409s above would be worthless.
+      const inserted: Inserted[] = [];
+      const res = await post(fixture([coveringPv([AP0])], { inserted }), [AP1]);
+
+      expect(res.statusCode, "an UNCOVERED billing must still be payable").toBe(201);
+      const ins = inserted.find((i) => i.table === pvs)!;
+      expect(ins.values.billingIds).toEqual([AP1]);
+      expect(ins.values.amount).toBe(AP1_AMOUNT); // the server's own derivation, not AP0's
+      expect(ins.values.status).toBe("pending");
+    });
+
+    it("a MULTI-billing PV succeeds when NEITHER id is covered", async () => {
+      const inserted: Inserted[] = [];
+      const res = await post(fixture([], { inserted }), [AP0, AP1]);
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json().amount).toBe(741_800); // 645000 + 96800 — billing_ids stays PLURAL
+      expect(inserted.find((i) => i.table === pvs)!.values.billingIds).toEqual([AP0, AP1]);
+    });
+
+    it("a MULTI-billing PV is refused when the FIRST id is covered", async () => {
+      const inserted: Inserted[] = [];
+      const res = await post(fixture([coveringPv([AP0])], { inserted }), [AP0, AP1]);
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json().message).toContain(AP0);
+      expect(inserted).toHaveLength(0);
+    });
+
+    it("a MULTI-billing PV is refused when the SECOND id is covered (per-ELEMENT, not per-array)", async () => {
+      // The discriminator. A guard written as "does some PV hold the identical
+      // billing_ids array?" — or one that only inspects billing_ids[0], the way
+      // payee/currency legitimately do — answers 201 here and pays AP1 twice.
+      const inserted: Inserted[] = [];
+      const res = await post(fixture([coveringPv([AP1])], { inserted }), [AP0, AP1]);
+
+      expect(res.statusCode, "coverage must be checked per element, not on the whole array").toBe(
+        409,
+      );
+      expect(res.json().message).toContain(AP1);
+      expect(inserted).toHaveLength(0);
+    });
+
+    it("counts a PENDING PV as live too (there is no cancelled PV state in this codebase)", async () => {
+      // POST /pv/{id}/approve is the only pv mutation in the API and its only write
+      // is pending→approved, so `pending` and `approved` are the only statuses that
+      // reach the table. Both hold their billings. This pins that the guard did not
+      // quietly acquire a status filter that lets an un-approved PV be duplicated.
+      const inserted: Inserted[] = [];
+      const res = await post(
+        fixture([pvRow(PV0, { billingIds: [AP0], status: "pending" })], { inserted }),
+        [AP0],
+      );
+      expect(res.statusCode).toBe(409);
+      expect(inserted).toHaveLength(0);
+    });
+
+    it("the ownership 400 for a foreign billing id is unchanged — and now runs on the LOCK", async () => {
+      // The lock REPLACED the plain scoped select; it did not join it. A foreign id
+      // is still absent from the scoped read, so the message and the code are byte
+      // identical to before — and the read that proves it is the FOR UPDATE one.
+      const inserted: Inserted[] = [];
+      const calls: Call[] = [];
+      const res = await post(fixture([], { inserted, calls }), [
+        "ffffffff-0000-0000-0000-00000000ffff",
+      ]);
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe("VALIDATION");
+      expect(res.json().message).toMatch(/not found in this tenant/);
+      expect(inserted).toHaveLength(0);
+
+      const billingReads = calls.filter((c) => c.kind === "read" && c.table === apBillings);
+      expect(billingReads).toHaveLength(1);
+      expect(billingReads[0]!.forUpdate).toBe(true);
+      expect(billingReads[0]!.inTx).toBe(true);
+    });
+
+    it("ATOMICITY — the coverage read runs INSIDE the tx and AFTER the FOR UPDATE lock", async () => {
+      // The stub cannot model a real row lock, and this does not claim to. What it
+      // pins is the ORDER and the PLACEMENT, which is what a reviewer cannot see and
+      // what a refactor silently destroys: move the coverage read out of the block,
+      // or above the lock, and the guard becomes a pure TOCTOU that reads
+      // "uncovered" for both concurrent creates while still passing every
+      // status-code assertion above.
+      const calls: Call[] = [];
+      const res = await post(fixture([], { calls }), [AP0]);
+      expect(res.statusCode).toBe(201);
+
+      const lock = calls.findIndex(
+        (c) => c.kind === "read" && c.table === apBillings && c.forUpdate,
+      );
+      const coverage = calls.findIndex((c) => c.kind === "read" && c.table === pvs);
+      const insert = calls.findIndex((c) => c.kind === "insert" && c.table === pvs);
+
+      expect(lock, "the billings must be read through selectForUpdate").toBeGreaterThanOrEqual(0);
+      expect(coverage, "createPv must read the pv table at all — it never used to").toBeGreaterThan(
+        lock,
+      );
+      expect(insert, "the insert must follow the coverage read").toBeGreaterThan(coverage);
+
+      // …and all three inside ONE transaction. The insert used to sit in no
+      // transaction at all.
+      expect(calls[lock]!.inTx, "the lock must be taken inside the transaction").toBe(true);
+      expect(calls[coverage]!.inTx, "the coverage read must be inside the transaction").toBe(true);
+      expect(calls[insert]!.inTx, "the insert must be inside the transaction").toBe(true);
+
+      // No UNLOCKED read of ap_billing survives anywhere in the path — the lock
+      // replaced the plain select rather than being bolted on beside it.
+      expect(
+        calls.filter((c) => c.kind === "read" && c.table === apBillings).map((c) => c.forUpdate),
+      ).toEqual([true]);
+    });
   });
 });
 

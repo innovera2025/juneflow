@@ -26,10 +26,12 @@
  *   - the settings-card fields are the prototype's illustrative STATIC display: the server
  *     owns the file format (env-selected, fake default) and defaults the value date, so the
  *     fields are non-interactive (matching the prototype's own static Select/Input).
- *   - the lock note is prototype copy; the current export-batch handler is a pure
- *     build+return and does NOT persist a post-export lock (flagged).
- *   - the Export-history card has no wire source (the export is stateless) -> an honest
- *     empty state, never fabricated rows.
+ *   - the lock note is prototype copy AND is now true (B-397): export-batch stamps
+ *     pv.batch_id inside a guarded transaction, a stamped voucher is refused, and
+ *     export-rows.ts drops it from this list so a stale row cannot 409 the batch.
+ *   - the Export-history card still has no wire source: B-397 stamps the batch onto
+ *     each PV but persists no batch entity (file name / count / actor / date have
+ *     nowhere to come from) -> an honest empty state, never fabricated rows.
  *   - the filter action fires a client-intent toast (no server filter).
  *
  * i18n: every string is an export-strings.json phrase (tp) or an existing DICT key
