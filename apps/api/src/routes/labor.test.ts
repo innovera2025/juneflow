@@ -3,7 +3,7 @@
 // reads (sorted, opaque Entity wire of the REAL columns) + fail-closed 401 without
 // a tenant. Expected values come from the stub — never hand-computed against the
 // impl. The routes are wired in app.ts (registerLaborRoute) → buildApp mounts them.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -1990,7 +1990,63 @@ describe("B-332 POST /api/v1/labor/workers — the worker↔user auth link", () 
   });
 });
 
+// ===========================================================================
+// THE BUSINESS CLOCK IS PINNED FOR EVERY SELF-SERVICE FIXTURE BELOW
+// ===========================================================================
+// The two describes that follow post their fixture day through DOOR 2, and door 2 is
+// bounded by B-337's window: [business today − 7 … business today], judged against
+// `businessNowMs()`. With that clock left on the WALL, a hardcoded fixture day is a
+// TIME BOMB — it sat inside the window on the day it was written and aged out of it
+// seven days later. Measured 2026-08-15, with `day: "2026-08-07"` eight days old: 10
+// tests in this file failed, every one of them with `day is more than 7 days old`
+// standing in for the 201 / the specific 400 / the 409 that was actually under test.
+// They had passed the day before. Since B-378 put apps/api in CI, that is the
+// auto-merge gate for EVERY zone failing on the calendar rather than on the code.
+//
+// The remedy is the one B-337's own block already uses: PIN BOTH SIDES. Freezing
+// `SEED_FROZEN_NOW` makes the fixture day's distance from "today" a FIXED NUMBER OF
+// DAYS instead of "however long ago someone typed this file", and the pin is itself
+// the same assertion B-337 makes — it only bites BECAUSE the handler reads
+// businessNowMs() and never `new Date()`, which no freeze could reach.
+//
+// WHAT THIS DOES NOT DO: weaken these tests. Their subject is the authorization split
+// (WHO is being recorded) and the duplicate gate (HOW MANY rows for one day). The
+// window is a THIRD, upstream gate that was masking both — restoring their subject is
+// the whole change. Whether the window itself holds is asserted where it belongs and
+// nowhere else: the B-337 block at the foot of this file, which pins the clock to this
+// same instant and walks today / today−7 / today−8 / tomorrow across the boundary.
+// ===========================================================================
+
+/** 09:00 in Bangkok on 2026-08-08 → business today = 2026-08-08. B-337's FROZEN instant. */
+const SELF_SERVICE_FROZEN_NOW = "2026-08-08T02:00:00.000Z";
+/**
+ * The day every self-service fixture below records: business today − 1. Deliberately
+ * NOT an edge — one day inside a seven-day window, so neither boundary is under test
+ * here and a future edge-case change to SELF_SERVICE_BACKDATE_DAYS cannot silently
+ * reclassify these tests. Named rather than inlined so the coupling to the frozen
+ * instant above is visible at every use: the pair is what makes the day meaningful.
+ */
+const SELF_SERVICE_DAY = "2026-08-07";
+
+/**
+ * Pins the server's business clock for ONE describe, and REMOVES it after every test.
+ * The teardown is load-bearing: `SEED_FROZEN_NOW` is read from the live environment on
+ * each `businessNowMs()` call, so a pin left standing would silently freeze whatever
+ * suite ran next — the same failure as the bomb it exists to defuse, pointed the other
+ * way. Registered inside the describe body, so the hooks scope to that describe alone.
+ */
+const pinBusinessClock = (iso: string): void => {
+  beforeEach(() => {
+    process.env.SEED_FROZEN_NOW = iso;
+  });
+  afterEach(() => {
+    delete process.env.SEED_FROZEN_NOW;
+  });
+};
+
 describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING RECORDED", () => {
+  pinBusinessClock(SELF_SERVICE_FROZEN_NOW);
+
   /** A caller with NO finance.create, linked through worker.user_id to `selfId`. */
   const selfServiceDb = (selfId: string | null, inserted: Inserted[] = []) =>
     writeStub({
@@ -2015,7 +2071,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     ).inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07" },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY },
     });
     expect(res.statusCode).toBe(201);
     expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
@@ -2028,7 +2084,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     ).inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07" },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY },
     });
     expect(res.statusCode).toBe(403);
     expect(inserted).toHaveLength(0);
@@ -2041,7 +2097,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     ).inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07" },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY },
     });
     expect(res.statusCode).toBe(403);
     expect(inserted).toHaveLength(0);
@@ -2052,13 +2108,13 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     const noRow = await app.inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07" },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY },
     });
     const app2 = await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(W2) });
     const otherWorker = await app2.inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07" },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY },
     });
     expect(noRow.json()).toEqual(otherWorker.json());
   });
@@ -2066,7 +2122,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
   it("keeps the 403-BEFORE-400 ordering: an unauthorized caller sending no worker_id still gets 403, never a body-validation hint", async () => {
     const res = await (
       await buildTestApp({ resolveTenant: async () => SESSION, db: selfServiceDb(null) })
-    ).inject({ method: "POST", url: "/api/v1/labor/attendance", payload: { day: "2026-08-07" } });
+    ).inject({ method: "POST", url: "/api/v1/labor/attendance", payload: { day: SELF_SERVICE_DAY } });
     expect(res.statusCode).toBe(403);
   });
 
@@ -2077,7 +2133,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     ).inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07", ot: 4 },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY, ot: 4 },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().message).toMatch(/overtime cannot be recorded on a self-service check-in/);
@@ -2097,7 +2153,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     ).inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07", ot: 4 },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY, ot: 4 },
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().ot).toBe(4);
@@ -2128,7 +2184,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     ).inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07" },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().message).toMatch(/not active/);
@@ -2152,7 +2208,7 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
     ).inject({
       method: "POST",
       url: "/api/v1/labor/attendance",
-      payload: { worker_id: W1, day: "2026-08-07" },
+      payload: { worker_id: W1, day: SELF_SERVICE_DAY },
     });
     expect(res.statusCode).toBe(201);
     expect(inserted.filter((i) => i.table === attendances)).toHaveLength(1);
@@ -2169,7 +2225,9 @@ describe("B-332 POST /api/v1/labor/attendance — the gate split by WHO IS BEING
 // this class at all (a screen remount mints a NEW key for the same worker+day), so the
 // remedy is the explicit pre-check finance.ts named and B-332 shipped without.
 describe("B-332 gate-4.5 POST /api/v1/labor/attendance — the self-service duplicate gate", () => {
-  const DAY = "2026-08-07";
+  pinBusinessClock(SELF_SERVICE_FROZEN_NOW);
+
+  const DAY = SELF_SERVICE_DAY;
   /** A day already on file for W1 (what the real scoped read would return). */
   const recorded = (over: Record<string, unknown> = {}): typeof attendances.$inferSelect =>
     ({
@@ -2246,6 +2304,9 @@ describe("B-332 gate-4.5 POST /api/v1/labor/attendance — the self-service dupl
 
   it("does NOT fire on a DIFFERENT day — the guard is per-day, not a one-check-in-ever lock", async () => {
     const inserted: Inserted[] = [];
+    // A fixture ROW, never a request: the POST below still sends DAY, so this date
+    // never reaches selfServiceDayRefusal and its distance from "now" is irrelevant.
+    // All that matters is that it differs from DAY.
     const onFile = recorded({ day: "2026-08-06" });
     const res = await (
       await buildTestApp({

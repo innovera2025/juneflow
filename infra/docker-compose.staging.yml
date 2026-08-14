@@ -1,0 +1,222 @@
+# infra/docker-compose.staging.yml — staging OVERLAY on top of infra/docker-compose.yml
+#
+# Usage — ALWAYS both files, base first. On a staging host this file is INSTALLED
+# OUTSIDE the git checkout and wired in through COMPOSE_FILE, so the deploy command
+# carries no -f flags at all:
+#   sudo install -D -m 0644 infra/docker-compose.staging.yml /etc/juneflow/docker-compose.staging.yml
+#   # in /etc/environment (both paths absolute), NOT ~/.profile — see the runbook:
+#   COMPOSE_FILE=<repo>/infra/docker-compose.yml:/etc/juneflow/docker-compose.staging.yml
+#   # deploy: the assertion and the `up` are ONE statement, so the `up` is unreachable
+#   # unless this overlay is provably merged (runbook §"Deploy staging" ข้อ 4):
+#   docker compose config --format json migrate-seed | grep -qxE ' *"pnpm --filter @juneflow/db migrate",?' && docker compose config --format json postgres | awk '/^ *"published":/{p++} /^ *"host_ip": "127\.0\.0\.1",?$/{l++} END{exit !(p==1&&l==1)}' && docker compose config --format json redis | awk '/^ *"published":/{p++} /^ *"host_ip": "127\.0\.0\.1",?$/{l++} END{exit !(p==1&&l==1)}' && docker compose up -d --build --wait
+#
+# The assertion asks three questions, each ANCHORED TO ONE SERVICE, and it never counts
+# lines across a union pattern. Only THIS file can make all three true: migrate-seed's
+# command is the migrate half only, postgres publishes exactly one port and it is
+# loopback, redis likewise.
+#
+# The two port clauses prove the ABSENCE of a non-loopback publish, not merely the
+# presence of a loopback one, and that distinction is the whole point. Compose
+# CONCATENATES `ports:` lists across files; `!override` is the only thing that makes this
+# file REPLACE the base's list instead of appending to it. Delete just the TAG (leaving a
+# plain `ports:`) and postgres renders TWO published entries — the base's, with no
+# `host_ip` key at all, i.e. 0.0.0.0, plus this file's 127.0.0.1 one. An assertion that
+# asked "is there a loopback line?" found the second entry and said yes: measured, exit 0,
+# ACCEPT, on a config publishing a credentialed Postgres on every interface. One deleted
+# tag — the single edit an operator on Compose < 2.24, or anyone tidying this YAML, would
+# make — and the deploy reported green. Counting the published entries per service is what
+# closes it (measured: tag removed from postgres p=2 l=1 REFUSE; from redis, redis p=2 l=1
+# REFUSE; `ports:` deleted outright p=1 l=0 REFUSE; tag kept but bind widened to 0.0.0.0
+# p=1 l=0 REFUSE; this file unmodified p=1 l=1 ACCEPT).
+#
+# The load-bearing one is the command. The base spells it as a fixed list with NO ${...}
+# in it, so the FIELD itself cannot be produced by an environment variable — merging this
+# overlay is the only way to change it. But the guard must read that field through
+# `docker compose config --format json`, not the YAML render: `config migrate-seed` also
+# renders the services it depends_on (postgres), and compose emits a value containing a
+# newline as a YAML block scalar, so an env value can grow its own physical line in the
+# output. Measured, with no file edited: POSTGRES_PASSWORD=$'x\n- pnpm --filter
+# @juneflow/db migrate' makes the YAML-reading guard ACCEPT a base-only config whose real
+# command is `migrate && seed`. JSON escapes the newline, so the same forge is REFUSEd.
+# The earlier wording here ("no environment variable can produce the migrate-only form")
+# was false as a statement about the GUARD, and is corrected rather than deleted because
+# the next person to touch this will otherwise re-derive the same mistake.
+# The two port clauses are individually FORGEABLE (measured: base file alone plus
+# `POSTGRES_PORT=127.0.0.1:5432` renders exactly one loopback entry, p=1 l=1, passing that
+# clause whole), and they are not there to prove the file set; they are there to fail the
+# deploy if someone weakens the port overrides BELOW while keeping the command.
+# Reading them through `--format json` is defence-in-depth, NOT something measurement has
+# shown to be load-bearing at the level of the whole statement: mutating both clauses to
+# read the YAML render instead still decided all 17 measured states correctly. It IS
+# load-bearing for the postgres clause in isolation — with the bind widened to 0.0.0.0,
+# `POSTGRES_PASSWORD=$'x\nhost_ip: 127.0.0.1'` grows a real `host_ip: 127.0.0.1` line
+# inside `environment:` in the YAML render, and that clause then reads p=1 l=1 and passes.
+# What keeps the composite red today is only that redis has no field an env value can
+# interpolate a newline into (`${REDIS_PORT}` is the sole candidate and compose dies on
+# `invalid IP address` first). That margin is thin and depends on the base not growing a
+# redis `environment:`. Keep the JSON; re-measure if the base changes.
+#
+# Do NOT go back to counting lines from a union pattern
+# (`grep -cE 'host_ip: 127.0.0.1|db migrate$' | grep -qx 3`). It counts LINES, so it never
+# checks that a loopback line belongs to postgres/redis, nor that the migrate half exists
+# at all: ANY 3 hits pass. Measured with ZERO file edits, base file only, from the repo
+# root — `POSTGRES_PORT=127.0.0.1:5432 REDIS_PORT=127.0.0.1:6379 API_PORT=127.0.0.1:3000`
+# (three variables the runbook's own ข้อ 2 lists as settable by the operator) prints `3`,
+# exits 0, and the rendered command is `migrate && seed`, i.e. the assertion went GREEN on
+# the config that TRUNCATEs. Same result from `cd infra` with COMPOSE_FILE unset, against
+# the real project `name: juneflow`. The three hits were postgres/redis/api host_ip lines,
+# with no migrate marker present at all.
+#
+# Nor replace it with a search for the base's seed step: `grep -c 'db seed'` returns 0, the
+# "safe" reading, the moment the base spells that invocation differently (measured with
+# `pnpm --filter @juneflow/db run seed`, which still seeds), and its exit code is
+# inverted — 0 hits exits 1, so an &&-chain goes green exactly in the state that wipes
+# the box. An absence check cannot distinguish "hazard gone" from "hazard renamed".
+#
+# That indirection is not neatness, it is the rollback. Rollback here is `git checkout
+# <previous green SHA>`, and every SHA older than this file's own commit does not contain
+# it: a repo-tracked overlay simply VANISHES mid-incident, `-f infra/docker-compose.staging.yml`
+# dies with "no such file or directory", and the shortest way out — drop the flag — is a
+# base-only deploy, i.e. the TRUNCATE this file exists to prevent, at 2am, on the one box
+# holding data nobody else has. Outside the checkout it cannot vanish, and with COMPOSE_FILE
+# there is no flag left to drop. Off a dev machine (no COMPOSE_FILE set) the explicit
+# `-f infra/docker-compose.yml -f infra/docker-compose.staging.yml` form is equivalent —
+# verified byte-identical `config` output — but ON a staging host never type -f at all:
+# a hand-typed -f replaces COMPOSE_FILE wholesale, and one forgotten flag is base-only.
+# Full procedure, incl. the once-per-host seeded run (gated on the pgdata volume not
+# existing, and deliberately not an `up`) and the assertion that proves this overlay is
+# in effect: infra/runbook.md §"Deploy staging".
+#
+# This is an OVERLAY, not a fork: it changes three things and inherits everything else
+# (topology, build targets, healthchecks, depends_on gates) from the base file, which
+# stays the single source of truth. Keep it minimal — anything duplicated here is a
+# second place to forget to update.
+#
+# The base stack is built for a throwaway dev database. On a staging box that people
+# enter data into and stay logged in to, three of its defaults are destructive or
+# unsafe:
+#
+# 1) MIGRATE, DO NOT SEED. The base's migrate-seed one-shot runs `migrate && seed`, and
+#    compose re-runs it on every `up` (a completed `restart: "no"` service is started
+#    again, not skipped). The seed's first statement TRUNCATEs every table in the public
+#    schema (packages/db/src/seed/index.ts:953-962) — audit_log and the better-auth
+#    tables included; auth_user/auth_account get re-inserted but auth_session does not,
+#    so every logged-in tester is also signed out. A second deploy therefore destroys
+#    the box. Here the one-shot runs the migrate half only.
+# 2) DATASTORES ON LOOPBACK — see the postgres/redis comments below.
+# 3) SECRETS REQUIRED, NOT DEFAULTED — see the `:?` values below.
+#
+# Requires Docker Compose >= 2.24 for the `!override` tag: compose CONCATENATES port
+# lists across files, so a plain `ports:` list here would ADD a 127.0.0.1 binding and
+# KEEP the base's 0.0.0.0 one. Confirm merges from `... config` output, never from
+# assumed merge semantics.
+# On an older Compose the tag is not honoured and you get exactly that two-entry render.
+# The deploy assertion now REFUSES it (it requires exactly ONE published entry per
+# service) rather than accepting it because a loopback entry happens to be present, so an
+# old Compose fails the deploy loudly instead of exposing Postgres quietly. Do not "fix"
+# that red by dropping the tag or loosening the assertion — upgrade Compose.
+
+services:
+  postgres:
+    environment:
+      # Hard-required, matching infra/docker-compose.prod.yml. The base defaults this to
+      # the committed `juneflow-dev` and `docker compose config --variables` reports every
+      # variable as REQUIRED=false, so a staging host with no infra/.env comes up cleanly
+      # on a publicly known password — the failure mode is silence, not an error. `:?`
+      # turns that silence into a failed deploy.
+      # NOTE: this sets the password only when the database is FIRST initialised — which
+      # makes it the most likely first-deploy failure on Wei's existing VPS, in a shape
+      # that does not look like a password problem. On an existing pgdata volume a value
+      # that differs from the one the volume was initdb'd with re-keys nothing and errors
+      # nowhere: postgres still reports Healthy (its healthcheck is pg_isready, which does
+      # not authenticate) while migrate-seed exits 1 on `password authentication failed`,
+      # so the service_completed_successfully gate never opens and api/worker are never
+      # created. Healthy database, no app. Symptom, the grep that tells it apart from a
+      # broken migration, and the two fixes: infra/runbook.md §"Deploy staging" ข้อ 7.
+      # (Passwords of the application accounts the seed created — auth_account rows — are
+      # separate and untouched by this variable either way.)
+      # NOT COVERED BY THE DEPLOY ASSERTION, unlike the ports and the command below: delete
+      # this line (and the BETTER_AUTH_SECRET ones) and the assertion still passes, on a
+      # config that silently uses the committed `juneflow-dev` (measured: assertion exit 0,
+      # `POSTGRES_PASSWORD: juneflow-dev`). Reviewing this file is what protects it.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in infra/.env on the staging host}
+    # Docker inserts its own DNAT rules into the DOCKER chain, which ufw does not filter:
+    # a published port answers on every interface the host has, whatever the firewall
+    # says. Nothing outside this stack consumes Postgres — the app containers reach it
+    # over the compose network as `postgres:5432`, not through the published port — so
+    # binding to loopback costs nothing and takes a credentialed database off a VPS that
+    # may have a public NIC as well as the VPN one. Still published, so psql/pg_dump over
+    # an SSH tunnel keeps working.
+    # Also LOAD-BEARING for the deploy assertion: it asserts, inside `docker compose config
+    # --format json postgres` specifically (and the same for redis below), that there is
+    # exactly ONE published entry and that it is loopback. Delete this override and staging
+    # stops deploying (measured: exit 1) rather than deploying unprotected. So does moving
+    # both bindings onto ONE service (measured: exit 1 — the old counting assertion accepted
+    # that, since two loopback lines were still two loopback lines), widening the bind to
+    # 0.0.0.0 while keeping the tag (measured: exit 1), and — the case a presence-only
+    # assertion missed — deleting just the `!override` TAG (measured: exit 1 now, exit 0
+    # ACCEPT before). Fix the runbook and this file together, never by loosening the
+    # assertion.
+    # The TAG below is part of the security property, not YAML style. Removing it does not
+    # remove the loopback binding; it ADDS the base's 0.0.0.0 one back alongside it.
+    ports: !override
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    # Same reasoning, and worse: this Redis runs with no password at all, so the base's
+    # 0.0.0.0 binding is an unauthenticated data store on every interface. The `!override`
+    # tag is load-bearing here for the same reason as postgres above: without it the base's
+    # 0.0.0.0 entry survives ALONGSIDE this one.
+    ports: !override
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+
+  # api and web are deliberately LEFT on the base's bindings (all interfaces). They are
+  # the reason the staging box exists — testers on the VPN must reach them — and this
+  # stack has no reverse proxy to forward from loopback (prod's `edge` service is a
+  # different topology: infra/docker-compose.prod.yml). Loopback-only here would make
+  # staging unreachable for everyone, trading a real outage for no gain, because unlike
+  # postgres/redis these ports are the intended ingress. What confines them is the VPN /
+  # host firewall; if this box ever grows a public interface, put an edge proxy in front
+  # of them rather than deleting this comment.
+
+  migrate-seed:
+    # Migrate half only. Everything else about the service is inherited unchanged: the
+    # `build.target: build` stage, `image: juneflow-api-build:dev`, `depends_on: postgres
+    # service_healthy`, `restart: "no"`, and the `service_completed_successfully` gate
+    # that api and worker wait on.
+    # FIRST deploy against an empty database still needs one seeded run — but NOT by
+    # bringing the box up on the base file alone. That instruction used to live here, and
+    # it put a base-only `up` on the runbook page: the one command that still "works" at
+    # 2am when COMPOSE_FILE is missing and every other command in the section has died,
+    # so it is the one an operator reaches for, and it wipes the box. The seeded run is
+    # now a one-off that is not an `up` at all, gated on the pgdata volume not existing
+    # yet (true once per host, and impossible to satisfy by accident):
+    #   test -n "${COMPOSE_PROJECT_NAME:-}" && echo STOP \
+    #     || { docker volume inspect juneflow_pgdata >/dev/null 2>&1 \
+    #          || { <the ข้อ 4 assertion> && docker compose run --rm --build migrate-seed \
+    #                 sh -c 'pnpm --filter @juneflow/db migrate && pnpm --filter @juneflow/db seed'; }; }
+    # The COMPOSE_PROJECT_NAME clause is not decoration: that variable renames the project
+    # AND its volumes (measured: `name: other`, `volumes.pgdata.name: other_pgdata`), so on
+    # a host where it is exported the volume gate asks about a name that belongs to no
+    # running stack, finds nothing, and seeds a box that is full of data.
+    # Full form, all three gates on one line: infra/runbook.md §"Deploy staging" ข้อ 3.
+    #
+    # This line is what the deploy assertion actually proves. It is a fixed list — no
+    # ${...} anywhere in the base's version of it either — which is why no environment
+    # variable can forge it and why the assertion anchors on it rather than on port lines.
+    # Rewriting it in a behaviour-preserving way is fine: `docker compose config`
+    # normalises `command: sh -c "..."` and the block-list form to the same output, and the
+    # assertion still passes (measured, both). Changing the `migrate` script name in
+    # packages/db is NOT fine silently — the assertion goes red and staging stops deploying
+    # until this file and the runbook are updated together.
+    command: ["sh", "-c", "pnpm --filter @juneflow/db migrate"]
+
+  api:
+    environment:
+      # Same fail-fast rule as POSTGRES_PASSWORD above: the base falls back to the
+      # committed `juneflow-dev-secret`, which would sign session cookies on staging.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set in infra/.env on the staging host}
+
+  worker:
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set in infra/.env on the staging host}

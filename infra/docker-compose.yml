@@ -59,8 +59,20 @@ services:
   # build stage (the runtime stage is a `pnpm deploy --prod` that strips them).
   # packages/db exposes `migrate` (drizzle-kit migrate) and `seed` (tsx src/seed);
   # both read DATABASE_URL from env (packages/db/drizzle.config.ts + seed/index.ts).
-  # Seed is idempotent: one TRUNCATE+INSERT transaction, so data persists and counts
-  # stay 1:1 on restart — no reseed-on-reload (PLAN.md §0 rule 3).
+  # Re-run behaviour, stated plainly: the seed's first statement TRUNCATEs EVERY table
+  # in the public schema (packages/db/src/seed/index.ts:953-962), then re-inserts the
+  # fixture with deterministic ids. Same rows and 1:1 counts on every reload, so the
+  # data does persist across app reloads (PLAN.md §0 rule 3) — but "idempotent" here
+  # means "same end state", NOT non-destructive: anything a human entered is gone, and
+  # a row count will not show you that. audit_log is the trap — truncated, then refilled
+  # with the fixture's 13 entries, so a box that had 14 rows has 13 afterwards: the real
+  # audit trail is gone while the count barely moved. auth_session is the one visible
+  # symptom: truncated and NOT re-inserted, so every logged-in user is signed out.
+  # Compose re-runs this one-shot on every `up`
+  # (a completed `restart: "no"` service is started again, not skipped), so a second
+  # deploy wipes the box. Fine for dev (throwaway DB), wrong anywhere people enter
+  # real data: deploy those with the infra/docker-compose.staging.yml overlay, which
+  # runs the migrate half only.
   migrate-seed:
     build:
       context: ..
