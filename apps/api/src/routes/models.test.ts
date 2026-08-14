@@ -141,8 +141,31 @@ const modelRow = (
   createdAt: new Date(),
   updatedAt: new Date(),
 });
-const A1 = modelRow("m-a1", "A-1", "บ้านเดี่ยว 2 ชั้น", "168.00", "8240000.00", "active", "#0B2A4A", 4, 4, 2);
-const B1 = modelRow("m-b1", "B-1", "ทาวน์โฮม 2 ชั้น", "92.00", "4850000.00", "active", "#0F766E", 3, 2, 1);
+// B-391: stagger the fixture the way cost-centers.test.ts's `staggered()` already
+// does for the same reason (B-323) — index 0 newest, 1s apart. Two module-level
+// `modelRow()` calls each reading the live clock via bare `new Date()` are not
+// guaranteed to tie: on a loaded machine the second
+// call lands in a later millisecond than the first, and the real, correctly-TOTAL
+// `byNewestThenId` comparator (newest-first) then legitimately reorders [A1, B1] to
+// [B1, A1] — flipping this test's hardcoded envelope order out from under it. Fixed,
+// ON THE RATE, because a number here would mislead: this was observed ONCE, in one
+// full-suite run on a contended box. Two later attempts to reproduce it naturally
+// came back 0/10 and 0/9 on idle machines. Do not read a frequency into that and
+// conclude the fix was unnecessary — the evidence is not a rate, it is a
+// reconstructed-condition probe: this file, unmodified, under a monotonically
+// increasing `Date`, fails exactly this test, and passes once staggered.
+// explicitly-descending instants make the order deterministic regardless of
+// scheduler timing; the comparator itself needs no change (B-323's
+// list-order.enforce.test.ts already proves it TOTAL).
+const staggered = <T extends { createdAt: Date; updatedAt: Date }>(rows: T[]): T[] =>
+  rows.map((r, i) => {
+    const at = new Date(Date.UTC(2026, 0, 1, 0, 0, 0) - i * 1000);
+    return { ...r, createdAt: at, updatedAt: at };
+  });
+const [A1, B1] = staggered([
+  modelRow("m-a1", "A-1", "บ้านเดี่ยว 2 ชั้น", "168.00", "8240000.00", "active", "#0B2A4A", 4, 4, 2),
+  modelRow("m-b1", "B-1", "ทาวน์โฮม 2 ชั้น", "92.00", "4850000.00", "active", "#0F766E", 3, 2, 1),
+]);
 
 // B-084 (matrix GAP-8): creating a model is master-data administration, now
 // gated on master.create (F1 consistency with /users + /roles). The caller's

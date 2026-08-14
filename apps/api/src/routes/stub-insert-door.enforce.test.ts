@@ -334,9 +334,32 @@ function codeOnly(src: string): string {
   return a.join("");
 }
 
+interface ParsedSource {
+  file: string;
+  sf: ts.SourceFile;
+}
+
+/**
+ * B-391: parse every non-test source file ONCE, shared by every scan below that walks
+ * an AST over that population. Before this, `allBareWrites()` (insert-bare-write scan,
+ * collection time) and blind-spot-5's update-bare-write pin (inside its own `it()`,
+ * RUN time) each independently read + `codeOnly()` + `ts.createSourceFile()`'d the
+ * SAME 77 files — measured ~257ms idle for the second (redundant) pass alone, inside a
+ * single test's 5000ms `testTimeout` budget. Under the CPU contention of a full-suite
+ * run competing with other work that budget is not a safe multiple of the idle number
+ * (CPU-bound synchronous scans do not degrade linearly under scheduler pressure), and
+ * it timed out there. Sharing the parse both removes the duplicate CPU work AND moves
+ * all of it to collection, which has no comparably tight default budget.
+ */
+function parsedSourceFiles(): ParsedSource[] {
+  return sourceFiles().map((file) => {
+    const text = codeOnly(readFileSync(join(REPO_ROOT, file), "utf8"));
+    return { file, sf: ts.createSourceFile(file, text, ts.ScriptTarget.ES2022, true) };
+  });
+}
+
 /** `.insert(table, values)` calls (the 2-arg TenantDb door) whose chain omits .returning(). */
-function bareDoorWrites(file: string, text: string): BareWrite[] {
-  const sf = ts.createSourceFile(file, codeOnly(text), ts.ScriptTarget.ES2022, true);
+function bareDoorWrites(file: string, sf: ts.SourceFile): BareWrite[] {
   const out: BareWrite[] = [];
   const visit = (n: ts.Node): void => {
     if (
@@ -375,6 +398,43 @@ function bareDoorWrites(file: string, text: string): BareWrite[] {
   return out;
 }
 
+/**
+ * Whether one parsed source contains a bare (non-`.returning()`-terminated) 2-arg
+ * `.update(table, set)` call — the SAME hazard `bareDoorWrites` finds for `.insert()`,
+ * (header blind spot 5) but only ever needs a yes/no per file here. Runs on the SHARED
+ * parse from `parsedSourceFiles()` rather than re-reading/re-parsing (B-391).
+ */
+function hasBareUpdateWrite(sf: ts.SourceFile): boolean {
+  let found = false;
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      n.expression.name.text === "update" &&
+      n.arguments.length >= 2 &&
+      // NOT the db door when the 2nd argument is a string: that is
+      // `createHash(...).update(token, "utf8")`, whose arity collides with
+      // `update(table, set, where)`. The real door's 2nd argument is the `set`
+      // object. This scan found that call on its first run, which is the matcher
+      // being narrowed by evidence rather than by guesswork.
+      !ts.isStringLiteral(n.arguments[1]!) &&
+      !ts.isNoSubstitutionTemplateLiteral(n.arguments[1]!) &&
+      !(
+        n.parent &&
+        ts.isPropertyAccessExpression(n.parent) &&
+        n.parent.name.text === "returning"
+      )
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 
 function allDoors(): StubDoor[] {
@@ -383,18 +443,23 @@ function allDoors(): StubDoor[] {
   );
 }
 
-function allBareWrites(): BareWrite[] {
-  return sourceFiles().flatMap((f) => {
-    // tenant-db.ts DEFINES the door; its own `db.insert(table).values(row)` is the raw
-    // drizzle 1-arg call, not a TenantDb 2-arg one, so it is not matched here anyway.
-    const text = readFileSync(join(REPO_ROOT, f), "utf8");
-    return bareDoorWrites(f, text);
-  });
+function allBareWrites(parsed: ParsedSource[]): BareWrite[] {
+  // tenant-db.ts DEFINES the door; its own `db.insert(table).values(row)` is the raw
+  // drizzle 1-arg call, not a TenantDb 2-arg one, so it is not matched here anyway.
+  return parsed.flatMap(({ file, sf }) => bareDoorWrites(file, sf));
 }
 
 describe("B-386 · stub insert doors are enforced, not swept for", () => {
   const doors = allDoors();
-  const bare = allBareWrites();
+  // B-391: ONE shared parse of every non-test source file backs both the
+  // insert-bare-write scan and blind-spot-5's update-bare-write pin below — see
+  // parsedSourceFiles()'s doc comment for why (was two independent full-tree parses,
+  // the second one inside an `it()` body's timed budget).
+  const parsedSources = parsedSourceFiles();
+  const bare = allBareWrites(parsedSources);
+  const bareUpdateWriters = parsedSources
+    .filter(({ sf }) => hasBareUpdateWrite(sf))
+    .map(({ file }) => file);
 
   it("finds enough stub insert doors for the scan to be believable", () => {
     // NOT a completeness claim — a floor that fails loudly if the walker, the parser or
@@ -527,37 +592,15 @@ describe("B-386 · stub insert doors are enforced, not swept for", () => {
     // .returning(). It needs no enforcement only because subscription.ts is its one
     // bare-door caller and subscription.test.ts is the one update stub capturing both.
     // If a second bare-door update appears, that coincidence ends.
-    const bareUpdaters: string[] = [];
-    for (const f of sourceFiles()) {
-      const text = codeOnly(readFileSync(join(REPO_ROOT, f), "utf8"));
-      const sf = ts.createSourceFile(f, text, ts.ScriptTarget.ES2022, true);
-      const visit = (n: ts.Node): void => {
-        if (
-          ts.isCallExpression(n) &&
-          ts.isPropertyAccessExpression(n.expression) &&
-          n.expression.name.text === "update" &&
-          n.arguments.length >= 2 &&
-          // NOT the db door when the 2nd argument is a string: that is
-          // `createHash(...).update(token, "utf8")`, whose arity collides with
-          // `update(table, set, where)`. The real door's 2nd argument is the `set`
-          // object. This scan found that call on its first run, which is the matcher
-          // being narrowed by evidence rather than by guesswork.
-          !ts.isStringLiteral(n.arguments[1]!) &&
-          !ts.isNoSubstitutionTemplateLiteral(n.arguments[1]!) &&
-          !(
-            n.parent &&
-            ts.isPropertyAccessExpression(n.parent) &&
-            n.parent.name.text === "returning"
-          )
-        ) {
-          if (!bareUpdaters.includes(f)) bareUpdaters.push(f);
-        }
-        ts.forEachChild(n, visit);
-      };
-      visit(sf);
-    }
+    //
+    // B-391: this used to re-derive bareUpdateWriters HERE, inside the timed `it()`
+    // body, by re-parsing all 77 source files a second time (allBareWrites() above
+    // already parses them once). ~257ms measured idle — comfortably inside the default
+    // 5000ms testTimeout alone, but a contended full-suite run is not a linear
+    // slowdown on CPU-bound synchronous work, and this test timed out under one. It is
+    // now `bareUpdateWriters`, computed once at describe level on the shared parse.
     expect(
-      bareUpdaters.sort(),
+      [...bareUpdateWriters].sort(),
       "the set of files awaiting a bare TenantDb.update() changed. subscription.test.ts " +
         "is the only update stub that captures both paths, so a new bare-door updater " +
         "elsewhere is blind exactly as the insert door was — extend this file to cover " +
