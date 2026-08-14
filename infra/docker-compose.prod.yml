@@ -186,6 +186,21 @@ services:
         condition: service_healthy
     # Same image as api, worker entrypoint (matches the dev stack + apps/api Dockerfile).
     command: ["node", "dist/worker.js"]
+    # MUST override the image's baked HTTP probe (apps/api/Dockerfile), exactly as
+    # the dev stack does. That probe fetches /health and worker.ts serves no HTTP,
+    # so without this the worker sits `Up (unhealthy)` forever and the runbook's
+    # own prod step 5 — `up -d --build --wait`, which waits for HEALTHY rather
+    # than running — exits 1 on a correct deploy. Proven live on the dev compose;
+    # this file carried the identical defect. Probes the heartbeat worker.ts
+    # refreshes only while every queue's Redis connection is "ready", so a worker
+    # wedged in a connect-retry loop still reports unhealthy.
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "const f=process.env.WORKER_HEARTBEAT_PATH??'/tmp/juneflow-worker.alive';import('node:fs').then(({statSync})=>process.exit(Date.now()-statSync(f).mtimeMs<20000?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
     logging: *default-logging
     deploy:

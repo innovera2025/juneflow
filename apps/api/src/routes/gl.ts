@@ -1340,6 +1340,33 @@ export function registerGlRoute(app: FastifyInstance): void {
   app.post("/gl/jv", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
+    // B-396: creating a JV IS posting it — require finance `approve` (mirrors
+    // /gl/post below). The schema settles this, not preference: the `jv` table
+    // (packages/db finance.ts) carries no status and no posted flag — only id,
+    // company_id, no, source_doc, period_id, memo, timestamps. So the row IS the
+    // ledger entry; there is no draft-then-post step, and this door has exactly
+    // the effect /gl/post has ("Posting LOCKS money into the ledger").
+    //
+    // RULING: Wei answered (ก) finance.approve on 2026-08-14 (AskUserQuestion).
+    // The (ก)/(ข) options on the B-396 row were the blocker author's, not Wei's
+    // — the schema argument above only voided (ข)'s rationale (it presumed a
+    // draft-then-post step that does not exist); it did not decide the policy.
+    // The stake Wei ruled on: `sale` (Sales/REM) holds finance.create but not
+    // approve, so (ข) would have kept a salesperson able to write ledger
+    // entries directly. Fail-closed, and gated BEFORE the body is read so an
+    // unauthorized caller writes nothing.
+    const caller = await loadCaller(request);
+    if (!caller) {
+      return reply
+        .code(403)
+        .send({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    }
+    if (!permAllowed(caller.perms, FINANCE_MODULE, "approve")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "recording a JV requires the finance approve permission",
+      });
+    }
     const body = (request.body ?? {}) as Record<string, unknown>;
     return createJv(db, body, reply);
   });

@@ -138,6 +138,21 @@ services:
       api:
         condition: service_started
     command: ["node", "dist/worker.js"]
+    # MUST override the image's baked HTTP probe (apps/api/Dockerfile): that one
+    # fetches /health, and worker.ts serves no HTTP, so the worker sat
+    # `Up (unhealthy)` forever and `docker compose up --wait` — which waits for
+    # HEALTHY, not running — exited 1 on a correct deploy. This probes the
+    # heartbeat file worker.ts refreshes only while every queue's Redis
+    # connection is "ready", so a worker wedged in a connect-retry loop is still
+    # reported unhealthy; `disable: true` would have hidden exactly that.
+    # Stale (or missing) file -> exit 1. Threshold tolerates 3 missed beats.
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "const f=process.env.WORKER_HEARTBEAT_PATH??'/tmp/juneflow-worker.alive';import('node:fs').then(({statSync})=>process.exit(Date.now()-statSync(f).mtimeMs<20000?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   web:
     build:

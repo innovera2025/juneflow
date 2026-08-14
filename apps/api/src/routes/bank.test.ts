@@ -7,11 +7,13 @@
 // 409, fail-closed foreign-doc reject, and the tenant-verified confirm write),
 // GET /bank/cheque (register + honest-null pv_no, tenant scope), and POST
 // /bank/export-batch (approved-transfer filter + @juneflow/bank-file fake output,
-// pv_ids restriction, and the B-397 post-export lock: a sent PV is stamped with
+// pv_ids restriction, the B-397 post-export lock: a sent PV is stamped with
 // the batch id and never re-emitted, an already-sent pv_ids is 409, nothing
 // waiting is 409, and a PV stamped between the read and the guarded write is left
-// out of the file). Every expected value comes from the stub / the real bank-file
-// formatter — not hand-computed against the impl.
+// out of the file; and the B-400 finance-`approve` gate on the money-out export:
+// create is not enough, an unattributable caller is denied, and a denial stamps
+// nothing and returns no file). Every expected value comes from the stub / the
+// real bank-file formatter — not hand-computed against the impl.
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
@@ -855,12 +857,19 @@ interface ExportWorld {
   steal: (...ids: string[]) => void;
 }
 
-function exportWorld(seed: PvSelect[] = exportSeed()): ExportWorld {
+function exportWorld(
+  seed: PvSelect[] = exportSeed(),
+  // B-400: the export gate needs finance `approve`, so the world seeds a real
+  // authorized caller (users + roles rows the production loadCaller resolves) —
+  // the same grant the reconcile tests use. Override it to prove the gate.
+  caller: Array<[unknown, unknown[]]> = financeCaller,
+): ExportWorld {
   const pvState = seed.map((r) => ({ ...r }));
   const updated: Updated[] = [];
   const pendingSteal: string[] = [];
   const db = stubDb({
     rows: [
+      ...caller,
       [pvs, pvState],
       [apBillings, [billingRow]],
       [vendors, [vendorRow]],
@@ -904,8 +913,91 @@ describe("POST /api/v1/bank/export-batch", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  // B-400 gate. A live preflight on a seeded stack drove this endpoint as the
+  // Warehouse role (finance.view = false) and got 200 with a real KBANK payment
+  // instruction for 93,896 THB: it was the only bank mutation with no perm gate.
+  // It emits the money-OUT instrument AND takes the B-397 one-way lock, so it
+  // requires finance `approve` — same tier as /bank/reconcile.
+  //
+  // The assertions that matter are the two ABSENCES: no UPDATE was issued and no
+  // file came back. A test checking only the status code would still pass if the
+  // gate were later moved BELOW the stamp — the PV would be locked forever by a
+  // request that was refused.
+  it("403s (fail closed) a caller lacking the finance approve perm — nothing stamped, no file", async () => {
+    const world = exportWorld(exportSeed(), [
+      [users, [userRow]],
+      [roles, [financeRole(/* create */ false, /* approve */ false)]],
+    ]);
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: BATCH1 } });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/finance approve permission/);
+    expect(res.json().content).toBeUndefined(); // the bank never got an instruction
+    expect(world.updated).toHaveLength(0); // and no PV was locked to a batch
+    expect(stampOf(world, PVA)).toBeNull();
+    expect(stampOf(world, PVD)).toBeNull();
+  });
+
+  // Pins the RIGHT, not merely "some gate": the create tier is what the data-entry
+  // doors beside this one (line match, statement import) require. Loosening the
+  // export to create would let a finance clerk send money — this goes RED if it is.
+  it("403s a caller holding finance create but NOT approve — create is not enough to send money", async () => {
+    const world = exportWorld(exportSeed(), [
+      [users, [userRow]],
+      [roles, [financeRole(/* create */ true, /* approve */ false)]],
+    ]);
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: BATCH1 } });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/finance approve permission/);
+    expect(res.json().content).toBeUndefined();
+    expect(world.updated).toHaveLength(0);
+    expect(stampOf(world, PVA)).toBeNull();
+  });
+
+  // Fail-closed: a resolved session whose email maps to NO dictionary user cannot
+  // be attributed → denied before the file is built or any PV is stamped.
+  it("403s (fail closed) an unattributable caller — session resolved but no dictionary user", async () => {
+    const world = exportWorld(exportSeed(), [[users, []]]);
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: BATCH1 } });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/cannot be attributed/);
+    expect(res.json().content).toBeUndefined();
+    expect(world.updated).toHaveLength(0);
+    expect(stampOf(world, PVA)).toBeNull();
+  });
+
+  // The gate runs BEFORE the body is parsed — a denied caller never reaches the
+  // batch_id shape check, so a payload that would 400 for an authorized caller
+  // still 403s here. Deny before you read.
+  it("denies before parsing the body — a malformed batch_id from an unauthorized caller still 403s", async () => {
+    const world = exportWorld(exportSeed(), [
+      [users, [userRow]],
+      [roles, [financeRole(/* create */ true, /* approve */ false)]],
+    ]);
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: world.db })
+    ).inject({ method: "POST", url: EXPORT_URL, payload: { batch_id: "batch-1" } });
+
+    expect(res.statusCode).toBe(403); // NOT the 400 the authorized caller gets
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(world.updated).toHaveLength(0);
+  });
+
   // POSITIVE CONTROL: the feature itself still works — the eligible PVs are
-  // exported, with the right net, on the real fake-formatter line shape.
+  // exported, with the right net, on the real fake-formatter line shape. Same
+  // fixture as the three denials above, differing ONLY in the granted perm, so an
+  // over-broad B-400 gate (denying everyone) shows up here as a failure.
   it("builds the file for approved-transfer PVs only, via the bank-file fake formatter", async () => {
     const world = exportWorld();
     const res = await (

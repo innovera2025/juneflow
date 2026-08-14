@@ -401,11 +401,19 @@ describe("POST /api/v1/gl/jv", () => {
       { account_id: ACC_AR, dr: 0, cr: 184500 },
     ],
   };
+  // B-396: recording a JV is gated on finance.approve (the jv row IS the ledger
+  // entry — no status/posted column exists), so every fixture that expects the
+  // write to happen must carry the rows loadCaller resolves (users → roles).
+  const approver = (): Array<[unknown, unknown[]]> => [
+    [users, [userRow]],
+    [roles, [roleRow(true)]],
+  ];
   // gl_account rows the ownership check resolves; jvs row so insertThrough's
   // parent-ownership select passes.
   const writeDb = (inserted: Inserted[] = [], captured: Captured[] = []) =>
     stubDb({
       rows: [
+        ...approver(),
         [glAccounts, [glAcc(ACC_COST, "5020", "x", null), glAcc(ACC_AR, "1030", "y", null)]],
         [jvs, [{ id: "any", companyId: COMPANY }]],
       ],
@@ -421,6 +429,75 @@ describe("POST /api/v1/gl/jv", () => {
     });
     expect(res.statusCode).toBe(401);
     expect(res.json().code).toBe("UNAUTHENTICATED");
+  });
+
+  // -- B-396 · the finance.approve gate --------------------------------------
+  // A jv row IS the ledger entry (the table has no status and no posted flag),
+  // so recording one is the same money action /gl/post performs and carries the
+  // same right. The fixtures below are IDENTICAL except for the caller rows, so
+  // the deny/allow pair isolates the gate and nothing else.
+  const gateDb = (
+    caller: Array<[unknown, unknown[]]>,
+    inserted: Inserted[],
+  ) =>
+    stubDb({
+      rows: [
+        ...caller,
+        [glAccounts, [glAcc(ACC_COST, "5020", "x", null), glAcc(ACC_AR, "1030", "y", null)]],
+        [jvs, [{ id: "any", companyId: COMPANY }]],
+      ],
+      inserted,
+    });
+  const asRole = (role: unknown): Array<[unknown, unknown[]]> => [
+    [users, [userRow]],
+    [roles, [role]],
+  ];
+  /** finance rights that stop at `edit` — view/create/edit yes, approve no. */
+  const CREATE_NOT_APPROVE = roleRow(false);
+  /** A role whose perms matrix is empty — it holds nothing at all. */
+  const NO_PERMS = { ...roleRow(false), perms: {} };
+  const postJv = async (caller: Array<[unknown, unknown[]]>, inserted: Inserted[]) =>
+    (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: gateDb(caller, inserted) })
+    ).inject({ method: "POST", url: "/api/v1/gl/jv", payload: balancedBody });
+
+  it("403s FORBIDDEN a caller without finance.approve — and NO jv / jv_line row is written", async () => {
+    const inserted: Inserted[] = [];
+    const res = await postJv(asRole(NO_PERMS), inserted);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    // The status alone would still pass if the gate were moved BELOW the write,
+    // so the ledger itself is asserted untouched: not one captured insert.
+    expect(inserted).toEqual([]);
+  });
+
+  it("denies a caller holding finance.create but NOT approve — pins the right at `approve`", async () => {
+    // Pin the fixture, so the denial below cannot be read as "the role was empty".
+    expect(CREATE_NOT_APPROVE.perms.finance.create).toBe(true);
+    expect(CREATE_NOT_APPROVE.perms.finance.approve).toBe(false);
+    const inserted: Inserted[] = [];
+    const res = await postJv(asRole(CREATE_NOT_APPROVE), inserted);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+    expect(res.json().message).toMatch(/finance approve permission/);
+    expect(inserted).toEqual([]);
+  });
+
+  it("denies an unattributable caller (no dictionary user row) — fail closed", async () => {
+    const inserted: Inserted[] = [];
+    const res = await postJv([[users, []], [roles, []]], inserted);
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    expect(inserted).toEqual([]);
+  });
+
+  it("POSITIVE CONTROL — an approve-holding caller still records the balanced JV (201)", async () => {
+    const inserted: Inserted[] = [];
+    const res = await postJv(asRole(roleRow(true)), inserted);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().amount).toBe(184500);
+    expect(inserted.find((i) => i.table === jvs)).toBeTruthy();
+    expect(inserted.find((i) => i.table === jvLines)!.values).toHaveLength(2);
   });
 
   it("creates a balanced JV (201) — writes jv + jv_line, echoes amount/line_count", async () => {
@@ -538,6 +615,7 @@ describe("POST /api/v1/gl/jv", () => {
         // only ACC_COST belongs to the tenant → ACC_AR is foreign
         db: stubDb({
           rows: [
+            ...approver(),
             [glAccounts, [glAcc(ACC_COST, "5020", "x", null)]],
             [jvs, [{ id: "any", companyId: COMPANY }]],
           ],
@@ -569,6 +647,7 @@ describe("POST /api/v1/gl/jv", () => {
         resolveTenant: async () => SESSION,
         db: stubDb({
           rows: [
+            ...approver(),
             [glAccounts, [glAcc(ACC_COST, "5020", "x", null), glAcc(ACC_AR, "1030", "y", null)]],
             [jvs, [{ id: "any", companyId: COMPANY }]],
             [accountingPeriods, [periodRow(PERIOD, true)]], // the period is CLOSED
@@ -594,6 +673,7 @@ describe("POST /api/v1/gl/jv", () => {
         resolveTenant: async () => SESSION,
         db: stubDb({
           rows: [
+            ...approver(),
             [glAccounts, [glAcc(ACC_COST, "5020", "x", null), glAcc(ACC_AR, "1030", "y", null)]],
             [jvs, [{ id: "any", companyId: COMPANY }]],
             [accountingPeriods, [periodRow(PERIOD, false)]], // the period is OPEN

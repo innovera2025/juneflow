@@ -106,10 +106,11 @@ const MS_PER_DAY = 86_400_000;
 
 /**
  * The perms-matrix module (seed MODULE_IDS) that governs finance actions — the
- * same `finance` module ap.ts gates PV approval on. The two bank mutations
- * enforce the EXISTING 11×5 perms matrix (they invent no new policy): the
- * period-lock reconcile needs finance `approve`, the statement import needs
- * finance `create`. Reuses authz.ts (loadCaller/permAllowed), fail-closed.
+ * same `finance` module ap.ts gates PV approval on. The bank mutations enforce
+ * the EXISTING 11×5 perms matrix (they invent no new policy): the period-lock
+ * reconcile and the money-out batch export need finance `approve` (B-400), the
+ * statement import and the line match need finance `create`. Reuses authz.ts
+ * (loadCaller/permAllowed), fail-closed.
  */
 const FINANCE_MODULE = "finance";
 
@@ -1179,6 +1180,27 @@ export function registerBankRoute(app: FastifyInstance): void {
   app.post("/bank/export-batch", async (request, reply) => {
     const db = request.db;
     if (!db) return unauthenticated(reply);
+    // B-400: export-batch is the money-OUT instrument — it emits the payment
+    // instruction a bank executes, and since B-397 it also takes a one-way lock
+    // (stamping pv.batch_id, so a sent voucher can never be exported again:
+    // bank.jsx:226 "ถ้าต้องแก้ ต้องสร้างใบใหม่"). That is at least as consequential
+    // as /bank/reconcile below, which already requires finance `approve`, and
+    // strictly more than the create-tier data-entry doors above — same house rule
+    // as gl.ts /gl/post ("posting LOCKS money into the ledger"). Fail-closed and
+    // BEFORE the body is parsed: an unattributable caller, or one lacking the
+    // perm, is denied 403 before anything is read, emitted or stamped.
+    const caller = await loadCaller(request);
+    if (!caller) {
+      return reply
+        .code(403)
+        .send({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    }
+    if (!permAllowed(caller.perms, FINANCE_MODULE, "approve")) {
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "bank batch export requires the finance approve permission",
+      });
+    }
     return exportBatch(db, (request.body ?? {}) as Record<string, unknown>, reply);
   });
 
