@@ -28,6 +28,156 @@
   - mask ปัจจุบัน: `sidebar-logo-b044` = กล่องโลโก้ sidebar (wordmark + tagline) rect x8 y6 w224 h56 — วัดจาก `reference/gallery/g1/01-s.jpg` (1600x1000: lockup x16..124 y16..55 · เส้นแบ่ง y64 · ปุ่ม toggle y≈69) — reference ทุกใบเป็น logo lockup รุ่นเก่า (`juneflow / Construction ERP`) ส่วน port ใช้ `t("app.name")` th=`ระบบงานก่อสร้าง` (B-044(ก) Wei ตัดสิน 13 ก.ค.) · จอที่ไม่มี sidebar lockup (เช่น login — P1-WEB-01) **ห้ามใส่** mask นี้
 - **รัน:** `pnpm --filter @juneflow/tests test:visual`
 
+## Promote mode — re-baseline `reference/app-baseline/` (B-409)
+
+> **นี่คือการเขียนทับ "ผู้ตัดสิน" ของ design fidelity (PLAN.md §0 ข้อ 4)** — ไม่ใช่คำสั่งอำนวยความสะดวก
+> ต้องมี blocker id ที่ Wei อนุมัติ (ตอนนี้คือ **B-409**) ทุกครั้ง ห้ามรันเพื่อ "ทำให้ gate เขียว"
+
+การ re-baseline ครั้งก่อน (`91dee5c`) ทำด้วยสคริปต์เฉพาะกิจนอก repo — พิกเซลอยู่รอด แต่**กลไกหายไปทั้งหมด**
+โหมดนี้คือกลไกถาวรที่ตรวจสอบย้อนหลังได้ อยู่ใน `lib/promote.ts` + capture path เดียวกับโหมดเทียบภาพ
+
+### รันอย่างไร
+
+```bash
+# ต้องมี stack สดที่ seed แล้ว (isolated) + storageState สำหรับ auth
+VISUAL_BASE_URL=http://localhost:5173 \
+VISUAL_STORAGE_STATE=/abs/path/to/state.json \
+VISUAL_PROMOTE_EXPECT_USER=wipha@rungrueang.co.th \
+VISUAL_PROMOTE_BASELINE=1 \
+pnpm --filter @juneflow/tests test:visual
+```
+
+- `VISUAL_STORAGE_STATE` **บังคับ** ในโหมด promote (ด่าน 0) — ไม่ตั้ง = ปฏิเสธทั้งรอบก่อนถ่ายจอแรก
+- `VISUAL_PROMOTE_EXPECT_USER` ไม่บังคับ · ตั้งไว้แล้ว `/me` ต้องตอบเป็นผู้ใช้คนนั้นพอดี (แพ็กที่ถ่ายด้วยผู้ใช้ผิด = เมนู/สิทธิ์ผิดฝังลงไปทั้งแพ็ก)
+
+- `VISUAL_PROMOTE_BASELINE` **ปิดโดย default** — รับเฉพาะค่า `1` หรือ `true` เท่านั้น (`0`/`false`/`yes`/ค่าว่าง = ปิด)
+  ถ้าไม่ตั้ง ตัว gate ทำงานเหมือนเดิมทุกประการ (เทียบภาพ ไม่เขียนอะไรเลย)
+- เปิดแล้วจะพิมพ์แบนเนอร์บอกชัดว่ากำลังจะ **เขียนทับ** reference กี่ใบ และไม่มีการเทียบภาพในรอบนั้น
+- **ปฏิเสธถ้า `CI` ถูกตั้ง** — re-baseline คือการกระทำที่มีคนอนุมัติ ไม่ใช่ผลข้างเคียงของ pipeline
+- `protect-files.sh` กัน *agent tool-write* ที่ `tests/visual/reference/**` แต่**ไม่เห็น**การเขียนของ node process
+  ฉะนั้นอำนาจที่แท้จริงคือ id ใน `BLOCKERS.md` (+ `SACRED_OVERRIDE=wei-approved:B-409` สำหรับขั้นตอนที่ agent แตะไฟล์เอง) — เป็นวินัยเชิงกระบวนการ ไม่ใช่ hook
+
+### สิ่งที่โหมดนี้ **ไม่** ทำ
+
+- ไม่แก้ `screens.manifest.json` (แถว/route/masks เหมือนเดิม) · ไม่เพิ่มจอใหม่ · ไม่สร้าง reference ใบใหม่
+- จอใหม่ที่ยังไม่มี reference = NEW-REF round ตาม skill `visual-gate` §4-3 ไม่ใช่ promote
+
+### ด่านที่ทำให้ปลอดภัย (นี่คือของจริงของโหมดนี้ ไม่ใช่ตัวเขียนไฟล์)
+
+| ด่าน | ปฏิเสธเมื่อ |
+|---|---|
+| 0 · **auth pre-flight** (ก่อนถ่ายจอแรก) | ไม่มี `VISUAL_STORAGE_STATE` · ไฟล์ไม่มี/ไม่ใช่ JSON · ไม่มีคีย์ `juneflow-token` (หรือค่าว่าง) · `GET {base}/api/v1/me` ตอบ 401/403 (token หมดอายุ) · ตอบไม่ใช่ JSON (proxy เสิร์ฟ index.html) · ไม่มี `user.email` · ไม่ตรง `VISUAL_PROMOTE_EXPECT_USER` · API ไม่ตอบเลย |
+| 1 · opt-in | ไม่มี env = ไม่มีทางเขียน · เปิดใน CI = ปฏิเสธ |
+| 2 · เฉพาะ path ที่ manifest ประกาศ **และมีอยู่แล้ว** | ref หาย/พิมพ์ผิด · ไม่ใช่ `.png` · หลุดออกนอก `app-baseline/` (รวม `..`, absolute, **symlink** — เช็คด้วย realpath) · 2 จอชี้ ref เดียวกัน → **ปฏิเสธทั้งรอบ ไม่ promote บางส่วน** · ref ที่ **หายไประหว่างรอบ** ถูกเช็คซ้ำตอน commit (ไม่ปั้นใบใหม่คืนมา) |
+| 2b · **path ของ artifact ที่ผู้รันตั้งเอง** (`stagingDir` · `manifestPath`/`VISUAL_PROMOTE_MANIFEST` · `evidencePath`) | ตกลงไปใน pack (รวม pack root เอง และ **symlink ancestor** — เช็คด้วย realpath ของ ancestor ที่มีอยู่จริง) · path ที่มีอยู่แล้วแต่ไม่ใช่ไฟล์ธรรมดา → **ปฏิเสธ ไม่ย้ายที่เขียนให้เงียบ ๆ** |
+| 3 · **B-155 detector** | hash ภาพซ้ำเกิน `MAX_IDENTICAL_GROUP=2` จอต่อภาพ · หรือ distinct/total < `MIN_DISTINCT_RATIO=0.9` เมื่อมี ≥ 10 จอ — รายงานกลุ่มซ้ำ **เป็นชื่อจอ** พร้อมตัวเลขให้คนตัดสิน |
+| 3b · **near-duplicate detector** | ภาพที่ "เกือบ" เหมือนกัน (ไม่ใช่แค่ byte-identical) — ระยะ mean-luma บนกริด 16×16 ≤ `MAX_NEAR_DUP_DISTANCE=0.35` ถือเป็นกลุ่มเดียวกัน แล้วใช้ cap/ratio เดิม · คู่ที่ห่าง ≤ `NEAR_DUP_ADVISORY_DISTANCE=1.5` **รายงานเฉย ๆ ไม่ปฏิเสธ** |
+| 4 · manifest ของสิ่งที่เขียน | (ไม่ใช่การปฏิเสธ) `.results/promote-manifest.txt` — sha256 · bytes · **WxH** · screen · route · ref เรียงคงที่ ไม่มีเวลา/ไม่มี path เฉพาะรอบ |
+| 5 · ห้าม promote capture ที่พัง | nav error · HTTP ≥ 400 · **HTTP status = null** (goto คืน null = same-document nav → เช็คไม่ทำงาน ไม่ใช่ "ผ่าน") · uncaught page error · **console error ที่เป็น 401/403/failed-to-fetch** · ภาพ 0 byte/ไม่ใช่ PNG/ขนาดไม่ตรง viewport · **body ยาว 0 ตัวอักษร** (หน้าเปล่า) หรือ probe ไม่ทำงาน · **ไม่มี `juneflow-token` ใน localStorage ตอนถ่าย** (capture ที่ไม่ได้ล็อกอิน) · **API ของจอนั้นตอบ 401/403** (session หมดอายุกลางรอบ) · **landing pathname ไม่ตรง route** (B-155 รายจอ) |
+
+**ทำไมเส้นของด่าน 3 อยู่ตรงนี้:** B-155 คือรอบที่ spec ใช้ hash nav ทั้งที่แอปใช้ browser-path → ทุก route ตกไป `/dashboard`
+→ **baseline 28 ใบเป็นภาพ dashboard ทั้งหมด · gate กลายเป็น no-op และไม่มีใครเห็นเป็นสัปดาห์**
+สองจอที่ต่าง route แล้วได้ภาพ byte-identical ยัง "พอเป็นไปได้" (empty state เหมือนกัน) → อนุญาตเป็น **คู่** และรายงานไว้
+สามจอขึ้นไป = รูปทรงของ B-155 ในสเกลเล็ก → ปฏิเสธ · ต้นทุนของการปฏิเสธผิด = คนดูรายชื่อกลุ่มหนึ่งครั้ง · ต้นทุนของการรับผิด = gate ที่ไม่ได้ทดสอบอะไรเลย
+ส่วนกรณี "พังแบบกระจาย" (เช่น 40 คู่ ผ่าน cap ได้หมด) ถูกจับด้วย ratio (แพ็ก `app-baseline` ปัจจุบัน = 99 ใบ **distinct 99/99**)
+
+### ทำไมต้องมีด่าน 0 และเช็ค auth รายจอ (วัดจริง 2026-08-17)
+
+**`apps/web` ไม่ได้ gate router ด้วย auth** — bearer token คุมแค่ชั้น API (`src/api-client.ts` + hooks ใน `src/shell/use-shell-data.ts`)
+ไม่ได้คุม navigation · ผลคือรอบ promote ที่ `VISUAL_STORAGE_STATE` **หายหรือหมดอายุ** จะได้ capture ที่
+**route ถูกต้อง · HTTP 200 · และภาพต่างกันทุกจอ** (chrome เต็ม body ว่าง/error) — ผ่านด่าน 5 เดิม**ทั้งหมด** และถูก promote
+กลายเป็นการเอา "แพ็กที่ไม่ได้ล็อกอิน" มาเป็นนิยามของคำว่าถูกต้อง
+
+สองโหมดพังนี้ **ลายเซ็นต่างกัน** จึงต้องใช้สัญญาณคนละตัว (อ่านจากซอร์ส ไม่ใช่เดา):
+
+| โหมดพัง | เกิดอะไร | สัญญาณที่จับได้ |
+|---|---|---|
+| ไม่มี token | `authed()` เป็น false → hooks **ไม่ยิงเลย** → API request = 0 (ไม่มีอะไร 401 เพราะไม่มีอะไรถาม) | ไม่มี `juneflow-token` ใน localStorage ตอนถ่าย |
+| token หมดอายุ | hooks ยิง → `tenant-scope.ts` fail closed **401 UNAUTHENTICATED** ทุก path | นับ response 401/403 ของจอนั้น |
+
+**ทำไมไม่ false-positive กับจอที่ว่างโดยธรรมชาติ:** จอว่างโดย design ได้ 200 + list ว่าง และยังมี token อยู่ —
+"ว่าง" เป็นคุณสมบัติของ **data** ส่วนสัญญาณสองตัวข้างบนเป็นคุณสมบัติของ **session** · จอ static/placeholder ที่ไม่เรียก API เลย
+รายงาน `apiRequests=0 / apiUnauthorized=0` และถูกตัดสินด้วย token อย่างเดียว ซึ่งมันยังมี
+(มีเทสต์ยืนยันตรง ๆ: `a legitimately EMPTY screen still promotes`)
+
+**ด่าน 0 ทำให้ทั้งหมดนี้ถูก:** เช็ค **ครั้งเดียวก่อนถ่ายจอแรก** ว่า storageState มี token จริง และ API ตอบ `/me` เป็น 200 ในนามผู้ใช้ที่คาดไว้
+รอบที่ไปเจอปัญหา auth ตอนจอที่ 73 = เสียรอบไปแล้ว (commit เป็น all-or-nothing อยู่แล้ว) · เจอตอนจอ 0 = ไม่เสียอะไรเลย
+
+### near-duplicate detector — ตัวเลขที่ใช้ตั้งเส้น (วัดจากแพ็กจริง ไม่ใช่เดา)
+
+ด่าน 3 เดิมดู **byte identity** อย่างเดียว → verifier promote ภาพ**หน้าเดียวกัน 12 ใบที่ต่างกัน 1 pixel** ได้สำเร็จ (sha ต่างกัน 12 ค่า · duplicate group = 0)
+สำคัญกับแอปนี้เป็นพิเศษเพราะ route ที่ยังไม่ port เรนเดอร์ `<Placeholder routeId>` — ชื่อ title มาจาก route id → **ต่าง pixel แต่โครงเดียวกัน**
+
+วิธีวัด: ย่อภาพเป็นกริด 16×16 ของค่า luminance เฉลี่ย แล้วเทียบ mean absolute difference ต่อ cell (สเกล 0..255)
+คาลิเบรตกับ **แพ็กจริงทั้ง 99 ใบ (4851 คู่ · รู้ว่า distinct จริงทั้งหมด)**:
+
+| | ระยะ |
+|---|---|
+| คู่ที่ใกล้ที่สุดในแพ็กจริง | **0.677** (`sales-down.png` ↔ `sales-loan.png`) |
+| percentile ที่ 1 | 1.626 |
+| median | 4.267 |
+| ต่าง 1 pixel (การโจมตีของ verifier) | 0.00009 |
+| ต่างเป็นบล็อก 60×60 px | 0.336 |
+| ต่างแค่ title 250×28 px | 0.49–0.55 |
+| placeholder จริง (title + แถบ sidebar ที่ active) | ~1.33 |
+
+→ ตั้ง `MAX_NEAR_DUP_DISTANCE = 0.35` · **false positive ที่วัดได้ = 0 จาก 4851 คู่** (ห่างจากคู่ที่ใกล้ที่สุด 1.93 เท่า)
+ขณะที่การโจมตี 1 pixel อยู่ต่ำกว่าเส้น ~3900 เท่า
+
+**ขอบเขตที่จับได้จริง (ไม่ขยายความ):** จับคู่ที่ต่างกัน**น้อยกว่าประมาณบล็อก 60×60 px (0.22% ของเฟรม)**
+**จับไม่ได้**: คู่ placeholder ที่ต่างแค่ title (0.49–0.55) เพราะแพ็กจริงมีคู่ที่ distinct จริงซึ่ง**ใกล้กว่านั้น** (0.677) —
+ไม่มี threshold ไหนบนเมตริกนี้แยกสองอย่างนี้ออกจากกันได้ · จึงมีแถบ **advisory ≤ 1.5** ที่**รายงานอย่างเดียว ไม่ปฏิเสธ**
+(ถ้าปฏิเสธที่ 1.5 จะ false positive **35 คู่จาก 4851** ในแพ็กจริง = gate ที่คนจะเรียนรู้ที่จะข้าม)
+เทสต์ `the REAL 99-file pack produces ZERO near-duplicate groups` วัดตัวเลขนี้ซ้ำทุกครั้งที่รัน (อ่านอย่างเดียว ไม่เขียน `reference/`)
+
+### เงื่อนไข 2 รอบ (พิสูจน์ก่อน promote ไม่ใช่หลัง — B-409 ข้อ ก)
+
+1. รอบที่ 1: ยก stack สดที่ seed แล้ว → รัน promote → เก็บ `.results/promote-manifest.txt` ไว้เป็น `run-1.txt`
+2. รอบที่ 2: **ยก stack ใหม่อีกรอบ (seed ใหม่)** → รัน promote อีกครั้ง → ได้ `run-2.txt`
+3. `diff run-1.txt run-2.txt` **ต้องว่าง** — manifest ถูกออกแบบให้ diff ได้: เรียงคงที่ จอละบรรทัด ไม่มี timestamp
+   บรรทัดที่ต่าง = จอที่ยังไม่ reproduce ระบุชื่อมาให้ตรง ๆ
+4. ถ้า diff ว่าง → ปิด promote แล้วรัน gate ปกติกับ stack สดอีกชุด ต้องเขียว จึงค่อย commit แพ็ก
+
+**ทำไมต้องยืนกราน:** แพ็กเดิมเขียวเฉพาะบนสแต็กที่ถ่ายมันมา — B-323 พิสูจน์แล้วว่า `SEED_FROZEN_NOW` ไม่ได้ freeze `defaultNow()` ของ Postgres
+drift จึง **โตตามเวลาจริง** (petty 936 px · gl.inbox 428 px · notifications 276 px ต่อ threshold 160 px)
+**promote ภาพที่ reproduce ไม่ได้ = ฝัง B-323 กลับลงไปใหม่**: ได้ gate เขียวที่เขียวเฉพาะเครื่องเดียว วันเดียว
+แล้วมันจะโผล่กลับมาเป็น "gate แดงโดยไม่มีใครรู้สาเหตุ" อีกรอบ — ซึ่งคือกำแพงสี่ชั้นของ B-401 → B-407 → B-408 → B-409 พอดี
+ถ้า diff ไม่ว่าง **อย่าปรับ threshold และอย่า promote** — แปลว่ายังมีตัวแปรที่ยังไม่ถูกคุม ให้ไปหามันก่อน
+
+### artifacts ของรอบ promote (ทั้งหมดอยู่ใน `.results/` — gitignored)
+
+- `promote-manifest.txt` — **ของที่เอาไป diff** (sha256/bytes/**WxH**/screen/route/ref · เรียงคงที่ · ไม่มี noise)
+  ย้ายที่เขียนได้ด้วย `VISUAL_PROMOTE_MANIFEST=/abs/path/run-1.txt` (สะดวกกว่าเวลาทำเงื่อนไข 2 รอบ เพราะ `.results/` ถูกล้างทุกครั้งที่ gate เริ่มรัน)
+  **ต้องอยู่นอก pack** — ชี้เข้า `reference/` เมื่อไร ปฏิเสธทั้งรอบ (ด่าน 2b) และ**ไม่ย้ายให้เอง** เพราะ manifest ที่ไม่ได้อยู่ที่ที่สั่งไว้ = หลักฐาน 2 รอบที่เชื่อไม่ได้
+  คอลัมน์ `WxH` (v2) มีไว้เพื่อกรณีเดียว: รอบ 1 กับรอบ 2 ถ่ายคนละ viewport → sha เปลี่ยน**ทุกบรรทัด** ซึ่งหน้าตาเหมือน "จอเปลี่ยนหมดทุกจอ" เป๊ะ · คอลัมน์นี้บอกสาเหตุบนบรรทัดเดียวกันเลย
+- `promote-evidence.json` — วินิจฉัยรายจอ (landing URL, HTTP status, console/page errors, จำนวนตัวอักษรใน body, ธง placeholder,
+  **`authTokenPresent` · `apiRequests` · `apiUnauthorized`**) · **ห้ามใช้ diff** เพราะมี noise ของรอบนั้น
+- `promote-staging/` — PNG ที่ถ่ายไว้ก่อนเขียนจริง (การเขียนลง `reference/` เกิดครั้งเดียวตอน commit ท้ายรอบ และเป็นแบบ all-or-nothing)
+
+> **แก้คำกล่าวอ้างเรื่อง containment (2026-08-17)** — ก่อนหน้านี้เอกสารนี้พูดถึง "เขียนเฉพาะใน `app-baseline/`" ราวกับเป็นคุณสมบัติของทั้งโหมด
+> ซึ่ง**ไม่จริงตามที่เขียน**: ด่าน 2 คุมเฉพาะ *path ของภาพ* ส่วน path ของ artifact ไม่เคยถูกตรวจเลย · วัดจริงเมื่อ 2026-08-17:
+> `VISUAL_PROMOTE_MANIFEST=<pack>/app-baseline/run-1.txt` → เกิดไฟล์ `run-1.txt` **ใหม่** ใน pack (สิ่งที่ path ของภาพห้ามไว้ตรง ๆ) ·
+> `stagingDir=refDir` ผ่านการเช็ค prefix แบบเดิม แล้ว `rmSync` ใน constructor **ลบ `reference/app-baseline/` ทั้งก้อน** ·
+> `stagingDir=<symlink ไป reference>/staging` สร้างโฟลเดอร์จริงใน `reference/`
+> ตอนนี้ทั้งสาม path ถูกตรวจด้วย realpath เหมือนกับที่ path ของภาพโดนตรวจ (ด่าน 2b) — ข้อความข้างบนจึงเป็นจริงตามที่เขียนแล้ว
+
+### capture path เดียวกับตอนเทียบ
+
+`captureScreen()` ใน `visual-gate.spec.ts` เป็น **ทางเดียว** ที่ทั้งสองโหมดใช้ — viewport · viewMode init-script (B-187) ·
+browser-path nav (B-155) · `waitUntil:"networkidle"` + settle 1500 ms (B-120) · `fullPage:false` · storageState/globalSetup
+ถูกเขียนไว้ **ที่เดียว** และการแยกโหมดเกิด *หลัง* ฟังก์ชันคืนค่าแล้ว
+(รอบ 2026-08-07 ใช้สคริปต์ไดรเวอร์คนละตัวใน `agents/` ที่หัวไฟล์ต้องเขียนว่า "mirrors visual-gate.spec.ts EXACTLY" — คำกล่าวอ้างที่ไม่มีอะไรบังคับ)
+ผลคือ baseline ที่ promote ออกมา **เป็นภาพที่ถ่ายด้วยเงื่อนไขเดียวกับที่ gate จะเอาไปเทียบ โดยโครงสร้าง**
+
+### เทสต์ของด่านเหล่านี้
+
+อยู่ใน `visual-gate.spec.ts` (describe `promote mode · GUARD n`) — รันได้ทันที ไม่ต้องมีแอป/สแต็ก และใช้ sandbox pack ใน `.results/`
+(ไม่แตะ `reference/` จริง — ทุกเทสต์ hash pack ของตัวเองก่อน/หลัง)
+
+```bash
+pnpm exec playwright test --config visual/playwright.visual.config.ts --grep "promote mode"   # จาก tests/
+```
+
 ## Gate ที่เกี่ยวข้อง (PLAN.md §9)
 
 - **G5 — Visual gate:** screenshot เทียบ reference ใน `tests/visual/reference/` ตาม §0 · ขาด G5 = ไม่ done

@@ -3,12 +3,20 @@
  *
  * WHY THIS EXISTS
  * The compose `web` service (infra/docker-compose.yml) serves the built SPA via
- * nginx with an SPA fallback only — it does NOT proxy /api/* to the api service
- * (apps/web/Dockerfile inlines `location / { try_files ... /index.html }`). The
- * SPA's generated client talks to a RELATIVE base url `/api/v1` (apps/web
- * api-client.ts: `import.meta.env.VITE_API_BASE_URL ?? "/api/v1"`). So when the
- * browser loads the app straight from :5173, every /api/v1 call hits nginx and
- * gets index.html back — login can never reach the api.
+ * nginx. When this bridge was written, that config had an SPA fallback ONLY and
+ * did not proxy /api/* to the api service, so every /api/v1 call from the
+ * browser came back as index.html with status 200 and login could never reach
+ * the api. Since aba803f the config — which lives in apps/web/nginx.conf.template,
+ * NOT inlined in the Dockerfile — also carries
+ * `location /api/ { proxy_pass $api_upstream$request_uri; }`, so the compose web
+ * origin can now reach the api on its own. This bridge is still wired in
+ * (playwright.config.ts + smoke.spec.ts) and still guarantees the single origin
+ * regardless of how the web image is configured.
+ *
+ * The SPA's generated client talks to a RELATIVE base url (apps/web
+ * api-client.ts: `resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL)`, which
+ * defaults to `/api/v1` and treats a blank override as absent — B-410). So
+ * whatever serves the app must also answer that prefix.
  *
  * This tiny dependency-free reverse proxy puts the SPA and the api behind ONE
  * origin so the browser makes same-origin /api/v1 requests (no CORS, real bearer
