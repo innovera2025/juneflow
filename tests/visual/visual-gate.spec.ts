@@ -15,7 +15,9 @@ import {
   NEAR_DUP_ADVISORY_DISTANCE,
   PROMOTE_ENV,
   PromoteRefusal,
+  MIN_MEASURED_SCREENS,
   assertAuthenticatedSession,
+  assertPackFetchedSomething,
   assertPlausiblyDistinct,
   captureProblems,
   duplicateGroups,
@@ -775,6 +777,66 @@ test.describe("visual gate · promote mode · GUARD 1 opt-in (B-409)", () => {
 });
 
 test.describe("visual gate · promote mode · GUARD 2 declared+existing paths (B-409)", () => {
+  test("two refs in different subdirectories sharing a FILENAME are refused (staging keys by basename)", async () => {
+    const sb = sandbox("guard2-basename");
+    const viewport = { width: 120, height: 80 };
+    // Distinct screens, distinct refs, both existing, both inside the pack —
+    // every other GUARD 2 check passes. Only the basename collides, and staging
+    // is keyed by basename, so one capture would overwrite the other and the
+    // wrong pixels would be promoted to one of the two approved baselines.
+    const list: PromoteRow[] = [
+      { screen: "alpha", route: "alpha", ref: "app-baseline/one/shared.png", viewport },
+      { screen: "beta", route: "beta", ref: "app-baseline/two/shared.png", viewport },
+    ];
+    seedExistingRefs(sb, list);
+    const before = packHashes(sb, list);
+    let err: Error | null = null;
+    try {
+      openPromoteSession(PROMOTE_ON, list, sb.opts);
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err, "a basename collision must refuse — staging would silently overwrite one capture").not.toBeNull();
+    expect(err).toBeInstanceOf(PromoteRefusal);
+    expect(err!.message).toMatch(/same filename/);
+    expect(err!.message).toContain("alpha");
+    expect(packHashes(sb, list)).toEqual(before);
+  });
+
+  test("filenames differing only in CASE are refused too — promote runs on a case-folding filesystem", async () => {
+    const sb = sandbox("guard2-basename-case");
+    const viewport = { width: 120, height: 80 };
+    // Two real, distinct files (different parent directories), so every other
+    // GUARD 2 check passes. They collide only once staging flattens them to a
+    // basename, and macOS folds the case — so a case-SENSITIVE key accepts both,
+    // both stage to one file, and both baselines receive the second screen's
+    // pixels. Two identical images is a PAIR, which sits under
+    // MAX_IDENTICAL_GROUP and is allowed: silently wrong pixels, reported green.
+    const list: PromoteRow[] = [
+      { screen: "alpha", route: "alpha", ref: "app-baseline/one/Shared.png", viewport },
+      { screen: "beta", route: "beta", ref: "app-baseline/two/shared.png", viewport },
+    ];
+    seedExistingRefs(sb, list);
+    const before = packHashes(sb, list);
+    let err: Error | null = null;
+    try {
+      openPromoteSession(PROMOTE_ON, list, sb.opts);
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err, "a case-only basename collision must refuse").not.toBeNull();
+    expect(err).toBeInstanceOf(PromoteRefusal);
+    expect(err!.message).toMatch(/same filename/);
+    expect(packHashes(sb, list)).toEqual(before);
+  });
+
+  test("distinct filenames still pass — the basename check is not a blanket refusal", async () => {
+    const sb = sandbox("guard2-basename-ok");
+    const list = rows(["alpha", "beta"]); // flat and unique: the pack's real shape today
+    seedExistingRefs(sb, list);
+    expect(() => openPromoteSession(PROMOTE_ON, list, sb.opts)).not.toThrow();
+  });
+
   test("a missing reference refuses the WHOLE run before any capture", async () => {
     const sb = sandbox("guard2-missing");
     const list = rows(["alpha", "typo-screen"]);
@@ -1447,6 +1509,26 @@ test.describe("visual gate · promote mode · GUARD 5 never promote a failed cap
     expect(readPngSize(png)).toEqual({ width: 120, height: 80 });
   });
 
+  test("a capture with NO apiRequests count is refused — GUARD 6 must never be handed an unmeasured pack", async ({
+    page,
+  }) => {
+    // GUARD 6 skips screens with no measurement, by design (a harness that
+    // forgot the listener must not read as a broken app). That leaves a hole one
+    // layer up: if NOTHING is measured, GUARD 6 declines to judge, commit()
+    // proceeds, and the summary prints "0 of 0 measured" in the same voice as a
+    // healthy "6 of 99" — a guard reporting success in exactly the state where
+    // it did nothing. Refusing the capture here makes `measured === pack size`
+    // true by construction, so that state is unreachable.
+    const row = rows(["unmeasured"])[0];
+    const png = await makePng(page, 43);
+    const { apiRequests: _dropped, ...noCount } = cleanCapture(row);
+    const problems = captureProblems(row, png, noCount as CaptureEvidence);
+    expect(problems.join(" | ")).toMatch(/API traffic was not measured/);
+    // The sibling signal is still measured, so this is the apiRequests check
+    // firing and not the apiUnauthorized one.
+    expect(noCount.apiUnauthorized).toBe(0);
+  });
+
   // Requirement (b) of the unauthenticated detector: it must NOT fire on screens
   // that are legitimately empty BY DESIGN. This is the test that stops the new
   // guard from being a blanket "any quiet screen is broken" refusal — which
@@ -1513,6 +1595,116 @@ test.describe("visual gate · promote mode · GUARD 5 never promote a failed cap
     expect(() => session.commit()).toThrow(/did not stage/);
     expect(packHashes(sb, list)).toEqual(before);
     expect(existsSync(sb.opts.manifestPath)).toBe(false);
+  });
+});
+
+test.describe("visual gate · promote mode · GUARD 6 a pack that never called the API (B-410)", () => {
+  const ev = (screen: string, apiRequests: number | null) => ({ screen, apiRequests });
+
+  test("REFUSES when every measured screen made zero API calls", () => {
+    const pack = ["dashboard", "master-cc", "users", "gl-coa", "petty", "reports"].map((s) => ev(s, 0));
+    expect(() => assertPackFetchedSomething(pack)).toThrow(PromoteRefusal);
+    expect(() => assertPackFetchedSomething(pack)).toThrow(/not one of the 6 measured screens/);
+  });
+
+  test("commit() REFUSES a pack that fetched nothing — the guard is WIRED IN, not merely exported", async ({ page }) => {
+    // The pure-function tests above cannot see whether commit() calls the guard
+    // at all: replacing the call with a constant left every one of them green.
+    // This is the test that dies when the wiring is removed.
+    const sb = sandbox("guard6-wired");
+    const list = rows(["a", "b", "c", "d", "e", "f"]); // 6 screens ≥ the floor
+    seedExistingRefs(sb, list);
+    const session = openPromoteSession(PROMOTE_ON, list, sb.opts)!;
+    // Visually DISTINCT shots, so the near-duplicate detector has no reason to
+    // refuse — whatever refuses here can only be GUARD 6. Every per-screen
+    // signal is the clean one (authenticated, 200, no errors); only the fetch
+    // count is zero, which is the whole B-410 shape.
+    const shots = await Promise.all(list.map((_, i) => makePng(page, 810 + i * 7)));
+    list.forEach((r, i) => session.stage(r, shots[i], { ...cleanCapture(r), apiRequests: 0 }));
+    const before = packHashes(sb, list);
+
+    let err: Error | null = null;
+    try {
+      session.commit();
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err, "a pack where no screen called the API must refuse the commit").not.toBeNull();
+    expect(err).toBeInstanceOf(PromoteRefusal);
+    expect(err!.message).toMatch(/never talked to the API/);
+    expect(packHashes(sb, list), "nothing may be written").toEqual(before);
+  });
+
+  test("the fetch refusal WINS over the near-duplicate one — the operator gets the cause, not the symptom", async ({ page }) => {
+    const sb = sandbox("guard6-order");
+    const list = rows(["a", "b", "c", "d", "e", "f"]);
+    seedExistingRefs(sb, list);
+    const session = openPromoteSession(PROMOTE_ON, list, sb.opts)!;
+    // One image for every screen: assertPlausiblyDistinct would refuse this pack
+    // too, so the message that comes out is the ordering proof.
+    const same = await makePng(page, 811);
+    list.forEach((r) => session.stage(r, same, { ...cleanCapture(r), apiRequests: 0 }));
+
+    let err: Error | null = null;
+    try {
+      session.commit();
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeInstanceOf(PromoteRefusal);
+    expect(err!.message, "the cause must be reported ahead of the symptom").toMatch(/never talked to the API/);
+    expect(err!.message).not.toMatch(/implausibly uniform/);
+  });
+
+  test("a pack that DID fetch commits normally, and the summary REPORTS the counts", async ({ page }) => {
+    const sb = sandbox("guard6-ok");
+    const list = rows(["a", "b", "c", "d", "e", "f"]);
+    seedExistingRefs(sb, list);
+    const logged: string[] = [];
+    const session = openPromoteSession(PROMOTE_ON, list, { ...sb.opts, log: (m: string) => logged.push(m) })!;
+    const shots = await Promise.all(list.map((_, i) => makePng(page, 830 + i * 11)));
+    list.forEach((r, i) => session.stage(r, shots[i], cleanCapture(r))); // apiRequests: 6
+    expect(() => session.commit()).not.toThrow();
+    // The widened captureProblems clause is justified in-comment by this line
+    // never being able to print "0 of 0" on a successful run, so the line has to
+    // exist and has to carry real counts — otherwise the justification is for
+    // something that is not there.
+    expect(logged.join("\n")).toMatch(/screens that called \/api\/v1: 6 of 6 measured/);
+  });
+
+  test("MIN_MEASURED_SCREENS is PINNED to a literal — lowering the floor must go red", () => {
+    // Sizing both arms from the constant makes a test that moves with it and can
+    // never see it change. The floor exists to stop a tiny run of genuinely
+    // static screens from tripping the guard, so the direction that matters is
+    // LOWERING it, and that is the direction a self-sizing test cannot catch.
+    expect(MIN_MEASURED_SCREENS).toBe(5);
+    expect(() => assertPackFetchedSomething(Array.from({ length: 4 }, (_, i) => ev(`s${i}`, 0)))).not.toThrow();
+    expect(() => assertPackFetchedSomething(Array.from({ length: 5 }, (_, i) => ev(`s${i}`, 0)))).toThrow(PromoteRefusal);
+  });
+
+  test("ONE fetching screen is enough to allow the pack — the guard is whole-pack only", () => {
+    const pack = [...Array.from({ length: 20 }, (_, i) => ev(`s${i}`, 0)), ev("dashboard", 3)];
+    expect(assertPackFetchedSomething(pack)).toEqual({ measured: 21, fetched: 1 });
+  });
+
+  test("unmeasured screens are IGNORED, never counted as zero", () => {
+    // A harness that forgot to attach the request listener must not read as a
+    // broken app — that would be a false refusal on a good pack.
+    const pack = Array.from({ length: 30 }, (_, i) => ev(`s${i}`, null));
+    expect(assertPackFetchedSomething(pack)).toEqual({ measured: 0, fetched: 0 });
+  });
+
+  test("the refusal hands over the CAUSE, not just the symptom", () => {
+    const pack = Array.from({ length: 10 }, (_, i) => ev(`s${i}`, 0));
+    let msg = "";
+    try {
+      assertPackFetchedSomething(pack);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg, "the operator must be pointed at the base url, not left to guess").toContain("VITE_API_BASE_URL");
+    expect(msg).toContain("nothing was written");
+    expect(msg).toMatch(/200 is not proof/);
   });
 });
 

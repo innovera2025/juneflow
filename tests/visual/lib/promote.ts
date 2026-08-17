@@ -273,6 +273,7 @@ export function planPromotion(rows: PromoteRow[], refDir: string): PlannedTarget
   const targets: PlannedTarget[] = [];
   const seenRef = new Map<string, string>();
   const seenScreen = new Set<string>();
+  const seenBase = new Map<string, string>();
 
   const baselineRoot = join(refDir, BASELINE_DIR);
   let baselineRootReal: string;
@@ -313,6 +314,41 @@ export function planPromotion(rows: PromoteRow[], refDir: string): PlannedTarget
       continue;
     }
     seenRef.set(ref, row.screen);
+
+    // stage() keys the staging directory by BASENAME, so two refs in different
+    // subdirectories sharing a filename overwrite each other in staging, and
+    // every colliding target then receives the LAST capture's pixels.
+    //
+    // Nothing downstream catches it, and the reason matters: assertPlausiblyDistinct
+    // compares the sha256 of the in-memory buffers recorded at stage time
+    // (`sha256: sha256(png)`), never the bytes commit() actually wrote. Distinct
+    // captures therefore look distinct to it no matter how many of them landed
+    // in one file. Measured at gate 4.5 by restoring the collision: two refs
+    // with DISTINCT captures → `COMMITTED 2 files; duplicateGroups: []`, both
+    // baselines holding the second screen's pixels; three refs → `COMMITTED 3
+    // files; duplicateGroups: []`, all three holding the third's. There is no
+    // backstop at any count — an earlier version of this comment claimed the
+    // near-duplicate cap allowed it "as a pair", which was wrong and made the
+    // hole sound smaller than it is.
+    //
+    // Every ref in the pack is flat and unique today, so this refuses a shape
+    // that does not exist yet rather than one that does. It is here because
+    // silently-wrong pixels in an approved baseline is the exact outcome this
+    // module exists to prevent.
+    //
+    // Keyed case-INSENSITIVELY: the only filesystem a promote ever runs on is a
+    // developer's (it refuses under CI), and macOS folds case, so `Shared.png`
+    // and `shared.png` are one directory entry — a case-sensitive key accepts
+    // both and reopens exactly the collision above.
+    const base = basename(ref).toLowerCase();
+    const previousBase = seenBase.get(base);
+    if (previousBase) {
+      problems.push(
+        `${where}: ref "${ref}" has the same filename as ${previousBase}'s ref (case-insensitively) — staging keys by basename, so one capture would overwrite the other`
+      );
+      continue;
+    }
+    seenBase.set(base, row.screen);
 
     const abs = resolve(refDir, ref);
     if (!existsSync(abs)) {
@@ -452,10 +488,17 @@ export function captureProblems(
       `the ${AUTH_TOKEN_KEY} probe did not run — a promote cannot confirm this capture was authenticated`
     );
   }
-  if (typeof evidence.apiUnauthorized !== "number") {
+  if (typeof evidence.apiUnauthorized !== "number" || typeof evidence.apiRequests !== "number") {
     // Not measured is not "fine": an expired token STAYS in localStorage, so
     // authTokenPresent alone cannot see a session that died mid-run. Without the
     // wire count there is no signal left for that case.
+    //
+    // apiRequests is checked here as well as apiUnauthorized, so that a staged
+    // pack has a measured count on EVERY screen by construction. GUARD 6 skips
+    // unmeasured screens, so without this an unmeasured pack would reach commit
+    // with `measured: 0` and print "0 of 0 measured" in the same voice as a
+    // healthy "6 of 99" — a guard reporting success in exactly the state where
+    // it did nothing.
     problems.push(
       "API traffic was not measured for this screen — a promote cannot tell a screen that is empty by design " +
         "from one whose data layer was refused"
@@ -762,6 +805,100 @@ export function assertPlausiblyDistinct(
   }
   return groups;
 }
+
+/**
+ * GUARD 6 — a whole pack that never called the API.
+ *
+ * B-410 is why this exists, and it is worth stating exactly what got past
+ * everything else. `apps/web/Dockerfile` baked an empty `VITE_API_BASE_URL`, so
+ * the bundle's base url was `""`; every request went to the origin root, where
+ * nginx's SPA fallback answered index.html with **200**. The app rendered its
+ * full shell on every route, raised no console error, navigated nowhere odd, and
+ * carried a valid bearer token — so GUARD 5's per-screen checks passed, and the
+ * pre-flight's `GET /api/v1/me` answered 200 because it was made OUT OF BAND, by
+ * fetch, not by the app. **A pre-flight proves the token, never the app's use of
+ * it.** The only signal that separated a working stack from a dataless one was
+ * sitting in the evidence the whole time: `apiRequests: 0` on all 99 screens.
+ * It was caught, but only sideways — by the near-duplicate detector noticing that
+ * five master-data screens had collapsed into the same picture.
+ *
+ * So: refuse when EVERY screen with a measured count made zero API calls.
+ *
+ * Honest scope, because a guard that overstates its reach is worse than none:
+ *   * It catches the whole-pack case ONLY. A pack where half the screens fetched
+ *     and half did not passes here — `assertPlausiblyDistinct` is the backstop
+ *     for that, and it is a weaker one.
+ *   * Screens with no measurement (`null`) are ignored, not counted as zero. A
+ *     harness that forgot to attach the request listener must not read as a
+ *     broken app.
+ *   * Below MIN_MEASURED_SCREENS it declines to judge: a handful of genuinely
+ *     static screens (login makes no API call at all) would otherwise trip it.
+ *     A real promote always covers the full manifest, so the floor never binds
+ *     in practice.
+ *   * It counts REQUESTS, not answered data. "The app asked and got an SPA
+ *     fallback instead of JSON" is GUARD 0's job (assertAuthenticatedSession
+ *     refuses a non-JSON /api/v1/me body); this guard covers only what is left
+ *     after it — the app never asking at all.
+ *   * The counter behind these numbers (attachApiWatch) matches responses whose
+ *     URL CONTAINS `/api/v1`, so an override pointing the app at a base url
+ *     without that path would read as zero here and be refused. That is a
+ *     deliberate approximation and the honest cost of it: the contract declares
+ *     exactly one `servers` url, so any other base is already off-contract — but
+ *     an operator who hits this refusal with a working stack should read this
+ *     paragraph, not guess.
+ */
+export const MIN_MEASURED_SCREENS = 5;
+
+/**
+ * One row of the promote evidence file. Typed rather than `Record<string,
+ * unknown>` because GUARD 6 reads `apiRequests` off it: with the loose type a
+ * rename at the push site silently made `measured` zero forever, and neither
+ * the compiler nor a test objected (the `tests` package has no typecheck).
+ */
+export interface EvidenceRow {
+  screen: string;
+  route: string;
+  ref: string;
+  bytes: number;
+  // Required, not optional: stage() writes all four unconditionally from a
+  // CaptureEvidence where they are themselves required. Typing them optional
+  // understated every row of promote-evidence.json and made the legacy cast at
+  // the console-noise tally look necessary.
+  landedUrl: string;
+  status: number | null;
+  pageErrors: string[];
+  consoleErrors: string[];
+  bodyChars: number | null;
+  placeholder: boolean | null;
+  authTokenPresent: boolean | null;
+  apiRequests: number | null;
+  apiUnauthorized: number | null;
+  problems: string[];
+}
+
+export function assertPackFetchedSomething(
+  evidence: Array<Pick<EvidenceRow, "screen" | "apiRequests">>
+): { measured: number; fetched: number } {
+  const measured = evidence.filter((e) => typeof e.apiRequests === "number");
+  const fetched = measured.filter((e) => (e.apiRequests as number) > 0);
+  if (measured.length >= MIN_MEASURED_SCREENS && fetched.length === 0) {
+    const names = measured.slice(0, 8).map((e) => e.screen).join(", ");
+    const more = measured.length > 8 ? `, +${measured.length - 8} more` : "";
+    throw new PromoteRefusal(
+      `not one of the ${measured.length} measured screens made a single ${API_BASE_PATH_FOR_MESSAGES} request — nothing was written.\n` +
+        `  screens: ${names}${more}\n` +
+        `  The app rendered but never talked to the API, so every one of these captures is a shell with no data.\n` +
+        `  A 200 is not proof the response was what you asked for: an SPA fallback answers index.html with 200, and\n` +
+        `  an auth pre-flight made by fetch proves the token, not the app's use of it (B-410).\n` +
+        `  Check the bundle's base url (apps/web/src/api-client.ts + the VITE_API_BASE_URL baked into the image), the\n` +
+        `  proxy in front of it, and the stack — then re-run the whole promote.`
+    );
+  }
+  return { measured: measured.length, fetched: fetched.length };
+}
+
+/** Spelled once, for the refusal message above. */
+const API_BASE_PATH_FOR_MESSAGES = "/api/v1";
 
 /**
  * GUARD 4 — the diff-clean manifest of what was written.
@@ -1128,7 +1265,7 @@ export class PromoteSession {
   readonly targets: PlannedTarget[];
   private readonly byScreen: Map<string, PlannedTarget>;
   private readonly staged = new Map<string, StagedRecord>();
-  private readonly evidence: Array<Record<string, unknown>> = [];
+  private readonly evidence: EvidenceRow[] = [];
   private readonly opts: PromoteSessionOptions;
   private readonly log: (msg: string) => void;
   private committed = false;
@@ -1242,6 +1379,11 @@ export class PromoteSession {
       );
     }
 
+    // Ordered before the near-duplicate detector on purpose: when the app never
+    // fetched, "the pack is uniform" is a symptom and "nothing called the API"
+    // is the cause, so the operator should be handed the cause.
+    const fetchStats = assertPackFetchedSomething(this.evidence);
+
     const groups = assertPlausiblyDistinct(records);
 
     // Write. Temp file + rename inside the SAME directory so a reader never
@@ -1301,7 +1443,7 @@ export class PromoteSession {
       );
     }
     const consoleNoise = this.evidence.reduce(
-      (n, e) => n + ((e.consoleErrors as string[] | undefined)?.length ?? 0),
+      (n, e) => n + e.consoleErrors.length,
       0
     );
     if (consoleNoise > 0) {
@@ -1313,6 +1455,7 @@ export class PromoteSession {
     this.log(
       `\nPROMOTE COMMITTED — ${written} baseline(s) overwritten under ${BASELINE_DIR}/\n` +
         `  manifest: ${this.opts.manifestPath}\n` +
+        `  screens that called ${API_BASE_PATH_FOR_MESSAGES}: ${fetchStats.fetched} of ${fetchStats.measured} measured\n` +
         `  distinct images: ${new Set(records.map((r) => r.sha256)).size} of ${records.length}` +
         (groups.length > 0 ? ` · identical pairs allowed: ${groups.map(describeGroup).join(" | ")}` : "") +
         `\n  Run the promote a SECOND time on a fresh stack and diff the two manifests: a non-empty diff means the capture is not reproducible (B-323) and the pack must NOT be trusted.\n`
