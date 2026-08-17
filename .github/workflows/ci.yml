@@ -281,9 +281,18 @@ jobs:
           else
             pnpm install
           fi
+      - name: Start dev stack (docker compose)
+        if: hashFiles('infra/docker-compose.yml') != '' && hashFiles('tests/visual/**') != ''
+        run: docker compose -f infra/docker-compose.yml up -d --wait
+      - name: Install Playwright browsers
+        if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
+        run: pnpm --dir tests exec playwright install --with-deps chromium
       - name: Visual gate (screenshots vs tests/visual/reference — PLAN.md §0)
         if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
         run: pnpm run --if-present test:visual
+      - name: Stop dev stack
+        if: always() && hashFiles('infra/docker-compose.yml') != ''
+        run: docker compose -f infra/docker-compose.yml down -v || true
       - name: Pre-scaffold pass
         if: hashFiles('tests/visual/**') == ''
         run: echo "tests/visual not present yet (P0-BE-03 / P0-QA-04 pending) — stage passes by design."
