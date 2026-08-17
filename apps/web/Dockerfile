@@ -31,11 +31,18 @@ COPY . .
 RUN pnpm install --frozen-lockfile --offline --store-dir=/pnpm/store
 # VITE_API_BASE_URL is BAKED AT BUILD TIME — Vite inlines import.meta.env into
 # the bundle, so it cannot be changed by a runtime environment variable on the
-# container. Left unset on purpose: api-client.ts then falls back to the
-# same-origin "/api/v1", which nginx.conf.template proxies. Set this build arg
-# only when the API lives on a different origin, and expect to rebuild to change
-# it.
-ARG VITE_API_BASE_URL
+# container. Override it only when the API lives on a different origin, and
+# expect to rebuild to change it.
+#
+# The default is spelled out here rather than left to a fallback in
+# api-client.ts, because `ARG X` + `ENV X=${X}` does NOT leave X unset when the
+# arg is not passed: Docker substitutes the empty string and `ENV` DEFINES it.
+# Vite then inlined "" and every request lost its prefix, hitting the origin
+# root where nginx's SPA fallback answered index.html with 200 — the app served
+# its shell and no data. Measured on the image built from aba803f: 0
+# occurrences of "/api/v1" in the bundle. api-client.ts now also treats a blank
+# value as absent, so the two guards are independent.
+ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 RUN pnpm --filter @juneflow/web build
 
