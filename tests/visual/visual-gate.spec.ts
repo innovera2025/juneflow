@@ -16,17 +16,21 @@ import {
   PROMOTE_ENV,
   PromoteRefusal,
   MIN_MEASURED_SCREENS,
+  PROMOTE_REFUSAL_PREFIX,
+  appReachable,
   assertAuthenticatedSession,
+  gateSessionPreflight,
+  resolveGateSessionDecision,
   assertPackFetchedSomething,
   assertPlausiblyDistinct,
   captureProblems,
   duplicateGroups,
   imageSignature,
   isPromoteMode,
+  loadScreensManifest,
   nearDuplicateReport,
   openPromoteSession,
   planPromotion,
-  promoteAuthPreflight,
   readPngSize,
   renderPromoteManifest,
   sha256,
@@ -377,27 +381,9 @@ interface ManifestEntry {
   viewMode?: "tenant" | "platform";
 }
 
+/** Delegates to lib/promote.ts, where the absent-vs-broken split is unit-tested. */
 function loadManifest(): ManifestEntry[] {
-  try {
-    const raw = JSON.parse(
-      readFileSync(join(__dirname, "screens.manifest.json"), "utf8")
-    );
-    return Array.isArray(raw.screens) ? raw.screens : [];
-  } catch {
-    return [];
-  }
-}
-
-async function appReachable(baseURL: string): Promise<boolean> {
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 1500);
-    const res = await fetch(baseURL, { signal: ctrl.signal });
-    clearTimeout(t);
-    return res.ok || res.status < 500;
-  } catch {
-    return false;
-  }
+  return loadScreensManifest(join(__dirname, "screens.manifest.json")) as ManifestEntry[];
 }
 
 interface Capture {
@@ -440,6 +426,19 @@ async function captureScreen(
     if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200));
   });
   const readApiWatch = attachApiWatch(page);
+
+  // NOT freezing the browser clock here, and the reason is measured rather than
+  // assumed. Freezing the SEED clock (SEED_FROZEN_NOW, set on Stage 6's stack)
+  // is load-bearing: it takes the failing set from 14 screens to 9, and that 9
+  // is stable across runs hours apart. Pinning the PAGE clock to the same
+  // instant with page.clock.setFixedTime was tried on top of that and bought
+  // nothing: the four screens it was meant to fix (app-shell, gl-inbox,
+  // notifications, petty) failed identically with it. The single screen that
+  // differed between the two arms, master-cc, then failed in one run of the
+  // page-clock-live configuration and not in another run of the SAME
+  // configuration — so it is flaky, not clock-sensitive, and the one piece of
+  // evidence for the mechanism was noise. A mechanism that would run in CI on
+  // every gate needs better than that.
 
   // Shoot at the reference's dimensions (fold P0-QA-04) so the capture never
   // auto-FAILs on a dimension mismatch. fullPage:false clips to the viewport,
@@ -571,23 +570,38 @@ test.describe("visual gate · capture mode (real screens vs reference)", () => {
   // HTTP round trip instead of 99 screenshots that would then be thrown away by
   // commit()'s all-or-nothing rule anyway.
   //
-  // Compare mode is untouched: the pre-flight runs only when promote is on. A
-  // compare run against an unauthenticated stack simply FAILS its diffs, which
-  // is already the correct outcome — it is only PROMOTE that would silently
-  // enshrine the bad pack.
+  // B-411 — this now runs in BOTH modes, and the note it replaces was wrong.
+  // That note said a compare run against an unauthenticated stack "simply FAILS
+  // its diffs, which is already the correct outcome". It is not: the failure is
+  // indistinguishable from 98 screens having drifted, and that is exactly how it
+  // was read for weeks while `.github/workflows/ci.yml` never set
+  // VISUAL_STORAGE_STATE at all — so Stage 6 compared logged-out captures with
+  // logged-in baselines and could not pass however correct the app was.
+  //
+  // Measured on one machine, one image, one pack, varying only the session:
+  // with it 11 screens failed that morning and 14 that afternoon (the growth is
+  // date drift, measured separately); without it 98 fail and the only pass is `login`,
+  // the one screen in the manifest that calls no API. A gate whose red means two
+  // completely different things is not a gate, so a run with no usable session
+  // is refused up front instead of producing a number someone has to interpret.
   test.beforeAll(async () => {
-    const auth = await promoteAuthPreflight(promote, {
-      storageStatePath: process.env.VISUAL_STORAGE_STATE,
-      baseURL,
-      apiBasePath: API_BASE_PATH,
-      expectUser: process.env.VISUAL_PROMOTE_EXPECT_USER,
-    });
-    if (auth) {
-      console.log(
-        `  promote · auth pre-flight OK — GET ${baseURL}${API_BASE_PATH}/me answered 200 as ${auth.user} ` +
-          `(token ${auth.tokenChars} chars, origin ${auth.origin || "unknown"})`
-      );
-    }
+    // Routing and all: gateSessionPreflight lives in lib/ and is unit-tested
+    // with `assert` injected. Three gate rounds measured the same hole here —
+    // the decision was tested, the decision to APPLY it was not, and
+    // re-exempting compare mode left the whole suite green every time. What
+    // stays in this seam is now only the wiring of real inputs to it.
+    await gateSessionPreflight(
+      {
+        manifestLength: manifest.length,
+        appReachable: await appReachable(baseURL),
+        promote: Boolean(promote),
+        storageStatePath: process.env.VISUAL_STORAGE_STATE,
+        baseURL,
+        apiBasePath: API_BASE_PATH,
+        expectUser: process.env.VISUAL_PROMOTE_EXPECT_USER,
+      },
+      { assert: assertAuthenticatedSession, log: (m) => console.log(m) }
+    );
   });
 
   test("capture manifest is wired", async () => {
@@ -1739,10 +1753,19 @@ test.describe("visual gate · promote mode · GUARD 0 the auth pre-flight (B-409
     res.end(JSON.stringify({ user: { email: "wipha@rungrueang.co.th" }, role: {}, package: {} }));
   }
 
-  function stateFile(name: string, entries: Array<{ name: string; value: string }>): string {
+  // The origin is a PARAMETER, and defaulting it to a hardcoded localhost:5173
+  // was not harmless: these tests feed `baseURL` an ephemeral 127.0.0.1 stub, so
+  // every "passing" case here was the exact origin mismatch that makes Playwright
+  // drop the token — the guard's green test was the broken configuration. Callers
+  // now pass the same url they hand the pre-flight.
+  function stateFile(
+    name: string,
+    entries: Array<{ name: string; value: string }>,
+    origin = "http://localhost:5173"
+  ): string {
     const p = join(SELFTEST_ROOT, `state-${name}.json`);
     mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, JSON.stringify({ cookies: [], origins: [{ origin: "http://localhost:5173", localStorage: entries }] }));
+    writeFileSync(p, JSON.stringify({ cookies: [], origins: [{ origin, localStorage: entries }] }));
     return p;
   }
 
@@ -1750,7 +1773,7 @@ test.describe("visual gate · promote mode · GUARD 0 the auth pre-flight (B-409
     const api = await apiStub(realish);
     try {
       const r = await assertAuthenticatedSession({
-        storageStatePath: stateFile("good", [{ name: AUTH_TOKEN_KEY, value: GOOD_TOKEN }]),
+        storageStatePath: stateFile("good", [{ name: AUTH_TOKEN_KEY, value: GOOD_TOKEN }], api.url),
         baseURL: api.url,
       });
       expect(r.user).toBe("wipha@rungrueang.co.th");
@@ -1846,20 +1869,61 @@ test.describe("visual gate · promote mode · GUARD 0 the auth pre-flight (B-409
     }
   });
 
-  test("promoteAuthPreflight: no-op when promote is OFF, refusal when promote is ON", async () => {
-    // The wiring itself, not just the check: a compare run must not acquire a
-    // new way to fail, and a promote run must not be able to skip the check.
+  test("assertAuthenticatedSession refuses a missing session and accepts a real one (B-411)", async () => {
+    // NOT a test of mode routing: this function has no mode parameter and
+    // structurally cannot observe one. The routing is covered in
+    // "the pre-flight ROUTING" describe, against gateSessionPreflight, where
+    // re-exempting compare mode goes red. An earlier title here claimed the
+    // mode property and stayed green through exactly that revert.
+    // This test used to assert the opposite: that a compare run "must not
+    // acquire a new way to fail". That was the defect. A compare run against an
+    // unauthenticated stack failed 98 of 99 screens in the shape of drift, and
+    // CI never set VISUAL_STORAGE_STATE at all, so the red was unreadable for
+    // weeks. The wrapper that made promote special (promoteAuthPreflight) is
+    // deleted rather than left as dead code, so nothing can quietly route back
+    // through it.
     const badState = { storageStatePath: undefined, baseURL: "http://unused" };
-    await expect(promoteAuthPreflight(null, badState)).resolves.toBeNull();
+    await expect(assertAuthenticatedSession(badState)).rejects.toThrow(/VISUAL_STORAGE_STATE is not set/);
 
     const api = await apiStub(realish);
     try {
-      await expect(promoteAuthPreflight({} as object, badState)).rejects.toThrow(/VISUAL_STORAGE_STATE is not set/);
-      const ok = await promoteAuthPreflight({} as object, {
-        storageStatePath: stateFile("wiring", [{ name: AUTH_TOKEN_KEY, value: GOOD_TOKEN }]),
+      const ok = await assertAuthenticatedSession({
+        storageStatePath: stateFile("wiring", [{ name: AUTH_TOKEN_KEY, value: GOOD_TOKEN }], api.url),
         baseURL: api.url,
       });
-      expect(ok?.user).toBe("wipha@rungrueang.co.th");
+      expect(ok.user).toBe("wipha@rungrueang.co.th");
+    } finally {
+      await api.close();
+    }
+  });
+
+  test("REFUSES a session minted for a DIFFERENT origin (B-415)", async () => {
+    // The token is valid and /me answers 200 — this check passes today on exactly
+    // that basis. But Playwright matches storageState origins EXACTLY, so a state
+    // file written for localhost:5173 contributes nothing to a page opened on an
+    // ephemeral 127.0.0.1 port: the browser carries no token and all 99 screens
+    // capture logged out, which is B-411 with every guard green.
+    const api = await apiStub(realish);
+    try {
+      await expect(
+        assertAuthenticatedSession({
+          storageStatePath: stateFile("otherorigin", [{ name: AUTH_TOKEN_KEY, value: GOOD_TOKEN }], "http://localhost:5173"),
+          baseURL: api.url, // ephemeral 127.0.0.1:<port> — deliberately not the state's origin
+        })
+      ).rejects.toThrow(/written for origin .* but the run opens .*carry NO token/s);
+    } finally {
+      await api.close();
+    }
+  });
+
+  test("a matching origin with a path or trailing slash is NOT a mismatch", async () => {
+    const api = await apiStub(realish);
+    try {
+      const r = await assertAuthenticatedSession({
+        storageStatePath: stateFile("sameorigin", [{ name: AUTH_TOKEN_KEY, value: GOOD_TOKEN }], api.url + "/"),
+        baseURL: api.url,
+      });
+      expect(r.user).toBe("wipha@rungrueang.co.th");
     } finally {
       await api.close();
     }
@@ -2239,5 +2303,650 @@ test.describe("visual gate · promote mode · stage() bookkeeping (B-409)", () =
     expect(session.stagedRecords()).toHaveLength(1);
     session.commit();
     expect(readFileSync(join(sb.refDir, list[0].ref)).equals(first)).toBe(true);
+  });
+});
+
+test.describe("visual gate · appReachable means JUNEFLOW is here, not just a socket (B-411)", () => {
+  /** A throwaway server on an ephemeral port, so these cases need no stack. */
+  function serve(status: number, body: string): Promise<{ url: string; close: () => Promise<void> }> {
+    const server = createServer((_req, res) => {
+      res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+      res.end(body);
+    });
+    return new Promise((done) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address() as AddressInfo;
+        done({
+          url: `http://127.0.0.1:${addr.port}`,
+          close: () => new Promise<void>((closed) => server.close(() => closed())),
+        });
+      });
+    });
+  }
+
+  const APP_INDEX = `<!doctype html><html><head><title>Juneflow</title></head><body><div id="root"></div></body></html>`;
+
+  test("the REAL apps/web/index.html reads as reachable (markers read from the file, not retyped)", async () => {
+    // Serving a hand-written copy would let the markers drift out of the app
+    // without anything going red — and the cost of that drift is not a failure,
+    // it is `test.skip` on all 99 screens and a GREEN stage that compared
+    // nothing. So this reads the shipped file.
+    const realIndex = readFileSync(join(__dirname, "..", "..", "apps", "web", "index.html"), "utf-8");
+    const s = await serve(200, realIndex);
+    try {
+      expect(await appReachable(s.url), "apps/web/index.html no longer carries the markers appReachable looks for").toBe(true);
+    } finally {
+      await s.close();
+    }
+  });
+
+  test("a 404 from an UNRELATED process is NOT reachable", async () => {
+    // Measured while writing this: another session's node server was listening on
+    // :5173 and answered `/` with 404. The old check (`res.ok || res.status < 500`)
+    // called that reachable, so the gate treated a stranger's server as the app —
+    // survivable while the consequence was a skip, a hard failure once B-411 made
+    // a missing session refuse.
+    const s = await serve(404, `<html><body>cannot GET /</body></html>`);
+    try {
+      expect(await appReachable(s.url)).toBe(false);
+    } finally {
+      await s.close();
+    }
+  });
+
+  test("a 404 that DOES carry the markers is still NOT reachable — the status check is load-bearing", async () => {
+    // Isolates `if (!res.ok) return false` from the marker check. Without this,
+    // relaxing the status test back to "anything under 500" leaves every other
+    // appReachable test green, because the 404 case above is carried by its
+    // foreign body alone.
+    const s = await serve(404, `<!doctype html><html><head><title>Juneflow</title></head><body><div id="root"></div></body></html>`);
+    try {
+      expect(await appReachable(s.url)).toBe(false);
+    } finally {
+      await s.close();
+    }
+  });
+
+  test("a 200 from a DIFFERENT app is NOT reachable", async () => {
+    const s = await serve(200, `<!doctype html><html><head><title>Some Other App</title></head><body><div id="app"></div></body></html>`);
+    try {
+      expect(await appReachable(s.url)).toBe(false);
+    } finally {
+      await s.close();
+    }
+  });
+
+  test("the title alone is not enough, and neither is the root div alone", async () => {
+    // Both markers are required: a page that merely mentions Juneflow (a proxy
+    // error page, a status dashboard) must not pass for the app.
+    const titleOnly = await serve(200, `<html><head><title>Juneflow</title></head><body>service unavailable</body></html>`);
+    const rootOnly = await serve(200, `<html><head><title>Other</title></head><body><div id="root"></div></body></html>`);
+    try {
+      expect(await appReachable(titleOnly.url), "title without the app shell").toBe(false);
+      expect(await appReachable(rootOnly.url), "shell without the app title").toBe(false);
+    } finally {
+      await titleOnly.close();
+      await rootOnly.close();
+    }
+  });
+
+  test("nothing listening is not reachable", async () => {
+    const s = await serve(200, APP_INDEX);
+    const url = s.url;
+    await s.close(); // the port is now dead
+    expect(await appReachable(url)).toBe(false);
+  });
+});
+
+test.describe("visual gate · the session decision, and the silent-green path it closes (B-411)", () => {
+  const D = resolveGateSessionDecision;
+
+  test("an empty manifest skips — there is nothing to compare", () => {
+    for (const reachable of [true, false]) {
+      for (const promote of [true, false]) {
+        expect(D({ manifestLength: 0, appReachable: reachable, promote, storageStatePath: "/tmp/s.json" }).kind).toBe("skip");
+      }
+    }
+  });
+
+  test("app reachable ⇒ a session is REQUIRED, in both modes", () => {
+    expect(D({ manifestLength: 99, appReachable: true, promote: false, storageStatePath: undefined }).kind).toBe("require-session");
+    expect(D({ manifestLength: 99, appReachable: true, promote: true, storageStatePath: "/tmp/s.json" }).kind).toBe("require-session");
+  });
+
+  test("unreachable while CONFIGURED to compare is REFUSED, not skipped — this is the silent-green path", () => {
+    // test.skip(!reachable) means unreachable ⇒ 99 screens skip ⇒ exit 0. Once
+    // appReachable also required the app's own markers, a change to <title> or
+    // id="root" would have taken the stage GREEN having compared nothing. A run
+    // that minted a session, or turned promote on, said it intends to compare.
+    const promoteOn = D({ manifestLength: 99, appReachable: false, promote: true, storageStatePath: undefined });
+    expect(promoteOn.kind).toBe("refuse");
+    expect(promoteOn.kind === "refuse" && promoteOn.reason).toMatch(/promote mode is on/);
+
+    const sessionSet = D({ manifestLength: 99, appReachable: false, promote: false, storageStatePath: "/tmp/state.json" });
+    expect(sessionSet.kind).toBe("refuse");
+    expect(sessionSet.kind === "refuse" && sessionSet.reason).toMatch(/VISUAL_STORAGE_STATE is set/);
+
+    expect(D({ manifestLength: 99, appReachable: false, promote: true, storageStatePath: "/tmp/state.json" }).kind).toBe("refuse");
+  });
+
+  test("the refusal says what going green would have meant", () => {
+    const r = D({ manifestLength: 99, appReachable: false, promote: false, storageStatePath: "/tmp/state.json" });
+    expect(r.kind === "refuse" && r.reason).toMatch(/GREEN having compared nothing/);
+  });
+
+  test("unreachable with NOTHING configured still skips — a developer with no stack is not blocked", () => {
+    const d = D({ manifestLength: 99, appReachable: false, promote: false, storageStatePath: undefined });
+    expect(d.kind).toBe("skip");
+    expect(d.kind === "skip" && d.reason).toMatch(/docker compose|pnpm dev/);
+  });
+
+  test("a blank VISUAL_STORAGE_STATE counts as unset, not as intent to compare", () => {
+    for (const blank of ["", "   ", "\t\n"]) {
+      expect(D({ manifestLength: 99, appReachable: false, promote: false, storageStatePath: blank }).kind).toBe("skip");
+    }
+  });
+});
+
+test.describe("visual gate · the pre-flight ROUTING, not just the table (B-411)", () => {
+  const OK = { user: "wipha@rungrueang.co.th", tokenChars: 32, origin: "http://app.test" };
+  const base = {
+    baseURL: "http://app.test",
+    apiBasePath: "/api/v1",
+    storageStatePath: "/tmp/state.json",
+    expectUser: undefined as string | undefined,
+  };
+
+  /** Records whether the real check was reached, so "never called" is provable. */
+  function spyAssert(result: (() => Promise<never>) | null = null) {
+    const calls: unknown[] = [];
+    return {
+      calls,
+      assert: async (opts: unknown) => {
+        calls.push(opts);
+        if (result) return result();
+        return OK;
+      },
+    };
+  }
+
+  test("skip does NOT reach the session check — the check must not run when there is nothing to capture", async () => {
+    const spy = spyAssert();
+    const out = await gateSessionPreflight(
+      { ...base, manifestLength: 0, appReachable: true, promote: false },
+      { assert: spy.assert }
+    );
+    expect(out).toBe("skipped");
+    expect(spy.calls, "an empty manifest must not trigger an auth round trip").toHaveLength(0);
+  });
+
+  test("COMPARE mode reaches the session check — this is the mutant that survived three rounds", async () => {
+    // The revert this kills is `if (!promote) return;` as the first line of the
+    // spec's beforeAll: compare mode exempt again, which is precisely the defect
+    // B-411 exists to fix. Measured before this test existed: the whole suite
+    // stayed green with that line in place.
+    const spy = spyAssert();
+    const out = await gateSessionPreflight(
+      { ...base, manifestLength: 99, appReachable: true, promote: false },
+      { assert: spy.assert }
+    );
+    expect(out).toBe("ok");
+    expect(spy.calls, "compare mode must be checked exactly like promote mode").toHaveLength(1);
+  });
+
+  test("PROMOTE mode reaches it too, with the same arguments", async () => {
+    const spy = spyAssert();
+    await gateSessionPreflight(
+      { ...base, manifestLength: 99, appReachable: true, promote: true },
+      { assert: spy.assert }
+    );
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0]).toMatchObject({ storageStatePath: "/tmp/state.json", baseURL: "http://app.test" });
+  });
+
+  test("an unreachable app that was CONFIGURED to compare throws, and never reaches the check", async () => {
+    const spy = spyAssert();
+    await expect(
+      gateSessionPreflight({ ...base, manifestLength: 99, appReachable: false, promote: false }, { assert: spy.assert })
+    ).rejects.toThrow(/VISUAL GATE REFUSED — .*GREEN having compared nothing/s);
+    expect(spy.calls).toHaveLength(0);
+  });
+
+  test("a failing session check is NOT swallowed", async () => {
+    // The mutant: wrap the call in try/catch and return a fake user. Silence here
+    // is the whole B-411 failure mode wearing a passing guard.
+    const spy = spyAssert(async () => {
+      throw new PromoteRefusal("VISUAL_STORAGE_STATE is not set — nobody minted a session");
+    });
+    await expect(
+      gateSessionPreflight({ ...base, manifestLength: 99, appReachable: true, promote: false }, { assert: spy.assert })
+    ).rejects.toThrow(/VISUAL_STORAGE_STATE is not set/);
+    expect(spy.calls).toHaveLength(1);
+  });
+
+  test("a compare-mode refusal is re-prefixed — an operator must not read PROMOTE REFUSED on a compare run", async () => {
+    const spy = spyAssert(async () => {
+      throw new PromoteRefusal("the token is expired");
+    });
+    let msg = "";
+    try {
+      await gateSessionPreflight(
+        { ...base, manifestLength: 99, appReachable: true, promote: false },
+        { assert: spy.assert }
+      );
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain("VISUAL GATE REFUSED — ");
+    expect(msg, "the promote wording must be gone, not merely prefixed over").not.toContain(PROMOTE_REFUSAL_PREFIX);
+    expect(msg).toContain("the token is expired");
+  });
+
+  test("in PROMOTE mode the promote wording is KEPT — the rewrite is scoped, not blanket", async () => {
+    const spy = spyAssert(async () => {
+      throw new PromoteRefusal("the token is expired");
+    });
+    let msg = "";
+    try {
+      await gateSessionPreflight(
+        { ...base, manifestLength: 99, appReachable: true, promote: true },
+        { assert: spy.assert }
+      );
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain(PROMOTE_REFUSAL_PREFIX);
+    expect(msg).not.toContain("VISUAL GATE REFUSED");
+  });
+});
+
+test.describe("visual gate · the WIRING is enforced from source, not assumed (B-411)", () => {
+  // WHY THIS EXISTS
+  // ---------------
+  // Three gate rounds in a row measured the same survivor. The routing was moved
+  // into lib/ and covered there — and the mutant still lived, because what the
+  // reverts actually deleted was the CALL, not the callee:
+  //
+  //     test.beforeAll(async () => {
+  //       if (!promote) return;        // <- compare exempt again; suite stayed green
+  //
+  // A runtime test cannot reach a beforeAll body without a live stack, and the CI
+  // shape (session always valid) hides it there too. So this reads the spec's own
+  // source, in the shape of apps/api/src/routes/stub-insert-door.enforce.test.ts.
+  //
+  // A first version of this test was itself bypassable eight ways — braces on the
+  // early return, wrapping the call in `if (promote) {...}`, `promote && await
+  // ...`, `.catch(() => {})`, `try/catch`, shadowing the injected functions, and
+  // dropping a key from the argument object. It also anchored on the FIRST
+  // beforeAll in the file rather than this describe's. Hence: anchor on the
+  // describe title, forbid any conditional or swallow between the opening brace
+  // and the call, and pin the argument KEY SET rather than five individual keys.
+  //
+  // Scope, stated rather than implied: this proves the call is present, is
+  // unconditional, and is fed the real inputs. It does NOT prove the call is
+  // reached at runtime — the lib tests and the live acceptance run cover that.
+  const SOURCE = readFileSync(join(__dirname, "visual-gate.spec.ts"), "utf-8");
+
+  /**
+   * The source with the CONTENT of strings, template literals and block comments
+   * blanked out, same length so every index still matches the real file.
+   *
+   * Boundaries in this file USED TO BE found by scanning for `});` at column 0 —
+   * nothing does that now (see blockEnd). That was
+   * defeated by a literal containing one: the region shrinks, a shadow after it
+   * is never scanned, and both sides of the occurrence count shrink together so
+   * the assertion still holds. Measured — the suite stayed fully green with the
+   * pre-flight replaced by a no-op. Pinning a phrase inside the region only
+   * narrowed the class: a terminator placed after the pin hid a shadow just as
+   * well.
+   *
+   * What masking removes is one SUPPLY of terminators — the ones inside
+   * literals and comments. It does not remove the mechanism: boundaries are
+   * now taken by brace depth (see blockEnd), which is what closes a `});`
+   * that is real code. And masking is itself approximate — no regex-literal
+   * state, no `${}` nesting — which is the residual filed as B-417. Line
+   * comments are blanked here too, not only block ones.
+   */
+  function maskLiterals(src: string): string {
+    const out = src.split("");
+    let i = 0;
+    const blank = (from: number, to: number) => {
+      for (let k = from; k < to && k < out.length; k++) if (out[k] !== "\n") out[k] = " ";
+    };
+    while (i < src.length) {
+      const c = src[i];
+      const next = src[i + 1];
+      if (c === "/" && next === "*") {
+        const end = src.indexOf("*/", i + 2);
+        const stop = end === -1 ? src.length : end + 2;
+        blank(i + 2, stop - 2);
+        i = stop;
+      } else if (c === "/" && next === "/") {
+        const end = src.indexOf("\n", i);
+        blank(i + 2, end === -1 ? src.length : end);
+        i = end === -1 ? src.length : end;
+      } else if (c === '"' || c === "'" || c === "`") {
+        const quote = c;
+        let k = i + 1;
+        while (k < src.length) {
+          if (src[k] === "\\") k += 2;
+          else if (src[k] === quote) break;
+          else k++;
+        }
+        blank(i + 1, k);
+        i = k + 1;
+      } else {
+        i++;
+      }
+    }
+    return out.join("");
+  }
+  const MASKED = maskLiterals(SOURCE);
+
+  /**
+   * The end of the block opened at `from`, found by BRACE DEPTH on the masked
+   * copy rather than by scanning for a `});` at some column.
+   *
+   * The scan was defeated by a `});` that is real code — measured, at column 0
+   * for the describe and at column 2 inside the pre-flight call's last argument,
+   * where it truncated the region before a live `.catch(() => {})` and left the
+   * "result is not swallowed" assertion green with the swallow in place.
+   *
+   * Honest residual, because this is the third time a narrowing was described as
+   * a fix: depth is only as good as the masking under it. `maskLiterals` is not
+   * a tokenizer — it has no regex-literal state and does not track `${}` nesting
+   * — so `/` + quote + `/` or a nested template can desync it and move a
+   * boundary — and a `/{/ ` used as ballast can move the boundary while the
+   * `commit the captured pack` pin still holds, which reaches all the way back
+   * to A8: the swallow assertion goes green with a live `.catch()`. The trigger
+   * is not always exotic either — an ordinary `/https?:\/\//` makes the masker
+   * read `\/\/` as a line comment and blank the `{` that opens a block on that
+   * line. Measured: outside the last few lines of the describe every such case
+   * fails CLOSED (the region blows out and the count goes red); inside them it
+   * does not. That is B-417, and the only complete answer is a real parser,
+   * which the `tests` workspace cannot reach without a lockfile change.
+   */
+  function blockEnd(masked: string, from: number): number {
+    const open = masked.indexOf("{", from);
+    if (open === -1) return masked.length;
+    let depth = 0;
+    for (let i = open; i < masked.length; i++) {
+      if (masked[i] === "{") depth++;
+      else if (masked[i] === "}") {
+        depth--;
+        if (depth === 0) return i + 1;
+      }
+    }
+    return masked.length;
+  }
+  const CAPTURE_DESCRIBE = 'test.describe("visual gate · capture mode (real screens vs reference)"';
+  const BEFORE_ALL = (() => {
+    const d = SOURCE.indexOf(CAPTURE_DESCRIBE);
+    expect(d, "the capture describe must still exist under this exact title").toBeGreaterThan(-1);
+    const start = MASKED.indexOf("  test.beforeAll(async () => {", d);
+    expect(start, "the capture describe must still have a beforeAll").toBeGreaterThan(-1);
+    return SOURCE.slice(start, blockEnd(MASKED, start));
+  })();
+  const HEAD = BEFORE_ALL.slice(0, BEFORE_ALL.indexOf("await gateSessionPreflight("));
+  const ENV_KEY = "process." + "env" + ".VISUAL_STORAGE_STATE";
+
+  /** Source lines with comments and blanks removed — no regex escaping games. */
+  function codeLines(block: string): string[] {
+    return block
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "" && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"));
+  }
+
+  test("the beforeAll CALLS gateSessionPreflight, UNCONDITIONALLY", () => {
+    expect(BEFORE_ALL).toContain("await gateSessionPreflight(");
+    // Only the CODE between the opening brace and the call matters; the prose
+    // above is allowed to contain the words the code must not.
+    const head = codeLines(HEAD).filter((l) => l !== "test.beforeAll(async () => {");
+    expect(head, "nothing may stand between the beforeAll's brace and the call").toEqual([]);
+  });
+
+
+  test("the call's result is not swallowed", () => {
+    const tail = BEFORE_ALL.slice(BEFORE_ALL.indexOf("await gateSessionPreflight("));
+    const code = tail.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const token of [".catch(", "catch"]) {
+      expect(code, `\`${token}\` after the call turns every refusal into silence`).not.toContain(token);
+    }
+  });
+
+  test("it is fed the REAL inputs — exactly these keys, no more, no fewer", () => {
+    expect(BEFORE_ALL).toMatch(/promote:\s*Boolean\(promote\)/);
+    expect(BEFORE_ALL).toContain(`storageStatePath: ${ENV_KEY}`);
+    expect(BEFORE_ALL).toMatch(/manifestLength:\s*manifest\.length/);
+    expect(BEFORE_ALL).toMatch(/appReachable:\s*await appReachable\(baseURL\)/);
+    expect(BEFORE_ALL).toMatch(/assert:\s*assertAuthenticatedSession/);
+    // Dropping a key is as effective as hardwiring one: without `expectUser`,
+    // VISUAL_PROMOTE_EXPECT_USER is silently disabled.
+    // Shorthand properties (`baseURL,`) carry no colon, so match the key with an
+    // optional value — a regex that missed them would have "proved" a key set the
+    // code does not have.
+    const keys = codeLines(BEFORE_ALL)
+      .map((l) => /^([a-zA-Z]+)\s*[:,]/.exec(l)?.[1])
+      .filter((k): k is string => Boolean(k) && !["test", "await", "return"].includes(k as string))
+      .sort();
+    expect(keys).toEqual(
+      ["apiBasePath", "appReachable", "baseURL", "expectUser", "manifestLength", "promote", "storageStatePath"].sort()
+    );
+  });
+
+  test("the names in the wiring are the IMPORTED ones — un-aliased, and unshadowed IN THE DESCRIBE", () => {
+    // The tenth bypass, and the reason a syntax check is not enough: `const
+    // { gateSessionPreflight } = _shim;` shadows the import without matching any
+    // `const|let|var|function NAME` pattern, and the enforced slice stays
+    // byte-identical. Destructuring, array patterns, `for (const x of ...)`,
+    // `class x {}` and parameter defaults are all further spellings of the same
+    // move.
+    //
+    // What makes an occurrence check sound: shadowing an import at MODULE scope
+    // is a hard duplicate declaration, so any shadow must live inside the capture
+    // describe. So instead of enumerating syntax, count where each name appears
+    // in that describe — it may appear only where it is called.
+    const importEnd = SOURCE.indexOf('} from "./lib/promote"');
+    expect(importEnd, "the spec must still import from ./lib/promote").toBeGreaterThan(-1);
+    const importBlock = SOURCE.slice(SOURCE.lastIndexOf("import {", importEnd), importEnd);
+
+    // START on the real source — the describe's title is itself a literal, and the
+    // masked copy has blanked it. END on the masked copy, so no literal can move
+    // the boundary. Mixing the two is the point, not an oversight.
+    const dStart = SOURCE.indexOf(CAPTURE_DESCRIBE);
+    expect(dStart, "the capture describe must still exist under this exact title").toBeGreaterThan(-1);
+    const dEnd = blockEnd(MASKED, dStart);
+    // Count CODE only: a comment that mentions the name is harmless, and the
+    // beforeAll's own explanation names all three.
+    const describeBody = codeLines(SOURCE.slice(dStart, dEnd)).join("\n");
+    // Belt to the masking's braces: assert the region reaches the bottom of the
+    // real describe. Masking removes the way a literal moves the boundary; this
+    // catches a boundary that moves for some OTHER reasons — a renamed test, a
+    // restructured file — where the count would otherwise silently enforce less.
+    // Not all of them: a desync placed AFTER this pin truncates between it and a
+    // shadow at the bottom of the describe, and the pin still holds (B-417).
+    // On its own this pin is not sufficient: a terminator placed after it hid a
+    // shadow, measured. It is the second of two checks, not the fix.
+    expect(
+      describeBody,
+      "the scanned region stops before the end of the describe — enforcement is smaller than it claims"
+    ).toContain("promote · commit the captured pack");
+
+    const expected: Record<string, string[]> = {
+      gateSessionPreflight: ["await gateSessionPreflight("],
+      assertAuthenticatedSession: ["assert: assertAuthenticatedSession"],
+      appReachable: ["appReachable: await appReachable(baseURL)", "!(await appReachable(baseURL))"],
+    };
+    for (const [name, sites] of Object.entries(expected)) {
+      expect(importBlock, `${name} must be imported from lib/promote`).toContain(`  ${name},`);
+      expect(importBlock, `${name} must not be aliased on import`).not.toMatch(new RegExp(`\\b${name}\\s+as\\s+`));
+      const occurrences = describeBody.split(name).length - 1;
+      const accounted = sites.reduce((n, site) => n + (describeBody.split(site).length - 1) * (site.split(name).length - 1), 0);
+      expect(
+        occurrences,
+        `${name} appears ${occurrences} time(s) in the capture describe but only ${accounted} are its known call ` +
+          `site(s) — an extra occurrence is how a shadow gets in, in any syntax`
+      ).toBe(accounted);
+    }
+  });
+
+
+  test("nothing in the wiring is a literal", () => {
+    for (const bad of ["promote: false", "promote: true", "storageStatePath: undefined", "appReachable: true"]) {
+      expect(BEFORE_ALL, `\`${bad}\` in the wiring silently disables the pre-flight`).not.toContain(bad);
+    }
+  });
+});
+
+test.describe("visual gate · promote mode · an EMPTY manifest is refused, not quietly promoted (B-411/N2)", () => {
+  test("openPromoteSession refuses zero rows", () => {
+    const sb = sandbox("promote-empty");
+    expect(() => openPromoteSession(PROMOTE_ON, [], sb.opts)).toThrow(PromoteRefusal);
+    expect(() => openPromoteSession(PROMOTE_ON, [], sb.opts)).toThrow(/the manifest is empty/);
+  });
+
+  test("the session decision still SKIPS an empty manifest — the two are different questions", () => {
+    // Compare mode with no rows is a scaffold state, not a defect: skipping is
+    // right there. It is only PROMOTE, which exists to overwrite the arbiter of
+    // design fidelity, that must not proceed on an empty list.
+    expect(
+      resolveGateSessionDecision({ manifestLength: 0, appReachable: true, promote: true, storageStatePath: "/tmp/s" }).kind
+    ).toBe("skip");
+  });
+
+  test("a non-empty manifest still opens normally", () => {
+    const sb = sandbox("promote-nonempty");
+    const list = rows(["a"]);
+    seedExistingRefs(sb, list);
+    expect(openPromoteSession(PROMOTE_ON, list, sb.opts)).not.toBeNull();
+  });
+});
+
+test.describe("visual gate · the stored origin must be USABLE, not merely present (B-415)", () => {
+  const apiStub2 = (handler: (req: IncomingMessage, res: ServerResponse) => void) => {
+    const server = createServer(handler);
+    return new Promise<{ url: string; close: () => Promise<void> }>((res) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address() as AddressInfo;
+        res({ url: `http://127.0.0.1:${addr.port}`, close: () => new Promise<void>((d) => server.close(() => d())) });
+      });
+    });
+  };
+  const realish2 = (_req: IncomingMessage, res: ServerResponse) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ user: { email: "wipha@rungrueang.co.th" }, role: {}, package: {} }));
+  };
+  const SELF = join(RESULTS_DIR, "origin-selftest");
+  function state(name: string, origins: Array<{ origin: unknown; token: string }>): string {
+    const p = join(SELF, `${name}.json`);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(
+      p,
+      JSON.stringify({
+        cookies: [],
+        origins: origins.map((o) => ({ origin: o.origin, localStorage: [{ name: AUTH_TOKEN_KEY, value: o.token }] })),
+      })
+    );
+    return p;
+  }
+
+  for (const [label, bad] of [
+    ["empty string", ""],
+    ["absent key", undefined],
+    ["not a url", "not a url"],
+    ["scheme-relative", "//localhost:5173"],
+    ["scheme only", "http://"],
+  ] as Array<[string, unknown]>) {
+    test(`an origin that is ${label} is REFUSED, not waved through`, async () => {
+      // Each of these used to skip the comparison entirely, which is the one
+      // shape where Playwright attaches nothing and every screen captures
+      // logged out — the guard waving through exactly what it exists to catch.
+      const api = await apiStub2(realish2);
+      try {
+        await expect(
+          assertAuthenticatedSession({ storageStatePath: state(`bad-${label.replace(/\W+/g, "-")}`, [{ origin: bad, token: "t.t.t" }]), baseURL: api.url })
+        ).rejects.toThrow(/records an origin this run cannot use|written for origin/);
+      } finally {
+        await api.close();
+      }
+    });
+  }
+
+  test("a base url with no parsable origin REFUSES — it must not disarm the check", async () => {
+    // Both guards were written `wantOrigin && …`, so an empty or malformed
+    // baseURL skipped the comparison entirely: fail-open in the same shape as the
+    // unusable-stored-origin branch, on the other side of it. Reachable through a
+    // set-but-empty VISUAL_BASE_URL, because `??` does not fall back on "".
+    for (const bad of ["", "not a url", "//host"]) {
+      await expect(
+        assertAuthenticatedSession({
+          storageStatePath: state(`badbase-${bad.replace(/\W+/g, "-") || "empty"}`, [
+            { origin: "http://localhost:5173", token: "t.t.t" },
+          ]),
+          baseURL: bad,
+        })
+      ).rejects.toThrow(/base url has no parsable origin/);
+    }
+  });
+
+  test("with SEVERAL origins the one matching the run is chosen, not the last", async () => {
+    const api = await apiStub2(realish2);
+    try {
+      const r = await assertAuthenticatedSession({
+        storageStatePath: state("multi", [
+          { origin: api.url, token: "the.right.one" },
+          { origin: "http://localhost:5173", token: "the.stale.one" },
+        ]),
+        baseURL: api.url,
+      });
+      // Before the fix the LAST entry won and this refused a file that did carry
+      // a usable token — fail-closed, but answering about the wrong token.
+      expect(r.user).toBe("wipha@rungrueang.co.th");
+      expect(r.tokenChars).toBe("the.right.one".length);
+    } finally {
+      await api.close();
+    }
+  });
+});
+
+test.describe("visual gate · an unreadable manifest is a DEFECT, not an empty list (B-411)", () => {
+  // The compare-mode silent-green in one line: swallow the parse error, return
+  // [], generate zero capture tests, and the stage exits 0 having compared
+  // nothing. A trailing comma was enough. This is the test that dies if
+  // loadScreensManifest goes back to swallowing — measured: with the old body the
+  // whole suite stayed green, which is how it shipped.
+  const DIR = join(RESULTS_DIR, "manifest-selftest");
+  function write(name: string, body: string): string {
+    const p = join(DIR, name);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, body);
+    return p;
+  }
+
+  test("an ABSENT file is the scaffold state and returns no rows", () => {
+    expect(loadScreensManifest(join(DIR, "does-not-exist.json"))).toEqual([]);
+  });
+
+  test("a MALFORMED file throws, naming the cause", () => {
+    const p = write("malformed.json", '{"screens": [ {"screen":"a"}, ]}'); // trailing comma
+    expect(() => loadScreensManifest(p)).toThrow(/does not parse/);
+    expect(() => loadScreensManifest(p)).toThrow(/GREEN having compared nothing/);
+  });
+
+  test("a file with no `screens` array throws", () => {
+    expect(() => loadScreensManifest(write("noscreens.json", '{"note":"hi"}'))).toThrow(/no .?screens.? array/);
+    expect(() => loadScreensManifest(write("wrongtype.json", '{"screens":{}}'))).toThrow(/no .?screens.? array/);
+  });
+
+  test("a valid file returns its rows", () => {
+    const p = write("good.json", JSON.stringify({ screens: [{ screen: "a", route: "a", ref: "app-baseline/a.png" }] }));
+    expect(loadScreensManifest(p)).toHaveLength(1);
+  });
+
+  test("an EMPTY screens array is allowed here — the promote path is what refuses it", () => {
+    // Scaffold states stay legal for compare mode; openPromoteSession is where an
+    // empty list is refused, and that is pinned in its own describe.
+    expect(loadScreensManifest(write("empty.json", '{"screens":[]}'))).toEqual([]);
   });
 });

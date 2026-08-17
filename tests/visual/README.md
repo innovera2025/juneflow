@@ -27,6 +27,10 @@
 - **Mask regions (P0-QA-07 · B-044):** ยกเว้นเฉพาะสี่เหลี่ยมที่ Wei อนุมัติจากการนับ diff — **opt-in ต่อจอ** ผ่าน field `masks` ใน `screens.manifest.json` (คีย์จาก `lib/masks.ts` `MASK_REGISTRY`) · ทุก region ต้องมี `reason` อ้าง id ใน `BLOCKERS.md` (บังคับ runtime — ไม่มี citation = throw) · ไม่ใช่การผ่อน threshold ทั่วไป · **dimension mismatch ยัง auto-FAIL เสมอ** (mask ช่วยไม่ได้ — P0-FIX-04 คงเดิม) · จำนวน masked px + จำนวนที่ต่างจริงในนั้นถูกรายงานใน `visual-report.md` (คอลัมน์ `masked px`) และย้อมน้ำเงินใน diff PNG
   - mask ปัจจุบัน: `sidebar-logo-b044` = กล่องโลโก้ sidebar (wordmark + tagline) rect x8 y6 w224 h56 — วัดจาก `reference/gallery/g1/01-s.jpg` (1600x1000: lockup x16..124 y16..55 · เส้นแบ่ง y64 · ปุ่ม toggle y≈69) — reference ทุกใบเป็น logo lockup รุ่นเก่า (`juneflow / Construction ERP`) ส่วน port ใช้ `t("app.name")` th=`ระบบงานก่อสร้าง` (B-044(ก) Wei ตัดสิน 13 ก.ค.) · จอที่ไม่มี sidebar lockup (เช่น login — P1-WEB-01) **ห้ามใส่** mask นี้
 - **รัน:** `pnpm --filter @juneflow/tests test:visual`
+- **⚠️ ต้องมี session เสมอเมื่อแอปขึ้นจริง (B-411 — เปลี่ยนพฤติกรรมเมื่อ 17 ส.ค. 69):** ถ้า `VISUAL_BASE_URL` ชี้ไปที่แอป Juneflow จริงแต่ไม่ได้ตั้ง `VISUAL_STORAGE_STATE` (หรือ token ใช้ไม่ได้) **gate จะปฏิเสธทั้งรอบตั้งแต่ก่อนถ่ายจอแรก** ไม่ใช่ถ่ายไปเรื่อย ๆ แล้วแดง
+  - เหตุผล: baseline ถ่ายในฐานะผู้ใช้ที่ล็อกอิน จอที่ล็อกเอาต์จึงไม่มีทางตรง **และแดงในรูปทรงเดียวกับ drift** จนอ่านไม่ออก — วัดแล้วบนสแต็กเดียวกัน pack เดียวกัน ต่างกันแค่ session: **มี session ตก 11 จอ (เช้า) / 14 จอ (บ่ายวันเดียวกัน — เซตโตตามเวลา) · ไม่มี session ตก 98 จอ และจอเดียวที่ผ่านคือ `login`** ซึ่งเป็นจอเดียวที่ไม่เรียก API
+  - CI ทำให้เองแล้วใน `.github/workflows/ci.yml` step `Mint the visual-gate session (B-411)` · รันในเครื่องให้ทำแบบเดียวกัน (login → เขียน storageState → ส่ง `VISUAL_STORAGE_STATE`) ตามตัวอย่างในหัวข้อ promote ด้านล่าง
+  - `appReachable` เข้มขึ้นพร้อมกัน: ต้องได้ 200 **และ** เจอ `<title>Juneflow</title>` + `id="root"` — เดิมรับทุก status < 500 ทำให้ dev server ของคนอื่นบนพอร์ตเดียวกันถูกนับว่า "แอปขึ้นแล้ว" (วัดจริง: โปรเซสอื่นบน `:5173` ตอบ 404 แล้วเช็คเดิมบอกว่าถึง)
 
 ## Promote mode — re-baseline `reference/app-baseline/` (B-409)
 
@@ -38,16 +42,34 @@
 
 ### รันอย่างไร
 
+**สร้าง storageState ก่อน** (จำเป็นทั้งโหมดเทียบภาพและโหมด promote ตั้งแต่ B-411 — CI ทำขั้นตอนนี้เองใน step `Mint the visual-gate session`):
+
 ```bash
-# ต้องมี stack สดที่ seed แล้ว (isolated) + storageState สำหรับ auth
+BASE=http://localhost:5173
+TOKEN=$(curl -sS -X POST "$BASE/api/v1/auth/login" \
+  -H 'content-type: application/json' \
+  -d '{"email":"wipha@rungrueang.co.th","password":"juneflow-dev"}' \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(JSON.parse(s).token||"")})')
+[ -n "$TOKEN" ] || { echo "login failed — the gate would capture logged-out screens"; exit 1; }
+node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({cookies:[],origins:[{origin:process.argv[2],localStorage:[{name:"juneflow-token",value:process.argv[3]}]}]}))' \
+  /tmp/juneflow-visual-state.json "$BASE" "$TOKEN"
+```
+
+`origin` ต้องตรงกับ `VISUAL_BASE_URL` เป๊ะ (Playwright จับคู่ origin แบบตรงตัว) และคีย์คือ `juneflow-token` ตาม `apps/web/src/auth-token.ts`
+
+```bash
+# ต้องมี stack สดที่ seed แล้ว (isolated) + storageState จากขั้นตอนข้างบน
 VISUAL_BASE_URL=http://localhost:5173 \
-VISUAL_STORAGE_STATE=/abs/path/to/state.json \
+VISUAL_STORAGE_STATE=/tmp/juneflow-visual-state.json \
 VISUAL_PROMOTE_EXPECT_USER=wipha@rungrueang.co.th \
 VISUAL_PROMOTE_BASELINE=1 \
+SEED_FROZEN_NOW=2026-08-07T12:22:42+07:00 \
 pnpm --filter @juneflow/tests test:visual
 ```
 
-- `VISUAL_STORAGE_STATE` **บังคับ** ในโหมด promote (ด่าน 0) — ไม่ตั้ง = ปฏิเสธทั้งรอบก่อนถ่ายจอแรก
+`SEED_FROZEN_NOW` คือ instant ที่ pack ถูกถ่าย — ตรึงไว้ตอนถ่ายด้วย ไม่งั้นแพ็กใหม่จะเริ่ม drift ตั้งแต่วันรุ่งขึ้น (B-409)
+
+- `VISUAL_STORAGE_STATE` **บังคับทั้งสองโหมด** ตั้งแต่ B-411 (เดิมบังคับเฉพาะ promote) — ไม่ตั้งแล้วแอปขึ้นจริง = ปฏิเสธทั้งรอบก่อนถ่ายจอแรก
 - `VISUAL_PROMOTE_EXPECT_USER` ไม่บังคับ · ตั้งไว้แล้ว `/me` ต้องตอบเป็นผู้ใช้คนนั้นพอดี (แพ็กที่ถ่ายด้วยผู้ใช้ผิด = เมนู/สิทธิ์ผิดฝังลงไปทั้งแพ็ก)
 
 - `VISUAL_PROMOTE_BASELINE` **ปิดโดย default** — รับเฉพาะค่า `1` หรือ `true` เท่านั้น (`0`/`false`/`yes`/ค่าว่าง = ปิด)
@@ -66,7 +88,7 @@ pnpm --filter @juneflow/tests test:visual
 
 | ด่าน | ปฏิเสธเมื่อ |
 |---|---|
-| 0 · **auth pre-flight** (ก่อนถ่ายจอแรก) | ไม่มี `VISUAL_STORAGE_STATE` · ไฟล์ไม่มี/ไม่ใช่ JSON · ไม่มีคีย์ `juneflow-token` (หรือค่าว่าง) · `GET {base}/api/v1/me` ตอบ 401/403 (token หมดอายุ) · ตอบไม่ใช่ JSON (proxy เสิร์ฟ index.html) · ไม่มี `user.email` · ไม่ตรง `VISUAL_PROMOTE_EXPECT_USER` · API ไม่ตอบเลย |
+| 0 · **auth pre-flight** (ก่อนถ่ายจอแรก · **ตั้งแต่ B-411 ทำงานทั้งโหมดเทียบภาพและโหมด promote ไม่ใช่เฉพาะ promote**) | ไม่มี `VISUAL_STORAGE_STATE` · ไฟล์ไม่มี/ไม่ใช่ JSON · ไม่มีคีย์ `juneflow-token` (หรือค่าว่าง) · `GET {base}/api/v1/me` ตอบ 401/403 (token หมดอายุ) · ตอบไม่ใช่ JSON (proxy เสิร์ฟ index.html) · ไม่มี `user.email` · ไม่ตรง `VISUAL_PROMOTE_EXPECT_USER` · API ไม่ตอบเลย |
 | 1 · opt-in | ไม่มี env = ไม่มีทางเขียน · เปิดใน CI = ปฏิเสธ |
 | 2 · เฉพาะ path ที่ manifest ประกาศ **และมีอยู่แล้ว** | ref หาย/พิมพ์ผิด · ไม่ใช่ `.png` · หลุดออกนอก `app-baseline/` (รวม `..`, absolute, **symlink** — เช็คด้วย realpath) · 2 จอชี้ ref เดียวกัน → **ปฏิเสธทั้งรอบ ไม่ promote บางส่วน** · ref ที่ **หายไประหว่างรอบ** ถูกเช็คซ้ำตอน commit (ไม่ปั้นใบใหม่คืนมา) |
 | 2 (ต่อ) · **ชื่อไฟล์ ref ชนกัน** | ref สองแถวที่อยู่คนละโฟลเดอร์แต่ **ชื่อไฟล์เดียวกัน** (เทียบแบบไม่สนตัวพิมพ์ เพราะ macOS folds case) — staging คีย์ด้วย basename ทุก target ที่ชนกันจึงได้พิกเซลของ capture ตัวสุดท้าย · **ไม่มีด่านไหนข้างหลังจับได้เลย**: ด่าน 3/3b แฮชบัฟเฟอร์ตอน stage ไม่ใช่ไฟล์ที่เขียนจริง วัดแล้วว่าชน 2 ใบ → `COMMITTED 2 · duplicateGroups: []` และชน 3 ใบ → `COMMITTED 3 · duplicateGroups: []` · ตอนนี้ ref ทุกใบแบนและไม่ซ้ำ ด่านนี้จึงกันรูปทรงที่ยังไม่เกิด |

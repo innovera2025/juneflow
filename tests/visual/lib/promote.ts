@@ -212,12 +212,63 @@ export interface DuplicateGroup {
   screens: string[];
 }
 
+/**
+ * The prefix every PromoteRefusal carries. Spelled once and exported because
+ * `gateSessionPreflight` strips it when promote is OFF — a compare run must not
+ * print "PROMOTE REFUSED" at anyone. Two independent spellings of the same
+ * string would drift apart silently and the stripping would quietly stop.
+ */
+export const PROMOTE_REFUSAL_PREFIX = "PROMOTE REFUSED — ";
+
 /** Every refusal in this module is this class — a promote refusal, not a crash. */
 export class PromoteRefusal extends Error {
   constructor(message: string) {
-    super(`PROMOTE REFUSED — ${message}`);
+    super(`${PROMOTE_REFUSAL_PREFIX}${message}`);
     this.name = "PromoteRefusal";
   }
+}
+
+/**
+ * Read the capture manifest, keeping "there is no manifest" and "the manifest is
+ * broken" apart.
+ *
+ * Swallowing both into `[]` was a live silent-green path, and the whole compare
+ * mode rides on it: no rows means no capture tests are generated at all, the
+ * wired-manifest test skips itself, and the stage exits 0 having compared
+ * nothing. A trailing comma in screens.manifest.json was enough.
+ *
+ * It lives here, not in the spec, because the throw is load-bearing and a
+ * function inside a spec file is a seam no unit test can drive — reverting it to
+ * the old swallow left the entire suite green, which is how it got shipped in
+ * the first place.
+ *
+ * Absent file: a real scaffold state, returns []. Present but unparsable, or
+ * parsed without a `screens` array: a defect, throws where it will be read.
+ */
+export function loadScreensManifest(file: string): unknown[] {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (e) {
+    throw new Error(
+      `${file} exists but does not parse (${(e as Error).message}). Returning an empty list here would ` +
+        `generate zero capture tests and the gate would report GREEN having compared nothing.`
+    );
+  }
+  const screens = (raw as { screens?: unknown }).screens;
+  if (!Array.isArray(screens)) {
+    throw new Error(
+      `${file} parsed but has no \`screens\` array (got ${typeof screens}). An empty capture list makes the ` +
+        `gate green without comparing anything.`
+    );
+  }
+  return screens;
 }
 
 export function isPromoteMode(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -1104,6 +1155,172 @@ export interface AuthPreflightResult {
   user: string;
 }
 
+// Lives here rather than in the spec because helpers belong in lib/ — the spec
+// is an entry point, and everything else the gate can be reasoned about
+// separately already sits here.
+//
+// It was moved after one capture run died with "Playwright Test did not expect
+// test.describe() to be called here", pointing at the spec's first describe.
+// What is NOT established is that exporting from the spec caused that: the spec
+// already exported `attachApiWatch` and `probeBody` long before, and the failing
+// run also differed in test count and in machine load from the six clean runs
+// before it. So this move is tidiness with a plausible side benefit, not a
+// diagnosed fix — if the error recurs, that is the thing to chase, and this
+// comment should not be read as having ruled it out.
+/**
+ * Is JUNEFLOW serving at this base url — not merely "did a socket answer".
+ *
+ * The old test accepted any status below 500, which means a stranger's dev
+ * server on :5173 read as "the app is up". That was survivable while the only
+ * consequence was skipping; with the B-411 session refusal it turns an unrelated
+ * process into a hard failure, so the reachability test now has to answer the
+ * question it was always pretending to. Measured while writing this: an
+ * unrelated node process on :5173 answered `/` with **404**, and the old check
+ * called it reachable.
+ *
+ * The marker is the app's own `<title>Juneflow</title>` from apps/web/index.html
+ * (byte-identical in the built image), plus `id="root"`. Both survive the SPA
+ * fallback, which is the point — a deep link must look like the app too.
+ */
+export async function appReachable(baseURL: string): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch(baseURL, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) return false;
+    const body = await res.text();
+    return body.includes("<title>Juneflow</title>") && body.includes('id="root"');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What the gate should do before capturing anything, given only facts a caller
+ * can supply. Extracted from the spec's `beforeAll` because a beforeAll body is
+ * a seam no unit test can reach without a live stack — which is exactly how the
+ * previous version of this change shipped with nothing that died when it was
+ * reverted.
+ *
+ * The `refuse` arm closes a silent-GREEN path that the reachability check itself
+ * created. `test.skip(!reachable)` means unreachable ⇒ all 99 screens skip ⇒
+ * exit 0, so once `appReachable` also required the app's own markers, a change to
+ * `<title>` or `id="root"` in apps/web/index.html would take Stage 6 green having
+ * compared **zero** screens. A run that was configured to compare — promote is on,
+ * or a session was minted for it — must never quietly compare nothing. A bare
+ * local run with neither still skips, which is what a developer with no stack
+ * wants.
+ *
+ * Honest scope, because this claim is easy to over-read: it closes the FIRST
+ * check only. visual-gate.spec.ts re-evaluates `appReachable` per screen, 99 more
+ * times, with a 1500 ms abort against a stack already under screenshot load — a
+ * slow answer there still skips that one screen silently, and a single skip is
+ * invisible in a run that already prints 100 of them. Filed as B-414.
+ */
+export type GateSessionDecision =
+  | { kind: "skip"; reason: string }
+  | { kind: "refuse"; reason: string }
+  | { kind: "require-session" };
+
+export function resolveGateSessionDecision(input: {
+  manifestLength: number;
+  appReachable: boolean;
+  promote: boolean;
+  storageStatePath: string | undefined;
+}): GateSessionDecision {
+  if (input.manifestLength === 0) {
+    return { kind: "skip", reason: "the manifest is empty — there is nothing to capture" };
+  }
+  if (input.appReachable) return { kind: "require-session" };
+
+  const configured = input.promote || Boolean(String(input.storageStatePath ?? "").trim());
+  if (configured) {
+    return {
+      kind: "refuse",
+      reason:
+        "the app is not reachable, but this run was configured to compare against it " +
+        (input.promote ? "(promote mode is on)" : "(VISUAL_STORAGE_STATE is set)") +
+        ". Skipping every screen would report GREEN having compared nothing — check the base url, " +
+        "the stack, and that the page still serves the app's own markers.",
+    };
+  }
+  return {
+    kind: "skip",
+    reason: "the app is not reachable and no session was configured — start it (docker compose / pnpm dev)",
+  };
+}
+
+/**
+ * The gate's whole pre-flight, routing included — not just the decision table.
+ *
+ * Three gate rounds in a row measured the same hole: the TABLE was extracted and
+ * tested while the code that decides to APPLY it stayed in the spec's beforeAll,
+ * where no unit test can reach it. Re-exempting compare mode (`if (!promote)
+ * return`) left the whole suite green all three times. So the routing lives here
+ * too, with `assert` injected — the unit under test is the routing, and
+ * assertAuthenticatedSession keeps its own real-socket tests.
+ *
+ * Returns "skipped" when there is legitimately nothing to do, "ok" when a session
+ * was proven. Throws on refuse, and re-prefixes a promote-shaped refusal so a
+ * plain compare run does not print "PROMOTE REFUSED" at someone.
+ */
+export interface GatePreflightDeps {
+  assert: (opts: AuthPreflightOptions) => Promise<AuthPreflightResult>;
+  log?: (message: string) => void;
+}
+
+export async function gateSessionPreflight(
+  input: {
+    manifestLength: number;
+    appReachable: boolean;
+    promote: boolean;
+    storageStatePath: string | undefined;
+    baseURL: string;
+    apiBasePath: string;
+    expectUser?: string;
+  },
+  deps: GatePreflightDeps
+): Promise<"skipped" | "ok"> {
+  const decision = resolveGateSessionDecision({
+    manifestLength: input.manifestLength,
+    appReachable: input.appReachable,
+    promote: input.promote,
+    storageStatePath: input.storageStatePath,
+  });
+  if (decision.kind === "skip") {
+    deps.log?.(`  visual gate · not capturing — ${decision.reason}`);
+    return "skipped";
+  }
+  if (decision.kind === "refuse") {
+    throw new Error(`VISUAL GATE REFUSED — ${decision.reason}`);
+  }
+
+  let auth: AuthPreflightResult;
+  try {
+    auth = await deps.assert({
+      storageStatePath: input.storageStatePath,
+      baseURL: input.baseURL,
+      apiBasePath: input.apiBasePath,
+      expectUser: input.expectUser,
+    });
+  } catch (e) {
+    const message = (e as Error).message ?? String(e);
+    // PromoteRefusal prefixes every message with "PROMOTE REFUSED — ", which is
+    // wrong-and-confusing on a compare run. The point of this whole change is
+    // that the red must be readable.
+    if (!input.promote && message.startsWith(PROMOTE_REFUSAL_PREFIX)) {
+      throw new Error(`VISUAL GATE REFUSED — ${message.slice(PROMOTE_REFUSAL_PREFIX.length)}`);
+    }
+    throw e;
+  }
+  deps.log?.(
+    `  ${input.promote ? "promote · " : ""}auth pre-flight OK — GET ${input.baseURL}${input.apiBasePath}/me ` +
+      `answered 200 as ${auth.user} (token ${auth.tokenChars} chars, origin ${auth.origin || "unknown"})`
+  );
+  return "ok";
+}
+
 /**
  * GUARD 0 — prove the session is authenticated ONCE, before screen 0.
  *
@@ -1126,12 +1343,32 @@ export interface AuthPreflightResult {
 export async function assertAuthenticatedSession(
   opts: AuthPreflightOptions
 ): Promise<AuthPreflightResult> {
+  // Refuse an unusable base url FIRST, before any request. Both origin guards
+  // below were written `wantOrigin && …`, so an empty or malformed baseURL
+  // disarmed the whole comparison — fail-open in the same shape as the branch it
+  // sits next to, on the other side of it. Reachable through a set-but-empty
+  // VISUAL_BASE_URL, since `??` does not fall back on "". Checked here rather
+  // than beside the comparison because a bad base url also makes every error
+  // below it a confusing one about a fetch that never had a chance.
+  if (!originOf(opts.baseURL)) {
+    throw new PromoteRefusal(
+      `the run's base url has no parsable origin (${JSON.stringify(opts.baseURL)}), so the session's origin cannot ` +
+        `be checked against it — and an origin mismatch is invisible to every other guard here.`
+    );
+  }
   const statePath = String(opts.storageStatePath ?? "").trim();
   if (!statePath) {
     throw new PromoteRefusal(
-      "VISUAL_STORAGE_STATE is not set — the run would capture 99 screens with NO bearer token. " +
-        "apps/web's router is not auth-gated, so those shots would look routed and plausible while every " +
-        "body is an unauthenticated empty state, and promoting them would make that the definition of correct."
+      "VISUAL_STORAGE_STATE is not set — the run would capture every screen with NO bearer token. " +
+        "apps/web's router is not auth-gated, so those shots look routed and plausible while every body is " +
+        "an unauthenticated empty state. In PROMOTE that would make the empty state the definition of " +
+        "correct; in COMPARE it fails almost every screen with the exact shape of drift, which is how " +
+        "B-411 went unread for weeks (measured, one machine, one pack: with a session 11 screens failed that " +
+        "morning and 14 that afternoon — the growth is date drift, not the session — while WITHOUT one 98 " +
+        "fail and the only pass is `login`, the one screen that calls no API — measured before the B-413 " +
+        "toolchain repair, so the GAP is the claim, not the integers). " +
+        "Mint a session first: POST /api/v1/auth/login, then write a Playwright storageState whose origin " +
+        "is the base url and whose localStorage carries `juneflow-token`."
     );
   }
   if (!existsSync(statePath)) {
@@ -1146,12 +1383,27 @@ export async function assertAuthenticatedSession(
   }
 
   let token = "";
+  // Prefer the entry whose origin matches the run's base url. Taking the LAST
+  // match regardless (the previous behaviour) meant a state file carrying several
+  // origins could validate a token the browser will never use, and then refuse a
+  // file that did contain the right one — the check answering about the wrong
+  // token while sounding certain.
   let tokenOrigin = "";
+  const wantOriginEarly = originOf(opts.baseURL);
   for (const o of state.origins ?? []) {
+    const thisOrigin = String(o.origin ?? "");
     for (const kv of o.localStorage ?? []) {
       if (kv?.name === AUTH_TOKEN_KEY && String(kv.value ?? "").trim() !== "") {
+        // Prefer a MATCHING origin over a non-matching one, and among matching
+        // ones take the LAST — a browser applying storageState in order ends up
+        // with the last write, so picking the first would validate a token the
+        // page does not end up holding. That is the same class of divergence
+        // this check exists to close.
+        const haveMatch = token !== "" && wantOriginEarly !== "" && originOf(tokenOrigin) === wantOriginEarly;
+        const thisMatches = wantOriginEarly !== "" && originOf(thisOrigin) === wantOriginEarly;
+        if (haveMatch && !thisMatches) continue;
         token = String(kv.value);
-        tokenOrigin = String(o.origin ?? "");
+        tokenOrigin = thisOrigin;
       }
     }
   }
@@ -1220,23 +1472,58 @@ export async function assertAuthenticatedSession(
         `user has the wrong menus and the wrong permissions baked into it.`
     );
   }
+  // B-415 — the token proves nothing if the BROWSER will not carry it.
+  //
+  // Everything above validates the token out of band, with an Authorization
+  // header this code sets itself. Playwright, however, matches storageState
+  // origins EXACTLY: a state file written for http://localhost:5173 contributes
+  // nothing to a page opened at http://127.0.0.1:41231. The pre-flight would then
+  // pass on a token the run never uses, and all 99 screens capture logged out —
+  // B-411 restored, with every new guard green.
+  //
+  // This was not hypothetical: the suite's own passing test fed `baseURL` an
+  // ephemeral 127.0.0.1 URL against a state file hardcoded to localhost:5173, so
+  // the guard's green case WAS the broken configuration.
+  //
+  // Compared on origin only (scheme + host + port); a path or trailing slash on
+  // either side is not a mismatch.
+  const wantOrigin = originOf(opts.baseURL);
+  const haveOrigin = originOf(tokenOrigin);
+  // Naming only the one entry that happened to win misleads when a state file
+  // carries several; list them all rather than sound certain about one.
+  const allOrigins = (state.origins ?? []).map((o) => String(o.origin ?? "")).filter(Boolean);
+  // Fail CLOSED on an unusable stored origin. The previous form skipped the whole
+  // check when `haveOrigin` was empty — and a blank, missing or unparsable origin
+  // ("", absent key, "not a url", "//host", "http://") is precisely the shape where
+  // Playwright attaches nothing, so the guard waved through the one input that
+  // reproduces B-411. There is no legitimate state file with one.
+  if (wantOrigin && !haveOrigin) {
+    throw new PromoteRefusal(
+      `the session file records an origin this run cannot use (${JSON.stringify(tokenOrigin)}) — Playwright ` +
+        `matches storageState origins exactly, so the browser would carry NO token and every screen would ` +
+        `capture logged out. Mint the state file against ${wantOrigin}.`
+    );
+  }
+  if (wantOrigin && haveOrigin && wantOrigin !== haveOrigin) {
+    throw new PromoteRefusal(
+      `the session was written for origin ${haveOrigin}${allOrigins.length > 1 ? ` (of ${allOrigins.length}: ${allOrigins.join(", ")})` : ""} but the run opens ${wantOrigin} — Playwright matches ` +
+        `storageState origins exactly, so the browser would carry NO token and every screen would capture ` +
+        `logged out while this check passed. Mint the state file against the same base url the gate uses.`
+    );
+  }
+
   return { origin: tokenOrigin, tokenChars: token.length, user: who };
 }
 
-/**
- * The pre-flight as the RUN calls it: a no-op when promote is off, a refusal
- * when the session is not authenticated. Lives here rather than inline in the
- * spec's beforeAll so the decision "does this run need an authenticated
- * session, and is it?" is itself testable — an inline beforeAll body is a seam
- * no unit test can reach without a live stack.
- */
-export async function promoteAuthPreflight(
-  session: object | null,
-  opts: AuthPreflightOptions
-): Promise<AuthPreflightResult | null> {
-  if (!session) return null;
-  return assertAuthenticatedSession(opts);
+/** scheme://host:port of a url, or "" when it cannot be parsed. */
+function originOf(u: string | undefined): string {
+  try {
+    return new URL(String(u ?? "")).origin;
+  } catch {
+    return "";
+  }
 }
+
 
 export interface PromoteSessionOptions {
   /** tests/visual/reference — the pack root. */
@@ -1480,6 +1767,24 @@ export function openPromoteSession(
     // CI silently rewriting the arbiter of design fidelity is the one way this
     // mechanism could do more damage than the bug it fixes.
     throw new PromoteRefusal(`${PROMOTE_ENV} is set but CI=${env.CI} — a re-baseline is never promoted from CI`);
+  }
+  if (rows.length === 0) {
+    // A promote over an empty manifest used to run to completion: the session
+    // pre-flight skips (nothing to capture), no capture test runs, and commit()
+    // asserts 0 promoted and passes — after the banner has announced it will
+    // OVERWRITE 0 baselines. That is a green run of the one mechanism in this
+    // repo allowed to rewrite the arbiter of design fidelity.
+    //
+    // The path that reaches here is now narrow, and saying so matters: since the
+    // same change split loadManifest, a MALFORMED manifest throws at collection
+    // and never gets this far. What still arrives is a manifest that is absent,
+    // or one that parses to an empty `screens` array. Both are legitimate
+    // scaffold states for COMPARE mode and neither is a licence to promote.
+    throw new PromoteRefusal(
+      "the manifest is empty — there is nothing to promote. screens.manifest.json is either absent or " +
+        "parses to an empty `screens` array (a malformed one throws earlier, at collection). A promote " +
+        "that overwrites nothing while reporting success is worse than one that refuses."
+    );
   }
   const log = opts.log ?? ((m: string) => console.log(m));
   const line = "=".repeat(78);

@@ -283,10 +283,80 @@ jobs:
           fi
       - name: Start dev stack (docker compose)
         if: hashFiles('infra/docker-compose.yml') != '' && hashFiles('tests/visual/**') != ''
+        # B-409: freeze the seed clock. Without an instant, B-323's deterministic
+        # seeding still stamps from the wall clock, so date-bearing screens drift
+        # further every day — measured on the live clock: 11 failing screens one
+        # morning, 14 the same afternoon, with nothing dropping out.
+        #
+        # THE VALUE IS THE ONE B-409 MEASURED, AND THE CHOICE IS NOT SETTLED.
+        # Wei's B-409 ruling is "freeze the clock for dms/gr-list" — freeze it so
+        # that those two screens go green. This value does that: measured on the
+        # lockfile's Playwright (B-413, repaired), dms and gr-list both pass under
+        # it and the failing set is 12. Before that repair the same run measured
+        # 9 — the browser build moved the count, which is why B-413 had to be
+        # closed before any of these numbers could be trusted. Of the 9-era set,
+        # one screen came and went across five fresh stacks; that one is B-412.
+        #
+        # A second, equally evidenced source disagrees about the instant:
+        # tests/visual/screens.manifest.json records the pack's own provenance as
+        # "FULL RE-BASELINE (2026-08-07) ... with SEED_FROZEN_NOW=2026-07-20T09:00:00Z
+        # (B-224 - freezes the seed clock AND the ap/ar aging clock) ... then proven
+        # strict-0". A previous revision of this step shipped that instant instead.
+        # Measured, it fails 15 screens rather than 9 — dashboard passes, but seven
+        # aging/date screens start failing, INCLUDING dms and gr-list, which are
+        # the entire content of the approval above. (9 - 1 + 7 = 15 only if those
+        # two are inside the seven, and they are.) So it was reverted, and the
+        # conflict is filed as B-416 rather than settled in this comment. Do not
+        # change this value on the strength of the provenance line alone.
+        #
+        # Either way a re-baseline is required: no instant reproduces this pack,
+        # because B-323 changed the stamping ALGORITHM and not merely the clock.
+        #
+        # B-413 is repaired. The 12 above is post-repair, on the lockfile's
+        # Playwright 1.61.1. The 15-vs-9 comparison ABOVE is NOT — both arms were
+        # measured before the repair, and what carries there is their ORDERING
+        # (this instant fails fewer than the provenance one), not the integers —
+        # and AT MOST the ordering: the 15 was never re-measured after the repair,
+        # which moved this instant's own count from 9 to 12.
+        #
+        # Scoped to THIS STEP on purpose (an `env:` on the step, which is narrower
+        # than the job) — Stage 5's E2E was written against the live clock (see
+        # B-404) and must not silently inherit a frozen one.
+        env:
+          SEED_FROZEN_NOW: "2026-08-07T12:22:42+07:00"
         run: docker compose -f infra/docker-compose.yml up -d --wait
       - name: Install Playwright browsers
         if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
         run: pnpm --dir tests exec playwright install --with-deps chromium
+      - name: Mint the visual-gate session (B-411)
+        if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
+        # Without this the gate captures every screen LOGGED OUT and compares it
+        # with baselines captured signed-in, which cannot pass however correct the
+        # app is — and fails in the shape of drift, so the red is unreadable.
+        # Measured, one machine, one image, one pack, varying only the session:
+        # 11 screens fail with it in the morning and 14 that afternoon, against
+        # 98 without it — two runs, not one variable; the growth is the drift
+        # this same step freezes. The single pass without a session is `login`,
+        # the one screen in the manifest that calls no API.
+        #
+        # No secret: the user is seeded (packages/db/src/seed/index.ts:209) and
+        # this dev password is already plaintext in the repo's capture scripts.
+        # The step FAILS if no token comes back, because a silent empty token
+        # would put the gate straight back into the state this fixes.
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sS --fail-with-body -X POST http://localhost:5173/api/v1/auth/login \
+            -H 'content-type: application/json' \
+            -d '{"email":"wipha@rungrueang.co.th","password":"juneflow-dev"}' \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).token||"")}catch(e){}})')
+          if [ -z "$TOKEN" ]; then
+            echo "::error::login returned no token — the gate would capture logged-out screens (B-411)"
+            exit 1
+          fi
+          node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({cookies:[],origins:[{origin:"http://localhost:5173",localStorage:[{name:"juneflow-token",value:process.argv[2]}]}]}))' \
+            "$RUNNER_TEMP/visual-storage-state.json" "$TOKEN"
+          echo "VISUAL_STORAGE_STATE=$RUNNER_TEMP/visual-storage-state.json" >> "$GITHUB_ENV"
+          echo "minted a session for the visual gate (token ${#TOKEN} chars)"
       - name: Visual gate (screenshots vs tests/visual/reference — PLAN.md §0)
         if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
         run: pnpm run --if-present test:visual

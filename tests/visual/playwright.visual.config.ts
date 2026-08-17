@@ -45,7 +45,7 @@ export default defineConfig({
     // Auth for capture mode (P0-QA-04 fold): a run points VISUAL_STORAGE_STATE at a
     // Playwright storageState file (localStorage bearer token — apps/web/src/auth-token.ts
     // key `juneflow-token`) so /#/<route> renders the authed shell, not the login screen.
-    // Unset (self-check / no-app) → undefined = no state, unchanged behaviour.
+    // Unset (self-check / no-app) → undefined = no state. NOT unchanged behaviour since B-411: if the app IS reachable, an unset value now REFUSES the whole run instead of capturing 99 logged-out screens that fail in the shape of drift. Unset with no app still skips.
     storageState: process.env.VISUAL_STORAGE_STATE || undefined,
   },
 });
