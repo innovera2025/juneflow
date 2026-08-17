@@ -215,7 +215,7 @@ jobs:
         run: docker compose -f infra/docker-compose.yml up -d --wait
       - name: Install Playwright browsers
         if: hashFiles('tests/e2e/**') != '' && hashFiles('package.json') != ''
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --dir tests exec playwright install --with-deps chromium
       - name: E2E tests (state machine per docs/handoff/flows.html)
         if: hashFiles('tests/e2e/**') != '' && hashFiles('package.json') != ''
         run: pnpm run --if-present test:e2e
