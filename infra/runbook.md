@@ -170,6 +170,14 @@ feature/**  →  dev  (auto-merge เมื่อ CI เขียว + diff-revi
      ```
 
      เจอ `password authentication failed for user "..."` = เคสนี้ · เจอแค่ `drizzle-kit migrate: Exit status 1` (บรรทัดสรุปของ pnpm) โดยไม่มีบรรทัดบน = คนละเรื่อง ให้อ่าน log เต็มก่อน อย่าเพิ่งไปแก้รหัส
+
+   - **สาเหตุที่สามที่ให้อาการหน้าตาเดียวกันเป๊ะ: รหัสมีอักขระ `/`** — แยกออกจากสองเคสบนด้วย log บรรทัดนี้:
+
+     ```bash
+     docker compose logs migrate-seed | grep -i 'Invalid URL'
+     ```
+
+     เจอ `Invalid URL` = รหัสพัง **connection string** ไม่ใช่ auth (จึงไม่มีบรรทัด `password authentication failed` ให้เห็นเลย และ psql ด้วยรหัสเดียวกันจะเข้าได้ปกติ ยิ่งชวนให้ไล่ผิดทาง) · **วัดจริงกับ pg-connection-string@2.14.0 ตามที่ lockfile ตรึง:** รหัสที่มี `/` → THROW `Invalid URL` · `+` `=` `@` ผ่านปกติ · **ทางแก้คือเปลี่ยนรหัสให้ไม่มี `/`** (`openssl rand -hex 32` — ดู §1.6 ข้อ 6 (2)) ไม่ใช่ไป re-key volume · ถ้า initdb ผ่านไปแล้วด้วยรหัสเก่า ให้ใช้ (ข) ข้างล่างตั้งรหัสใหม่ที่ไม่มี `/`
    - **เหตุ:** `POSTGRES_PASSWORD` ตั้งรหัสให้เฉพาะตอน initdb ครั้งแรกเท่านั้น — volume เดิมจะไม่ถูก re-key และ postgres ไม่ฟ้องอะไรเลย
    - **แก้ได้ 2 ทาง เลือกทางเดียว:**
      - **(ก) ใช้รหัสที่ volume มีอยู่เดิม** — แก้ `POSTGRES_PASSWORD` ใน `infra/.env` ให้ตรงของเดิม แล้ว `up` ใหม่ตามข้อ 4 · ไม่แตะ DB เลย ปลอดภัยสุด เอาทางนี้ก่อนถ้ายังหารหัสเดิมได้
@@ -287,7 +295,15 @@ postgres=127.0.0.1:5432  redis=127.0.0.1:6379  api=0.0.0.0:3000  web=0.0.0.0:517
 
    # (2) secrets — เครื่องนี้เท่านั้น ห้ามเข้า repo (infra/.env ถูก git-ignore ไว้แล้ว)
    #     ตั้งค่าจริงด้วยมือ: POSTGRES_PASSWORD · BETTER_AUTH_SECRET · ACME_EMAIL
-   #     สุ่มให้: openssl rand -base64 32
+   #     สุ่มให้: BETTER_AUTH_SECRET → `openssl rand -base64 32` (เป็น secret เฉย ๆ อักขระอะไรก็ได้)
+   #     ⚠️ POSTGRES_PASSWORD ต้อง **ไม่มีอักขระ `/`** และให้ใช้ `openssl rand -hex 32` แทน base64
+   #        เหตุผล: รหัสถูกแทรกดิบ ๆ ลง DATABASE_URL (`postgres://user:PASS@postgres:5432/db`
+   #        — docker-compose.yml:86,105,139) แล้ว `pg` parse ด้วย pg-connection-string ซึ่งใช้
+   #        URL parser · **วัดจริงกับเวอร์ชันที่ lockfile ตรึงไว้ (2.14.0):** รหัสที่มี `/`
+   #        → THROW `Invalid URL` ส่วน `+` `=` `@` ผ่านปกติ · `openssl rand -base64 32` ให้ 43
+   #        อักขระจากชุดที่มี `/` อยู่ด้วย → มี `/` ประมาณครึ่งหนึ่งของครั้งที่สุ่ม
+   #        อาการที่ออกมาคือ **"postgres เขียวแต่ migrate/api ตาย"** ซึ่งหน้าตาเหมือน §1.5 ข้อ 7
+   #        (รหัสไม่ตรง volume เดิม) ทั้งที่คนละสาเหตุ — จะไล่ผิดทางทั้งดุ้น
    #     ⚠️ ถ้าเครื่องเคยมี volume juneflow_pgdata อยู่แล้ว POSTGRES_PASSWORD ต้องตรงกับตอน initdb (§1.5 ข้อ 7)
    ${EDITOR:-nano} infra/.env
 
