@@ -18,6 +18,22 @@
 # answers with the origin IP — so this file uses Caddy's automatic HTTPS (ACME HTTP-01)
 # instead, which needs nothing but port 80 reachable. If DNS later moves behind
 # Cloudflare, switch to the prod topology rather than editing this into a hybrid.
+# ⚠️ TESTING THIS FILE: use `caddy validate` ONLY. Never smoke-test it by starting caddy.
+#
+#   docker run --rm -e ACME_EMAIL=… -v "$PWD/infra/Caddyfile":/etc/caddy/Caddyfile:ro \
+#     caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#
+# `validate` adapts the config and exits — it never talks to a CA. Actually RUNNING caddy
+# does, within about a second, because the site block below names real domains and
+# automatic HTTPS starts immediately: measured on 2026-08-18, a container started merely
+# to check that the healthcheck command worked registered an ACME account against Let's
+# Encrypt PRODUCTION and began a tls-alpn-01 challenge for www.juneflow.app. Those
+# challenges fail from anywhere that is not the box the DNS points at, and Let's Encrypt
+# counts failed validations against a rate limit (5 per account per hostname per hour).
+# Burn that limit and the real deploy cannot get a certificate — and the symptom is
+# "the site is down", hours after the thing that caused it.
+# If you ever must run it for real testing, point it at the staging CA first:
+#   acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 {
 	# ACME registration address. Let's Encrypt sends expiry warnings here; an empty
 	# value still issues (anonymous account) but you lose that warning, so set it.
