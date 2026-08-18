@@ -1,0 +1,95 @@
+# infra/docker-compose.public.yml — THIRD overlay, for a staging box on the public internet.
+#
+# Apply on top of BOTH, in this order:
+#   infra/docker-compose.yml : infra/docker-compose.staging.yml : this file
+#
+# WHAT IT CHANGES, and only this:
+#   1) api and web lose their published ports entirely (they keep talking over the
+#      compose network, which is how they already reach each other).
+#   2) a Caddy `edge` service takes 80/443 and terminates TLS for juneflow.app.
+#
+# Everything else — migrate-without-seed, loopback datastores, required secrets — is
+# inherited from the staging overlay, which stays the owner of those properties.
+#
+# WHY IT EXISTS
+# The staging overlay leaves api/web on 0.0.0.0 on purpose, and its comment states the
+# precondition: "What confines them is the VPN / host firewall; if this box ever grows a
+# public interface, put an edge proxy in front of them rather than deleting this comment."
+# juneflow.app resolves publicly to the staging host, so the precondition is false and the
+# instruction in that comment is what this file carries out. It does NOT delete or weaken
+# the staging overlay.
+#
+# WHY `!override` AND NOT A PLAIN EMPTY LIST
+# Compose CONCATENATES `ports:` across files; it does not replace them. A plain `ports: []`
+# here would merge to the base's entry unchanged and publish exactly what it was meant to
+# withdraw — the same trap the staging overlay documents for postgres/redis, where deleting
+# just the tag left a 0.0.0.0 entry alive next to the loopback one. The tag is the whole
+# mechanism. Requires Compose >= 2.24, same as the staging overlay.
+#
+# THE DEPLOY ASSERTION MUST BE THE PUBLIC ONE
+# The staging assertion in infra/runbook.md §1.5 ข้อ 4 asks three questions, all about
+# migrate-seed/postgres/redis. It passes unchanged on this stack whether or not this file
+# is merged — it has no clause about api, web, or edge, so it CANNOT tell a proxied box
+# from one publishing the API to the internet. Use the four-clause form in §1.6 on a public
+# host. Adding clauses here rather than loosening anything there.
+
+services:
+  api:
+    # Reachable only as `api:3000` on the compose network — by web's nginx (which proxies
+    # location /api/ to http://api:3000) and by worker. Nothing outside the stack consumes
+    # it directly, so withdrawing the published port costs nothing.
+    #
+    # Docker writes its own DNAT rules into the DOCKER chain, which ufw does not filter:
+    # while this port is published it answers on the public NIC no matter what the host
+    # firewall says. That is the same reasoning the staging overlay gives for postgres and
+    # redis; on a box with a public interface it applies to the API too, and more sharply,
+    # because the API is unauthenticated at the edge, has no rate limiting, and logs
+    # req.url + query at level 30 (B-406).
+    ports: !override []
+
+  web:
+    # Served through `edge` instead. Keeping a published port here would leave a plaintext
+    # HTTP copy of the whole app on :5173 beside the HTTPS one — and any HSTS the edge
+    # sets does not apply to a port the browser reaches directly.
+    ports: !override []
+
+  edge:
+    image: ${EDGE_IMAGE:-caddy:2}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Mounted from OUTSIDE the git checkout for the same reason the staging overlay is:
+      # rollback here is `git checkout <previous green SHA>`, and every SHA older than this
+      # file's own commit does not contain it. A repo-mounted Caddyfile VANISHES mid-incident
+      # and the edge then fails to start on the one box that is serving users. Install it
+      # once per host (infra/runbook.md §1.6):
+      #   sudo install -D -m 0644 infra/Caddyfile /etc/juneflow/caddy/Caddyfile
+      - ${EDGE_CONFIG_DIR:-/etc/juneflow/caddy}:/etc/caddy:ro
+      # ACME account key + issued certs. MUST be a named volume, not a bind or a tmpfs:
+      # Let's Encrypt rate-limits issuance per domain (5 duplicate certs/week), so a
+      # container that forgets its certs on every `up` will deploy fine for a few days and
+      # then start failing to get a certificate at all, in a way that looks like a Caddy bug.
+      - edge_data:/data
+      - edge_config:/config
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      # Empty is tolerated by Caddy (anonymous ACME account) but loses expiry warnings.
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    healthcheck:
+      # Caddy's admin API on 2019 answers only when the config actually loaded, so this
+      # goes red on a Caddyfile typo instead of reporting green with a dead site.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  edge_data:
+  edge_config:

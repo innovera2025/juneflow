@@ -1,0 +1,68 @@
+# infra/Caddyfile — edge for a staging box that is reachable from the PUBLIC internet.
+#
+# WHY THIS FILE EXISTS
+# infra/docker-compose.staging.yml deliberately leaves `api` and `web` on the base's
+# 0.0.0.0 bindings, and says so in its own comment: "if this box ever grows a public
+# interface, put an edge proxy in front of them rather than deleting this comment."
+# juneflow.app resolves publicly to the staging host (measured: public DNS answer, and
+# port 22 open from off-net), so that precondition is now FALSE. Without an edge, a
+# staging deploy publishes the app over plaintext HTTP on every interface.
+#
+# This is the edge. Pair it with infra/docker-compose.public.yml, which is the piece
+# that actually takes api/web OFF their published ports — this file alone changes
+# nothing about what is exposed.
+#
+# NOT the same file as prod's. infra/docker-compose.prod.yml mounts an edge config from
+# ${EDGE_CONFIG_DIR} on the host and expects Cloudflare Origin certs in ${EDGE_TLS_DIR};
+# that topology assumes DNS is proxied through Cloudflare. It is not today — juneflow.app
+# answers with the origin IP — so this file uses Caddy's automatic HTTPS (ACME HTTP-01)
+# instead, which needs nothing but port 80 reachable. If DNS later moves behind
+# Cloudflare, switch to the prod topology rather than editing this into a hybrid.
+{
+	# ACME registration address. Let's Encrypt sends expiry warnings here; an empty
+	# value still issues (anonymous account) but you lose that warning, so set it.
+	email {$ACME_EMAIL}
+}
+
+juneflow.app, www.juneflow.app {
+	# Everything goes to the web container, INCLUDING /api/. That is not a shortcut:
+	# the web image's nginx already proxies `location /api/` to http://api:3000
+	# (apps/web/nginx.conf.template:65-69), and the bundle is built with
+	# VITE_API_BASE_URL=/api/v1, i.e. SAME-ORIGIN by design (apps/web/Dockerfile).
+	# Splitting /api off to the api container here would be a second, divergent copy of
+	# a routing rule that already exists one layer down — and B-410 was exactly the bug
+	# where the front end lost its /api prefix and nginx's SPA fallback answered
+	# index.html with 200. One owner for that route; it is nginx, not Caddy.
+	reverse_proxy web:80
+
+	# HSTS. The three content headers (X-Content-Type-Options, X-Frame-Options,
+	# Referrer-Policy) are already set by the web image's nginx and are NOT repeated
+	# here: nginx's add_header does not inherit into locations that declare their own,
+	# which that template documents at length, so duplicating them at the edge would
+	# make two places to get it wrong. HSTS belongs here because only the edge knows
+	# TLS terminated successfully.
+	#
+	# max-age is 1 day, deliberately, NOT the 1-year value people paste from guides.
+	# HSTS is not revocable from the server side: once a browser has pinned it, that
+	# host is HTTPS-only for the full max-age even if you take the header away. On a
+	# box that is still finding its shape, a year-long pin is a year-long outage risk
+	# for one bad cert renewal. Raise it once the deploy has been stable, and only then.
+	# No `includeSubDomains`, no `preload` — both are far harder to walk back.
+	header Strict-Transport-Security "max-age=86400"
+
+	# Access log to stdout so `docker compose logs edge` shows it and the daemon's
+	# json-file driver rotates it, matching every other service in the stack.
+	log {
+		output stdout
+		format console
+	}
+}
+
+# WHAT THIS EDGE DOES NOT DO — do not read TLS as "the box is now hardened":
+#   * NO RATE LIMITING. Caddy's rate_limit is a third-party module that requires a
+#     custom build (xcaddy); `image: caddy:2` does not have it. The API is now
+#     reachable from the internet with no request cap of any kind.
+#   * NO AUTH IN FRONT. Anyone who can reach the domain reaches the login page.
+#   * B-406 IS UNFIXED: the API logs req.url and query at level 30, so PII lands in
+#     container logs. That was filed while this box was believed to be VPN-only.
+# Those are tracked in BLOCKERS.md. This file closes plaintext transport and nothing more.
