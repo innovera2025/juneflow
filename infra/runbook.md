@@ -269,10 +269,59 @@ postgres=127.0.0.1:5432  redis=127.0.0.1:6379  api=0.0.0.0:3000  web=0.0.0.0:517
    - **อ่าน config เป็น JSON ทั้งก้อนครั้งเดียว แล้วเช็คทีละ service จากโครงสร้าง** ไม่ได้ grep บรรทัด — การปลอมด้วย newline ใน env ที่ §1.5 บันทึกไว้จึงใช้ไม่ได้ตั้งแต่ต้น (ค่าที่ parse แล้วงอกบรรทัดใหม่ไม่ได้) · **วัดจริง:** `POSTGRES_PASSWORD=$'x\n- pnpm --filter @juneflow/db migrate'` → REFUSE
    - **วัดจริง 9 สภาพ · fail-closed ทุกช่อง** — สภาพถูกต้อง ACCEPT exit 0 · ไม่มี public overlay REFUSE (บอกชื่อ service ที่เปิดอยู่) · base ไฟล์เดียว REFUSE (6 ข้อพร้อมกัน) · ลบ tag ที่ api REFUSE · ลบ tag ที่ web REFUSE · edge ไปอยู่ 8443 REFUSE · ลบ service `edge` ทิ้ง REFUSE · forge newline REFUSE · **จำนวนสภาพที่เปิดอยู่แล้ว ACCEPT = 0**
 
-4. **`edge` ยังไม่ตัดสินว่าใช้ TLS จากไหน — ดู `B-418`** · PLAN.md §255 และ `infra/CLAUDE.md` ระบุสถาปัตยกรรมไว้ว่า **Edge = Cloudflare DNS+CDN+WAF+rate limit+Turnstile** และ `docker-compose.prod.yml` รอ Cloudflare Origin cert ที่ `${EDGE_TLS_DIR}` · แต่ **DNS ของ `juneflow.app` วันนี้ชี้ตรงมาที่ origin ไม่ได้ proxy ผ่าน Cloudflare** · `infra/Caddyfile` ที่วางไว้ใช้ ACME HTTP-01 (ขอ cert เองด้วยพอร์ต 80) ซึ่ง **ขึ้นได้โดยไม่ต้องมีบัญชี Cloudflare แต่ไม่ได้ WAF/rate limit/Turnstile ตามที่แผนเขียนไว้** — เลือกทางไหนเป็นคำตัดสินของ Wei ใน `B-418` **ห้ามเลือกเอง**
+4. **TLS = Let's Encrypt (ACME HTTP-01) — คำตัดสิน `B-418` = ข (Wei · 2026-08-18 "ใช้ Let's Encrypt ไปก่อน")** · `infra/Caddyfile` เป็นแบบนั้นอยู่แล้ว ไม่ต้องแก้อะไรเพิ่ม
+   - **"ไปก่อน" คือทางผ่าน ไม่ใช่ปลายทาง** — สิ่งที่ยัง**ไม่ได้**มาพร้อม TLS และจะได้ก็ต่อเมื่อย้ายไป Cloudflare ตาม PLAN.md §255: **WAF · rate limit · Turnstile** · อย่าอ่านว่า "ขึ้น https แล้ว = ป้องกันแล้ว"
+   - ตอนย้ายไป Cloudflare ทีหลัง: เปลี่ยนที่ `edge` ให้ใช้ Origin cert จาก `${EDGE_TLS_DIR}` (topology เดียวกับ `docker-compose.prod.yml`) · **การถอน published port ของ `api`/`web` ไม่ต้องแก้ ใช้ต่อได้เลย** และยังจำเป็นอยู่ (ดูบรรทัดล่าง)
+   - บริบทเดิมของคำตัดสิน · PLAN.md §255 และ `infra/CLAUDE.md` ระบุสถาปัตยกรรมไว้ว่า **Edge = Cloudflare DNS+CDN+WAF+rate limit+Turnstile** และ `docker-compose.prod.yml` รอ Cloudflare Origin cert ที่ `${EDGE_TLS_DIR}` · แต่ **DNS ของ `juneflow.app` วันนี้ชี้ตรงมาที่ origin ไม่ได้ proxy ผ่าน Cloudflare** · `infra/Caddyfile` ที่วางไว้ใช้ ACME HTTP-01 (ขอ cert เองด้วยพอร์ต 80) ซึ่ง **ขึ้นได้โดยไม่ต้องมีบัญชี Cloudflare แต่ไม่ได้ WAF/rate limit/Turnstile ตามที่แผนเขียนไว้** — เลือกทางไหนเป็นคำตัดสินของ Wei ใน `B-418` **ห้ามเลือกเอง**
    - สิ่งที่ **ไม่** ขึ้นกับคำตัดสินนั้น: การถอน published port ของ `api`/`web` จำเป็น**ทั้งสองทาง** — ถ้าปล่อย `0.0.0.0:3000` ไว้ คนที่ยิงตรงเข้า IP **ข้าม Cloudflare ทั้งดุ้น** ต่อให้ DNS proxy แล้วก็ตาม
 
 5. **สิ่งที่ §1.6 ไม่ได้แก้ — อย่าอ่าน TLS ว่า "แข็งแล้ว"**: ไม่มี rate limiting (โมดูล `rate_limit` ของ Caddy ต้อง build เอง `image: caddy:2` ไม่มีให้) · ไม่มี auth หน้า edge · **`B-406` ยังเปิดอยู่ — API log `req.url` + query ที่ level 30 คือ PII ลง container log** ซึ่งตอนยื่นเรื่องยังเชื่อกันว่าเครื่องนี้อยู่หลัง VPN · ทั้งหมดอยู่ใน `BLOCKERS.md`
+
+6. **ลำดับครั้งแรกบนเครื่องนี้ — รันบนเซิร์ฟเวอร์ ทีละบล็อก อย่ารวบ** (ต้องมี `docker` + **Compose >= 2.24** และ `git`)
+
+   ```bash
+   # (1) repo — ปักที่ SHA ที่ตั้งใจ ไม่ใช่ HEAD ลอยๆ
+   sudo mkdir -p /srv && sudo chown "$USER" /srv
+   git clone https://github.com/innovera2025/juneflow /srv/juneflow 2>/dev/null || git -C /srv/juneflow fetch --all
+   cd /srv/juneflow && git checkout dev && git pull --ff-only && git log --oneline -1
+
+   # (2) secrets — เครื่องนี้เท่านั้น ห้ามเข้า repo (infra/.env ถูก git-ignore ไว้แล้ว)
+   #     ตั้งค่าจริงด้วยมือ: POSTGRES_PASSWORD · BETTER_AUTH_SECRET · ACME_EMAIL
+   #     สุ่มให้: openssl rand -base64 32
+   #     ⚠️ ถ้าเครื่องเคยมี volume juneflow_pgdata อยู่แล้ว POSTGRES_PASSWORD ต้องตรงกับตอน initdb (§1.5 ข้อ 7)
+   ${EDITOR:-nano} infra/.env
+
+   # (3) overlay + Caddyfile ออกไปอยู่นอก checkout (rollback ลบมันไม่ได้)
+   sudo install -D -m 0644 infra/docker-compose.staging.yml /etc/juneflow/docker-compose.staging.yml
+   sudo install -D -m 0644 infra/docker-compose.public.yml  /etc/juneflow/docker-compose.public.yml
+   sudo install -D -m 0644 infra/Caddyfile                  /etc/juneflow/caddy/Caddyfile
+
+   # (4) ผูก COMPOSE_FILE (absolute ทุก path) แล้ว **logout/login หนึ่งรอบ**
+   echo "COMPOSE_FILE=/srv/juneflow/infra/docker-compose.yml:/etc/juneflow/docker-compose.staging.yml:/etc/juneflow/docker-compose.public.yml" | sudo tee -a /etc/environment
+
+   # (5) firewall (ข้อ 2) — 80 ต้องเปิด ไม่งั้น Let's Encrypt ออก cert ไม่ได้
+   sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw status numbered
+   ```
+
+   จากนั้น **logout/login** แล้วต่อด้วย:
+
+   ```bash
+   cd /srv/juneflow
+   # (6) seed ครั้งเดียวต่อเครื่อง — ประตูสามชั้น (§1.5 ข้อ 3) · ไม่ใช่ `up` · ข้ามได้ถ้าเครื่องมีข้อมูลแล้ว
+   #     >>> คัดลอกคำสั่งจาก §1.5 ข้อ 3 ตามตัว ห้ามพิมพ์เอง <<<
+
+   # (7) deploy — guard 6 ข้ออ้าง + up เป็นคำสั่งเดียว (ข้อ 3 ข้างบน) · guard แดง = up ไม่วิ่ง
+   #     >>> คัดลอกคำสั่งจากข้อ 3 ตามตัว <<<
+
+   # (8) ตรวจว่าขึ้นจริง
+   docker compose ps
+   curl -sS -o /dev/null -w 'https %{http_code}\n' https://juneflow.app/healthz
+   docker compose logs edge --tail 30 | grep -iE 'certificate|obtain|error'
+   ```
+
+   - **cert ไม่ออก** → ดู `docker compose logs edge` · สาเหตุที่พบบ่อยตามลำดับ: 80 ยังปิด (ข้อ 2) · DNS ยังไม่ชี้มาที่เครื่องนี้ · ยิงชน rate limit ของ Let's Encrypt จากการลองซ้ำ (5 cert ต่อโดเมนต่อสัปดาห์ — เพราะแบบนี้ `edge_data` จึงเป็น named volume ไม่ใช่ tmpfs)
+   - **api/worker ไม่เกิดขึ้นเลยแต่ postgres เขียว** → เกือบทุกครั้งคือ `POSTGRES_PASSWORD` ไม่ตรงกับ volume เดิม อ่าน §1.5 ข้อ 7 ก่อนแก้ (healthcheck ของ postgres คือ `pg_isready` ซึ่ง**ไม่ auth** จึงเขียวได้ทั้งที่ migrate ตาย)
+   - **rollback** = `git checkout <SHA เขียวก่อนหน้า>` แล้วรันคำสั่งข้อ (7) ตัวเดิมเป๊ะ — ไม่มี `-f` ไม่ต้อง install อะไรใหม่
 
 ---
 
