@@ -235,3 +235,286 @@ describe("GET /api/v1/doc-numbering — tenant scope (no leak)", () => {
     expect(paramsOf(captured[0].where)).not.toContain(COMPANY);
   });
 });
+
+// ---------------------------------------------------------------------------
+// WRITES (this round) — POST /doc-numbering, PUT /doc-numbering/{id},
+// GET /doc-numbering/{id}. The contract declared all three; none was mounted,
+// so master.docnum's add/edit controls had nothing to call.
+// ---------------------------------------------------------------------------
+
+/** A Postgres unique violation as node-postgres reports it. */
+function uniqueViolation(constraint: string): Error & { code: string; constraint: string } {
+  return Object.assign(new Error("duplicate key value violates unique constraint"), {
+    code: "23505",
+    constraint,
+  });
+}
+
+interface WriteSink {
+  inserted?: Record<string, unknown>[];
+  updated?: Record<string, unknown>[];
+  updateWhere?: SQL;
+}
+
+/**
+ * Read-write stub. `throwOnWrite` makes both write doors reject with the given
+ * error, which is how the 409 path is exercised: the duplicate is decided by the
+ * DATABASE (unique(company_id, type), extensions.ts:749), never by a preceding
+ * SELECT, so the only thing this suite can and should prove is that the handler
+ * translates that specific constraint — and nothing else — into a 409.
+ */
+function rwStub(opts: {
+  selectRows?: unknown[];
+  updateRows?: unknown[];
+  sink?: WriteSink;
+  throwOnWrite?: Error;
+} = {}): Db {
+  const selectRows = opts.selectRows ?? [];
+  const updateRows = opts.updateRows ?? [];
+  const sink = opts.sink ?? {};
+  const boom = opts.throwOnWrite;
+  return {
+    select: () => ({
+      from: () => {
+        const builder = {
+          $dynamic: () => builder,
+          where: () => Promise.resolve(selectRows),
+          then: (onOk: (r: unknown[]) => unknown, onErr: (e: unknown) => unknown) =>
+            Promise.resolve(selectRows).then(onOk, onErr),
+        };
+        return builder;
+      },
+    }),
+    // BOTH insert doors (B-386/B-388, enforced by stub-insert-door.enforce.test):
+    // TenantDb.insert() can be awaited directly OR chained with .returning(), and
+    // a `.returning()`-only stub records nothing for the first, which makes every
+    // "did not write" assertion about it vacuous. One record() closure sits behind
+    // both, invoked once per DOOR CALL so nothing double-counts.
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        const record = (): Record<string, unknown>[] => {
+          sink.inserted = [...(sink.inserted ?? []), values];
+          return [{ id: "docnum-new", ...values }];
+        };
+        return {
+          returning: () => (boom ? Promise.reject(boom) : Promise.resolve(record())),
+          then: (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) =>
+            (boom ? Promise.reject(boom) : Promise.resolve(record())).then(onOk, onErr),
+        };
+      },
+    }),
+    update: () => ({
+      set: (values: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            if (boom) return Promise.reject(boom);
+            sink.updated = [...(sink.updated ?? []), values];
+            sink.updateWhere = where;
+            return Promise.resolve(updateRows);
+          },
+        }),
+      }),
+    }),
+  } as unknown as Db;
+}
+
+const OK_BODY = { type: "Debit Note", prefix: "DN", running: "0001", reset_rule: "ทุกปีบัญชี", locked: "all" };
+
+describe("POST /api/v1/doc-numbering — create a counter", () => {
+  it("401s without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "POST",
+      url: "/api/v1/doc-numbering",
+      payload: OK_BODY,
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("creates and echoes the wire shape", async () => {
+    const sink: WriteSink = {};
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub({ sink }) })
+    ).inject({ method: "POST", url: "/api/v1/doc-numbering", payload: OK_BODY });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({
+      id: "docnum-new",
+      type: "Debit Note",
+      prefix: "DN",
+      running: "0001",
+      reset_rule: "ทุกปีบัญชี",
+      locked: "all",
+    });
+    expect(sink.inserted?.[0]).toMatchObject({ type: "Debit Note", running: "0001", locked: "all" });
+  });
+
+  it("keeps `running` as TEXT — leading zeros survive", async () => {
+    // B-060: the mock carries "0418" and even "B-02 v3". Parsing it to a number
+    // here would rewrite both, and the FE pads/increments all-digit values itself.
+    const sink: WriteSink = {};
+    await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub({ sink }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/doc-numbering",
+      payload: { ...OK_BODY, running: "0418" },
+    });
+    expect(sink.inserted?.[0]!.running).toBe("0418");
+  });
+
+  it("400s a missing type — it is the NOT NULL column and half the unique index", async () => {
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub() })
+    ).inject({ method: "POST", url: "/api/v1/doc-numbering", payload: { prefix: "DN" } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("VALIDATION");
+  });
+
+  it("400s an unknown lock code instead of storing it", async () => {
+    // The column is free text with a default, so "sometimes" would store happily
+    // and then render as NOTHING in the grid's security column — indistinguishable
+    // from "not set" for a screen whose subject is locking document numbers.
+    const sink: WriteSink = {};
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub({ sink }) })
+    ).inject({
+      method: "POST",
+      url: "/api/v1/doc-numbering",
+      payload: { ...OK_BODY, locked: "sometimes" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(sink.inserted).toBeUndefined();
+  });
+
+  it("accepts every lock code the FE can label, and defaults to none", async () => {
+    for (const locked of ["all", "dept", "warehouse", "none"]) {
+      const sink: WriteSink = {};
+      const res = await (
+        await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub({ sink }) })
+      ).inject({ method: "POST", url: "/api/v1/doc-numbering", payload: { ...OK_BODY, locked } });
+      expect(res.statusCode).toBe(201);
+      expect(sink.inserted?.[0]!.locked).toBe(locked);
+    }
+
+    const sink: WriteSink = {};
+    await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub({ sink }) })
+    ).inject({ method: "POST", url: "/api/v1/doc-numbering", payload: { type: "Debit Note" } });
+    expect(sink.inserted?.[0]!.locked).toBe("none");
+    expect(sink.inserted?.[0]!.running).toBe("1");
+  });
+
+  it("409s on the type unique index — the DB decides, not a preceding SELECT", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ throwOnWrite: uniqueViolation("doc_numbering_company_type_uq") }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/doc-numbering", payload: OK_BODY });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("DUPLICATE_TYPE");
+  });
+
+  it("does NOT report a DIFFERENT unique index as a duplicate type", async () => {
+    // B-263: gating on "some unique violation" turns every future index on this
+    // table into a false 409 that hides a real bug. The catch is keyed on the
+    // constraint NAME, so another index must surface as a 500.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ throwOnWrite: uniqueViolation("some_other_uq") }),
+      })
+    ).inject({ method: "POST", url: "/api/v1/doc-numbering", payload: OK_BODY });
+
+    expect(res.statusCode).toBe(500);
+  });
+});
+
+describe("GET /api/v1/doc-numbering/{id} — one counter", () => {
+  it("401s without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({ url: "/api/v1/doc-numbering/docnum-PO" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("404s an id this tenant cannot see, rather than 403", async () => {
+    // The scoped select AND-injects company_id, so another tenant's row simply
+    // matches nothing. A 403 would confirm the id exists somewhere.
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub({ selectRows: [] }) })
+    ).inject({ url: "/api/v1/doc-numbering/docnum-OTHER" });
+
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("PUT /api/v1/doc-numbering/{id} — update a counter", () => {
+  it("401s without a session (fail closed)", async () => {
+    const res = await (await buildTestApp()).inject({
+      method: "PUT",
+      url: "/api/v1/doc-numbering/docnum-PO",
+      payload: OK_BODY,
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("404s when the scoped update matches no row", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ updateRows: [] }),
+      })
+    ).inject({ method: "PUT", url: "/api/v1/doc-numbering/docnum-OTHER", payload: OK_BODY });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("scopes the update by the row id", async () => {
+    const sink: WriteSink = {};
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({
+          sink,
+          updateRows: [{ id: "docnum-PO", type: "Purchase Order", prefix: "PO", running: "0292", resetRule: null, locked: "all" }],
+        }),
+      })
+    ).inject({
+      method: "PUT",
+      url: "/api/v1/doc-numbering/docnum-PO",
+      payload: { type: "Purchase Order", prefix: "PO", running: "0292", locked: "all" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(paramsOf(sink.updateWhere)).toContain("docnum-PO");
+    expect(res.json().running).toBe("0292");
+  });
+
+  it("409s when a rename collides with the type unique index", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: rwStub({ throwOnWrite: uniqueViolation("doc_numbering_company_type_uq") }),
+      })
+    ).inject({ method: "PUT", url: "/api/v1/doc-numbering/docnum-PO", payload: OK_BODY });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("DUPLICATE_TYPE");
+  });
+
+  it("400s an unknown lock code instead of storing it", async () => {
+    const sink: WriteSink = {};
+    const res = await (
+      await buildTestApp({ resolveTenant: async () => SESSION, db: rwStub({ sink }) })
+    ).inject({
+      method: "PUT",
+      url: "/api/v1/doc-numbering/docnum-PO",
+      payload: { ...OK_BODY, locked: "maybe" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(sink.updated).toBeUndefined();
+  });
+});
