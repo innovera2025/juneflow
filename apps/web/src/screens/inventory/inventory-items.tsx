@@ -22,8 +22,13 @@
  *     stock-status enum. On the unseeded ledger every row derives inv.status.out (C10).
  *   - the warehouse cell resolves warehouse_id -> name (em-dash unresolved); price 0 ->
  *     em-dash (prototype L93); the checkbox + more-icon are bulk/row chrome with no
- *     endpoint (non-functional); the 3 header actions have no read-scope form ->
- *     honest-disabled; the category/warehouse/status filters are presentational (GET
+ *     endpoint (non-functional); export + import stay honest-disabled (no endpoint at
+ *     all), while inv.items.btnAdd is LIVE since this round — it opens the ported
+ *     ItemAddForm and POSTs /inventory/items (inventory.ts:1469). Three prototype
+ *     elements of that form are absent: the BOQ link field and its info strip (no
+ *     column, and the strip promises automatic BOQ/PR/PO linking that nothing does)
+ *     and two of ten unit options that have no key (B-422 family);
+ *     the category/warehouse/status filters are presentational (GET
  *     takes no filter params) — only the search is wired client-side (gr-list precedent).
  *
  * i18n (rule 2): every string is an inv.* dict key or a cross-module BORROW of an
@@ -41,10 +46,24 @@ import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Icon } from "../../ui/icon";
 import { Page } from "../../shell/page";
+import { useShellCtx } from "../../shell/shell-context";
 import { DASH, MiniKpi, FilterChip, StatusBadge, TableSkeleton, th, td } from "./inv-ui";
 import { toItemRow, catCounts, filterItems, type ItemRow } from "./items-rows";
 import { formatDec, formatMoney, stockStatusKind, stockStatusTone, warehouseNameById } from "./inv-shared";
-import { useInventoryItems, useWarehouses } from "./use-inventory";
+import { useInventoryItems, useWarehouses, useCreateItem } from "./use-inventory";
+
+/** A wire field as a string, or "" when the server sent null/absent. */
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/** Server/browser error message, if the error carries one (mirrors wo-detail). */
+function errMessage(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
+}
+import { ItemAddForm, type WarehouseOption } from "./item-add-form";
 
 export function InventoryItems() {
   const { t, tn } = useI18n();
@@ -53,6 +72,53 @@ export function InventoryItems() {
   const warehousesQ = useWarehouses();
 
   const [q, setQ] = useState("");
+
+  const ctx = useShellCtx();
+  const createItem = useCreateItem();
+
+  /**
+   * The main-warehouse picker's options: the tenant's REAL warehouses, id-keyed. The
+   * prototype offered a hardcoded list of five names and sent the NAME; a name is not
+   * a key, and warehouse_id is what POST /inventory/items reads.
+   */
+  const whOptions = useMemo<WarehouseOption[]>(
+    () =>
+      (warehousesQ.data ?? [])
+        .map((w) => ({ id: str(w.id), name: str(w.name) }))
+        .filter((w) => w.id !== "" && w.name !== ""),
+    [warehousesQ.data],
+  );
+
+  /** Add-material, mirroring the prototype's own header action on this screen. */
+  const openAddItem = () => {
+    ctx.openModal({
+      title: t("inv.itemAdd.title"),
+      subtitle: t("inv.itemAdd.subtitle"),
+      icon: "box",
+      iconTone: "var(--brand)",
+      size: "md",
+      body: ({ close }: { close: () => void }) => (
+        <ItemAddForm
+          warehouses={whOptions}
+          saving={createItem.isPending}
+          onClose={close}
+          onSubmit={(draft) =>
+            createItem.mutate(draft, {
+              onSuccess: (created) => {
+                close();
+                ctx.notify(
+                  t("inv.itemAdd.toastSaved")
+                    .replace("{name}", str(created.name) || draft.name)
+                    .replace("{code}", str(created.code) || draft.code),
+                );
+              },
+              onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
+            })
+          }
+        />
+      ),
+    });
+  };
 
   const rows = useMemo<ItemRow[]>(() => (itemsQ.data ?? []).map(toItemRow), [itemsQ.data]);
   const whNames = useMemo(() => warehouseNameById(warehousesQ.data), [warehousesQ.data]);
@@ -78,8 +144,8 @@ export function InventoryItems() {
           <Btn kind="outline" size="md" icon="upload" disabled>
             {t("fa.register.btnImport")}
           </Btn>
-          {/* POST /inventory/items exists, but the create form is out of this read scope. */}
-          <Btn kind="primary" size="md" icon="plus" disabled>
+          {/* LIVE: opens the ported ItemAddForm and POSTs /inventory/items. */}
+          <Btn kind="primary" size="md" icon="plus" disabled={createItem.isPending} onClick={openAddItem}>
             {t("inv.items.btnAdd")}
           </Btn>
         </div>

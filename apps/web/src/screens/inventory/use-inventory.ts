@@ -15,8 +15,8 @@
  * All return the B-014 paginated envelope `{ data, page, page_size, total }`; the
  * screens consume `.data`.
  *
- * WRITES: WarehouseAdd is ported and wired (useCreateWarehouse, bottom of this file).
- * ItemAdd / TransferAdd / IssueAdd are not yet, so their header actions stay
+ * WRITES: WarehouseAdd and ItemAdd are ported and wired (useCreateWarehouse /
+ * useCreateItem, bottom of this file). TransferAdd / IssueAdd are not yet, so their header actions stay
  * honest-disabled rather than opening a modal that cannot save. Note the earlier
  * claim here — that no create endpoint existed — was about this file, not the API:
  * the server has had all four write routes merged the whole time.
@@ -136,6 +136,55 @@ export function useCreateWarehouse(): UseMutationResult<Row, unknown, WarehouseD
       ) as Promise<Row>,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["inventory-warehouses"] });
+      void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
+    },
+  });
+}
+
+/** The fields POST /inventory/items reads (inventory.ts:687-700). */
+export interface ItemDraft {
+  /** Required — 400 "code is required" when blank. */
+  code: string;
+  /** Required — 400 "name is required" when blank. */
+  name: string;
+  /** Required and must be > 0 — the handler rejects 0 and negatives alike. */
+  price: number;
+  /** Category code ("Material" | "Tool" | "Consumable" | "Equipment"). */
+  cat: string;
+  /** Unit code ("piece" | "bag" | … ) — see UNIT_OPTIONS in item-add-form. */
+  unit: string;
+  /** Reorder point; omitted from the body when blank (the column is nullable). */
+  lowPoint?: number;
+  /** Main warehouse id; omitted when unset. The handler 400s an id from another tenant. */
+  warehouseId?: string;
+}
+
+/**
+ * POST /inventory/items — create a catalogue item. 201 with the created row.
+ *
+ * Invalidates items AND stock: the items screen's KPI strip counts rows, and the
+ * stock screen joins item names, so a create that shows up in one place and not the
+ * other reads as a half-written record.
+ */
+export function useCreateItem(): UseMutationResult<Row, unknown, ItemDraft> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (draft: ItemDraft) =>
+      unwrap(
+        apiClient.POST("/inventory/items", {
+          body: {
+            code: draft.code,
+            name: draft.name,
+            price: draft.price,
+            cat: draft.cat,
+            unit: draft.unit,
+            ...(draft.lowPoint != null ? { low_point: draft.lowPoint } : {}),
+            ...(draft.warehouseId ? { warehouse_id: draft.warehouseId } : {}),
+          },
+        }),
+      ) as Promise<Row>,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["inventory-items"] });
       void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
     },
   });
