@@ -26,6 +26,7 @@ import {
   integer,
   numeric,
   jsonb,
+  date,
   timestamp,
   unique,
   type AnyPgColumn,
@@ -165,6 +166,20 @@ export const projects = pgTable("project", {
   // under yet เฝ้าระวัง). Nullable — a project without a curated label reads
   // honest null (and is not counted at-risk).
   health: text("health"),
+  /**
+   * The schedule anchor (B-424, migration 0064). `timeline` positions every
+   * Gantt bar and the today-line as an OFFSET from `startDate`, the way the
+   * prototype does (timeline.jsx: day 0/40/95/195/240 against TODAY_DAY = 145),
+   * so without a day zero the chart cannot be drawn at all.
+   *
+   * NULLABLE, and every consumer must treat null as "not scheduled" rather than
+   * "starts today": a project nobody has planned must render as an empty chart,
+   * not as a bar sitting on the current date. `date`, not timestamptz — a
+   * construction schedule is a calendar plan, and the rest of the schedule stack
+   * (timeline_task.plan_start/plan_end, milestone.milestone_date) is `date` too.
+   */
+  startDate: date("start_date"),
+  endDate: date("end_date"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

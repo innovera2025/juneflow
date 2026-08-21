@@ -685,20 +685,53 @@ const CHECKLIST_TEMPLATES = [
 
 // timeline.jsx:238 TIMELINE_TASKS (5 groups / 13 tasks). g = group index.
 const TL_GROUPS = ["01 งานเตรียม + Site Work", "02 งานโครงสร้าง", "03 งานสถาปัตยกรรม", "04 งานระบบไฟฟ้า + ประปา", "05 ส่งมอบ + Handover"];
-const TL_TASKS: { g: number; label: string; status: string; pct: number }[] = [
-  { g: 0, label: "เคลียร์พื้นที่ + ปักหมุด", status: "done", pct: 100 },
-  { g: 0, label: "ระบบไฟฟ้า/น้ำชั่วคราว", status: "done", pct: 100 },
-  { g: 1, label: "งานฐานราก B-1 ถึง B-24", status: "done", pct: 100 },
-  { g: 1, label: "งานเสา-คาน ชั้น 1 B-1..B-12", status: "done", pct: 100 },
-  { g: 1, label: "งานเสา-คาน ชั้น 2 B-1..B-12", status: "ongoing", pct: 92 },
-  { g: 1, label: "งานเสา-คาน B-13..B-24", status: "ongoing", pct: 38 },
-  { g: 2, label: "งานก่ออิฐ-ฉาบ Block B (รวม)", status: "soon", pct: 0 },
-  { g: 2, label: "งานกระเบื้องพื้น Block B", status: "future", pct: 0 },
-  { g: 2, label: "งานสีภายใน + ภายนอก", status: "future", pct: 0 },
-  { g: 3, label: "ระบบไฟฟ้าหลัก Block B", status: "ongoing", pct: 78 },
-  { g: 3, label: "ระบบประปา-สุขาภิบาล Block B", status: "ongoing", pct: 45 },
-  { g: 4, label: "ตรวจรับ + เก็บงาน (B-1..B-12)", status: "future", pct: 0 },
-  { g: 4, label: "ส่งมอบลูกค้า + เริ่ม Warranty", status: "future", pct: 0 },
+/**
+ * DAY ZERO of the seeded schedule, as an offset from the seed's today (B-424,
+ * Wei = ก 2026-08-21). The prototype anchors its Gantt at day 0 and puts the
+ * today-line at day 145 of a 240-day plan (timeline.jsx TODAY_DAY = 145), so the
+ * project started 145 days ago and closes 95 days from now.
+ *
+ * Expressed as an OFFSET, never as a literal date, for the reason B-224/B-323
+ * already established for every other date in this file: a literal would drift
+ * against the seed clock and take the G5 baseline with it.
+ */
+const TL_DAY_ZERO = -145;
+/** Last day of the seeded plan (timeline.jsx MILESTONES: the close is day 240). */
+const TL_DAY_LAST = 240;
+
+/**
+ * timeline.jsx TL_TASKS (13) with their plan windows.
+ *
+ * `from`/`to` are day offsets from DAY ZERO — the same axis the milestones
+ * already use (0/40/95/195/240, seeded from the prototype and left untouched).
+ * They are not numbers the prototype states: it draws its bars from a layout the
+ * mock hardcodes. What the prototype DOES state, and what these reproduce, is
+ * each task's status and percent at day 145, so every window is chosen to AGREE
+ * with the pct already in the mock:
+ *
+ *   ongoing 92% -> 75..151   elapsed (145-75)/76  = 92.1%
+ *   ongoing 38% -> 120..186  elapsed (145-120)/66 = 37.9%
+ *   ongoing 78% -> 100..158  elapsed (145-100)/58 = 77.6%
+ *   ongoing 45% -> 118..178  elapsed (145-118)/60 = 45.0%
+ *
+ * `done` windows close before day 145, `soon` opens just after it, `future`
+ * later, and the structural ones line up with the milestone they belong to
+ * (foundations end at 40; first handover starts at 195; close ends at 240).
+ */
+const TL_TASKS: { g: number; label: string; status: string; pct: number; from: number; to: number }[] = [
+  { g: 0, label: "เคลียร์พื้นที่ + ปักหมุด", status: "done", pct: 100, from: 0, to: 18 },
+  { g: 0, label: "ระบบไฟฟ้า/น้ำชั่วคราว", status: "done", pct: 100, from: 10, to: 28 },
+  { g: 1, label: "งานฐานราก B-1 ถึง B-24", status: "done", pct: 100, from: 20, to: 40 },
+  { g: 1, label: "งานเสา-คาน ชั้น 1 B-1..B-12", status: "done", pct: 100, from: 38, to: 80 },
+  { g: 1, label: "งานเสา-คาน ชั้น 2 B-1..B-12", status: "ongoing", pct: 92, from: 75, to: 151 },
+  { g: 1, label: "งานเสา-คาน B-13..B-24", status: "ongoing", pct: 38, from: 120, to: 186 },
+  { g: 2, label: "งานก่ออิฐ-ฉาบ Block B (รวม)", status: "soon", pct: 0, from: 150, to: 200 },
+  { g: 2, label: "งานกระเบื้องพื้น Block B", status: "future", pct: 0, from: 190, to: 225 },
+  { g: 2, label: "งานสีภายใน + ภายนอก", status: "future", pct: 0, from: 205, to: 235 },
+  { g: 3, label: "ระบบไฟฟ้าหลัก Block B", status: "ongoing", pct: 78, from: 100, to: 158 },
+  { g: 3, label: "ระบบประปา-สุขาภิบาล Block B", status: "ongoing", pct: 45, from: 118, to: 178 },
+  { g: 4, label: "ตรวจรับ + เก็บงาน (B-1..B-12)", status: "future", pct: 0, from: 195, to: 215 },
+  { g: 4, label: "ส่งมอบลูกค้า + เริ่ม Warranty", status: "future", pct: 0, from: 230, to: 240 },
 ];
 
 // timeline.jsx:264 MILESTONES (5)
@@ -1097,6 +1130,11 @@ async function seed(): Promise<void> {
           id: det(`project:${p.key}`), companyId: CO1, typeId: det(`ptype:${p.type}`),
           name: p.name, short: p.short, color: p.color,
           budget: m((i + 5) * 10_000_000), status: "active",
+          // B-424: only the project the schedule belongs to gets an anchor. The
+          // others stay null — "not scheduled" — because inventing a start for a
+          // project with no seeded plan would put a bar on an empty chart.
+          startDate: p.key === "rjp" ? isoDaysFromToday(TL_DAY_ZERO) : null,
+          endDate: p.key === "rjp" ? isoDaysFromToday(TL_DAY_ZERO + TL_DAY_LAST) : null,
           // B-102 (Wei = ก): curated health verbatim (exec-audit.jsx:14-20).
           health: PROJECT_HEALTH[p.key] ?? null,
         })),
@@ -1824,18 +1862,35 @@ async function seed(): Promise<void> {
         })),
       );
 
+      // B-424 (Wei = ก): the plan windows are REAL dates now. They were all NULL,
+      // which is one of the three reasons B-142 deferred the timeline lane: a Gantt
+      // with no dates has nothing to draw. Offsets from DAY ZERO (145 days ago), so
+      // the whole schedule moves with the seed clock instead of drifting against it.
+      //
+      // actual_* mirrors the plan for finished work and opens-but-does-not-close for
+      // work in progress. That is a deliberate NO-VARIANCE seed: inventing a slip
+      // would put a delay on the chart that no source states, and `late` stays false
+      // on every row exactly as it was.
       await tx.insert(schema.timelineTasks).values(
         TL_TASKS.map((t, i) => ({
           id: det(`tl:${i}`), companyId: CO1, projectId: det("project:rjp"), groupLabel: at(TL_GROUPS, t.g),
-          label: t.label, planStart: null, planEnd: null, actualStart: null, actualEnd: null,
+          label: t.label,
+          planStart: isoDaysFromToday(TL_DAY_ZERO + t.from),
+          planEnd: isoDaysFromToday(TL_DAY_ZERO + t.to),
+          actualStart: t.status === "done" || t.status === "ongoing" ? isoDaysFromToday(TL_DAY_ZERO + t.from) : null,
+          actualEnd: t.status === "done" ? isoDaysFromToday(TL_DAY_ZERO + t.to) : null,
           status: t.status, pct: m(t.pct), late: false,
         })),
       );
 
+      // B-424: `day` was already the prototype's own axis (0/40/95/195/240) and is
+      // left exactly as it was; milestone_date is now derived from it against the
+      // same DAY ZERO, so the strip and the Gantt cannot disagree about when a
+      // milestone falls.
       await tx.insert(schema.milestones).values(
         MILESTONES.map((ms, i) => ({
           id: det(`ms:${i}`), companyId: CO1, projectId: det("project:rjp"),
-          label: ms.l, day: ms.day, milestoneDate: null, status: ms.status,
+          label: ms.l, day: ms.day, milestoneDate: isoDaysFromToday(TL_DAY_ZERO + ms.day), status: ms.status,
         })),
       );
 

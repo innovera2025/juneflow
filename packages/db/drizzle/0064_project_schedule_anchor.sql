@@ -1,0 +1,21 @@
+-- B-424 (Wei = ก, 2026-08-21) — the project schedule anchor.
+--
+-- WHY THIS EXISTS. `timeline` (แผนงานโครงการ) draws every Gantt bar and its
+-- today-line as an OFFSET from the project's start, the way the prototype does
+-- (timeline.jsx: milestones at day 0/40/95/195/240 against TODAY_DAY = 145).
+-- `project` had no start or end column, so there was no day zero to measure
+-- from and the chart could not be drawn at all — one of the three reasons
+-- B-142 deferred the whole lane on 2026-07-26.
+--
+-- Nullable on purpose: a project that has not been scheduled yet has no start,
+-- and an invented default would put a bar on a chart for a project nobody has
+-- planned. Every consumer must render an unscheduled project as empty, not as
+-- "starts today".
+--
+-- DATE, not timestamptz: a construction schedule is a calendar plan, and
+-- storing it as an instant would make the same plan land on different days
+-- either side of a timezone. The rest of the schedule stack already agrees —
+-- timeline_task.plan_start/plan_end and milestone.milestone_date are all
+-- `date` (extensions.ts:582-620).
+ALTER TABLE "project" ADD COLUMN IF NOT EXISTS "start_date" date;
+ALTER TABLE "project" ADD COLUMN IF NOT EXISTS "end_date" date;
