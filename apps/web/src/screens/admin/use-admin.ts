@@ -26,7 +26,10 @@
  * (W1c, PUT /admin/subscribers/{id}/package) — it writes package_id + a seat override onto the
  * subscription row (money = SERVER) and invalidates ADMIN_SUBSCRIBERS_KEY. Reset-password is
  * real as well (B-282, POST /admin/users/{id}/reset-password) — see resetUserPasswordRequest.
- * The remaining prototype writes (invite, remind, export) have NO merged handler and stay
+ * Dunning is real too (POST /admin/invoices/{id}/remind, apps/api admin.ts:511) — see
+ * useRemindInvoice, and read its note: the call is real and the AUDIT is real, but the
+ * tenant receives nothing until a transport exists (app.ts:766 no-op, B-269).
+ * The remaining prototype writes (invite, export) have NO merged handler and stay
  * honest toasts / honest-disabled.
  */
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
@@ -156,6 +159,38 @@ export function useUnblockUser(): UseMutationResult<unknown, unknown, string> {
     mutationFn: (id: string) => unwrap(apiClient.POST("/admin/users/{id}/unblock", { params: { path: { id } } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ADMIN_USERS_KEY }),
   });
+}
+
+/**
+ * POST /admin/invoices/{id}/remind — id = the INVOICE id (PATH); no request body.
+ *
+ * WHAT THIS DOES AND, JUST AS IMPORTANTLY, WHAT IT DOES NOT. The handler
+ * (apps/api admin.ts:511) is owner-gated, reads the stored invoice, hands it to
+ * the dunning seam, and writes a REAL audit entry — action="remind", attributed
+ * to the DUNNED tenant. It writes NO row and posts NO GL/JV: platform billing is
+ * standalone (B-188), and there is no invoice-generation or mark-paid door
+ * (B-189, ruled DEFER). money = SERVER: no amount is client-supplied.
+ *
+ * THE TENANT STILL RECEIVES NOTHING TODAY. `notify` defaults to a no-op
+ * (apps/api/src/app.ts:766) because the workspace has no concrete transport —
+ * @juneflow/notifications ships no SmtpTransport and its LINE adapter throws
+ * (B-269). So this call makes the AUDIT TRAIL true, not the mailbox. Until a
+ * transport lands, nothing here may claim a message was delivered.
+ *
+ * NO cache invalidation, deliberately: the handler changes no field any admin
+ * read renders, so a refetch would prove nothing.
+ *
+ * Exported as a plain function as well as a hook, for the same reason
+ * resetUserPasswordRequest is: G3 can then assert the exact call shape — path,
+ * params, and the ABSENCE of a body — without standing up a React tree.
+ */
+export function remindInvoiceRequest(id: string): Promise<unknown> {
+  return unwrap(apiClient.POST("/admin/invoices/{id}/remind", { params: { path: { id } } }));
+}
+
+/** The dunning mutation (see remindInvoiceRequest). No invalidation by design. */
+export function useRemindInvoice(): UseMutationResult<unknown, unknown, string> {
+  return useMutation({ mutationFn: remindInvoiceRequest });
 }
 
 /**

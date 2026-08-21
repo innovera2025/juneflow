@@ -22,10 +22,13 @@
  *   - amount: REAL (money, class num, right-aligned).
  *   - status: REAL status -> a tokened tri-state badge (paid->approved, pending->pending,
  *     overdue->rejected); an unknown status renders its raw code.
- *   - actions: overdue -> a dunning button (a faithful confirm dialog + toast; NOTHING is
- *     sent and nothing is written to the Audit Log despite the toast copy -- no reminder
- *     endpoint); other -> a view button (a mock download toast). Export -> a mock toast. No
- *     write endpoint exists.
+ *   - actions: overdue -> a dunning button. REAL since this round: the confirm dialog now
+ *     calls POST /admin/invoices/{id}/remind (apps/api admin.ts:511), which is owner-gated
+ *     and writes a REAL audit entry attributed to the dunned tenant -- so the toast's audit
+ *     claim is true. What is STILL not true is delivery: the API's dunning seam defaults to
+ *     a no-op (app.ts:766) because no transport exists (B-269), so a 2xx means "recorded",
+ *     never "the tenant was told". Other rows -> a view button (a mock download toast).
+ *     Export -> a mock toast; no export endpoint exists.
  *
  * i18n (rule 2): every visible string is an admin.invoices.* / admin.common.* dict key (t);
  * the baht KPI unit reuses the shared admin.overview.kpiMrrUnit glyph key (the baht sign is
@@ -52,10 +55,17 @@ import {
   type BadgeTone,
   type AdminInvoiceRow,
 } from "./admin-rows";
-import { useAdminInvoices, useAdminSubscribers } from "./use-admin";
+import { useAdminInvoices, useAdminSubscribers, useRemindInvoice } from "./use-admin";
 
 /** Em-dash for every honest wire gap (never a fabricated value). */
 const DASH = "—";
+
+/** Server/browser error message, if the error carries one (mirrors wo-detail). */
+function errMessage(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
+}
 
 function th(w?: number, right = false): CSSProperties {
   return {
@@ -138,6 +148,8 @@ export function AdminInvoices() {
     [subscribersQ.data],
   );
 
+  const remindM = useRemindInvoice();
+
   const baht = t("admin.overview.kpiMrrUnit"); // shared baht glyph key (U+0E3F, cannot be literal)
 
   const statusLabel = (status: string): string => {
@@ -154,9 +166,18 @@ export function AdminInvoices() {
     }
   };
 
-  /** Dunning dialog (real-forms2.jsx openNotifySend) -- faithful confirm + toast (org is
-   *  em-dash; NOTHING is sent, nothing is audit-logged despite the toast copy). */
-  const openDunning = (org: string) => {
+  /**
+   * Dunning dialog (real-forms2.jsx openNotifySend) — faithful confirm, then a REAL
+   * POST /admin/invoices/{id}/remind. The handler is owner-gated, reads the stored
+   * invoice and writes an audit entry attributed to the dunned tenant, so the toast's
+   * audit claim is now true; it writes no row and posts no GL/JV (B-188).
+   *
+   * WHAT IS STILL NOT TRUE: the tenant receives no message. The API's dunning seam
+   * defaults to a no-op (apps/api/src/app.ts:766) because no transport exists yet
+   * (B-269). The toast therefore fires only on a 2xx — a failed call raises the
+   * server's own message instead — but a 2xx still means "recorded", not "delivered".
+   */
+  const openDunning = (invoiceId: string, org: string) => {
     ctx.openModal({
       title: t("admin.invoices.notifyTitle"),
       subtitle: org,
@@ -178,7 +199,10 @@ export function AdminInvoices() {
               icon="bell"
               onClick={() => {
                 close();
-                ctx.notify(t("admin.invoices.notifyToast").replace("{org}", org));
+                remindM.mutate(invoiceId, {
+                  onSuccess: () => ctx.notify(t("admin.invoices.notifyToast").replace("{org}", org)),
+                  onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
+                });
               }}
             >
               {t("admin.invoices.notifyConfirm")}
@@ -273,10 +297,20 @@ export function AdminInvoices() {
                         <td style={td}>
                           <StatusBadge tone={info.tone} label={statusLabel(x.status)} />
                         </td>
-                        {/* action — overdue -> dunning (mock); other -> view download (mock). */}
+                        {/* action — overdue -> dunning (REAL call + REAL audit, no delivery
+                            yet: B-269); other -> view download (mock). The dialog is handed
+                            the SAME joined org this row prints, not an em-dash: the name is
+                            resolved right here, and passing DASH made the confirm dialog
+                            claim less than the table beside it knew. */}
                         <td style={td}>
                           {x.status === "overdue" ? (
-                            <Btn kind="soft" size="sm" icon="bell" onClick={() => openDunning(DASH)}>
+                            <Btn
+                              kind="soft"
+                              size="sm"
+                              icon="bell"
+                              disabled={remindM.isPending}
+                              onClick={() => openDunning(x.id, orgById.get(x.subscriptionId) ?? DASH)}
+                            >
                               {t("admin.invoices.dunAction")}
                             </Btn>
                           ) : (

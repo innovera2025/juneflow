@@ -26,7 +26,7 @@ vi.mock("../../api-client", () => ({
   API_BASE_URL: "/api/v1",
 }));
 
-const { resetUserPasswordRequest } = await import("./use-admin");
+const { resetUserPasswordRequest, remindInvoiceRequest } = await import("./use-admin");
 
 beforeEach(() => {
   POST.mockReset();
@@ -75,6 +75,54 @@ describe("resetUserPasswordRequest (B-282 wire)", () => {
 
     await expect(resetUserPasswordRequest("u9")).rejects.toMatchObject({
       code: "NOT_FOUND",
+    });
+  });
+});
+
+describe("remindInvoiceRequest (the dunning wire)", () => {
+  it("POSTs the remind path with the INVOICE id in the PATH", async () => {
+    POST.mockResolvedValue({ data: { ok: true } });
+
+    await remindInvoiceRequest("inv-7");
+
+    expect(POST).toHaveBeenCalledTimes(1);
+    expect(POST.mock.calls[0]![0]).toBe("/admin/invoices/{id}/remind");
+    expect(POST.mock.calls[0]![1]).toEqual({ params: { path: { id: "inv-7" } } });
+  });
+
+  it("sends NOTHING beyond the path param — no body, no query", async () => {
+    POST.mockResolvedValue({ data: {} });
+
+    await remindInvoiceRequest("inv-7");
+
+    // The contract declares no requestBody for remindAdminInvoice. money = SERVER:
+    // the notice echoes the STORED invoice, so a client-sent amount would be a
+    // number this screen invented about somebody's bill.
+    const opts = POST.mock.calls[0]![1] as Record<string, unknown>;
+    expect(Object.keys(opts)).toEqual(["params"]);
+    expect("body" in opts).toBe(false);
+  });
+
+  it("writes nothing else — no GET refetch, no PUT", async () => {
+    POST.mockResolvedValue({ data: {} });
+
+    await remindInvoiceRequest("inv-7");
+
+    // The handler changes no field any admin read renders (no row, no GL/JV —
+    // B-188), so an invalidation here would be a refetch that proves nothing.
+    expect(GET).not.toHaveBeenCalled();
+    expect(PUT).not.toHaveBeenCalled();
+  });
+
+  it("REJECTS on a server error so the success toast cannot fire", async () => {
+    // The toast claims the reminder was recorded. A 403 (non-owner) or 404
+    // (unknown invoice) landing on the happy path would make that claim false,
+    // which is the whole defect this round closes: the button used to fire the
+    // toast unconditionally and call nothing at all.
+    POST.mockResolvedValue({ error: { code: "FORBIDDEN", message: "requires platform admin" } });
+
+    await expect(remindInvoiceRequest("inv-7")).rejects.toMatchObject({
+      code: "FORBIDDEN",
     });
   });
 });
