@@ -106,9 +106,20 @@ const MS_PER_DAY = 86_400_000;
 
 /**
  * The compliance tax engine (mock-first, PLAN.md §4). The fake adapter does the
- * WHT/VAT float math deterministically for dev/tests; the real `thailand` driver
- * swaps in behind the same TaxEngine interface (env-selected) once P0-INT-01
- * lands. Instantiated once at module load — stateless, no credentials.
+ * WHT/VAT float math deterministically for dev/tests. Instantiated once at
+ * module load — stateless, no credentials.
+ *
+ * THE SELECTION IS NOT env-DRIVEN TODAY, whatever the env suggests. This line
+ * hardcodes the fake, and nothing in apps/api calls
+ * `loadTaxEngineConfig()` (packages/tax-engine/src/config.ts:50), which is the
+ * only reader of `TAX_ENGINE_DRIVER` in the workspace. Setting that variable —
+ * including to `thailand` — therefore changes NOTHING about which engine runs
+ * here; every WHT/VAT figure this route produces comes from the fake.
+ *
+ * Do not wire the switch before the driver exists: all six ThailandTaxEngine
+ * methods throw `TODO(P0-INT-01)` (packages/tax-engine/src/thailand/index.ts:43-66),
+ * so an env-selected real driver would turn each AP posting into a 500. The
+ * swap is P0-INT-01 and lands with the driver, not before it.
  */
 const taxEngine: TaxEngine = new FakeTaxEngine();
 

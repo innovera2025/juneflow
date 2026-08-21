@@ -115,9 +115,16 @@ type AgingBucket = (typeof AGING_BUCKETS)[number];
 
 /**
  * The compliance tax engine (mock-first, PLAN.md §4). The fake adapter does the
- * VAT float math deterministically for dev/tests; the real `thailand` driver
- * swaps in behind the same TaxEngine interface once P0-INT-01 lands. Instantiated
- * once at module load — stateless, no credentials.
+ * VAT float math deterministically for dev/tests. Instantiated once at module
+ * load — stateless, no credentials.
+ *
+ * Hardcoded, NOT env-selected — the same situation routes/ap.ts documents at
+ * length: `TAX_ENGINE_DRIVER` is read only by `loadTaxEngineConfig()`
+ * (packages/tax-engine/src/config.ts:50), which apps/api never calls, and all
+ * six ThailandTaxEngine methods throw `TODO(P0-INT-01)`
+ * (packages/tax-engine/src/thailand/index.ts:43-66). Every VAT figure on an AR
+ * invoice therefore comes from the fake, and swapping the driver by env today
+ * would 500 each posting. The swap lands with P0-INT-01, not before.
  */
 const taxEngine: TaxEngine = new FakeTaxEngine();
 
