@@ -688,50 +688,58 @@ const TL_GROUPS = ["01 งานเตรียม + Site Work", "02 งาน�
 /**
  * DAY ZERO of the seeded schedule, as an offset from the seed's today (B-424,
  * Wei = ก 2026-08-21). The prototype anchors its Gantt at day 0 and puts the
- * today-line at day 145 of a 240-day plan (timeline.jsx TODAY_DAY = 145), so the
- * project started 145 days ago and closes 95 days from now.
+ * today-line at day 145 of a 240-day plan (timeline.jsx:272 TODAY_DAY = 145), so
+ * the project started 145 days ago and closes 95 days from now.
  *
  * Expressed as an OFFSET, never as a literal date, for the reason B-224/B-323
  * already established for every other date in this file: a literal would drift
- * against the seed clock and take the G5 baseline with it.
+ * against the seed clock and take the G5 baseline with it. (The prototype's own
+ * milestone captions — "01 ม.ค. 69" for day 0 — confirm the anchor it had in
+ * mind, and are exactly what must NOT be copied in.)
  */
 const TL_DAY_ZERO = -145;
 /** Last day of the seeded plan (timeline.jsx MILESTONES: the close is day 240). */
 const TL_DAY_LAST = 240;
 
 /**
- * timeline.jsx TL_TASKS (13) with their plan windows.
+ * timeline.jsx:238-262 TIMELINE_TASKS (13), VERBATIM.
  *
- * `from`/`to` are day offsets from DAY ZERO — the same axis the milestones
- * already use (0/40/95/195/240, seeded from the prototype and left untouched).
- * They are not numbers the prototype states: it draws its bars from a layout the
- * mock hardcodes. What the prototype DOES state, and what these reproduce, is
- * each task's status and percent at day 145, so every window is chosen to AGREE
- * with the pct already in the mock:
+ * `plan` and `actual` are the prototype's own day pairs — not numbers chosen
+ * here. An earlier pass invented windows from each task's percent before anyone
+ * had read far enough into the file to find these; the prototype states them,
+ * so the prototype wins (PLAN.md §0 rule 1).
  *
- *   ongoing 92% -> 75..151   elapsed (145-75)/76  = 92.1%
- *   ongoing 38% -> 120..186  elapsed (145-120)/66 = 37.9%
- *   ongoing 78% -> 100..158  elapsed (145-100)/58 = 77.6%
- *   ongoing 45% -> 118..178  elapsed (145-118)/60 = 45.0%
+ * `actual: null` means the task has not started. `[start, null]` means it has
+ * started and not finished — the Gantt draws that bar up to the today-line.
  *
- * `done` windows close before day 145, `soon` opens just after it, `future`
- * later, and the structural ones line up with the milestone they belong to
- * (foundations end at 40; first handover starts at 195; close ends at 240).
+ * `late` is a COUNT OF DAYS the screen prints ("ช้า {n} วัน", :446), not a flag,
+ * and it is stated rather than derived: three of the four late tasks equal their
+ * own overrun, but "งานเสา-คาน ชั้น 2" runs plan [60,92] against actual [62,95]
+ * and carries no `late` at all. Deriving would put a warning on a row the
+ * prototype leaves clean.
  */
-const TL_TASKS: { g: number; label: string; status: string; pct: number; from: number; to: number }[] = [
-  { g: 0, label: "เคลียร์พื้นที่ + ปักหมุด", status: "done", pct: 100, from: 0, to: 18 },
-  { g: 0, label: "ระบบไฟฟ้า/น้ำชั่วคราว", status: "done", pct: 100, from: 10, to: 28 },
-  { g: 1, label: "งานฐานราก B-1 ถึง B-24", status: "done", pct: 100, from: 20, to: 40 },
-  { g: 1, label: "งานเสา-คาน ชั้น 1 B-1..B-12", status: "done", pct: 100, from: 38, to: 80 },
-  { g: 1, label: "งานเสา-คาน ชั้น 2 B-1..B-12", status: "ongoing", pct: 92, from: 75, to: 151 },
-  { g: 1, label: "งานเสา-คาน B-13..B-24", status: "ongoing", pct: 38, from: 120, to: 186 },
-  { g: 2, label: "งานก่ออิฐ-ฉาบ Block B (รวม)", status: "soon", pct: 0, from: 150, to: 200 },
-  { g: 2, label: "งานกระเบื้องพื้น Block B", status: "future", pct: 0, from: 190, to: 225 },
-  { g: 2, label: "งานสีภายใน + ภายนอก", status: "future", pct: 0, from: 205, to: 235 },
-  { g: 3, label: "ระบบไฟฟ้าหลัก Block B", status: "ongoing", pct: 78, from: 100, to: 158 },
-  { g: 3, label: "ระบบประปา-สุขาภิบาล Block B", status: "ongoing", pct: 45, from: 118, to: 178 },
-  { g: 4, label: "ตรวจรับ + เก็บงาน (B-1..B-12)", status: "future", pct: 0, from: 195, to: 215 },
-  { g: 4, label: "ส่งมอบลูกค้า + เริ่ม Warranty", status: "future", pct: 0, from: 230, to: 240 },
+const TL_TASKS: {
+  g: number;
+  label: string;
+  status: string;
+  pct: number;
+  plan: [number, number];
+  actual: [number, number | null] | null;
+  late?: number;
+}[] = [
+  { g: 0, label: "เคลียร์พื้นที่ + ปักหมุด", status: "done", pct: 100, plan: [0, 5], actual: [0, 5] },
+  { g: 0, label: "ระบบไฟฟ้า/น้ำชั่วคราว", status: "done", pct: 100, plan: [3, 12], actual: [3, 14], late: 2 },
+  { g: 1, label: "งานฐานราก B-1 ถึง B-24", status: "done", pct: 100, plan: [8, 38], actual: [8, 40], late: 2 },
+  { g: 1, label: "งานเสา-คาน ชั้น 1 B-1..B-12", status: "done", pct: 100, plan: [32, 68], actual: [32, 70], late: 2 },
+  { g: 1, label: "งานเสา-คาน ชั้น 2 B-1..B-12", status: "ongoing", pct: 92, plan: [60, 92], actual: [62, 95] },
+  { g: 1, label: "งานเสา-คาน B-13..B-24", status: "ongoing", pct: 38, plan: [85, 130], actual: [88, null], late: 3 },
+  { g: 2, label: "งานก่ออิฐ-ฉาบ Block B (รวม)", status: "soon", pct: 0, plan: [105, 165], actual: null },
+  { g: 2, label: "งานกระเบื้องพื้น Block B", status: "future", pct: 0, plan: [140, 175], actual: null },
+  { g: 2, label: "งานสีภายใน + ภายนอก", status: "future", pct: 0, plan: [165, 195], actual: null },
+  { g: 3, label: "ระบบไฟฟ้าหลัก Block B", status: "ongoing", pct: 78, plan: [110, 165], actual: [115, null] },
+  { g: 3, label: "ระบบประปา-สุขาภิบาล Block B", status: "ongoing", pct: 45, plan: [115, 168], actual: [118, null] },
+  { g: 4, label: "ตรวจรับ + เก็บงาน (B-1..B-12)", status: "future", pct: 0, plan: [180, 200], actual: null },
+  { g: 4, label: "ส่งมอบลูกค้า + เริ่ม Warranty", status: "future", pct: 0, plan: [195, 210], actual: null },
 ];
 
 // timeline.jsx:264 MILESTONES (5)
@@ -1867,19 +1875,19 @@ async function seed(): Promise<void> {
       // with no dates has nothing to draw. Offsets from DAY ZERO (145 days ago), so
       // the whole schedule moves with the seed clock instead of drifting against it.
       //
-      // actual_* mirrors the plan for finished work and opens-but-does-not-close for
-      // work in progress. That is a deliberate NO-VARIANCE seed: inventing a slip
-      // would put a delay on the chart that no source states, and `late` stays false
-      // on every row exactly as it was.
+      // actual_* is the prototype's own pair: null = not started, [start, null] =
+      // started and unfinished (the Gantt draws that bar to the today-line). `late`
+      // and late_days are STATED by the source, not derived — see the TL_TASKS note.
       await tx.insert(schema.timelineTasks).values(
         TL_TASKS.map((t, i) => ({
           id: det(`tl:${i}`), companyId: CO1, projectId: det("project:rjp"), groupLabel: at(TL_GROUPS, t.g),
           label: t.label,
-          planStart: isoDaysFromToday(TL_DAY_ZERO + t.from),
-          planEnd: isoDaysFromToday(TL_DAY_ZERO + t.to),
-          actualStart: t.status === "done" || t.status === "ongoing" ? isoDaysFromToday(TL_DAY_ZERO + t.from) : null,
-          actualEnd: t.status === "done" ? isoDaysFromToday(TL_DAY_ZERO + t.to) : null,
-          status: t.status, pct: m(t.pct), late: false,
+          planStart: isoDaysFromToday(TL_DAY_ZERO + t.plan[0]),
+          planEnd: isoDaysFromToday(TL_DAY_ZERO + t.plan[1]),
+          actualStart: t.actual ? isoDaysFromToday(TL_DAY_ZERO + t.actual[0]) : null,
+          actualEnd: t.actual && t.actual[1] != null ? isoDaysFromToday(TL_DAY_ZERO + t.actual[1]) : null,
+          status: t.status, pct: m(t.pct),
+          late: (t.late ?? 0) > 0, lateDays: t.late ?? null,
         })),
       );
 

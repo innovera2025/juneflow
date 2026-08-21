@@ -596,6 +596,15 @@ export const timelineTasks = pgTable("timeline_task", {
   status: text("status"),
   pct: numeric("pct", { precision: 6, scale: 2 }),
   late: boolean("late").notNull().default(false),
+  /**
+   * Days late, as the source states it (B-424, migration 0065). The screen
+   * prints "ช้า {n} วัน" (timeline.jsx:446 and again in the detail panel), which
+   * a boolean cannot carry. NOT derived from actual_end - plan_end: that formula
+   * matches three of the four late tasks and contradicts the fourth, which the
+   * prototype leaves unmarked despite a three-day overrun. Null = no lateness
+   * stated, which is distinct from a stored 0.
+   */
+  lateDays: integer("late_days"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .notNull()
     .defaultNow(),

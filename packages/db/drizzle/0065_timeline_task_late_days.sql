@@ -1,0 +1,16 @@
+-- B-424 — the number of days a task is late, because the screen prints it.
+--
+-- timeline_task.late is a boolean, and the prototype renders "ช้า {n} วัน"
+-- (timeline.jsx:446, and again in the task-detail panel at :503). A boolean
+-- cannot carry that number, so the count had nowhere to live.
+--
+-- WHY NOT DERIVE IT from actual_end - plan_end. It nearly works — three of the
+-- four late tasks are exactly their own overrun — but the prototype's own data
+-- refuses the formula: "งานเสา-คาน ชั้น 2" runs plan [60,92] against actual
+-- [62,95] and is NOT marked late, while the subtraction says three days. The
+-- prototype is the authority on what the screen shows, so the stated number is
+-- stored rather than a computed one that would contradict it on that row.
+--
+-- Nullable integer: null means "no lateness stated", which is what a task with
+-- no `late` field in the source means, and is distinct from a stored 0.
+ALTER TABLE "timeline_task" ADD COLUMN IF NOT EXISTS "late_days" integer;
