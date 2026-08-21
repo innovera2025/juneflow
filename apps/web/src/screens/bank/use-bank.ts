@@ -22,10 +22,13 @@
  *                                       selected PVs; returns { file_name, content, ... }.
  *
  * Bodies/responses are the opaque Entity from the contract (additionalProperties).
- * NOTE: POST /bank/statements/import + POST /bank/reconcile exist in the CONTRACT but
- * are NOT implemented by the API (apps/api/src/routes/bank.ts registers only the five
- * ops above), so the "import statement" + "close reconciliation" prototype actions stay
- * client-intent stubs in the screens (flagged), never wired to a 404 route.
+ * NOTE (was stale, corrected): POST /bank/statements/import and POST /bank/reconcile
+ * ARE implemented — bank.ts:1207 and :1223, gated on the finance create / approve
+ * perms respectively. The import is wired here (useImportStatement). The reconcile
+ * is NOT, and deliberately: it LOCKS the period, and the prototype guards it behind
+ * a confirm dialog whose copy has no key in i18n-full.json, so wiring it now would
+ * mean either locking the books with no confirmation or inventing Thai. Filed as
+ * B-421; until then that button stays the client-intent toast it has always been.
  */
 import {
   useMutation,
@@ -129,6 +132,41 @@ export function useMatchBankLine(): UseMutationResult<Entity, unknown, MatchLine
 }
 
 /** GET /bank/cheque — the tenant cheque register (B-014 envelope `{ data, ... }`). */
+/**
+ * POST /bank/statements/import — load a bank statement and auto-match its lines.
+ *
+ * THE HANDLER TAKES CSV **TEXT**, not a multipart upload: it reads `file` /
+ * `content` / `csv` from the JSON body, or a structured `lines[]`
+ * (apps/api/src/routes/bank.ts:978). That is why this needs no object storage and
+ * is not gated behind B-333 — the browser reads the chosen file and sends its
+ * text. Response: { statement_id, period, line_count, matched_count,
+ * currency_code }, the server's own count of what it matched (C10: a line with no
+ * confident document is left unmatched for the manual flow, never guessed).
+ *
+ * Invalidates both statements and lines: a successful import creates a statement
+ * and its lines, which are exactly what the screen renders.
+ *
+ * Gate: finance `create` (bank.ts:1213). A caller without it gets 403, which
+ * lands in the mutation's error state rather than on the happy path.
+ *
+ * Exported as a plain function as well as a hook (the use-admin precedent) so G3
+ * can assert the call shape — path and body key — without a React tree.
+ */
+export function importStatementRequest(csvText: string): Promise<Entity> {
+  return unwrap(apiClient.POST("/bank/statements/import", { body: { file: csvText } }));
+}
+
+export function useImportStatement(): UseMutationResult<Entity, unknown, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: importStatementRequest,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: STATEMENTS_KEY });
+      void qc.invalidateQueries({ queryKey: LINES_KEY });
+    },
+  });
+}
+
 export function useBankCheque() {
   return useQuery<Row[]>({
     queryKey: CHEQUE_KEY,

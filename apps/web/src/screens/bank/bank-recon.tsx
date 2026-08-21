@@ -30,9 +30,15 @@
  *     prototype's illustrative 18.42 M.
  *   - a matched line's linked-doc ref em-dashes for a pv/rv (no doc-number) or an RV with
  *     no seeded row (matched_doc null); a cheque match shows its real no.
- *   - the import + close-reconciliation actions fire client-intent toasts: POST
- *     /bank/statements/import and POST /bank/reconcile exist in the contract but are NOT
- *     implemented by the API (bank.ts registers only 5 ops), so they are honest stubs.
+ *   - import is REAL since this round (that "not implemented" note was stale — the API
+ *     registers 7 ops, import at bank.ts:1207 and reconcile at :1223). The header button
+ *     opens a hidden file input, reads the file as text and posts it; the handler parses
+ *     CSV itself, so no object storage is involved. The prototype's dropzone modal and
+ *     its fabricated "42 lines / 38 matched" summary are NOT ported — none of that copy
+ *     has a key, and the real counts arrive in the refreshed table (B-421).
+ *   - close-reconciliation stays a client-intent toast ON PURPOSE. It LOCKS the period
+ *     and the prototype guards it with a confirm dialog whose copy has no key, so wiring
+ *     it today would mean locking the books unconfirmed or inventing Thai (B-421).
  *   - the row checkbox is presentational (bulk-reconcile is not wired), checked=matched.
  *   - an unmatched line with NO server suggestion shows no match affordance (there is no
  *     arbitrary-doc manual picker in scope) — it stays unmatched.
@@ -41,8 +47,8 @@
  * (t: common.status). Missing keys are flagged (recon-strings.json._missing). Tokens
  * back every colour. NO Thai/baht in this .tsx (B-073).
  */
-import { useMemo } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import { useMemo, useRef } from "react";
+import type { ChangeEvent, CSSProperties, ReactNode } from "react";
 import type { PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
@@ -64,11 +70,23 @@ import {
   type ReconLine,
   type DocRef,
 } from "./recon-rows";
-import { useBankStatements, useBankStatementLinesMulti, useMatchBankLine } from "./use-bank";
+import {
+  useBankStatements,
+  useBankStatementLinesMulti,
+  useMatchBankLine,
+  useImportStatement,
+} from "./use-bank";
 import { formatMoney as formatDocMoney } from "./cheque-rows";
 import reconStrings from "./recon-strings.json" with { type: "json" };
 
 const DASH = "—";
+
+/** Server/browser error message, if the error carries one (mirrors wo-detail). */
+function errMessage(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
+}
 
 const P = (k: keyof typeof reconStrings): PhraseKey => reconStrings[k] as PhraseKey;
 
@@ -249,6 +267,32 @@ export function BankReconciliation() {
 
   const loading = statementsQ.isLoading || linesQ.isLoading;
 
+  /**
+   * Statement import. The file never leaves the browser as a file: FileReader turns
+   * it into text and the text is the request body (the handler parses CSV or
+   * `lines[]` itself). The input is reset after every pick so choosing the SAME file
+   * twice still fires a change event — otherwise a failed import could not be retried
+   * without picking something else first.
+   */
+  const fileRef = useRef<HTMLInputElement>(null);
+  const importM = useImportStatement();
+  const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => ctx.notify(DASH, "danger");
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      if (text.trim() === "") return;
+      importM.mutate(text, {
+        onSuccess: () => ctx.notify(tp(P("importToast"))),
+        onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
+      });
+    };
+    reader.readAsText(file);
+  };
+
   const openMatch = (line: ReconLine) => {
     ctx.openModal({
       title: tp(P("matchModalTitle")),
@@ -273,11 +317,43 @@ export function BankReconciliation() {
       subtitle={tp(P("subtitle"))}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          {/* Import + close-reconciliation: contract-only ops (not implemented in the
-              API) -> prototype client-intent toasts, flagged in the header. */}
-          <Btn kind="outline" size="md" icon="upload" onClick={() => ctx.notify(tp(P("importToast")))}>
+          {/* Import — REAL since this round. The handler takes CSV TEXT in the JSON
+              body (bank.ts:978), so the browser reads the chosen file and posts it;
+              no object storage is involved and nothing waits on B-333.
+
+              WHY A BARE FILE INPUT AND NOT THE PROTOTYPE'S DROPZONE MODAL: that modal
+              (real-forms.jsx RFBankImport) is drag-drop copy plus a fabricated result
+              summary — "42 lines, 38 auto-matched" is hardcoded in the prototype, and
+              none of its phrases exist in i18n-full.json. Porting it would mean
+              inventing Thai. A hidden input adds no visible copy and no pixels, and
+              the real counts land in the refreshed table. The modal is B-421.
+
+              The toast is the SAME phrase this button already fired, unchanged. It is
+              really the prototype modal's subtitle rather than a success line; a
+              proper one has no key either (B-421). What changed is that it now fires
+              only after a 2xx. */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            style={{ display: "none" }}
+            onChange={onFilePicked}
+          />
+          <Btn
+            kind="outline"
+            size="md"
+            icon="upload"
+            disabled={importM.isPending}
+            onClick={() => fileRef.current?.click()}
+          >
             {tp(P("importBtn"))}
           </Btn>
+          {/* Close-reconciliation: the endpoint exists (bank.ts:1223) but stays a
+              client-intent toast on purpose. It LOCKS the period — bank_statement
+              .locked = true for every statement in it, after which a back-dated match
+              is refused 409 — and the prototype puts a confirm dialog in front of it
+              whose copy has no key. Wiring it now would either lock the books with no
+              confirmation or invent Thai; both are worse than the honest stub. B-421. */}
           <Btn kind="primary" size="md" icon="check" onClick={() => ctx.notify(tp(P("reconcileToast")))}>
             {tp(P("reconcileBtn"))}
           </Btn>
