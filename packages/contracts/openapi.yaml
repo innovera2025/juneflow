@@ -582,6 +582,40 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /projects/{id}/timeline:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    get:
+      tags: [master]
+      summary: Project schedule — Gantt tasks + milestones + the schedule window (B-424)
+      description: >-
+        The one read behind the `timeline` screen (pototype/timeline.jsx
+        ProjectTimeline). Carries the project's schedule anchor (start_date /
+        end_date, migration 0064), every timeline_task row (group_label, label,
+        plan_start, plan_end, actual_start, actual_end, status, pct, late,
+        late_days) and every milestone row (label, day, milestone_date, status).
+
+        `as_of_date` is the SERVER's date. The client must place the today-line
+        with it and never with the browser clock: the footer prints the same day
+        number, and two clocks would let the line and the caption disagree on the
+        same screen.
+
+        Bar offsets, total_days and today_day are plain date arithmetic against
+        start_date and are deliberately NOT sent — one source of truth. A project
+        with no start_date has no day zero, so the chart renders empty rather than
+        putting a bar on today.
+
+        The S-curve is NOT part of this op: it is GET /boq/reports/evm, the single
+        reader of evm_snapshot (B-101 D3), anchored on the same project.
+      operationId: getProjectTimeline
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /org-units:
     get:
       tags: [master]

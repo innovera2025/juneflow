@@ -410,6 +410,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Project schedule — Gantt tasks + milestones + the schedule window (B-424)
+         * @description The one read behind the `timeline` screen (pototype/timeline.jsx ProjectTimeline). Carries the project's schedule anchor (start_date / end_date, migration 0064), every timeline_task row (group_label, label, plan_start, plan_end, actual_start, actual_end, status, pct, late, late_days) and every milestone row (label, day, milestone_date, status).
+         *     `as_of_date` is the SERVER's date. The client must place the today-line with it and never with the browser clock: the footer prints the same day number, and two clocks would let the line and the caption disagree on the same screen.
+         *     Bar offsets, total_days and today_day are plain date arithmetic against start_date and are deliberately NOT sent — one source of truth. A project with no start_date has no day zero, so the chart renders empty rather than putting a bar on today.
+         *     The S-curve is NOT part of this op: it is GET /boq/reports/evm, the single reader of evm_snapshot (B-101 D3), anchored on the same project.
+         */
+        get: operations["getProjectTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/org-units": {
         parameters: {
             query?: never;
@@ -4479,6 +4504,22 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getProjectTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["EntityOk"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };
