@@ -24,8 +24,11 @@
  *   - the WH cards are made client-side SELECTABLE (filtering the already-loaded stock
  *     rows, gr-list precedent) so the panel header/name is meaningful — no reliance on
  *     the server ?warehouse filter (recon flags it as ignored by the handler);
- *   - inv.stock.btnAddWh (POST /inventory/warehouses) + the filter btn (filter modal)
- *     are out of this read scope -> honest-disabled.
+ *   - inv.stock.btnAddWh is LIVE since this round: it opens the ported WarehouseAddForm
+ *     and POSTs /inventory/warehouses (inventory.ts:1474), then re-queries warehouses +
+ *     stock so the new card appears without a manual refresh. Two prototype elements of
+ *     that form are absent for want of keys — the project picker and the fourth type
+ *     option (B-422). The filter btn (filter modal) is still honest-disabled.
  *
  * i18n (rule 2): inv.* dict keys + BORROWS (accept.unitItems=items · subcon.colValueBaht=value ·
  * model.priceUnit=M-baht · gl.inbox.filterBtn=filter · common.status). item/warehouse
@@ -38,8 +41,21 @@ import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Icon } from "../../ui/icon";
 import { Page } from "../../shell/page";
+import { useShellCtx } from "../../shell/shell-context";
 import { DASH, TableSkeleton, th, td } from "./inv-ui";
 import { formatMoney } from "./inv-shared";
+
+/** A wire field as a string, or "" when the server sent null/absent. */
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/** Server/browser error message, if the error carries one (mirrors wo-detail). */
+function errMessage(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
+}
 import {
   toStockRow,
   toWarehouseRow,
@@ -49,7 +65,8 @@ import {
   type StockRow,
   type WarehouseRow,
 } from "./stock-rows";
-import { useStock, useWarehouses } from "./use-inventory";
+import { useStock, useWarehouses, useCreateWarehouse } from "./use-inventory";
+import { WarehouseAddForm } from "./wh-add-form";
 
 export function InventoryStock() {
   const { t } = useI18n();
@@ -58,6 +75,44 @@ export function InventoryStock() {
   const stockQ = useStock();
 
   const [selWh, setSelWh] = useState("");
+
+  const ctx = useShellCtx();
+  const createWh = useCreateWarehouse();
+
+  /**
+   * Add-warehouse, mirroring the prototype's own header action on this screen
+   * (inventory.jsx:125-131). The toast interpolates what the SERVER returned, not the
+   * draft that was sent: a 201 whose code differs from the typed one (trimmed, or
+   * normalised later) would otherwise be reported back as the typed value.
+   */
+  const openAddWh = () => {
+    ctx.openModal({
+      title: t("inv.whAdd.title"),
+      subtitle: t("inv.whAdd.subtitle"),
+      icon: "box",
+      iconTone: "var(--brand)",
+      size: "md",
+      body: ({ close }: { close: () => void }) => (
+        <WarehouseAddForm
+          saving={createWh.isPending}
+          onClose={close}
+          onSubmit={(draft) =>
+            createWh.mutate(draft, {
+              onSuccess: (created) => {
+                close();
+                ctx.notify(
+                  t("inv.whAdd.toastSaved")
+                    .replace("{name}", str(created.name) || draft.name)
+                    .replace("{code}", str(created.code) || draft.code),
+                );
+              },
+              onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
+            })
+          }
+        />
+      ),
+    });
+  };
 
   const warehouses = useMemo<WarehouseRow[]>(
     () => (warehousesQ.data ?? []).map(toWarehouseRow),
@@ -88,8 +143,10 @@ export function InventoryStock() {
       title={t("inv.stock.title")}
       subtitle={t("inv.stock.subtitle")}
       actions={
-        // POST /inventory/warehouses exists, but the create form is out of this read scope.
-        <Btn kind="primary" size="md" icon="plus" disabled>
+        // LIVE: opens the ported WarehouseAddForm and POSTs /inventory/warehouses. The
+        // old comment was right that the endpoint existed and wrong that the form was
+        // out of scope for good — it was out of scope until it was ported.
+        <Btn kind="primary" size="md" icon="plus" disabled={createWh.isPending} onClick={openAddWh}>
           {t("inv.stock.btnAddWh")}
         </Btn>
       }
