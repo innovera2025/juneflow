@@ -28,6 +28,8 @@ const h = vi.hoisted(() => ({
   periods: [] as unknown[],
   /** What openModal was last called with (the acceptance-modal title carries {no}). */
   modal: null as Record<string, unknown> | null,
+  /** POST /periods/{id}/deliver stand-in — the re-inspect control's only server op. */
+  deliver: vi.fn(),
 }));
 
 /**
@@ -90,6 +92,7 @@ vi.mock("./use-subcon", () => ({
   useSubconContractList: () => ({ data: h.contracts, isLoading: false }),
   useContractPeriods: () => ({ data: h.periods, isLoading: false }),
   useAcceptPeriod: () => ({ accept: async () => ({}), reject: async () => ({}) }),
+  useDeliverPeriod: () => ({ mutate: h.deliver, isPending: false }),
 }));
 
 // The acceptance modal body is opened through ctx.openModal; the list never mounts it.
@@ -316,5 +319,40 @@ describe("SubconAccept — an over-100 plan withholds the whole series", () => {
     expect(markerCount(html)).toBe(0);
     expect(html).not.toContain("left:140%");
     expect(html).not.toContain("left:70%");
+  });
+});
+
+/* --------------------------------------------------------------------------- */
+/* B-371 — a rejected period has a door home, and this screen opens it           */
+/* --------------------------------------------------------------------------- */
+
+describe("SubconAccept — the re-inspect control on a rejected period", () => {
+  /**
+   * Before B-371 `rejected` was written by inspect and left by nothing, so this
+   * control was rendered DISABLED and wired to no server op: a turned-back period
+   * was stranded and its money never reached AP. DELIVERABLE_FROM now carries
+   * `rejected` (apps/api/src/routes/subcon.ts:353), so the control is live.
+   *
+   * renderToStaticMarkup fires no events, so these assert the two things markup
+   * can carry: the control is offered, and it is NOT disabled. Reverting the
+   * wiring puts `disabled` back and kills the second assertion.
+   */
+  const REJECTED = [
+    period({ id: "r-1", seq: 1, pct: 50, amount: 500000, status: "rejected" }),
+    period({ id: "r-2", seq: 2, pct: 50, amount: 500000, status: "pending" }),
+  ];
+
+  it("offers the re-inspect control, enabled", () => {
+    h.periods = REJECTED;
+    const html = render();
+    expect(html).toContain("subcon.reinspectBtn");
+    const btn = html.slice(html.indexOf("subcon.reinspectBtn") - 400, html.indexOf("subcon.reinspectBtn"));
+    expect(btn).not.toContain("disabled");
+  });
+
+  it("offers it ONLY on the rejected row, never on a pending one", () => {
+    h.periods = [period({ id: "p-1", seq: 1, pct: 50, amount: 500000, status: "pending" })];
+    const html = render();
+    expect(html).not.toContain("subcon.reinspectBtn");
   });
 });

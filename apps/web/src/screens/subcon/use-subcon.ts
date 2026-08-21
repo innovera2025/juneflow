@@ -120,6 +120,49 @@ export function useContractPeriods(contractId: string) {
   });
 }
 
+/** Deliver variables — the period + its contract (for invalidation). */
+export interface DeliverPeriodVars {
+  periodId: string;
+  contractId: string;
+}
+
+/**
+ * POST /periods/{id}/deliver — hand a work period to the foreman: status
+ * `pending | rejected` → `delivered`. 409 from any other status. Invalidates the
+ * owning contract's periods on success, so the row's badge and its action
+ * control both re-derive from the wire rather than from local state.
+ *
+ * THE `rejected` SOURCE IS THE POINT (B-371). A period the foreman turned back
+ * used to have no door: `rejected` was written by inspect and left by nothing,
+ * so fixed work could not be re-submitted and its money never reached AP. The
+ * API opened THIS door rather than a new `/reinspect` one — deliver already
+ * means "the contractor submits the period + its docs/photos", which is exactly
+ * what a post-fix resubmission is, and it needed no contract or enum change
+ * (see the long note at apps/api/src/routes/subcon.ts:912).
+ *
+ * The contract requires the body ENVELOPE but both of its fields are optional,
+ * and the handler reads them through `strArray(pick(body, …))`, so `{}` is a
+ * complete request. A re-delivery from the acceptance table sends exactly that:
+ * the screen has no upload control, and sending `docs: []` / `photos: []` would
+ * assert "the contractor attached nothing" where the truth is "this screen
+ * cannot say". A first delivery, once a screen owns one, is the caller with
+ * real arrays to send.
+ */
+export function useDeliverPeriod(): UseMutationResult<Entity, unknown, DeliverPeriodVars> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ periodId }: DeliverPeriodVars) =>
+      unwrap(
+        apiClient.POST("/periods/{id}/deliver", {
+          params: { path: { id: periodId } },
+          body: {},
+        }),
+      ),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: periodsKey(vars.contractId) }),
+  });
+}
+
 /** One defect line sent with an inspect-REJECT (the failed checklist item). */
 export interface InspectDefect {
   item: string;

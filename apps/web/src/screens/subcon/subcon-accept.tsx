@@ -39,8 +39,10 @@
  *     -> the card shell renders with em-dash values (B-107 DEFAULT).
  *   - DMS card: there is no DMS/documents endpoint in scope -> em-dash file count +
  *     the honest empty state; upload is a toast, open-center navigates.
- *   - the re-inspect control (reinspect) has NO wire transition (rejected cannot
- *     return to delivered) -> rendered DISABLED for fidelity, wired to nothing (FLAG).
+ *   - the re-inspect control (reinspect) is LIVE: B-371 made `rejected` an accepted
+ *     source of POST /periods/{id}/deliver, so a turned-back period now has a door
+ *     home. Its toast withholds the round number ({n}) — nothing on the wire counts
+ *     inspections, and the prototype's counter was client-side (B-420).
  *
  * i18n (rule 2): every string is a subcon.* / common.* dict key (t). Tokens back every
  * colour (rule 6). No Thai literal (and no baht glyph) sits in this source; the "%" /
@@ -80,10 +82,17 @@ import {
   type PeriodRow,
   type PeriodBadge,
 } from "./subcon-accept-rows";
-import { useSubconContractList, useContractPeriods } from "./use-subcon";
+import { useSubconContractList, useContractPeriods, useDeliverPeriod } from "./use-subcon";
 import { AcceptForm } from "./accept-form";
 
 const DASH = "—";
+
+/** Server/browser error message, if the error carries one (mirrors wo-detail). */
+function errMessage(err: unknown): string {
+  return typeof err === "object" && err !== null && "message" in err
+    ? String((err as { message?: unknown }).message ?? "")
+    : "";
+}
 /** Language-invariant quantity markers (subcon-accept2.jsx L88/99). */
 const PERCENT_SIGN = "%";
 const TICK = "✓";
@@ -275,6 +284,37 @@ export function SubconAccept() {
   // The non-blocking %-gate advisory (B-107c) — raised strictly from the server
   // `warning` flag returned by the accept flow; never blocks, never fabricates a %.
   const [advisory, setAdvisory] = useState(false);
+
+  /**
+   * The re-inspect control: the contractor has fixed the defects, so the rejected
+   * period goes back to the foreman. One server op — POST /periods/{id}/deliver,
+   * whose accepted sources are `pending | rejected` (B-371). The row's badge and
+   * its control both re-derive from the refetched wire; nothing is tracked here.
+   *
+   * THE TOAST WITHHOLDS THE ROUND NUMBER, deliberately. `subcon.reinspectToast`
+   * carries two placeholders, {no} and {n}, and the prototype filled {n} from an
+   * `inspectCount` it incremented in the browser (subcon-accept2.jsx:106).
+   * Nothing on the wire counts inspections: work_period has no such column, and
+   * acceptance is a single UPSERTED row rather than a history. So {n} takes the
+   * same em-dash this screen already gives an unknown ordinal (periodOrdinal),
+   * instead of a number invented client-side. Filed for a wire counter: B-420.
+   */
+  const deliverM = useDeliverPeriod();
+  const requestReinspect = (period: PeriodRow) => {
+    if (!contract) return;
+    deliverM.mutate(
+      { periodId: period.id, contractId: contract.id },
+      {
+        onSuccess: () =>
+          ctx.notify(
+            t("subcon.reinspectToast")
+              .replace("{no}", periodOrdinal(period))
+              .replace("{n}", DASH),
+          ),
+        onError: (err) => ctx.notify(errMessage(err) || DASH, "danger"),
+      },
+    );
+  };
 
   const openAccept = (period: PeriodRow) => {
     if (!contract) return;
@@ -613,9 +653,16 @@ export function SubconAccept() {
                             {t("subcon.acceptCertBtn")}
                           </Btn>
                         ) : disp.action === "reinspect" ? (
-                          // FLAG (B-107 DEFAULT): rejected has no wire path back to
-                          // delivered — the control is kept for fidelity but DISABLED.
-                          <Btn kind="soft" size="sm" icon="sync" disabled>
+                          // LIVE since B-371: `rejected` is an accepted source of
+                          // POST /periods/{id}/deliver, so the control is wired.
+                          // Disabled only while the request is in flight.
+                          <Btn
+                            kind="soft"
+                            size="sm"
+                            icon="sync"
+                            disabled={deliverM.isPending}
+                            onClick={() => requestReinspect(p)}
+                          >
                             {t("subcon.reinspectBtn")}
                           </Btn>
                         ) : (
