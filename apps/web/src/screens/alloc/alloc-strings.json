@@ -1,0 +1,10 @@
+{
+  "_source": "Verbatim Thai from pototype/petty-alloc.jsx AllocateCost. Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx source, the bank-recon/timeline precedent. Every value RESOLVES in docs/extract/i18n-full.json phrases — checked when this file was generated. Copy that had no key at all was minted as alloc.* dict keys (B-433) and is reached with t(). Copy that EMBEDS mock data ('84 ยูนิต', 'Block B', 'แผน 148K · จริง 152K', 'ตัดงบจาก PO/WO/GR/Petty') is deliberately absent — minting it would freeze a mock figure, or a false provenance claim, into the product's copy (the B-425 family). See B-433.",
+  "crumbSection": "การเงิน",
+  "crumbScreen": "จัดสรรต้นทุน",
+  "unitMillionBaht": "M ฿",
+  "colCode": "รหัส",
+  "colCategory": "หมวดงาน",
+  "colStatus": "สถานะ",
+  "statusNormal": "ปกติ"
+}

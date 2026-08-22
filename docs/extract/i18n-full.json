@@ -22420,6 +22420,90 @@
       "en": "WIP คงเหลือ {amount} ฿ · การโอนจะบันทึก Dr 5010 ต้นทุนขาย / Cr 1140 WIP",
       "zh": "WIP คงเหลือ {amount} ฿ · การโอนจะบันทึก Dr 5010 ต้นทุนขาย / Cr 1140 WIP",
       "ar": "WIP คงเหลือ {amount} ฿ · การโอนจะบันทึก Dr 5010 ต้นทุนขาย / Cr 1140 WIP"
+    },
+    "alloc.title": {
+      "th": "จัดสรรต้นทุน (Cost Allocation)",
+      "en": "จัดสรรต้นทุน (Cost Allocation)",
+      "zh": "จัดสรรต้นทุน (Cost Allocation)",
+      "ar": "จัดสรรต้นทุน (Cost Allocation)"
+    },
+    "alloc.subtitle": {
+      "th": "Standard Cost (BOQ) · Actual Cost (ใช้จริง) · Variance — เทียบหมวดต่อ Unit/Block",
+      "en": "Standard Cost (BOQ) · Actual Cost (ใช้จริง) · Variance — เทียบหมวดต่อ Unit/Block",
+      "zh": "Standard Cost (BOQ) · Actual Cost (ใช้จริง) · Variance — เทียบหมวดต่อ Unit/Block",
+      "ar": "Standard Cost (BOQ) · Actual Cost (ใช้จริง) · Variance — เทียบหมวดต่อ Unit/Block"
+    },
+    "alloc.kpiActual": {
+      "th": "Actual Cost (ใช้จริง)",
+      "en": "Actual Cost (ใช้จริง)",
+      "zh": "Actual Cost (ใช้จริง)",
+      "ar": "Actual Cost (ใช้จริง)"
+    },
+    "alloc.kpiVariance": {
+      "th": "Variance รวม",
+      "en": "Variance รวม",
+      "zh": "Variance รวม",
+      "ar": "Variance รวม"
+    },
+    "alloc.kpiPerUnit": {
+      "th": "ต้นทุน / ยูนิตเฉลี่ย",
+      "en": "ต้นทุน / ยูนิตเฉลี่ย",
+      "zh": "ต้นทุน / ยูนิตเฉลี่ย",
+      "ar": "ต้นทุน / ยูนิตเฉลี่ย"
+    },
+    "alloc.unitPerHouse": {
+      "th": "฿/หลัง",
+      "en": "฿/หลัง",
+      "zh": "฿/หลัง",
+      "ar": "฿/หลัง"
+    },
+    "alloc.chartTitle": {
+      "th": "Standard vs Actual ตามหมวด",
+      "en": "Standard vs Actual ตามหมวด",
+      "zh": "Standard vs Actual ตามหมวด",
+      "ar": "Standard vs Actual ตามหมวด"
+    },
+    "alloc.chartSubtitle": {
+      "th": "วางคู่กันเพื่อเห็นส่วนต่าง — hover เพื่อดูตัวเลข",
+      "en": "วางคู่กันเพื่อเห็นส่วนต่าง — hover เพื่อดูตัวเลข",
+      "zh": "วางคู่กันเพื่อเห็นส่วนต่าง — hover เพื่อดูตัวเลข",
+      "ar": "วางคู่กันเพื่อเห็นส่วนต่าง — hover เพื่อดูตัวเลข"
+    },
+    "alloc.tableTitle": {
+      "th": "Variance Analysis · ตามหมวดงาน",
+      "en": "Variance Analysis · ตามหมวดงาน",
+      "zh": "Variance Analysis · ตามหมวดงาน",
+      "ar": "Variance Analysis · ตามหมวดงาน"
+    },
+    "alloc.colStandard": {
+      "th": "Standard (฿)",
+      "en": "Standard (฿)",
+      "zh": "Standard (฿)",
+      "ar": "Standard (฿)"
+    },
+    "alloc.colActual": {
+      "th": "Actual (฿)",
+      "en": "Actual (฿)",
+      "zh": "Actual (฿)",
+      "ar": "Actual (฿)"
+    },
+    "alloc.statusOver": {
+      "th": "เกินงบมาก",
+      "en": "เกินงบมาก",
+      "zh": "เกินงบมาก",
+      "ar": "เกินงบมาก"
+    },
+    "alloc.statusUnder": {
+      "th": "ดีกว่าแผนมาก",
+      "en": "ดีกว่าแผนมาก",
+      "zh": "ดีกว่าแผนมาก",
+      "ar": "ดีกว่าแผนมาก"
+    },
+    "alloc.btnRecalc": {
+      "th": "คำนวณใหม่",
+      "en": "คำนวณใหม่",
+      "zh": "คำนวณใหม่",
+      "ar": "คำนวณใหม่"
     }
   },
   "nav_i18n": {
