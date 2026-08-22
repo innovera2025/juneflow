@@ -1,0 +1,8 @@
+{
+  "_source": "Static UI keys for the mobile labour check-in screen (route field-checkin, pototype/mobile-screens.jsx MFieldCheckin L534-578). KEYS ONLY, like pm_checkin_strings.json: every value is a DICT stable-id resolved with i18n.t. EXACTLY ONE key was minted for this screen — mob.field.checkin.eyebrow, the prototype's own Thai eyebrow, byte-exact. Everything else either already exists (pm.checkedInAt, borrowed for the checked-in state because its wording is subject-neutral) or is ASCII the prototype writes literally (Check-in / Check-out — the gl-jv.tsx:217 precedent), or is a VALUE rather than copy. States the prototype never had are NOT given invented wording: it only ever showed an inert button, so a checked-out row shows its time and a caller with no linked worker record shows the em-dash, rather than a sentence nobody approved.",
+  "_layers": "all t() = dict (a stable id resolved from i18n-full.json). NO phrases-layer (Thai-as-key) entries here.",
+  "eyebrow": "mob.field.checkin.eyebrow",
+  "checkedInAt": "pm.checkedInAt",
+  "failed": "admin.common.actionFailedToast",
+  "queued": "tax.etax.statusPending"
+}

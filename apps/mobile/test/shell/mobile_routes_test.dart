@@ -228,13 +228,13 @@ void main() {
     }
   });
 
-  test('route parity: 22 of the 26 known routes are built', () {
+  test('route parity: 23 of the 26 known routes are built', () {
     // The count is asserted explicitly so a port that registers a BUILDER without
     // its built id (or the reverse) is caught as a number, not only as a set
     // mismatch. 19 -> 20 with st-receive; 20 -> 21 with field-gr; 21 -> 22 with
-    // field-stock.
-    expect(kBuiltRouteIds.length, 22);
-    expect(mobileScreenBuilders.length, 22);
+    // field-stock; 22 -> 23 with field-checkin (B-437, Wei = ก).
+    expect(kBuiltRouteIds.length, 23);
+    expect(mobileScreenBuilders.length, 23);
     expect(mobileScreenBuilders.keys.toSet(), kBuiltRouteIds);
   });
 }
