@@ -22246,6 +22246,108 @@
       "en": "แจ้งอัปเดต",
       "zh": "แจ้งอัปเดต",
       "ar": "แจ้งอัปเดต"
+    },
+    "timeline.toastRefreshWo": {
+      "th": "รีเฟรชข้อมูลจาก WO Progress แล้ว",
+      "en": "รีเฟรชข้อมูลจาก WO Progress แล้ว",
+      "zh": "รีเฟรชข้อมูลจาก WO Progress แล้ว",
+      "ar": "รีเฟรชข้อมูลจาก WO Progress แล้ว"
+    },
+    "timeline.ganttTitle": {
+      "th": "Gantt Chart · แผนงาน vs จริง",
+      "en": "Gantt Chart · แผนงาน vs จริง",
+      "zh": "Gantt Chart · แผนงาน vs จริง",
+      "ar": "Gantt Chart · แผนงาน vs จริง"
+    },
+    "timeline.ganttSubtitle": {
+      "th": "คลิกแถบงานเพื่อดูเอกสาร BOQ/PR/PO/WO ที่เกี่ยวข้อง · เส้นแดง = วันนี้",
+      "en": "คลิกแถบงานเพื่อดูเอกสาร BOQ/PR/PO/WO ที่เกี่ยวข้อง · เส้นแดง = วันนี้",
+      "zh": "คลิกแถบงานเพื่อดูเอกสาร BOQ/PR/PO/WO ที่เกี่ยวข้อง · เส้นแดง = วันนี้",
+      "ar": "คลิกแถบงานเพื่อดูเอกสาร BOQ/PR/PO/WO ที่เกี่ยวข้อง · เส้นแดง = วันนี้"
+    },
+    "timeline.legendActual": {
+      "th": "ทำจริง",
+      "en": "ทำจริง",
+      "zh": "ทำจริง",
+      "ar": "ทำจริง"
+    },
+    "timeline.legendLate": {
+      "th": "ล่าช้า",
+      "en": "ล่าช้า",
+      "zh": "ล่าช้า",
+      "ar": "ล่าช้า"
+    },
+    "timeline.colGroupTask": {
+      "th": "หมวดงาน · งาน",
+      "en": "หมวดงาน · งาน",
+      "zh": "หมวดงาน · งาน",
+      "ar": "หมวดงาน · งาน"
+    },
+    "timeline.statusDone": {
+      "th": "เสร็จแล้ว",
+      "en": "เสร็จแล้ว",
+      "zh": "เสร็จแล้ว",
+      "ar": "เสร็จแล้ว"
+    },
+    "timeline.statusNotStarted": {
+      "th": "ยังไม่เริ่ม",
+      "en": "ยังไม่เริ่ม",
+      "zh": "ยังไม่เริ่ม",
+      "ar": "ยังไม่เริ่ม"
+    },
+    "timeline.fieldDelay": {
+      "th": "ความล่าช้า",
+      "en": "ความล่าช้า",
+      "zh": "ความล่าช้า",
+      "ar": "ความล่าช้า"
+    },
+    "timeline.docWo": {
+      "th": "งวดงานผู้รับเหมาที่กำลังเดิน",
+      "en": "งวดงานผู้รับเหมาที่กำลังเดิน",
+      "zh": "งวดงานผู้รับเหมาที่กำลังเดิน",
+      "ar": "งวดงานผู้รับเหมาที่กำลังเดิน"
+    },
+    "timeline.docPr": {
+      "th": "PR วัสดุที่ใช้ในงานนี้",
+      "en": "PR วัสดุที่ใช้ในงานนี้",
+      "zh": "PR วัสดุที่ใช้ในงานนี้",
+      "ar": "PR วัสดุที่ใช้ในงานนี้"
+    },
+    "timeline.btnSubconProgress": {
+      "th": "ดู Progress ผู้รับเหมา",
+      "en": "ดู Progress ผู้รับเหมา",
+      "zh": "ดู Progress ผู้รับเหมา",
+      "ar": "ดู Progress ผู้รับเหมา"
+    },
+    "timeline.btnBoq": {
+      "th": "ดู BOQ",
+      "en": "ดู BOQ",
+      "zh": "ดู BOQ",
+      "ar": "ดู BOQ"
+    },
+    "timeline.lateBadge": {
+      "th": "ช้า {days} วัน",
+      "en": "ช้า {days} วัน",
+      "zh": "ช้า {days} วัน",
+      "ar": "ช้า {days} วัน"
+    },
+    "timeline.delayValue": {
+      "th": "ล่าช้า {days} วัน",
+      "en": "ล่าช้า {days} วัน",
+      "zh": "ล่าช้า {days} วัน",
+      "ar": "ล่าช้า {days} วัน"
+    },
+    "timeline.dateRange": {
+      "th": "วันที่ {from} → {to}",
+      "en": "วันที่ {from} → {to}",
+      "zh": "วันที่ {from} → {to}",
+      "ar": "วันที่ {from} → {to}"
+    },
+    "timeline.taskModalSubtitle": {
+      "th": "{group} · เชื่อมเอกสาร BOQ/PR/PO/WO",
+      "en": "{group} · เชื่อมเอกสาร BOQ/PR/PO/WO",
+      "zh": "{group} · เชื่อมเอกสาร BOQ/PR/PO/WO",
+      "ar": "{group} · เชื่อมเอกสาร BOQ/PR/PO/WO"
     }
   },
   "nav_i18n": {
