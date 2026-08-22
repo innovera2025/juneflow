@@ -251,6 +251,14 @@ export interface TimelineKpis {
  * counts here come from the rows, and the captions that cannot be derived are
  * rendered em-dash by the screen (B-425). A KPI that matches the mock by being
  * hardcoded is not a KPI.
+ *
+ * ONE AGGREGATION RULE IS CHOSEN HERE RATHER THAN STATED ANYWHERE: overall
+ * progress is the UNWEIGHTED MEAN of the task percents. The prototype hardcodes
+ * 62 and its own S-curve caption claims BOQ-value weighting, so neither the mock
+ * nor the spec defines this number; the rows carry no weight column to use, and a
+ * weighted figure would need a source that does not exist. Filed as part of B-426
+ * so the choice is visible rather than assumed — if a weighting is ruled later,
+ * this is the one line that changes.
  */
 export function timelineKpis(
   tasks: readonly TimelineTaskWire[],
@@ -337,4 +345,32 @@ export function scurveFromEvm(series: readonly EvmPoint[]): Scurve | null {
     // line instead of drawing a drop to zero.
     actual: series.map((p) => pct(p.ev)),
   };
+}
+
+/**
+ * Per-band colour, ported 1:1 from timeline.jsx TIMELINE_TASKS (:239-258).
+ *
+ * VERBATIM HEX, and that is the repo's own precedent for exactly this case:
+ * land-pipeline-rows.ts:114-123 ports the seven stage colours the same way, noting
+ * "no matching token". The first version of this screen cycled tokens by band
+ * INDEX instead, which re-colours every band the moment one is added, removed or
+ * reordered — the colour would stop meaning "this trade" and start meaning
+ * "whatever sorted third".
+ *
+ * Keyed by the group label, because that is what binds the colour to the trade in
+ * the source; the seeded labels are the prototype's own strings. A band the map
+ * does not know renders with the neutral tone rather than borrowing another
+ * trade's colour.
+ */
+const BAND_COLOR_BY_GROUP: Readonly<Record<string, string>> = {
+  "01 \u0e07\u0e32\u0e19\u0e40\u0e15\u0e23\u0e35\u0e22\u0e21 + Site Work": "#94A3B8",
+  "02 \u0e07\u0e32\u0e19\u0e42\u0e04\u0e23\u0e07\u0e2a\u0e23\u0e49\u0e32\u0e07": "#0B2A4A",
+  "03 \u0e07\u0e32\u0e19\u0e2a\u0e16\u0e32\u0e1b\u0e31\u0e15\u0e22\u0e01\u0e23\u0e23\u0e21": "#0F766E",
+  "04 \u0e07\u0e32\u0e19\u0e23\u0e30\u0e1a\u0e1a\u0e44\u0e1f\u0e1f\u0e49\u0e32 + \u0e1b\u0e23\u0e30\u0e1b\u0e32": "#1D4ED8",
+  "05 \u0e2a\u0e48\u0e07\u0e21\u0e2d\u0e1a + Handover": "#15803D",
+};
+
+/** The colour of a band, or the neutral tone for a group the source never named. */
+export function bandColor(group: string): string {
+  return BAND_COLOR_BY_GROUP[group] ?? "#94A3B8";
 }

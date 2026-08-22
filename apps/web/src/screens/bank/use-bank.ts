@@ -131,7 +131,6 @@ export function useMatchBankLine(): UseMutationResult<Entity, unknown, MatchLine
   });
 }
 
-/** GET /bank/cheque — the tenant cheque register (B-014 envelope `{ data, ... }`). */
 /**
  * POST /bank/statements/import — load a bank statement and auto-match its lines.
  *
@@ -167,6 +166,7 @@ export function useImportStatement(): UseMutationResult<Entity, unknown, string>
   });
 }
 
+/** GET /bank/cheque — the tenant cheque register (B-014 envelope `{ data, ... }`). */
 export function useBankCheque() {
   return useQuery<Row[]>({
     queryKey: CHEQUE_KEY,

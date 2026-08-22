@@ -35,7 +35,7 @@
  * i18n (rule 2): every string is a timeline-strings.json phrase (tp) or a
  * timeline.* / common.* dict key (t). No Thai in this source (B-073).
  */
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { DictKey, PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
@@ -49,6 +49,7 @@ import { useProjects, resolveActiveProject } from "../../shell/use-shell-data";
 import { useBoqEvm } from "../boq/use-boq-reports";
 import { useProjectTimeline } from "./use-timeline";
 import {
+  bandColor,
   barGeometry,
   pctOfAxis,
   scurveFromEvm,
@@ -66,14 +67,6 @@ import strings from "./timeline-strings.json" with { type: "json" };
 const DASH = "—";
 
 const P = (k: keyof typeof strings): PhraseKey => strings[k] as PhraseKey;
-
-/**
- * Group band colours. `timeline_task` has no colour column, so the prototype's
- * five hex literals have no source; tokens are cycled by band position instead,
- * which also keeps rule 6 (no hardcoded colour in a screen). A band beyond the
- * fifth reuses the cycle rather than rendering unstyled.
- */
-const BAND_TONES = ["var(--text-3)", "var(--brand)", "var(--ok)", "var(--info)", "var(--accent)"];
 
 /** Status to the bar's fill, following the prototype's own three states. */
 function barTone(task: GanttTask): string {
@@ -159,49 +152,88 @@ function monthColumns(axis: TimelineAxis): { key: keyof typeof strings; id: stri
 }
 
 /**
- * The task-detail modal body (prototype TaskDetail). The related-documents list
- * is not ported: there is no task-to-document join anywhere in the schema, so
- * every row of it would be invented (B-425).
+ * The task-detail panel (prototype TaskDetail, timeline.jsx:492-523).
+ *
+ * ONE ELEMENT IS OMITTED, and only one: the related-documents list. Its four rows
+ * are hardcoded document numbers in the mock ("BOQ-2026-B-02", "WO-2026-0117", …)
+ * and there is no task-to-document join anywhere in the schema, so every row would
+ * be invented. Its two footer buttons ARE ported — both routes exist.
+ *
+ * Everything else the prototype prints is here, because every one of them has a
+ * source: the group, the status, both windows, the percent and the stated delay.
  */
-function TaskDetail({ task, group }: { task: GanttTask; group: string }) {
-  const { t } = useI18n();
+function TaskDetail({
+  task,
+  group,
+  onClose,
+  onNavigate,
+}: {
+  task: GanttTask;
+  group: string;
+  onClose: () => void;
+  onNavigate: (route: string) => void;
+}) {
+  const { t, tp } = useI18n();
   const range = (w: readonly [number, number | null] | null): string =>
     w == null
       ? DASH
       : t("timeline.dateRange" as DictKey)
           .replace("{from}", String(w[0]))
-          .replace("{to}", w[1] == null ? DASH : String(w[1]));
+          // An open window runs to "now", which is the prototype's own word for it
+          // — not an em-dash, because the end is not unknown, it is ongoing.
+          .replace("{to}", w[1] == null ? tp(P("openEnded")) : String(w[1]));
+  const statusLabel =
+    task.status === "done"
+      ? t("timeline.statusDone" as DictKey)
+      : task.status === "ongoing"
+        ? tp(P("statusOngoing"))
+        : t("timeline.statusNotStarted" as DictKey);
+  const late = (task.lateDays ?? 0) > 0;
+
+  const field = (label: string, value: ReactNode, style?: CSSProperties) => (
+    <div>
+      <span style={{ color: "var(--text-3)", fontSize: 10.5 }}>{label}</span>
+      <div style={{ fontWeight: 600, marginTop: 2, ...style }}>{value}</div>
+    </div>
+  );
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
-      <div>
-        <span style={{ color: "var(--text-3)", fontSize: 10.5 }}>{group || DASH}</span>
-        <div style={{ fontWeight: 600 }}>{task.label || DASH}</div>
-      </div>
-      <div>
-        <span style={{ color: "var(--text-3)", fontSize: 10.5 }}>{t("common.status" as DictKey)}</span>
-        <div style={{ fontWeight: 600 }}>
-          {task.status === "done"
-            ? t("timeline.statusDone" as DictKey)
-            : task.status === "ongoing"
-              ? `${task.pct ?? DASH}%`
-              : t("timeline.statusNotStarted" as DictKey)}
+    <div>
+      <div style={{ padding: 14, background: "var(--surface-2)", borderRadius: 10, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
+          {field(tp(P("fieldGroup")), group || DASH)}
+          {field(tp(P("fieldStatus")), statusLabel)}
+          {field(tp(P("legendPlan")), <span className="num">{range(task.plan)}</span>)}
+          {field(tp(P("legendActual")), <span className="num">{range(task.actual)}</span>)}
+          {field(
+            tp(P("fieldProgress")),
+            <span className="num">{task.pct == null ? DASH : `${task.pct}%`}</span>,
+            { fontWeight: 700 },
+          )}
+          {/* "on schedule" is a real answer, not an unknown: `late` is a column the
+              server filled in. An em-dash here would claim ignorance about
+              something that was measured. */}
+          {field(
+            t("timeline.fieldDelay" as DictKey),
+            late
+              ? t("timeline.delayValue" as DictKey).replace("{days}", String(task.lateDays))
+              : tp(P("onSchedule")),
+            { color: late ? "var(--warn)" : "var(--ok)" },
+          )}
         </div>
       </div>
-      <div>
-        <span style={{ color: "var(--text-3)", fontSize: 10.5 }}>{strings.legendPlan}</span>
-        <div className="num">{range(task.plan)}</div>
-      </div>
-      <div>
-        <span style={{ color: "var(--text-3)", fontSize: 10.5 }}>{strings.legendActual}</span>
-        <div className="num">{range(task.actual)}</div>
-      </div>
-      <div>
-        <span style={{ color: "var(--text-3)", fontSize: 10.5 }}>{t("timeline.fieldDelay" as DictKey)}</span>
-        <div style={{ fontWeight: 600, color: (task.lateDays ?? 0) > 0 ? "var(--warn)" : "var(--ok)" }}>
-          {(task.lateDays ?? 0) > 0
-            ? t("timeline.delayValue" as DictKey).replace("{days}", String(task.lateDays))
-            : DASH}
-        </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Btn kind="outline" size="md" onClick={onClose}>
+          {tp(P("closeBtn"))}
+        </Btn>
+        <div style={{ flex: 1 }} />
+        <Btn kind="ghost" size="md" icon="hardhat" onClick={() => onNavigate("subcon")}>
+          {t("timeline.btnSubconProgress" as DictKey)}
+        </Btn>
+        <Btn kind="primary" size="md" icon="link" onClick={() => onNavigate("boq.overview")}>
+          {t("timeline.btnBoq" as DictKey)}
+        </Btn>
       </div>
     </div>
   );
@@ -229,7 +261,34 @@ export function ProjectTimeline() {
   const curve = useMemo(() => scurveFromEvm(evmQ.data?.series ?? []), [evmQ.data]);
   const months = useMemo(() => monthColumns(axis), [axis]);
 
-  const [openTask, setOpenTask] = useState<{ task: GanttTask; group: string } | null>(null);
+  /**
+   * The task panel opens through ctx.openModal, the shell's ported modal
+   * (ui/modal.tsx) — the same door 105 other screens use and the one the
+   * prototype itself calls (timeline.jsx:432-437). The first version of this
+   * screen hand-rolled an overlay, which lost the title, the subtitle, the icon,
+   * Escape-to-close and the size scale, and left the subtitle key minted but
+   * unused.
+   */
+  const openTaskDetail = (task: GanttTask, group: string) => {
+    ctx.openModal({
+      title: task.label || DASH,
+      subtitle: t("timeline.taskModalSubtitle" as DictKey).replace("{group}", group || DASH),
+      icon: "calendar",
+      iconTone: "var(--brand)",
+      size: "md",
+      body: ({ close }: { close: () => void }) => (
+        <TaskDetail
+          task={task}
+          group={group}
+          onClose={close}
+          onNavigate={(route) => {
+            close();
+            ctx.navigate(route, {});
+          }}
+        />
+      ),
+    });
+  };
 
   const num = (v: number | null, digits = 0): string => (v == null ? DASH : v.toFixed(digits));
 
@@ -299,7 +358,7 @@ export function ProjectTimeline() {
                 labels: curve.labels,
                 datasets: [
                   {
-                    label: strings.seriesPlan,
+                    label: tp(P("seriesPlan")),
                     data: curve.plan,
                     borderColor: theme.accent,
                     borderWidth: 2.5,
@@ -307,7 +366,7 @@ export function ProjectTimeline() {
                     fill: false,
                   },
                   {
-                    label: strings.seriesActual,
+                    label: tp(P("seriesActual")),
                     data: curve.actual,
                     borderColor: theme.brand,
                     borderWidth: 2.5,
@@ -455,7 +514,7 @@ export function ProjectTimeline() {
               <div
                 style={{
                   display: "flex",
-                  background: `color-mix(in srgb, ${BAND_TONES[bi % BAND_TONES.length]} 6%, var(--surface))`,
+                  background: `color-mix(in srgb, ${bandColor(band.group)} 6%, var(--surface))`,
                   borderTop: "1px solid var(--border)",
                 }}
               >
@@ -465,7 +524,7 @@ export function ProjectTimeline() {
                     padding: "8px 14px",
                     fontSize: 12,
                     fontWeight: 700,
-                    color: BAND_TONES[bi % BAND_TONES.length],
+                    color: bandColor(band.group),
                     display: "flex",
                     alignItems: "center",
                     gap: 6,
@@ -498,7 +557,7 @@ export function ProjectTimeline() {
                     </div>
                     <div
                       style={{ flex: 1, position: "relative", padding: "10px 0", cursor: "pointer" }}
-                      onClick={() => setOpenTask({ task, group: band.group })}
+                      onClick={() => openTaskDetail(task, band.group)}
                     >
                       {plan && (
                         <div
@@ -566,32 +625,6 @@ export function ProjectTimeline() {
         </div>
       </Card>
 
-      {openTask && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
-          }}
-          onClick={() => setOpenTask(null)}
-        >
-          <div
-            style={{ background: "var(--surface)", borderRadius: "var(--r-lg)", padding: 20, minWidth: 420 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <TaskDetail task={openTask.task} group={openTask.group} />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-              <Btn kind="outline" size="md" onClick={() => setOpenTask(null)}>
-                {t("common.close" as DictKey)}
-              </Btn>
-            </div>
-          </div>
-        </div>
-      )}
     </Page>
   );
 }

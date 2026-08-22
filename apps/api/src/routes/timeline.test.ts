@@ -312,3 +312,105 @@ describe("GET /api/v1/projects/{id}/timeline", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// ORDERING. gate 4.5 found the first version of this suite could not see it: every
+// fixture had ONE task and ONE milestone, so deleting both sorts left all nine
+// tests green while the file's own comment claimed the stubs exercised them. These
+// hand the stubs a scrambled array, which is what that comment described.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/projects/{id}/timeline — row order", () => {
+  const scrambled = [
+    taskRow({ id: "c", groupLabel: "02", planStart: "2026-03-01" }),
+    taskRow({ id: "a", groupLabel: "01", planStart: "2026-02-01" }),
+    taskRow({ id: "b", groupLabel: "02", planStart: "2026-01-01" }),
+    taskRow({ id: "d", groupLabel: "01", planStart: "2026-02-01" }),
+  ];
+
+  it("sorts by group band, then plan start, then id", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([
+          [projects, [projectRow()]],
+          [timelineTasks, scrambled],
+          [milestones, []],
+        ]),
+      })
+    ).inject({ url: `/api/v1/projects/${PROJECT}/timeline` });
+
+    // 01 before 02; inside 01 the two share a start date so `id` breaks the tie;
+    // inside 02 the earlier start wins.
+    expect(res.json().tasks.map((t: { id: string }) => t.id)).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("is TOTAL — two rows alike but for their id never swap between reads", async () => {
+    // A chart whose rows reorder on refresh reads as data that changed. The floor
+    // is `id`; without it the order falls back to whatever the join plan produced.
+    const twins = [
+      taskRow({ id: "z", groupLabel: "01", planStart: "2026-02-01" }),
+      taskRow({ id: "y", groupLabel: "01", planStart: "2026-02-01" }),
+    ];
+    for (const order of [twins, [...twins].reverse()]) {
+      const res = await (
+        await buildTestApp({
+          resolveTenant: async () => SESSION,
+          db: stubDb([
+            [projects, [projectRow()]],
+            [timelineTasks, order],
+            [milestones, []],
+          ]),
+        })
+      ).inject({ url: `/api/v1/projects/${PROJECT}/timeline` });
+      expect(res.json().tasks.map((t: { id: string }) => t.id)).toEqual(["y", "z"]);
+    }
+  });
+
+  it("sorts a row with no group or no plan start LAST, never first", async () => {
+    // A row that cannot be placed must not displace one that can.
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([
+          [projects, [projectRow()]],
+          [
+            timelineTasks,
+            [
+              taskRow({ id: "nogroup", groupLabel: null, planStart: "2026-01-01" }),
+              taskRow({ id: "real", groupLabel: "01", planStart: "2026-05-01" }),
+              taskRow({ id: "nostart", groupLabel: "01", planStart: null }),
+            ],
+          ],
+          [milestones, []],
+        ]),
+      })
+    ).inject({ url: `/api/v1/projects/${PROJECT}/timeline` });
+
+    expect(res.json().tasks.map((t: { id: string }) => t.id)).toEqual(["real", "nostart", "nogroup"]);
+  });
+
+  it("sorts milestones by day, then id, with a dayless one last", async () => {
+    const res = await (
+      await buildTestApp({
+        resolveTenant: async () => SESSION,
+        db: stubDb([
+          [projects, [projectRow()]],
+          [timelineTasks, []],
+          [
+            milestones,
+            [
+              milestoneRow({ id: "m3", day: 195 }),
+              milestoneRow({ id: "m0", day: null }),
+              milestoneRow({ id: "m1", day: 0 }),
+              milestoneRow({ id: "m2", day: 40 }),
+            ],
+          ],
+        ]),
+      })
+    ).inject({ url: `/api/v1/projects/${PROJECT}/timeline` });
+
+    expect(res.json().milestones.map((m: { id: string }) => m.id)).toEqual(["m1", "m2", "m3", "m0"]);
+  });
+});
+
