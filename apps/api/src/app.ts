@@ -35,6 +35,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerMeRoute } from "./routes/me.js";
 import { loadUserByEmail } from "./routes/profile-data.js";
 import { registerProjectsRoute } from "./routes/projects.js";
+import { registerTimelineRoute } from "./routes/timeline.js";
 import { registerCountsRoute } from "./routes/counts.js";
 import { registerCompaniesRoute } from "./routes/companies.js";
 import { registerProjectTypesRoute } from "./routes/project-types.js";
@@ -782,6 +783,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       });
       registerMeRoute(v1);
       registerProjectsRoute(v1, { quota: deps.quota });
+      // B-424 — GET /projects/{id}/timeline (the schedule behind the timeline screen).
+      registerTimelineRoute(v1);
       registerCountsRoute(v1);
       registerCompaniesRoute(v1);
       registerProjectTypesRoute(v1);
