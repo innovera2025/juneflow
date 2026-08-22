@@ -42,11 +42,18 @@ import type { WarehouseDraft } from "./use-inventory";
 
 /**
  * Type options: value = the code stored in warehouse.type, label = its dict key.
- * The prototype's fourth option (tools) is missing from inv.whType — B-422.
+ *
+ * ALL FOUR the prototype offers (inventory.jsx:507). The fourth was left out at
+ * first because `inv.whType` has only three — but the label it needs already
+ * exists under another group, as `fa.catTool`, with byte-identical Thai. Nothing
+ * had to be minted; the gap was in how I searched, not in the dictionary. The
+ * repo already borrows across groups this way and inventory-items.tsx documents
+ * its own borrows in the same style (B-422).
  */
 const WH_TYPE_OPTIONS: readonly (readonly [string, DictKey])[] = [
   ["site", "inv.whType.site" as DictKey],
   ["central", "inv.whType.central" as DictKey],
+  ["tools", "fa.catTool" as DictKey],
   ["temp", "inv.whType.temp" as DictKey],
 ];
 

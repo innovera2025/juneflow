@@ -73,13 +73,18 @@ describe("ItemAddForm — the fields it offers", () => {
     expect(html).not.toContain("inv.itemAdd.infoBoq");
   });
 
-  it("offers the EIGHT unit options that have keys, not the prototype's ten", () => {
+  it("offers ALL TEN unit options the prototype has", () => {
+    // Square- and cubic-metre were missing while I searched only the inv.unit
+    // group; both exist under subcon.unitSqm / subcon.unitCbm with byte-identical
+    // Thai, so they are borrows, not mints (B-422).
     const html = render();
     for (const k of ["piece", "bag", "rod", "roll", "meter", "set", "box", "other"]) {
       expect(html).toContain(`inv.unit.${k}`);
     }
-    // 8 units + 4 categories + 1 blank warehouse + 2 warehouses = 15 options.
-    expect((html.match(/<option/g) ?? []).length).toBe(15);
+    expect(html).toContain("subcon.unitSqm");
+    expect(html).toContain("subcon.unitCbm");
+    // 10 units + 4 categories + 1 blank warehouse + 2 warehouses = 17 options.
+    expect((html.match(/<option/g) ?? []).length).toBe(17);
   });
 
   it("builds the warehouse picker from REAL rows and sends ids, not names", () => {
@@ -119,7 +124,7 @@ describe("ItemAddForm — the save gate", () => {
     // A fresh tenant has none. The picker then holds only its blank option.
     const html = render(false, []);
     expect(html).toContain("inv.itemAdd.fieldMainWh");
-    expect((html.match(/<option/g) ?? []).length).toBe(13);
+    expect((html.match(/<option/g) ?? []).length).toBe(15);
   });
 });
 

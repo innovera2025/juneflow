@@ -18,9 +18,6 @@
  *      item will be linked to BOQ + PR + PO automatically on save. Nothing does that.
  *      Rendering it would be the screen making a claim about the system that is false.
  *
- *   3. TWO OF THE TEN UNIT OPTIONS. inv.unit has eight; the prototype's square-metre
- *      and cubic-metre entries have no key. Eight are offered rather than minting two.
- *      Same family as B-422.
  *
  * BORROWED KEYS (rule 2 allows an existing key whose Thai is identical; the same
  * practice inventory-stock.tsx documents for its own borrows): the name label uses
@@ -49,8 +46,14 @@ import type { ItemDraft } from "./use-inventory";
 const CAT_OPTIONS: readonly string[] = ["Material", "Tool", "Consumable", "Equipment"];
 
 /**
- * Unit options: value = the inv.unit key suffix stored on the row, label = its key.
- * The prototype also offers square-metre and cubic-metre; neither has a key (B-422).
+ * Unit options: value = the unit code stored on the row, label = its dict key.
+ *
+ * ALL TEN the prototype offers (inventory.jsx:510). Square- and cubic-metre were
+ * left out at first because `inv.unit` has only eight — but both labels already
+ * exist under another group, as `subcon.unitSqm` and `subcon.unitCbm`, with
+ * byte-identical Thai. Nothing had to be minted; the gap was in how I searched
+ * (one namespace instead of the whole dictionary by VALUE), not in the
+ * dictionary itself (B-422).
  */
 const UNIT_OPTIONS: readonly (readonly [string, DictKey])[] = [
   ["piece", "inv.unit.piece" as DictKey],
@@ -60,6 +63,8 @@ const UNIT_OPTIONS: readonly (readonly [string, DictKey])[] = [
   ["meter", "inv.unit.meter" as DictKey],
   ["set", "inv.unit.set" as DictKey],
   ["box", "inv.unit.box" as DictKey],
+  ["sqm", "subcon.unitSqm" as DictKey],
+  ["cbm", "subcon.unitCbm" as DictKey],
   ["other", "inv.unit.other" as DictKey],
 ];
 

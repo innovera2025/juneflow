@@ -45,15 +45,15 @@ describe("WarehouseAddForm — the fields it offers", () => {
     }
   });
 
-  it("offers the THREE type options that have keys, and no fourth", () => {
-    // The prototype has four (the fourth is tools); inv.whType has only three.
-    // Minting the fourth is B-422 — until it is ruled, a fourth option here would
-    // mean either a Thai literal in source or an option labelled with a raw key.
+  it("offers ALL FOUR type options the prototype has", () => {
+    // The fourth (tools) was missing while I searched only the inv.whType group;
+    // its label exists under fa.catTool with byte-identical Thai, so the option is
+    // a borrow, not a mint (B-422).
     const html = render();
-    expect(html).toContain("inv.whType.site");
-    expect(html).toContain("inv.whType.central");
-    expect(html).toContain("inv.whType.temp");
-    expect((html.match(/<option/g) ?? []).length).toBe(3);
+    for (const key of ["inv.whType.site", "inv.whType.central", "fa.catTool", "inv.whType.temp"]) {
+      expect(html, `missing type option: ${key}`).toContain(key);
+    }
+    expect((html.match(/<option/g) ?? []).length).toBe(4);
   });
 
   it("does NOT render a project field — no key for it, and no column behind it", () => {
