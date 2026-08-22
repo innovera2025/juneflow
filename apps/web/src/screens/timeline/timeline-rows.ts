@@ -286,12 +286,16 @@ export function timelineKpis(
   };
 }
 
-/** One EVM period as GET /boq/reports/evm sends it. */
+/**
+ * One EVM period, in the shape the BOQ reports module already narrows it to
+ * (boq-reports-agg.ts EvmPoint). Reused rather than re-parsed: a second narrowing
+ * of the same endpoint is a second place for the two to disagree.
+ */
 export interface EvmPoint {
-  period_label: string;
-  pv: number | null;
-  ev: number | null;
-  ac: number | null;
+  periodLabel: string | null;
+  pv: number;
+  ev: number;
+  ac: number;
 }
 
 /** The S-curve: one label per period, plan and actual as cumulative percents. */
@@ -321,12 +325,16 @@ export function scurveFromEvm(series: readonly EvmPoint[]): Scurve | null {
   if (!series.length) return null;
   const last = series[series.length - 1];
   const bac = last?.pv ?? null;
-  if (bac == null || !(bac > 0)) return null;
+  if (bac == null || !Number.isFinite(bac) || !(bac > 0)) return null;
+  const pct = (v: number | null | undefined): number | null =>
+    v == null || !Number.isFinite(v) ? null : (v / bac) * 100;
   return {
-    labels: series.map((p) => p.period_label),
-    plan: series.map((p) => (p.pv == null ? null : (p.pv / bac) * 100)),
+    // A period with no label still has a value; the axis keeps the slot rather
+    // than shifting every later point one place to the left.
+    labels: series.map((p) => p.periodLabel ?? ""),
+    plan: series.map((p) => pct(p.pv)),
     // A period with no EV has not been measured yet; null leaves a gap in the
     // line instead of drawing a drop to zero.
-    actual: series.map((p) => (p.ev == null ? null : (p.ev / bac) * 100)),
+    actual: series.map((p) => pct(p.ev)),
   };
 }

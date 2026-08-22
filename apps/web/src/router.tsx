@@ -32,6 +32,7 @@ import { BOQOverview } from "./screens/boq/boq-overview";
 import { BOQList } from "./screens/boq/boq-list";
 import { BOQEditor } from "./screens/boq/boq-editor";
 import { BOMTemplates } from "./screens/boq/boq-bom";
+import { ProjectTimeline } from "./screens/timeline/timeline";
 import { BOQApproval } from "./screens/boq/boq-approval";
 import { BOQArchive } from "./screens/boq/boq-archive";
 import { BOQReports } from "./screens/boq/boq-reports";
@@ -148,6 +149,8 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "boq.list": BOQList,
   "boq.editor": BOQEditor,
   "boq.bom": BOMTemplates,
+  // B-424 — the project schedule (Gantt + S-curve + milestones).
+  timeline: ProjectTimeline,
   "boq.approval": BOQApproval,
   "boq.archive": BOQArchive,
   "boq.reports": BOQReports,

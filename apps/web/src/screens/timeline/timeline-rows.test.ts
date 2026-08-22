@@ -18,6 +18,7 @@ import {
   toMilestonePoints,
   type TimelineTaskWire,
   type MilestoneWire,
+  type EvmPoint,
 } from "./timeline-rows";
 
 const START = "2026-01-01";
@@ -244,10 +245,10 @@ describe("timelineKpis", () => {
 });
 
 describe("scurveFromEvm", () => {
-  const series = [
-    { period_label: "2026-01", pv: 25, ev: 20, ac: 22 },
-    { period_label: "2026-02", pv: 50, ev: 40, ac: 44 },
-    { period_label: "2026-03", pv: 100, ev: 80, ac: 88 },
+  const series: EvmPoint[] = [
+    { periodLabel: "2026-01", pv: 25, ev: 20, ac: 22 },
+    { periodLabel: "2026-02", pv: 50, ev: 40, ac: 44 },
+    { periodLabel: "2026-03", pv: 100, ev: 80, ac: 88 },
   ];
 
   it("normalises by the FINAL pv, so plan reaches 100% at completion", () => {
@@ -259,13 +260,19 @@ describe("scurveFromEvm", () => {
 
   it("leaves a GAP for a period with no measured value instead of drawing zero", () => {
     // A drop to zero would read as work being undone.
-    const curve = scurveFromEvm([...series.slice(0, 2), { period_label: "2026-03", pv: 100, ev: null, ac: null }])!;
+    // The BOQ narrowing types ev/ac as numbers, but the endpoint can and does send
+    // a period that has not been measured; the cast is the only way to model that
+    // here, and the behaviour it pins is the reason the guard exists at all.
+    const unmeasured = { periodLabel: "2026-03", pv: 100, ev: null, ac: null } as unknown as EvmPoint;
+    const curve = scurveFromEvm([...series.slice(0, 2), unmeasured])!;
     expect(curve.actual).toEqual([20, 40, null]);
   });
 
   it("is null with no series, and null when the denominator is unusable", () => {
     expect(scurveFromEvm([])).toBeNull();
-    expect(scurveFromEvm([{ period_label: "2026-01", pv: 0, ev: 0, ac: 0 }])).toBeNull();
-    expect(scurveFromEvm([{ period_label: "2026-01", pv: null, ev: 5, ac: 5 }])).toBeNull();
+    expect(scurveFromEvm([{ periodLabel: "2026-01", pv: 0, ev: 0, ac: 0 }])).toBeNull();
+    expect(
+      scurveFromEvm([{ periodLabel: "2026-01", pv: null, ev: 5, ac: 5 } as unknown as EvmPoint]),
+    ).toBeNull();
   });
 });
