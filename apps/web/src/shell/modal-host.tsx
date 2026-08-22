@@ -18,6 +18,11 @@ function ConfirmDialog({ cfg, onClose }: { cfg: ModalCfg; onClose: () => void })
   const message = cfg.message as ReactNode | undefined;
   const onConfirm = cfg.onConfirm as (() => void) | undefined;
   const danger = cfg.danger === true;
+  // shell.jsx lets a caller name its own confirm action (`confirmLabel`), and several prototype
+  // screens do — "สร้าง JV" on gl.revrec, for one. This port ignored it and always printed
+  // common.confirm, which is a §0 rule-1 divergence on every such screen. Additive: callers that
+  // pass nothing keep the shared label exactly as before.
+  const confirmLabel = typeof cfg.confirmLabel === "string" ? cfg.confirmLabel : undefined;
   return (
     <Modal
       title={cfg.title}
@@ -39,7 +44,7 @@ function ConfirmDialog({ cfg, onClose }: { cfg: ModalCfg; onClose: () => void })
               onClose();
             }}
           >
-            {t("common.confirm")}
+            {confirmLabel ?? t("common.confirm")}
           </Btn>
         </div>
       }

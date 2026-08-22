@@ -65,6 +65,7 @@ import { PMAssets } from "./screens/pm/pm-assets";
 import { PMWorkOrders } from "./screens/pm/wo-list";
 import { GLChartOfAccounts } from "./screens/gl/gl-coa";
 import { GLJournalVoucher } from "./screens/gl/gl-jv";
+import { GLRevenueWIP } from "./screens/gl/gl-revrec";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
 import { GLTrialBalance } from "./screens/gl/gl-trial";
 import { GLStatements } from "./screens/gl/gl-statements";
@@ -192,6 +193,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   users: UsersPermissions,
   "gl.coa": GLChartOfAccounts,
   "gl.jv": GLJournalVoucher,
+  "gl.revrec": GLRevenueWIP,
   "gl.inbox": GLPostingInbox,
   "gl.trial": GLTrialBalance,
   "gl.statements": GLStatements,
