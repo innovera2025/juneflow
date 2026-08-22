@@ -11,20 +11,30 @@
 // wrong thing.
 //
 // So this file asserts FIDELITY instead: every window in the seed equals the
-// window in the prototype, read out of both files at run time. That is the
-// property PLAN.md §0 rule 1 actually asks for, and it dies the moment either
-// side drifts from the other.
+// window the prototype states.
 //
-// Source-read rather than import, the stamp.test.ts precedent: seed/index.ts is
-// a script, and importing it to reach a private const would run it.
-import { readFileSync } from "node:fs";
+// WHY THE PROTOTYPE IS TRANSCRIBED HERE INSTEAD OF READ FROM DISK (B-430).
+//
+// The previous revision read pototype/timeline.jsx at run time. That directory
+// is gitignored (.gitignore:25) — it is not in the repository — so the test
+// passed on every machine that has the prototype and died in CI with ENOENT,
+// failing Stage 4 and skipping Stages 5, 5b and 6 behind it. Measured, it was
+// also the ONLY test in the repo that read the prototype from disk: every other
+// test cites a pototype line in a comment and states the expected values inline.
+//
+// This file now follows that convention AND closes the hole the convention
+// leaves. The table below is a transcription, so it can drift from its source;
+// the last describe block compares it with the real prototype, row for row, and
+// runs wherever the prototype exists. Where it does not exist the block SKIPS,
+// visibly, and the seed-vs-table assertions above it still run in full — so CI
+// keeps a test that dies the moment the seed changes.
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const SEED = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-const PROTO = readFileSync(
-  new URL("../../../../pototype/timeline.jsx", import.meta.url),
-  "utf8",
-);
+const PROTO_PATH = fileURLToPath(new URL("../../../../pototype/timeline.jsx", import.meta.url));
+const HAS_PROTO = existsSync(PROTO_PATH);
 
 /** The today-line sits at day 145 of the plan (timeline.jsx:272 TODAY_DAY). */
 const TODAY = 145;
@@ -37,6 +47,29 @@ interface Task {
   actual: [number, number | null] | null;
   late: number | null;
 }
+
+/**
+ * pototype/timeline.jsx:238-262 — TIMELINE_TASKS, flattened in group order.
+ * Transcribed verbatim; proven against the file itself in the last describe.
+ */
+const PROTO_TASKS: Task[] = [
+  { label: "เคลียร์พื้นที่ + ปักหมุด", status: "done", pct: 100, plan: [0, 5], actual: [0, 5], late: null },
+  { label: "ระบบไฟฟ้า/น้ำชั่วคราว", status: "done", pct: 100, plan: [3, 12], actual: [3, 14], late: 2 },
+  { label: "งานฐานราก B-1 ถึง B-24", status: "done", pct: 100, plan: [8, 38], actual: [8, 40], late: 2 },
+  { label: "งานเสา-คาน ชั้น 1 B-1..B-12", status: "done", pct: 100, plan: [32, 68], actual: [32, 70], late: 2 },
+  { label: "งานเสา-คาน ชั้น 2 B-1..B-12", status: "ongoing", pct: 92, plan: [60, 92], actual: [62, 95], late: null },
+  { label: "งานเสา-คาน B-13..B-24", status: "ongoing", pct: 38, plan: [85, 130], actual: [88, null], late: 3 },
+  { label: "งานก่ออิฐ-ฉาบ Block B (รวม)", status: "soon", pct: 0, plan: [105, 165], actual: null, late: null },
+  { label: "งานกระเบื้องพื้น Block B", status: "future", pct: 0, plan: [140, 175], actual: null, late: null },
+  { label: "งานสีภายใน + ภายนอก", status: "future", pct: 0, plan: [165, 195], actual: null, late: null },
+  { label: "ระบบไฟฟ้าหลัก Block B", status: "ongoing", pct: 78, plan: [110, 165], actual: [115, null], late: null },
+  { label: "ระบบประปา-สุขาภิบาล Block B", status: "ongoing", pct: 45, plan: [115, 168], actual: [118, null], late: null },
+  { label: "ตรวจรับ + เก็บงาน (B-1..B-12)", status: "future", pct: 0, plan: [180, 200], actual: null, late: null },
+  { label: "ส่งมอบลูกค้า + เริ่ม Warranty", status: "future", pct: 0, plan: [195, 210], actual: null, late: null },
+];
+
+/** pototype/timeline.jsx:264-270 — MILESTONES, day values in order. */
+const PROTO_MILESTONE_DAYS = [0, 40, 95, 195, 240];
 
 const pair = (raw: string): [number, number | null] => {
   const [a, b] = raw.split(",").map((x) => x.trim());
@@ -60,40 +93,22 @@ function seedTasks(): Task[] {
   }));
 }
 
-/** Every TIMELINE_TASKS row, parsed out of the prototype (the authority). */
-function protoTasks(): Task[] {
-  const block = PROTO.slice(PROTO.indexOf("const TIMELINE_TASKS"), PROTO.indexOf("const MILESTONES"));
-  return [
-    ...block.matchAll(
-      /l: "([^"]+)",\s+plan: \[([^\]]+)\],\s+actual: (null|\[[^\]]+\]),\s+status: "(\w+)",\s+pct: (\d+)(?:,\s+late: (\d+))?/g,
-    ),
-  ].map((m) => ({
-    label: m[1]!,
-    plan: pair(m[2]!) as [number, number],
-    actual: m[3] === "null" ? null : pair(m[3]!.slice(1, -1)),
-    status: m[4]!,
-    pct: Number(m[5]),
-    late: m[6] ? Number(m[6]) : null,
-  }));
-}
-
 describe("the seeded timeline plan matches the prototype", () => {
-  it("parses 13 tasks out of BOTH files", () => {
+  it("parses 13 tasks out of the seed", () => {
     // A regex that silently matched nothing would make every comparison below
     // vacuously true, which is exactly how the first version of this file passed
     // while measuring the wrong thing.
-    expect(protoTasks(), "prototype").toHaveLength(13);
+    expect(PROTO_TASKS, "prototype").toHaveLength(13);
     expect(seedTasks(), "seed").toHaveLength(13);
   });
 
   it("carries the SAME task labels in the SAME order", () => {
-    expect(seedTasks().map((t) => t.label)).toEqual(protoTasks().map((t) => t.label));
+    expect(seedTasks().map((t) => t.label)).toEqual(PROTO_TASKS.map((t) => t.label));
   });
 
   it("copies every plan window verbatim", () => {
-    const proto = protoTasks();
     seedTasks().forEach((t, i) => {
-      expect(t.plan, `${t.label} plan`).toEqual(proto[i]!.plan);
+      expect(t.plan, `${t.label} plan`).toEqual(PROTO_TASKS[i]!.plan);
     });
   });
 
@@ -101,19 +116,17 @@ describe("the seeded timeline plan matches the prototype", () => {
     // null = not started; [start, null] = started and unfinished, which the Gantt
     // draws up to the today-line. Collapsing either into a date would draw a bar
     // for work nobody has begun.
-    const proto = protoTasks();
     seedTasks().forEach((t, i) => {
-      expect(t.actual, `${t.label} actual`).toEqual(proto[i]!.actual);
+      expect(t.actual, `${t.label} actual`).toEqual(PROTO_TASKS[i]!.actual);
     });
   });
 
   it("copies status, percent and the stated lateness verbatim", () => {
-    const proto = protoTasks();
     seedTasks().forEach((t, i) => {
       expect({ status: t.status, pct: t.pct, late: t.late }, t.label).toEqual({
-        status: proto[i]!.status,
-        pct: proto[i]!.pct,
-        late: proto[i]!.late,
+        status: PROTO_TASKS[i]!.status,
+        pct: PROTO_TASKS[i]!.pct,
+        late: PROTO_TASKS[i]!.late,
       });
     });
   });
@@ -142,7 +155,6 @@ describe("the seeded timeline plan matches the prototype", () => {
     expect(SEED).toContain("const TL_DAY_ZERO = -145;");
     expect(SEED).toContain("isoDaysFromToday(TL_DAY_ZERO + t.plan[0])");
     expect(SEED).toContain("isoDaysFromToday(TL_DAY_ZERO + ms.day)");
-    expect(PROTO).toContain("const TODAY_DAY = 145;");
   });
 
   it("keeps every window inside the plan and forward in time", () => {
@@ -166,11 +178,52 @@ describe("the seeded timeline plan matches the prototype", () => {
   it("keeps the milestone days the prototype's own", () => {
     const days = (block: string) => [...block.matchAll(/day: (\d+)/g)].map((m) => Number(m[1]));
     const seedDays = days(SEED.slice(SEED.indexOf("const MILESTONES"), SEED.indexOf("// sales-crm.jsx:191")));
-    const protoDays = days(PROTO.slice(PROTO.indexOf("const MILESTONES"), PROTO.indexOf("const TODAY_DAY")));
-    expect(protoDays).toEqual([0, 40, 95, 195, 240]);
-    expect(seedDays).toEqual(protoDays);
+    expect(seedDays).toEqual(PROTO_MILESTONE_DAYS);
     // The last milestone closes the plan, and today sits inside it.
-    expect(Math.max(...protoDays)).toBe(240);
+    expect(Math.max(...PROTO_MILESTONE_DAYS)).toBe(240);
     expect(TODAY).toBeLessThan(240);
+  });
+});
+
+// The tie-back. Runs wherever pototype/ exists (every developer machine, the
+// loop, Wei's box) and skips in CI, where the directory is not checked out.
+// Without it the table above would be an unverifiable copy — with it, a table
+// that drifts from the prototype fails here before it can be believed upstream.
+describe.skipIf(!HAS_PROTO)("the transcribed table IS the prototype's own", () => {
+  const PROTO = HAS_PROTO ? readFileSync(PROTO_PATH, "utf8") : "";
+
+  /** Every TIMELINE_TASKS row, parsed out of the prototype (the authority). */
+  function protoTasks(): Task[] {
+    const block = PROTO.slice(PROTO.indexOf("const TIMELINE_TASKS"), PROTO.indexOf("const MILESTONES"));
+    return [
+      ...block.matchAll(
+        /l: "([^"]+)",\s+plan: \[([^\]]+)\],\s+actual: (null|\[[^\]]+\]),\s+status: "(\w+)",\s+pct: (\d+)(?:,\s+late: (\d+))?/g,
+      ),
+    ].map((m) => ({
+      label: m[1]!,
+      plan: pair(m[2]!) as [number, number],
+      actual: m[3] === "null" ? null : pair(m[3]!.slice(1, -1)),
+      status: m[4]!,
+      pct: Number(m[5]),
+      late: m[6] ? Number(m[6]) : null,
+    }));
+  }
+
+  it("parses 13 tasks out of pototype/timeline.jsx", () => {
+    // Same reason as above: a regex that matched nothing would make the row-for-row
+    // comparison vacuous, and this block is the only thing checking the table.
+    expect(protoTasks()).toHaveLength(13);
+  });
+
+  it("matches the transcribed table row for row", () => {
+    expect(protoTasks()).toEqual(PROTO_TASKS);
+  });
+
+  it("matches the transcribed milestone days and the today-line", () => {
+    const days = [
+      ...PROTO.slice(PROTO.indexOf("const MILESTONES"), PROTO.indexOf("const TODAY_DAY")).matchAll(/day: (\d+)/g),
+    ].map((m) => Number(m[1]));
+    expect(days).toEqual(PROTO_MILESTONE_DAYS);
+    expect(PROTO).toContain(`const TODAY_DAY = ${TODAY};`);
   });
 });
