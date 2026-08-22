@@ -80,7 +80,7 @@ vi.mock("../../ui/chart", () => ({
   baseChartOpts: (t: unknown) => ({ t }),
 }));
 
-import { ProjectTimeline } from "./timeline";
+import { ProjectTimeline, TaskDetail } from "./timeline";
 
 const task = (over: Record<string, unknown> = {}) => ({
   id: "tl-0",
@@ -136,7 +136,13 @@ describe("ProjectTimeline — the values with no source stay em-dash", () => {
   });
 
   it("shows the em-dash for the phase chip, which has no column on the wire", () => {
-    expect(render()).toContain(DASH);
+    // `toContain(DASH)` alone cannot fail here — every Kpi card emits one in its
+    // sub slot, so five are in the document before the chip is considered. The
+    // chip is pinned by its own markup instead: the project chip beside it holds
+    // a real name, so a fabricated phase value would break this.
+    const html = render();
+    const chips = [...html.matchAll(/font-weight:600;color:var\(--text\)">([^<]*)</g)].map((m) => m[1]);
+    expect(chips).toEqual(["Ratchaphruek", DASH]);
   });
 
   it("DERIVES the KPI counts from the rows — a hardcoded value fails here", () => {
@@ -229,5 +235,74 @@ describe("ProjectTimeline — the band colours are the prototype's own", () => {
       tasks: [task({ id: "a", group_label: "02 \u0e07\u0e32\u0e19\u0e42\u0e04\u0e23\u0e07\u0e2a\u0e23\u0e49\u0e32\u0e07" })],
     };
     expect(render()).toContain("#0B2A4A");
+  });
+});
+
+describe("ProjectTimeline — the restored task-detail panel", () => {
+  /**
+   * WHY THIS IS TESTED THROUGH THE COMPONENT AND NOT THE SCREEN: the panel is
+   * built inside the bar's onClick, and renderToStaticMarkup dispatches no
+   * events, so the modal descriptor is never produced in this harness. The
+   * component the screen mounts is exported for exactly this reason.
+   *
+   * It exists because the previous round restored five dropped fields with no
+   * test at all — reverting any of them stayed green, which is the failure this
+   * whole branch is about.
+   */
+  const detail = (over: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(
+      <TaskDetail
+        task={{
+          id: "t",
+          group: "02 GROUP",
+          label: "TASK-A",
+          plan: [8, 38],
+          actual: [8, 40],
+          status: "done",
+          pct: 100,
+          lateDays: 2,
+          ...over,
+        }}
+        group="02 GROUP"
+        onClose={() => {}}
+        onNavigate={() => {}}
+      />,
+    );
+
+  it("renders all six fields, not the reduced set", () => {
+    const html = detail();
+    // group + status + plan + actual + progress + delay
+    expect(html).toContain("02 GROUP");
+    expect(html).toContain("timeline.statusDone");
+    expect(html).toContain("timeline.dateRange");
+    expect(html).toContain("100%");
+    expect(html).toContain("timeline.fieldDelay");
+    expect(html).toContain("timeline.delayValue");
+  });
+
+  it("keeps BOTH footer buttons, whose routes exist", () => {
+    const html = detail();
+    expect(html).toContain("timeline.btnSubconProgress");
+    expect(html).toContain("timeline.btnBoq");
+  });
+
+  it("says NOT STARTED in the ACTUAL cell for a null actual, rather than em-dash", () => {
+    // `actual == null` is measured data. An em-dash would claim ignorance about
+    // something the server answered — the same point as the on-schedule cell.
+    //
+    // The status is deliberately NOT "future" here: that status renders the same
+    // key in the status cell, so asserting the key anywhere in the document would
+    // pass with the actual cell reverted to an em-dash. Measured — that is exactly
+    // what the first version of this test did.
+    const html = detail({ actual: null, status: "ongoing", pct: 40, lateDays: null });
+    expect(html).toContain("timeline.statusNotStarted");
+    // ...and it is the actual cell, not a stray: the plan cell still renders a range.
+    expect(html).toContain("timeline.dateRange");
+  });
+
+  it("says ON SCHEDULE, not em-dash, when the server recorded no lateness", () => {
+    const html = detail({ lateDays: null });
+    expect(html).not.toContain("timeline.delayValue");
+    expect(html).toContain("PHRASE");
   });
 });

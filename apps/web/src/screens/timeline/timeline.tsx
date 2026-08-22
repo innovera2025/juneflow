@@ -162,7 +162,7 @@ function monthColumns(axis: TimelineAxis): { key: keyof typeof strings; id: stri
  * Everything else the prototype prints is here, because every one of them has a
  * source: the group, the status, both windows, the percent and the stated delay.
  */
-function TaskDetail({
+export function TaskDetail({
   task,
   group,
   onClose,
@@ -204,7 +204,17 @@ function TaskDetail({
           {field(tp(P("fieldGroup")), group || DASH)}
           {field(tp(P("fieldStatus")), statusLabel)}
           {field(tp(P("legendPlan")), <span className="num">{range(task.plan)}</span>)}
-          {field(tp(P("legendActual")), <span className="num">{range(task.actual)}</span>)}
+          {/* A null `actual` is not an unknown window — it is the answer "this has
+              not started" (timeline.jsx:501), the same argument as the on-schedule
+              cell below. Five of the thirteen seeded rows land here. */}
+          {field(
+            tp(P("legendActual")),
+            task.actual == null ? (
+              t("timeline.statusNotStarted" as DictKey)
+            ) : (
+              <span className="num">{range(task.actual)}</span>
+            ),
+          )}
           {field(
             tp(P("fieldProgress")),
             <span className="num">{task.pct == null ? DASH : `${task.pct}%`}</span>,
@@ -274,7 +284,9 @@ export function ProjectTimeline() {
       title: task.label || DASH,
       subtitle: t("timeline.taskModalSubtitle" as DictKey).replace("{group}", group || DASH),
       icon: "calendar",
-      iconTone: "var(--brand)",
+      // The prototype tints the panel icon with the band's own colour
+      // (timeline.jsx:435 `iconTone: g.color`), which bandColor now returns.
+      iconTone: bandColor(group),
       size: "md",
       body: ({ close }: { close: () => void }) => (
         <TaskDetail
