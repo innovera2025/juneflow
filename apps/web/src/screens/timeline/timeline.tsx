@@ -41,10 +41,10 @@ import type { DictKey, PhraseKey } from "@juneflow/i18n";
 import { useI18n } from "../../i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
-import { Icon } from "../../ui/icon";
+import { Icon, type IconName } from "../../ui/icon";
 import { ChartCanvas, baseChartOpts } from "../../ui/chart";
 import { Page } from "../../shell/page";
-import { useShellCtx } from "../../shell/shell-context";
+import { useShellCtx, type ModalCfg } from "../../shell/shell-context";
 import { useProjects, resolveActiveProject } from "../../shell/use-shell-data";
 import { useBoqEvm } from "../boq/use-boq-reports";
 import { useProjectTimeline } from "./use-timeline";
@@ -160,12 +160,18 @@ function monthColumns(axis: TimelineAxis): { key: keyof typeof strings; id: stri
  *
  * The icon tone is the BAND's colour, as the prototype sets it
  * (timeline.jsx:435 `iconTone: g.color`).
+ *
+ * `icon` and `size` are narrowed deliberately. ctx.openModal accepts them
+ * UNCHECKED — `Omit<ModalCfg, "kind">` over an interface with an index signature
+ * collapses to that signature, so a typo like `icon: "calandar"` compiles at all
+ * 105 call sites in this app (B-429). This one descriptor opts back in, because
+ * its return type is newly written and the narrowing costs nothing.
  */
 export function taskModalDescriptor(
   task: GanttTask,
   group: string,
   t: (key: string) => string,
-): { title: string; subtitle: string; icon: string; iconTone: string; size: string } {
+): { title: string; subtitle: string; icon: IconName; iconTone: string; size: NonNullable<ModalCfg["size"]> } {
   return {
     title: task.label || DASH,
     subtitle: t("timeline.taskModalSubtitle").replace("{group}", group || DASH),

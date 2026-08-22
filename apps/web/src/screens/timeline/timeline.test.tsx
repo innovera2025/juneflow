@@ -20,6 +20,13 @@ import phraseNames from "./timeline-strings.json" with { type: "json" };
 /** Em-dash — the screen's honest-unknown marker. */
 const DASH = "—";
 
+/** The dict keys this screen renders that carry placeholders (see the t mock). */
+const PLACEHOLDERS: Record<string, string> = {
+  "timeline.lateBadge": "|{days}",
+  "timeline.delayValue": "|{days}",
+  "timeline.dateRange": "|{from}~{to}",
+};
+
 const h = vi.hoisted(() => ({
   wire: null as Record<string, unknown> | null,
   evm: null as Record<string, unknown> | null,
@@ -28,7 +35,15 @@ const h = vi.hoisted(() => ({
 
 vi.mock("../../i18n", () => ({
   useI18n: () => ({
-    t: (k: string) => k,
+    /**
+     * The dict mock echoes the key WITH the placeholders that key's real phrase
+     * carries. A bare echo makes every `.replace()` in the screen a no-op on the
+     * echoed string, so deleting an interpolation — or interpolating the WRONG
+     * variable — stays green while users read a literal `{days}` on screen. Same
+     * hazard as the descriptor's translator two hundred lines below; this is the
+     * dict half of it.
+     */
+    t: (k: string) => k + (PLACEHOLDERS[k] ?? ""),
     tn: (k: string) => k,
     /**
      * tp() is handed the Thai phrase itself as the key, so echoing it would put
@@ -213,7 +228,7 @@ describe("ProjectTimeline — the axis comes from the wire, never from a clock",
 
 describe("ProjectTimeline — stated lateness, never a derived one", () => {
   it("shows the late badge only when the server stated a day count", () => {
-    expect(render()).toContain("timeline.lateBadge");
+    expect(render()).toContain("timeline.lateBadge|2");
   });
 
   it("shows NO badge for an overrunning task the server left unmarked", () => {
@@ -294,7 +309,7 @@ describe("ProjectTimeline — the restored task-detail panel", () => {
     expect(html).toContain("PHRASE:legendActual");
     expect(html).toContain("100%");
     expect(html).toContain("timeline.fieldDelay");
-    expect(html).toContain("timeline.delayValue");
+    expect(html).toContain("timeline.delayValue|2");
   });
 
   it("keeps BOTH footer buttons, whose routes exist", () => {
@@ -314,7 +329,7 @@ describe("ProjectTimeline — the restored task-detail panel", () => {
     const html = detail({ actual: null, status: "ongoing", pct: 40, lateDays: null });
     expect(html).toContain("timeline.statusNotStarted");
     // ...and it is the actual cell, not a stray: the plan cell still renders a range.
-    expect(html).toContain("timeline.dateRange");
+    expect(html).toContain("timeline.dateRange|8~38");
   });
 
   it("says ON SCHEDULE, not em-dash, when the server recorded no lateness", () => {
