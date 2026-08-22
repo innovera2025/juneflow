@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import phraseNames from "./timeline-strings.json" with { type: "json" };
 
 /** Em-dash — the screen's honest-unknown marker. */
 const DASH = "—";
@@ -29,9 +30,18 @@ vi.mock("../../i18n", () => ({
   useI18n: () => ({
     t: (k: string) => k,
     tn: (k: string) => k,
-    // tp() is given the Thai phrase itself as the key; echoing it would put Thai
-    // in this file's expectations, so it is reduced to a stable ASCII token.
-    tp: () => "PHRASE",
+    /**
+     * tp() is handed the Thai phrase itself as the key, so echoing it would put
+     * Thai in this file's expectations. The first version returned ONE constant
+     * for every phrase — which made every `toContain("PHRASE")` assertion
+     * unfalsifiable by construction, and hid a revert of the on-schedule cell.
+     *
+     * This maps each phrase back to its NAME in timeline-strings.json, so the
+     * token is ASCII, distinct per phrase, and an assertion names the field it
+     * is actually about.
+     */
+    tp: (value: string) =>
+      "PHRASE:" + (Object.entries(phraseNames).find(([, v]) => v === value)?.[0] ?? "UNKNOWN"),
   }),
 }));
 
@@ -80,7 +90,7 @@ vi.mock("../../ui/chart", () => ({
   baseChartOpts: (t: unknown) => ({ t }),
 }));
 
-import { ProjectTimeline, TaskDetail } from "./timeline";
+import { ProjectTimeline, TaskDetail, taskModalDescriptor } from "./timeline";
 
 const task = (over: Record<string, unknown> = {}) => ({
   id: "tl-0",
@@ -188,7 +198,10 @@ describe("ProjectTimeline — the axis comes from the wire, never from a clock",
     h.wire = { ...SCHEDULED, start_date: null };
     const html = render();
     expect(html).not.toContain("TASK-A");
-    expect(html).toContain(DASH);
+    // The footer counter is the part that must go blank: `toContain(DASH)` alone
+    // cannot fail, because every Kpi card emits one unconditionally.
+    expect(html).not.toContain("145 / 240");
+    expect(html).not.toContain("02 GROUP");
   });
 
   it("renders the rows once the project IS scheduled", () => {
@@ -274,7 +287,11 @@ describe("ProjectTimeline — the restored task-detail panel", () => {
     // group + status + plan + actual + progress + delay
     expect(html).toContain("02 GROUP");
     expect(html).toContain("timeline.statusDone");
-    expect(html).toContain("timeline.dateRange");
+    // The two window cells are pinned SEPARATELY: both render timeline.dateRange,
+    // so one assertion on that key alone stays true when either cell is deleted —
+    // inside the test whose title claims all six fields.
+    expect(html).toContain("PHRASE:legendPlan");
+    expect(html).toContain("PHRASE:legendActual");
     expect(html).toContain("100%");
     expect(html).toContain("timeline.fieldDelay");
     expect(html).toContain("timeline.delayValue");
@@ -301,8 +318,58 @@ describe("ProjectTimeline — the restored task-detail panel", () => {
   });
 
   it("says ON SCHEDULE, not em-dash, when the server recorded no lateness", () => {
+    // `late = false` is measured data; an em-dash would claim ignorance about it.
+    // The fixture populates every field, so NO em-dash should render at all —
+    // which is what makes reverting this cell to DASH fail here. The previous
+    // version asserted toContain("PHRASE") against a mock that returned that same
+    // token for all six other phrases in the panel, and could not fail.
     const html = detail({ lateDays: null });
     expect(html).not.toContain("timeline.delayValue");
-    expect(html).toContain("PHRASE");
+    expect(html).toContain("PHRASE:onSchedule");
+    expect(html).not.toContain(DASH);
+  });
+});
+
+describe("taskModalDescriptor — the parts of the panel that never reach the markup", () => {
+  /**
+   * ctx.openModal is mocked away, so the descriptor is invisible to a render
+   * assertion: gate 4.5 measured that reverting the icon tone or dropping the
+   * subtitle killed nothing. It is a pure value, so it is asserted as one.
+   */
+  const task = {
+    id: "t",
+    group: "02 \u0e07\u0e32\u0e19\u0e42\u0e04\u0e23\u0e07\u0e2a\u0e23\u0e49\u0e32\u0e07",
+    label: "TASK-A",
+    plan: [8, 38] as const,
+    actual: [8, 40] as const,
+    status: "done",
+    pct: 100,
+    lateDays: 2,
+  };
+  /**
+   * The fake translator returns the key WITH the placeholder the real phrase
+   * carries. Echoing the bare key would make the interpolation assertion below
+   * vacuous — `.replace("{group}", ...)` on a string with no placeholder is a
+   * no-op, so the subtitle would equal the key whether or not the code
+   * interpolates at all.
+   */
+  const echo = (k: string) => k + "|{group}";
+
+  it("titles the panel with the task, and subtitles it with the group", () => {
+    const d = taskModalDescriptor(task, task.group, echo);
+    expect(d.title).toBe("TASK-A");
+    expect(d.subtitle).toBe("timeline.taskModalSubtitle|" + task.group);
+  });
+
+  it("tints the icon with the BAND's colour, not a generic token", () => {
+    // timeline.jsx:435 sets iconTone from the group's own colour.
+    expect(taskModalDescriptor(task, task.group, echo).iconTone).toBe("#0B2A4A");
+    expect(taskModalDescriptor(task, "UNKNOWN BAND", echo).iconTone).toBe("#94A3B8");
+  });
+
+  it("falls back to an em-dash for a task with no label and no group", () => {
+    const d = taskModalDescriptor({ ...task, label: "" }, "", echo);
+    expect(d.title).toBe(DASH);
+    expect(d.subtitle).toBe("timeline.taskModalSubtitle|" + DASH);
   });
 });

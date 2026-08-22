@@ -152,6 +152,30 @@ function monthColumns(axis: TimelineAxis): { key: keyof typeof strings; id: stri
 }
 
 /**
+ * The modal descriptor the panel opens with — pure, so the parts that never reach
+ * the screen's own markup can still be asserted. gate 4.5 found the descriptor
+ * untested: reverting `iconTone` to a generic token or dropping the subtitle
+ * killed nothing, because ctx.openModal is mocked away and the object was never
+ * read.
+ *
+ * The icon tone is the BAND's colour, as the prototype sets it
+ * (timeline.jsx:435 `iconTone: g.color`).
+ */
+export function taskModalDescriptor(
+  task: GanttTask,
+  group: string,
+  t: (key: string) => string,
+): { title: string; subtitle: string; icon: string; iconTone: string; size: string } {
+  return {
+    title: task.label || DASH,
+    subtitle: t("timeline.taskModalSubtitle").replace("{group}", group || DASH),
+    icon: "calendar",
+    iconTone: bandColor(group),
+    size: "md",
+  };
+}
+
+/**
  * The task-detail panel (prototype TaskDetail, timeline.jsx:492-523).
  *
  * ONE ELEMENT IS OMITTED, and only one: the related-documents list. Its four rows
@@ -281,13 +305,7 @@ export function ProjectTimeline() {
    */
   const openTaskDetail = (task: GanttTask, group: string) => {
     ctx.openModal({
-      title: task.label || DASH,
-      subtitle: t("timeline.taskModalSubtitle" as DictKey).replace("{group}", group || DASH),
-      icon: "calendar",
-      // The prototype tints the panel icon with the band's own colour
-      // (timeline.jsx:435 `iconTone: g.color`), which bandColor now returns.
-      iconTone: bandColor(group),
-      size: "md",
+      ...taskModalDescriptor(task, group, (k) => t(k as DictKey)),
       body: ({ close }: { close: () => void }) => (
         <TaskDetail
           task={task}
