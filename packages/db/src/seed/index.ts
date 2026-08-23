@@ -648,6 +648,28 @@ const FA_ASSETS = [
 ];
 
 // labor.jsx:6 WORKERS_SEED (8) — name/wage (schema carries name + day_rate only).
+/**
+ * B-438: which WORKERS_SEED row carries which user's auth link, by roster index.
+ *
+ * Derived, not hardcoded: the seed assigns roles cyclically (at(ROLE_DEFS, i)), so
+ * the users holding ROLE_DEFS' "site" entry — Site Engineer, the role the prototype's
+ * check-in screen depicts — are exactly the indices where i % ROLE_DEFS.length equals
+ * that entry's position. The first two roster rows take them, in order. Every other
+ * row stays unlinked (null), which is the honest state for a labourer with no app
+ * account and keeps the roster at its 8 rows.
+ */
+const SITE_ENGINEER_USER_IDXS: Record<number, number | undefined> = (() => {
+  const siteRoleIdx = ROLE_DEFS.findIndex((r) => r.key === "site");
+  const siteUsers = COMPANY_USERS.map((_, i) => i).filter(
+    (i) => i % ROLE_DEFS.length === siteRoleIdx,
+  );
+  const byWorker: Record<number, number | undefined> = {};
+  siteUsers.forEach((userIdx, n) => {
+    byWorker[n] = userIdx;
+  });
+  return byWorker;
+})();
+
 const WORKERS_SEED = [
   { name: "สมหมาย พลดี", wage: 450 }, { name: "บุญมี แข็งขัน", wage: 420 },
   { name: "สาย คำมูล", wage: 380 }, { name: "ประสงค์ ใจเย็น", wage: 450 },
@@ -1635,6 +1657,24 @@ async function seed(): Promise<void> {
       await tx.insert(schema.workers).values(
         WORKERS_SEED.map((w, i) => ({
           id: det(`worker:${i}`), companyId: CO1, name: w.name, dayRate: m(w.wage),
+          // B-438 = ก (Wei 2026-08-23). worker.user_id is the auth link B-332 added
+          // to open the SELF-SERVICE attendance door (labor.ts findWorkerByUserId),
+          // and until now the seed left it null on every row — so the door could not
+          // open for anybody and the mobile check-in screen showed its honest "no
+          // linked worker" state to every demo user.
+          //
+          // WHICH users, chosen by the seed's OWN rule rather than by preference:
+          // roles are assigned cyclically as at(ROLE_DEFS, i), and ROLE_DEFS[3] is
+          // "site" (Site Engineer) — the exact role the prototype's check-in screen
+          // depicts. That gives user indices 3 and 11, and SITE_ENGINEER_USER_IDXS
+          // derives them instead of hardcoding the arithmetic.
+          //
+          // Two rows, not eight: an app account per day-rate labourer is not what
+          // this demo is showing, and (ก) was chosen over (ข) precisely to leave the
+          // roster at 8 rows so the labor.workers G5 baseline does not move.
+          userId: SITE_ENGINEER_USER_IDXS[i] != null
+            ? det(`user:${SITE_ENGINEER_USER_IDXS[i]}`)
+            : null,
         })),
       );
 
