@@ -141,6 +141,7 @@ const Set<String> kBuiltRouteIds = <String>{
   'field-gr',
   'field-stock',
   'field-checkin',
+  'fm-progress',
 };
 
 /// The set of all known route ids.

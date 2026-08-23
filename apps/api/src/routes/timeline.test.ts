@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { milestones, projects, timelineTasks } from "@juneflow/db";
+import { milestones, projects, roles, timelineTasks, users } from "@juneflow/db";
 import type { Db } from "@juneflow/db/client";
 import { buildApp, type AppDeps } from "../app.js";
 import { QuotaGuard, unlimitedQuotaResolver } from "../plugins/quota.js";
@@ -35,12 +35,33 @@ interface Captured {
  * would make the ordered reads hang rather than fail, which is worse than a
  * wrong answer because it looks like a slow test.
  */
-function stubDb(rows: Array<[unknown, unknown[]]>, captured: Captured[] = []): Db {
+function stubDb(
+  rows: Array<[unknown, unknown[]]>,
+  captured: Captured[] = [],
+  updates: Array<{ table: unknown; values: Record<string, unknown> }> = [],
+): Db {
   const rowsFor = (table: unknown): unknown[] => {
     for (const [t, r] of rows) if (t === table) return r;
     return [];
   };
   return {
+    // The progress write (B-436) goes through TenantDb.update().returning(); the read
+    // tests never touch this branch, and the write tests read `updates` to assert what
+    // reached the column rather than trusting the handler's own reply.
+    update: (table: unknown) => ({
+      set: (values: Record<string, unknown>) => ({
+        where: (where: SQL) => ({
+          returning: () => {
+            captured.push({ table, where });
+            updates.push({ table, values });
+            const row = rowsFor(table)[0];
+            return Promise.resolve(
+              row ? [{ ...(row as Record<string, unknown>), ...values }] : [],
+            );
+          },
+        }),
+      }),
+    }),
     select: () => ({
       from: (table: unknown) => {
         const settle = (where: SQL | undefined) => {
@@ -414,3 +435,134 @@ describe("GET /api/v1/projects/{id}/timeline — row order", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// POST /timeline/tasks/{id}/progress — the foreman's progress report (B-436).
+//
+// The write exists because timeline_task.pct is the only per-activity completion
+// percentage in the schema and nothing wrote it. What matters here is not "did it
+// return 200" but: is it fail-closed without a permission, does a value that cannot
+// be a percentage reach the column, and does the caller get back the number that was
+// STORED rather than the one it sent.
+// ---------------------------------------------------------------------------
+
+/** A dictionary user row, as loadCaller reads it. */
+const userRow = (over: Record<string, unknown> = {}) => ({
+  id: "u-0",
+  companyId: COMPANY,
+  email: SESSION.user.email,
+  name: SESSION.user.name,
+  roleId: "role-site",
+  status: "active",
+  isPlatformAdmin: false,
+  ...over,
+});
+
+/** A role row. `subcon.edit` is the right this endpoint gates on. */
+const roleRow = (perms: Record<string, Record<string, boolean>>) => ({
+  id: "role-site",
+  companyId: COMPANY,
+  name: "Site Engineer",
+  approvalLevel: 1,
+  perms,
+});
+
+const SITE_PERMS = { subcon: { view: true, create: true, edit: true } };
+const VIEW_ONLY_PERMS = { subcon: { view: true, create: false, edit: false } };
+
+function progressApp(
+  perms: Record<string, Record<string, boolean>>,
+  tasks: unknown[],
+  updates: Array<{ table: unknown; values: Record<string, unknown> }> = [],
+) {
+  return buildTestApp({
+    resolveTenant: async () => SESSION,
+    db: stubDb(
+      [
+        [users, [userRow()]],
+        [roles, [roleRow(perms)]],
+        [timelineTasks, tasks],
+      ],
+      [],
+      updates,
+    ),
+  });
+}
+
+const post = (app: FastifyInstance, body: unknown, id = "tl-0") =>
+  app.inject({ method: "POST", url: `/api/v1/timeline/tasks/${id}/progress`, payload: body });
+
+describe("POST /timeline/tasks/{id}/progress", () => {
+  it("refuses a caller with no session", async () => {
+    const res = await post(await buildTestApp(), { pct: 40 });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("refuses a caller who may view subcon but not edit it", async () => {
+    // The seed's Project Manager role is exactly this shape (subcon view-only), so
+    // this is not a hypothetical caller.
+    const res = await post(await progressApp(VIEW_ONLY_PERMS, [taskRow()]), { pct: 40 });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("FORBIDDEN");
+  });
+
+  it("stores the reported percent and answers with the STORED row", async () => {
+    const updates: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const res = await post(await progressApp(SITE_PERMS, [taskRow()], updates), { pct: 40 });
+    expect(res.statusCode).toBe(200);
+    // What reached the column, not what the handler chose to echo.
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.table).toBe(timelineTasks);
+    expect(updates[0]!.values.pct).toBe("40");
+    // And the reply is the post-write value, not the pre-write one.
+    expect(res.json().pct).toBe(40);
+  });
+
+  it("accepts both ends of the range — 100 is a real report", async () => {
+    for (const pct of [0, 100]) {
+      const updates: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+      const res = await post(await progressApp(SITE_PERMS, [taskRow()], updates), { pct });
+      expect(res.statusCode).toBe(200);
+      expect(updates[0]!.values.pct).toBe(String(pct));
+    }
+  });
+
+  it("refuses a percent outside the range, and writes nothing", async () => {
+    for (const pct of [-1, 101]) {
+      const updates: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+      const res = await post(await progressApp(SITE_PERMS, [taskRow()], updates), { pct });
+      expect(res.statusCode).toBe(400);
+      expect(updates).toHaveLength(0);
+    }
+  });
+
+  it("refuses a present-but-unparseable percent rather than skipping it", async () => {
+    // A phone that sent "abc" and got a 200 would believe it reported progress it
+    // had not. The same reasoning as labor.ts optCoordPair, one column over.
+    const updates: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const res = await post(await progressApp(SITE_PERMS, [taskRow()], updates), { pct: "abc" });
+    expect(res.statusCode).toBe(400);
+    expect(updates).toHaveLength(0);
+  });
+
+  it("refuses a body with no percent at all", async () => {
+    const res = await post(await progressApp(SITE_PERMS, [taskRow()]), {});
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("404s an unknown task instead of confirming it exists elsewhere", async () => {
+    const updates: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const res = await post(await progressApp(SITE_PERMS, [], updates), { pct: 40 });
+    expect(res.statusCode).toBe(404);
+    expect(updates).toHaveLength(0);
+  });
+
+  it("is naturally idempotent — the same report twice leaves the same value", async () => {
+    // The write SETS an absolute value rather than adding to one, which is why it
+    // carries no idempotency key. A replay that moved the number would need one.
+    const updates: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const app = await progressApp(SITE_PERMS, [taskRow()], updates);
+    await post(app, { pct: 40 });
+    await post(app, { pct: 40 });
+    expect(updates.map((u) => u.values.pct)).toEqual(["40", "40"]);
+  });
+});

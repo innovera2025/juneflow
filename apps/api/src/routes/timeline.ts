@@ -27,10 +27,11 @@
 // nobody has scheduled is a normal project — so the read succeeds with
 // start_date null and the client renders an empty chart rather than putting a
 // bar on today.
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { milestones, projects, timelineTasks } from "@juneflow/db/schema";
 import { businessNowMs } from "../business-clock.js";
+import { loadCaller, permAllowed } from "./authz.js";
 
 /**
  * Gantt row order: group band, then plan start, then id.
@@ -117,6 +118,39 @@ function unauthenticated(reply: FastifyReply) {
 }
 
 /** Register GET /projects/{id}/timeline on the given (already /api/v1-prefixed) scope. */
+/**
+ * The module whose `edit` right admits a foreman's progress report (B-436).
+ *
+ * `subcon`, not `wo` or `finance`, and the seed's own role table is the reason: the
+ * Site Engineer role — the role the prototype's foreman screen depicts — holds
+ * subcon view+create+EDIT while holding only view+create on wo and nothing on
+ * finance. Gating on subcon.edit therefore admits exactly the site role and the
+ * director, and refuses Sales and a view-only Project Manager. It is also what the
+ * prototype's own caption says this write feeds: "% งานที่ส่งจะอัปเดต Progress
+ * ผู้รับเหมา".
+ */
+const PROGRESS_MODULE = "subcon";
+
+/** Percent bounds, inclusive at both ends (100 is a legitimate report). */
+const PCT_MIN = 0;
+const PCT_MAX = 100;
+
+/**
+ * Read `pct` off an opaque body.
+ *
+ * A PRESENT but unparseable value is a 400, never a silent skip: a phone that sent
+ * "abc" and got a 200 back would believe it had reported progress it had not. The
+ * same reasoning as labor.ts optCoordPair, one column over.
+ */
+function readPct(body: Record<string, unknown>): { ok: true; pct: number } | { ok: false; message: string } {
+  const raw = body["pct"];
+  if (raw === undefined || raw === null) return { ok: false, message: "pct is required" };
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number.parseFloat(raw) : Number.NaN;
+  if (!Number.isFinite(n)) return { ok: false, message: "pct must be a number" };
+  if (n < PCT_MIN || n > PCT_MAX) return { ok: false, message: `pct must be between ${PCT_MIN} and ${PCT_MAX}` };
+  return { ok: true, pct: n };
+}
+
 export function registerTimelineRoute(app: FastifyInstance): void {
   app.get("/projects/:id/timeline", async (request, reply) => {
     const db = request.db;
@@ -149,5 +183,65 @@ export function registerTimelineRoute(app: FastifyInstance): void {
       tasks: [...tasks].sort(byGroupThenPlanStart).map(taskWire),
       milestones: [...msRows].sort(byDayThenId).map(milestoneWire),
     });
+  });
+
+  /**
+   * POST /timeline/tasks/:id/progress — a foreman reports one activity's percent
+   * complete (B-436, mobile fm-progress).
+   *
+   * WHY THIS COLUMN AND NO OTHER. timeline_task.pct is the only per-activity
+   * completion percentage in the schema. A work period carries a STATUS and its own
+   * `pct` is a TARGET share, which B-297 (4) already ruled is not progress; a BOQ
+   * item is a material or labour line (bags of cement), not an activity. So this
+   * writes the column that already means what the screen says, and needs no new
+   * table.
+   *
+   * NO IDEMPOTENCY KEY, deliberately, and the reason is the shape of the write: it
+   * SETS an absolute value rather than adding to one. Replaying "pct = 40" leaves
+   * the row at 40 however many times it arrives, so the class of bug an
+   * idempotency key exists to close (a retry that moves a number twice) cannot
+   * occur here. A money write would need one; this is not one.
+   *
+   * The tenant predicate is AND-ed in by TenantDb, so another tenant's task id
+   * matches zero rows and answers 404 — not 403, which would confirm the id exists
+   * somewhere.
+   */
+  app.post("/timeline/tasks/:id/progress", async (request: FastifyRequest, reply) => {
+    const db = request.db;
+    if (!db) return unauthenticated(reply);
+
+    const caller = await loadCaller(request);
+    if (!caller) {
+      return reply.code(403).send({ code: "FORBIDDEN", message: "caller cannot be attributed" });
+    }
+    if (!permAllowed(caller.perms, PROGRESS_MODULE, "edit")) {
+      return reply
+        .code(403)
+        .send({ code: "FORBIDDEN", message: "this action requires the subcon edit permission" });
+    }
+
+    const { id } = request.params as { id: string };
+    const parsed = readPct((request.body ?? {}) as Record<string, unknown>);
+    if (!parsed.ok) {
+      return reply.code(400).send({ code: "VALIDATION", message: parsed.message });
+    }
+
+    const [task] = await db.select(timelineTasks, eq(timelineTasks.id, id));
+    if (!task) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: `timeline task ${id} not found` });
+    }
+
+    const [updated] = await db
+      .update(
+        timelineTasks,
+        { pct: String(parsed.pct), updatedAt: new Date(businessNowMs()) },
+        eq(timelineTasks.id, id),
+      )
+      .returning();
+
+    // The UPDATE's own returned row, not the one read a moment ago: reporting the
+    // pre-write value back would tell the phone its report landed while showing it
+    // the number it replaced.
+    return reply.code(200).send(taskWire(updated ?? task));
   });
 }

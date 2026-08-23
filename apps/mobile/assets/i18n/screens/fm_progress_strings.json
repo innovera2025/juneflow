@@ -1,0 +1,12 @@
+{
+  "_source": "Static UI keys for the mobile foreman progress screen (route fm-progress, pototype/mobile-field.jsx MFmProgress L92-143). KEYS ONLY, like pm_checkin_strings.json: every value is a DICT stable-id resolved with i18n.t. Six keys were minted for this screen (mob.fm.progress.*), each byte-exact from the prototype. NOT minted, deliberately: the eyebrow's full text 'โฟร์แมน · สมคิด ร. · Block B' (a mock person and a mock block — only the role word is minted, the rest comes from the wire or em-dashes) and the submit toast 'ส่ง % งาน Block B แล้ว · เฉลี่ย {n}% → อัปเดต Progress + งวดงาน' (embeds the same mock block; the screen re-reads after a submit, which shows the truth rather than claiming it).",
+  "_layers": "all t() = dict (a stable id resolved from i18n-full.json). NO phrases-layer (Thai-as-key) entries here.",
+  "title": "mob.fm.progress.title",
+  "role": "mob.fm.progress.role",
+  "avgLabel": "mob.fm.progress.avgLabel",
+  "sent": "mob.fm.progress.sent",
+  "submit": "mob.fm.progress.submit",
+  "wasLabel": "mob.fm.progress.wasLabel",
+  "failed": "admin.common.actionFailedToast",
+  "queued": "tax.etax.statusPending"
+}

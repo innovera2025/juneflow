@@ -616,6 +616,39 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /timeline/tasks/{id}/progress:
+    parameters:
+      - $ref: "#/components/parameters/IdPath"
+    post:
+      tags: [pm]
+      summary: >-
+        Report a timeline task's percent complete ({pct}) — the foreman write behind
+        mobile fm-progress (B-436). Sets timeline_task.pct on an EXISTING task; the
+        task is addressed by id and its tenant is the caller's. pct outside 0-100 is
+        a 400 and an unknown task is a 404.
+      operationId: reportTimelineTaskProgress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pct]
+              properties:
+                pct:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+      responses:
+        "200":
+          $ref: "#/components/responses/EntityOk"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /org-units:
     get:
       tags: [master]

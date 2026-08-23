@@ -435,6 +435,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/timeline/tasks/{id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report a timeline task's percent complete ({pct}) — the foreman write behind mobile fm-progress (B-436). Sets timeline_task.pct on an EXISTING task; the task is addressed by id and its tenant is the caller's. pct outside 0-100 is a 400 and an unknown task is a 404. */
+        post: operations["reportTimelineTaskProgress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/org-units": {
         parameters: {
             query?: never;
@@ -4520,6 +4539,29 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["EntityOk"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    reportTimelineTaskProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    pct: number;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["EntityOk"];
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };

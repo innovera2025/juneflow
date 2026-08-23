@@ -15,10 +15,11 @@
 > `gl.revrec` **ทำแล้ว** (B-432 · 2026-08-22 — backend มีอยู่แล้วครบสี่ endpoint, ค้างแค่จอ) ·
 > `alloc` **ทำแล้ว** (B-433 · 2026-08-23 — ตามคำตัดสิน B-232=ค thin-honest ที่ Wei ให้ไว้ใน `agents/channel.md`).
 >
-> **มือถือ: 25/26 มีของครบ** — `detail` **สร้างแล้ว** (`pr_detail_screen.dart` · เป็น pushed route โดยตั้งใจ มีเทสต์ล็อกไว้ที่ `test/shell/mobile_routes_test.dart:73`) ·
+> **มือถือ: 26/26 มีของครบ** — `detail` **สร้างแล้ว** (`pr_detail_screen.dart` · เป็น pushed route โดยตั้งใจ มีเทสต์ล็อกไว้ที่ `test/shell/mobile_routes_test.dart:73`) ·
 > `field-hse` **Wei สั่ง DEFER แล้ว** (B-334 — placeholder คือสถานะที่ถูกต้อง ไม่ใช่หนี้) ·
 > `field-checkin` **ทำแล้ว** (B-437 = ก · 2026-08-23 — Wei สั่งตัดชิป geofence กับหัวข้องานมอบหมายทิ้ง แล้วพอร์ตแกน check-in/out) ·
-> ค้างจริง **1 จอ**: `fm-progress` (B-436 — ไม่มีทั้งประตูอ่านและเขียน).
+> `fm-progress` **ทำแล้ว** (B-436 = ก · 2026-08-23 — Wei อนุมัติเปิด endpoint · subject = `timeline_task` ซึ่ง derive ได้ ไม่ใช่เลือกเอง) ·
+> **ไม่เหลือจอมือถือค้างแล้ว** (`field-hse` = Wei DEFER ตาม B-334 · `detail` = pushed route ที่สร้างแล้ว).
 >
 > **แต่ไฟล์นี้ไม่ใช่ภาพรวมของโปรเจค.** งานที่เหลือไม่ใช่ "ของที่ยังไม่ได้สร้าง"
 > แต่เป็น **"ของที่สร้างแล้วแต่ผิด"** ซึ่งอยู่ใน **`BLOCKERS.md`** ทั้งหมด

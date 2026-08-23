@@ -11,6 +11,7 @@ import '../screens/approvals_inbox/approvals_inbox_screen.dart';
 import '../screens/exec/exec_screen.dart';
 import '../screens/field_checkin/field_checkin_screen.dart';
 import '../screens/field_gr/field_gr_screen.dart';
+import '../screens/fm_progress/fm_progress_screen.dart';
 import '../screens/field_pr/field_pr_screen.dart';
 import '../screens/field_progress/field_progress_screen.dart';
 import '../screens/field_stock/field_stock_screen.dart';
@@ -44,6 +45,12 @@ Widget _buildInbox(BuildContext context) => const ApprovalsInboxScreenHost();
 /// offline queue; which button is live is decided by the SERVER's attendance row,
 /// re-read after every submit rather than flipped optimistically.
 Widget _buildFieldCheckin(BuildContext context) => const FieldCheckinScreenHost();
+
+/// Builds the `fm-progress` screen (a foreman reports each activity's percent
+/// complete). Its host resolves services + the i18n sidecar from [AppScope]. Each
+/// CHANGED line is one queued POST /timeline/tasks/{id}/progress; the screen re-reads
+/// afterwards rather than flipping to "sent" optimistically.
+Widget _buildFmProgress(BuildContext context) => const FmProgressScreenHost();
 
 /// Builds the `notif` screen (its host resolves services + the i18n sidecar from
 /// [AppScope]). A top-level tearoff so [mobileScreenBuilders] stays const.
@@ -192,6 +199,7 @@ const Map<String, WidgetBuilder> mobileScreenBuilders = <String, WidgetBuilder>{
   'field-pr': _buildFieldPr,
   'field-gr': _buildFieldGr,
   'field-checkin': _buildFieldCheckin,
+  'fm-progress': _buildFmProgress,
   'field-stock': _buildFieldStock,
 };
 
