@@ -59,7 +59,8 @@ STATE_HOST=${VISUAL_STORAGE_STATE:-}
 if [ -z "$STATE_HOST" ]; then
   STATE_HOST=$(mktemp "${TMPDIR:-/tmp}/juneflow-visual-state.XXXXXX")
   CLEAN_STATE=$STATE_HOST
-  docker run --rm --network "$NET" -v "$STATE_HOST:/state.json" "$IMG" node -e '
+  docker run --rm --network "$NET" --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$STATE_HOST:/state.json" "$IMG" node -e '
     const base = process.argv[1];
     fetch(base + "/api/v1/auth/login", {
       method: "POST",
@@ -83,7 +84,16 @@ if [ -z "$STATE_HOST" ]; then
 fi
 
 # --- the gate --------------------------------------------------------------
+# --user: the container writes the run's artefacts (.results/) INTO the mounted repo,
+# and as root by default. On a Linux CI runner that leaves root-owned files in the
+# checkout, and the next workflow step that touches the tree fails on them — measured:
+# GitHub's own `hashFiles('tests/visual/**')` threw "Fail to hash files under
+# directory", turning a green gate into a red job AFTER 235 tests had passed. Running
+# as the invoking user keeps the artefacts readable by whatever runs next.
+# HOME is redirected because the mapped uid has no home inside the image, and tools
+# that write a cache there would otherwise fail on a read-only path.
 docker run --rm --network "$NET" \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$ROOT:/repo" -v "$STATE_HOST:/state.json" -w /repo/tests \
   -e VISUAL_BASE_URL="$BASE" \
   -e VISUAL_STORAGE_STATE=/state.json \

@@ -51,8 +51,39 @@ export interface ModalCfg {
   iconTone?: string;
   size?: "sm" | "md" | "lg" | "xl" | "full";
   body?: ReactNode | ((args: { ctx: ShellCtx; close: () => void }) => ReactNode);
-  [key: string]: unknown;
+
+  // ---- confirm-kind fields, read by ModalHost's ConfirmDialog ----------------
+  //
+  // B-429: this interface used to end with `[key: string]: unknown`, and that one
+  // line switched OFF checking for every caller. `Omit<ModalCfg, "kind">` — the type
+  // openModal() and confirm() actually take — collapses an interface with an index
+  // signature back into a bare index signature, so `openModal({ icon: "calandar",
+  // size: "medium" })` compiled clean at all 105 call sites while the same object
+  // written as a ModalCfg was a TS2820 error. Measured, not assumed: that exact probe
+  // is what filed the blocker.
+  //
+  // So the escape hatch is gone and the fields the shell READS are named instead.
+  // The list is not a guess either — every key passed anywhere in apps/web was
+  // counted before writing it: title 100 · icon 99 · iconTone 98 · subtitle 92 ·
+  // body 85 · size 82 · onConfirm 17 · message 6 · danger 5 · confirmLabel. Adding a
+  // field here is now a deliberate act, which is the point.
+  /** Confirm-dialog copy. */
+  message?: ReactNode;
+  /** Runs when the operator confirms; the dialog closes either way. */
+  onConfirm?: () => void;
+  /** Renders the confirm action in the danger tone. */
+  danger?: boolean;
+  /** Names the confirm action; falls back to common.confirm when absent. */
+  confirmLabel?: string;
 }
+
+/**
+ * What openModal() accepts: every ModalCfg field, with `kind` OPTIONAL and narrowed
+ * to the two non-confirm kinds.
+ */
+export type OpenModalCfg = Omit<ModalCfg, "kind"> & {
+  kind?: Exclude<ModalCfg["kind"], "confirm">;
+};
 
 export type ToastTone = "ok" | "info" | "warn" | "danger";
 export interface ToastState {
@@ -73,7 +104,13 @@ export interface ShellCtx {
   back: () => void;
   history: HistoryEntry[];
   notify: (msg: string, tone?: ToastTone) => void;
-  openModal: (cfg: Omit<ModalCfg, "kind">) => void;
+  /**
+   * Open a modal. Defaults to the `custom` kind; a caller may ask for `fullbleed`
+   * instead (the tax PP30/PND53 forms own their own backdrop and do). `confirm` is
+   * NOT reachable here — it has its own door, so a confirm cannot be opened without
+   * the dialog that renders its actions.
+   */
+  openModal: (cfg: OpenModalCfg) => void;
   closeModal: () => void;
   confirm: (cfg: Omit<ModalCfg, "kind">) => void;
   tweaks: Tweaks;
@@ -180,7 +217,9 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openModal = useCallback(
-    (cfg: Omit<ModalCfg, "kind">) => setModal({ kind: "custom", ...cfg }),
+    // The spread comes AFTER the default on purpose: an explicit `kind` from the
+    // caller wins, which is what makes the fullbleed callers work.
+    (cfg: OpenModalCfg) => setModal({ kind: "custom", ...cfg }),
     [],
   );
   const confirm = useCallback(
