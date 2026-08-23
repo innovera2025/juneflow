@@ -12,18 +12,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Design tokens come from @juneflow/tokens (navy accent) only - never hardcode values (PLAN.md section 0 rule 2) -->
     <!--
-      Webfonts loaded exactly as the prototype (Juneflow Fiori.html head): the
-      @juneflow/tokens --font family list (Inter, Noto Sans Thai/Arabic/SC) only
-      renders when the files are actually fetched; without this the browser falls
-      back to a serif (Times) and fails the visual gate. Families come from
-      tokens/prototype - not hardcoded here.
+      Webfonts are SELF-HOSTED (B-440 = ก, Wei 2026-08-23). This used to <link> two
+      preconnects and a stylesheet at fonts.googleapis.com, and that made what the app
+      RENDERS depend on a third-party fetch:
+
+        - the visual gate could never be stable. Measured, one browser and one stack,
+          the ONLY variable being whether the CDN was reachable: `login` differed by
+          130,840 of 1,600,000 pixels - 8.18%, against a CI gap of 1.42-3.74% that
+          three separate re-baselines had failed to close;
+        - `display=swap` meant the browser painted a fallback first and swapped later,
+          so a screenshot landing in that window recorded the fallback;
+        - and every page load told Google the user's IP. A Thai construction ERP that
+          cannot draw Thai text without reaching Google does not work in a site office.
+
+      public/fonts/fonts.css is Google's own css2 response for this exact family list
+      with the URLs pointed at the copies in public/fonts/files/. Families still come
+      from @juneflow/tokens - not hardcoded here.
     -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <link href="/fonts/fonts.css" rel="stylesheet" />
     <title>Juneflow</title>
   </head>
   <body>
