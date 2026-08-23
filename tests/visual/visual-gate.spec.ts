@@ -1346,9 +1346,12 @@ test.describe("visual gate · promote mode · GUARD 3b near-duplicate detector (
 
   // THE FALSE-POSITIVE COST, measured against the arbiter itself rather than
   // asserted. Read-only: this test never writes into reference/.
-  test("the REAL 99-file pack produces ZERO near-duplicate groups (measured FP cost)", async () => {
+  test("the REAL shipped pack produces ZERO near-duplicate groups (measured FP cost)", async () => {
     const dir = join(REF_DIR, "app-baseline");
     const files = readdirSync(dir).filter((f) => f.endsWith(".png")).sort();
+    // A floor, not a fixed count: the pack grows as screens are ported, and a test
+    // whose NAME carried the number went stale the first time it did. What must not
+    // happen is the pack silently shrinking.
     expect(files.length).toBeGreaterThanOrEqual(99);
 
     const records = files.map((f) => {
