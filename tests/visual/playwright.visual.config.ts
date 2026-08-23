@@ -42,6 +42,13 @@ export default defineConfig({
   globalTeardown: "./lib/teardown.ts",
   use: {
     baseURL: process.env.VISUAL_BASE_URL ?? "http://localhost:5173",
+    // Chart.js animates on mount, so a capture taken mid-animation is a frame rather
+    // than a state — measured, two runs on the SAME stack differing by 684 px on
+    // alloc and 7,221 px on timeline, entirely in the chart geometry. This is the
+    // real browser setting that means "do not animate at me" (ui/chart.tsx
+    // prefersReducedMotion reads it), so the gate is not asking the app for
+    // test-only behaviour; it is asking as a user who set the preference.
+    reducedMotion: "reduce",
     // Auth for capture mode (P0-QA-04 fold): a run points VISUAL_STORAGE_STATE at a
     // Playwright storageState file (localStorage bearer token — apps/web/src/auth-token.ts
     // key `juneflow-token`) so /#/<route> renders the authed shell, not the login screen.

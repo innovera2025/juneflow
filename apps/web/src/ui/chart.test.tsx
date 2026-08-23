@@ -33,13 +33,7 @@ vi.mock("chart.js", () => ({
   Filler: {},
 }));
 
-import {
-  chartTheme,
-  baseChartOpts,
-  createThemedChart,
-  ChartCanvas,
-  type ChartTheme,
-} from "./chart";
+import { chartTheme, baseChartOpts, createThemedChart, ChartCanvas, type ChartTheme, prefersReducedMotion } from "./chart";
 
 // Token values chosen distinct from the prototype/Fiori fallbacks so every read is
 // provable (colors from the navy theme; font/size/radius carry deliberately non-default
@@ -232,5 +226,62 @@ describe("ChartCanvas (render)", () => {
     expect(html).toContain("height:200px");
     // Effects do not run during static render — no chart constructed yet.
     expect(hoisted.ctor).not.toHaveBeenCalled();
+  });
+});
+
+/** The handful of ChartTheme fields baseChartOpts reads. */
+function themeStub() {
+  return {
+    surface: "#fff", text: "#000", border: "#ccc", grid: "#eee",
+    radius: 8, font: "Inter", fsTable: 12, fsTh: 11,
+  } as unknown as Parameters<typeof baseChartOpts>[0];
+}
+
+describe("prefersReducedMotion — why every chart in this app can be captured twice", () => {
+  const realMatchMedia = globalThis.matchMedia;
+  afterEach(() => {
+    if (realMatchMedia) globalThis.matchMedia = realMatchMedia;
+    else delete (globalThis as { matchMedia?: unknown }).matchMedia;
+  });
+
+  const stub = (matches: boolean) => {
+    (globalThis as { matchMedia?: unknown }).matchMedia = (q: string) => ({
+      matches: q.includes("prefers-reduced-motion") && matches,
+    });
+  };
+
+  it("is false where matchMedia does not exist, rather than throwing", () => {
+    // The node test env has no matchMedia; a chart that threw here would take the
+    // whole suite with it.
+    delete (globalThis as { matchMedia?: unknown }).matchMedia;
+    expect(prefersReducedMotion()).toBe(false);
+  });
+
+  it("reads the real browser preference", () => {
+    stub(true);
+    expect(prefersReducedMotion()).toBe(true);
+    stub(false);
+    expect(prefersReducedMotion()).toBe(false);
+  });
+
+  it("survives a matchMedia that throws", () => {
+    (globalThis as { matchMedia?: unknown }).matchMedia = () => {
+      throw new Error("no");
+    };
+    expect(prefersReducedMotion()).toBe(false);
+  });
+
+  it("STILLS every chart when the preference is set — the G5 property", () => {
+    // Measured: with Chart.js animating, two captures of one screen on the SAME
+    // stack differed by 684 px (alloc bars) and 7,221 px (the timeline S-curve).
+    // A screen that cannot be captured twice the same way is not a regression
+    // anchor, and the gate captures with reducedMotion 'reduce'.
+    stub(true);
+    expect(baseChartOpts(themeStub()).animation).toBe(false);
+  });
+
+  it("leaves the animation alone for everyone else", () => {
+    stub(false);
+    expect(baseChartOpts(themeStub()).animation).toBeUndefined();
   });
 });

@@ -41,7 +41,7 @@ import { useI18n } from "../../i18n";
 import type { PhraseKey } from "@juneflow/i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
-import { ChartCanvas } from "../../ui/chart";
+import { ChartCanvas, baseChartOpts } from "../../ui/chart";
 import { Page } from "../../shell/page";
 import { useProjects } from "../../shell/use-shell-data";
 import { useDashboardBudgetActual } from "../dashboard/use-dashboard";
@@ -237,15 +237,14 @@ export function AllocateCost() {
                 },
               ],
             },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: { legend: { display: false } },
+            // baseChartOpts, as the prototype calls it (petty-alloc.jsx:176) — the shared
+            // themed defaults, not a hand-rolled copy that drifts from the other charts.
+            options: baseChartOpts(theme, {
               scales: {
                 x: { grid: { display: false }, ticks: { color: theme.text } },
                 y: { grid: { color: theme.grid }, beginAtZero: true, ticks: { color: theme.text } },
               },
-            },
+            }),
           })}
         />
       </Card>

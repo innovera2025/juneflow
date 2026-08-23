@@ -20,6 +20,7 @@ const DASH = "—";
 const h = vi.hoisted(() => ({
   categories: [] as Array<{ label: string | null; plan: number; actual: number }>,
   chartLabels: [] as string[],
+  chartOptions: {} as Record<string, unknown>,
 }));
 
 const KEY_BY_PHRASE: Record<string, string> = Object.fromEntries(
@@ -51,9 +52,18 @@ vi.mock("../../shell/page", () => ({
 
 // Chart.js needs a canvas; capture the config instead of drawing it.
 vi.mock("../../ui/chart", () => ({
-  ChartCanvas: ({ build }: { build: (t: Record<string, string>) => { data: { labels: string[] } } }) => {
+  // baseChartOpts is echoed rather than stubbed to {} so the assertions below can read
+  // what the screen actually asked for — the animation flag in particular.
+  baseChartOpts: (_t: unknown, opts: Record<string, unknown>) => opts,
+  ChartCanvas: ({ build }: {
+    build: (t: Record<string, string>) => {
+      data: { labels: string[] };
+      options: Record<string, unknown>;
+    };
+  }) => {
     const cfg = build({ brand: "#b", accent: "#a", danger: "#d", text: "#t", grid: "#g" });
     h.chartLabels = cfg.data.labels;
+    h.chartOptions = cfg.options;
     return <div data-chart="1" />;
   },
 }));
@@ -76,6 +86,7 @@ beforeEach(() => {
     { label: "02 Structural Works", plan: 4000000, actual: 3800000 },
   ];
   h.chartLabels = [];
+  h.chartOptions = {};
 });
 
 describe("the backed content", () => {
