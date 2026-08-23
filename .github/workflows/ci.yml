@@ -221,6 +221,8 @@ jobs:
         run: pnpm run --if-present test:e2e
       - name: Stop dev stack
         if: always() && hashFiles('infra/docker-compose.yml') != ''
+        env:
+          COMPOSE_PROJECT_NAME: juneflow
         run: docker compose -f infra/docker-compose.yml down -v || true
       - name: Pre-scaffold pass
         if: hashFiles('tests/e2e/**') == ''
@@ -324,42 +326,39 @@ jobs:
         # B-404) and must not silently inherit a frozen one.
         env:
           SEED_FROZEN_NOW: "2026-08-07T12:22:42+07:00"
+          # Named explicitly rather than left to compose's default, which is the
+          # CHECKOUT DIRECTORY name. The gate step below joins this project's network
+          # by name, and a rename of the working directory would silently break that
+          # join rather than fail loudly.
+          COMPOSE_PROJECT_NAME: juneflow
         run: docker compose -f infra/docker-compose.yml up -d --wait
-      - name: Install Playwright browsers
+      - name: Visual gate, inside the image the pack was captured in (B-441)
         if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
-        run: pnpm --dir tests exec playwright install --with-deps chromium
-      - name: Mint the visual-gate session (B-411)
-        if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
-        # Without this the gate captures every screen LOGGED OUT and compares it
-        # with baselines captured signed-in, which cannot pass however correct the
-        # app is — and fails in the shape of drift, so the red is unreadable.
-        # Measured, one machine, one image, one pack, varying only the session:
-        # 11 screens fail with it in the morning and 14 that afternoon, against
-        # 98 without it — two runs, not one variable; the growth is the drift
-        # this same step freezes. The single pass without a session is `login`,
-        # the one screen in the manifest that calls no API.
+        # WHY A CONTAINER AND NOT THE RUNNER. This step used to install chromium onto
+        # ubuntu-latest and run the gate there, and it failed 104 of 104 rows against
+        # every pack ever captured — three re-baselines, on macOS, on emulated amd64
+        # and on native amd64, all of them red.
         #
-        # No secret: the user is seeded (packages/db/src/seed/index.ts:209) and
-        # this dev password is already plaintext in the repo's capture scripts.
-        # The step FAILS if no token comes back, because a silent empty token
-        # would put the gate straight back into the state this fixes.
-        run: |
-          set -euo pipefail
-          TOKEN=$(curl -sS --fail-with-body -X POST http://localhost:5173/api/v1/auth/login \
-            -H 'content-type: application/json' \
-            -d '{"email":"wipha@rungrueang.co.th","password":"juneflow-dev"}' \
-            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).token||"")}catch(e){}})')
-          if [ -z "$TOKEN" ]; then
-            echo "::error::login returned no token — the gate would capture logged-out screens (B-411)"
-            exit 1
-          fi
-          node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({cookies:[],origins:[{origin:"http://localhost:5173",localStorage:[{name:"juneflow-token",value:process.argv[2]}]}]}))' \
-            "$RUNNER_TEMP/visual-storage-state.json" "$TOKEN"
-          echo "VISUAL_STORAGE_STATE=$RUNNER_TEMP/visual-storage-state.json" >> "$GITHUB_ENV"
-          echo "minted a session for the visual gate (token ${#TOKEN} chars)"
-      - name: Visual gate (screenshots vs tests/visual/reference — PLAN.md §0)
-        if: hashFiles('tests/visual/**') != '' && hashFiles('package.json') != ''
-        run: pnpm run --if-present test:visual
+        # The cause is not which machine captures. It is that the same font FILE is
+        # rasterised differently by different freetype/fontconfig versions. Measured,
+        # one stack and one Playwright version, the ONLY variable being the OS base of
+        # the image: playwright:v1.61.1-jammy against -noble differs by 19,003 of
+        # 1,600,000 pixels on `login` — 1.19% — and the two do not even carry the same
+        # Thai fonts (9 against 12). The runner is a third environment again.
+        #
+        # So the fix removes the variable instead of trying to match it: the pack is
+        # captured in a pinned image and judged in the SAME pinned image, and the two
+        # cannot drift because the tag is written down in one place
+        # (tests/visual/gate-linux.sh, which must track the @playwright/test pin).
+        #
+        # The script also mints its own session INSIDE the compose network, which is
+        # what B-411 and B-415 are about: the gate refuses to run without one, and
+        # Playwright matches a storageState origin exactly, so a session minted for the
+        # host's published port would capture 104 logged-out screens that fail in the
+        # shape of drift.
+        env:
+          COMPOSE_PROJECT_NAME: juneflow
+        run: bash tests/visual/gate-linux.sh
       - name: Stop dev stack
         if: always() && hashFiles('infra/docker-compose.yml') != ''
         run: docker compose -f infra/docker-compose.yml down -v || true
