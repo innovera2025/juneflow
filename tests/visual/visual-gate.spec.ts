@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -659,7 +660,22 @@ test.describe("visual gate · capture mode (real screens vs reference)", () => {
 // The question each test answers is "does this die on revert?" — remove the
 // guard it names and the test must go RED.
 
-const SELFTEST_ROOT = join(RESULTS_DIR, "promote-selftest");
+/**
+ * Where the promote-mode self-tests build their fixture packs.
+ *
+ * OUTSIDE THE REPO, and that is the whole point. These tests deliberately create
+ * hostile fixtures — GUARD 2b builds a SYMLINK that escapes its pack, GUARD 2 builds
+ * one pointing outside app-baseline — and while they lived under tests/visual/.results
+ * they were left behind in the working tree. Measured on CI: after the gate passed
+ * 235 tests, the job still failed because GitHub's own `hashFiles('tests/visual/**')`
+ * walks that tree and threw "Fail to hash files under directory" on the escaping
+ * symlink. A green gate reported as a red job is worse than a red gate, because the
+ * number everybody reads is the job's.
+ *
+ * os.tmpdir() also means a fixture cannot be mistaken for a real baseline, which is
+ * the failure GUARD 2 exists to prevent in the first place.
+ */
+const SELFTEST_ROOT = join(tmpdir(), "juneflow-visual-selftest");
 
 interface Sandbox {
   root: string;
@@ -1346,9 +1362,12 @@ test.describe("visual gate · promote mode · GUARD 3b near-duplicate detector (
 
   // THE FALSE-POSITIVE COST, measured against the arbiter itself rather than
   // asserted. Read-only: this test never writes into reference/.
-  test("the REAL 99-file pack produces ZERO near-duplicate groups (measured FP cost)", async () => {
+  test("the REAL shipped pack produces ZERO near-duplicate groups (measured FP cost)", async () => {
     const dir = join(REF_DIR, "app-baseline");
     const files = readdirSync(dir).filter((f) => f.endsWith(".png")).sort();
+    // A floor, not a fixed count: the pack grows as screens are ported, and a test
+    // whose NAME carried the number went stale the first time it did. What must not
+    // happen is the pack silently shrinking.
     expect(files.length).toBeGreaterThanOrEqual(99);
 
     const records = files.map((f) => {
