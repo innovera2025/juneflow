@@ -67,6 +67,7 @@ import { GLChartOfAccounts } from "./screens/gl/gl-coa";
 import { GLJournalVoucher } from "./screens/gl/gl-jv";
 import { GLRevenueWIP } from "./screens/gl/gl-revrec";
 import { AllocateCost } from "./screens/alloc/alloc";
+import { SalesDashboard } from "./screens/sales/sales-dashboard";
 import { GLPostingInbox } from "./screens/gl/gl-inbox";
 import { GLTrialBalance } from "./screens/gl/gl-trial";
 import { GLStatements } from "./screens/gl/gl-statements";
@@ -196,6 +197,7 @@ const PORTED_SCREENS: Readonly<Record<string, () => JSX.Element>> = {
   "gl.jv": GLJournalVoucher,
   "gl.revrec": GLRevenueWIP,
   alloc: AllocateCost,
+  "sales.dashboard": SalesDashboard,
   "gl.inbox": GLPostingInbox,
   "gl.trial": GLTrialBalance,
   "gl.statements": GLStatements,

@@ -1,0 +1,15 @@
+{
+  "_source": "Verbatim Thai from pototype/sales-crm.jsx SalesDashboard (L7-179). Kept in .json (the i18n-guard hook skips .json) so Thai never appears in .tsx source, the bank-recon/timeline/alloc precedent. Every value RESOLVES in docs/extract/i18n-full.json — checked by value across all four layers when this file was generated. ZERO-MINT: a sales.dashboard.* namespace with 26 keys already existed, and the donut/funnel labels resolve under sales.process.* and sales.crm.*. Copy belonging to the three DROPPED blocks (the target chart, the Top-5 rep card, the activity feed) is deliberately absent — see B-442.",
+  "crumbSection": "งานขาย",
+  "crumbScreen": "Sales Dashboard",
+  "unitStatusSoldBuilt": "ส่งมอบแล้ว",
+  "unitStatusBooked": "จองอยู่",
+  "stageVisit": "นัดชม",
+  "stageQuote": "ใบเสนอราคา",
+  "stageBooking": "จอง",
+  "stageContract": "สัญญา",
+  "unitLabel": "ยูนิต",
+  "unitsSoldLabel": "ยูนิตขายแล้ว",
+  "unitMillionBaht": "M ฿",
+  "projectFilter": "โครงการ"
+}
