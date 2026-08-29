@@ -333,3 +333,37 @@
 - Stage 6 compares **103 screens** and passes. It is a real gate for the first time — before today it had never once judged the app on the platform it judges on.
 - It does **not** yet cover every ported screen: `sales.dashboard` has no anchor (B-443), and `audit` cannot have one as built (B-439). `subcon` needs none — it is an alias of `subcon.progress`.
 - Four of the 103 rows (`alloc`, `gl-revrec`, `pr-form`, `timeline`) are **NEW-REF images Wei has not accepted as ground truth**, and they became CI-enforcing the moment this merged. That is the posture the B-205 batch shipped under, so it is not a violation — but it is a thing Wei should know is now enforcing, not a thing to discover later.
+
+## 2026-08-29 (cont.) · B-443 — ถ่าย baseline ใบเดียว แล้วเจอว่าจอไม่เคยทำงาน สองชั้นซ้อน
+
+- **Wei อนุมัติ "ถ่าย sales.dashboard เพิ่มเลย" และงานที่ควรจะเป็นการถ่ายรูปหนึ่งใบ กลายเป็นการเจอบั๊กสองตัวที่ทุกด่านมองไม่เห็น** — ซึ่งเป็นเหตุผลที่ B-443 มีอยู่ตั้งแต่แรก
+- **ถ่ายบน native amd64 เท่านั้น ไม่ใช่ Mac** — B-431 วัดไว้เองว่า emulated กับ native ต่างกัน 5 จาก 104 ใบ และ `alloc` ซึ่งเป็นจอกราฟแบบเดียวกันอยู่ในห้าใบนั้น การถ่ายบน Mac จึงไม่ใช่ทางเลือกที่ประหยัดกว่า มันคือทางเลือกที่ผิด
+- **กับดักที่อันตรายที่สุดของรอบนี้ไม่ใช่โค้ด** — เครื่อง staging export `COMPOSE_FILE` ไว้ทั้งเครื่อง ชี้ไปที่ overlay chain ของ stack **live** คำสั่ง `docker compose` เปล่า ๆ บนเครื่องนั้นจะไปโดน production ของ Wei ทุกสคริปต์จึงล้าง `COMPOSE_FILE` เป็นบรรทัดแรก แล้วส่ง `-p` กับ `-f` เสมอ · ยืนยันตลอดงาน: live 6 containers · `juneflow.app` = 200 · volume คนละก้อน
+- **blast radius ต้องเป็นหนึ่งไฟล์ และนั่นบังคับให้ออกแบบวิธี** — promote mode เขียนทับ **ทุกแถว**ที่ได้รับ (`commit()` assert `promoted === manifest.length`) การรันกับ manifest จริงจะถ่ายทับ baseline ทั้ง 103 ใบที่ Wei เพิ่งรับ · จึงตัดเหลือ 2 แถว (ต้องมี `app-shell` เพราะ self-test ที่ `spec:340` หามันด้วยชื่อ) แล้วคืน `dashboard.png` จาก git · `git diff --name-status` ยืนยัน: `A` หนึ่งบรรทัด ไม่มี `M` เลยสักใบ
+- **`planPromotion` ปฏิเสธการสร้างไฟล์ใหม่โดยเจตนา** — *"a promote overwrites, it never mints a new baseline"* จึงต้องวาง placeholder ไว้ก่อนอย่างจงใจ และผมเลือกให้เป็น **1 ไบต์ที่ไม่ใช่ PNG** เพื่อว่าถ้า promote ไม่เขียนทับ รอบถัดไปจะพังเสียงดัง ถ้าใช้วิธีก๊อปจอข้างเคียงมาวางแทน นั่นคือเวอร์ชันที่พังเงียบ
+
+**บั๊กชั้นที่หนึ่ง — B-445: จอไม่เคยขึ้นเลยตั้งแต่วันที่ merge**
+
+- ภาพแรกได้ **10,778 ไบต์** ผมไม่ขุด commit ตาม [[experiment-discriminates-only-what-it-varies]] แต่เปิดไฟล์หลักฐานก่อน: `bodyChars 32` · **`apiRequests 8`** · `consoleErrors ['"doughnut" is not a registered controller']` — **ข้อมูลมาครบ จอต่างหากที่ตาย** ตัวเลข `apiRequests` คือสิ่งที่แยก "environment พัง" ออกจาก "จอพัง" ได้ในขั้นตอนเดียว
+- `ui/chart.tsx` ลงทะเบียน chart.js แบบ subset โดยตั้งใจ (คุมขนาด bundle) แต่ **การลงทะเบียนไม่ครบไม่ degrade มันพังทั้งจอ** — chart.js โยน error ตอน render แล้ว React ถอดทั้ง subtree
+- **ทุกด่านเขียวหมดตลอด 5 วัน:** unit test `vi.mock` ตัว `ChartCanvas` ทิ้ง → chart.js จริงไม่เคยรัน · `type: "doughnut"` เป็น string literal ที่ถูกต้อง → typecheck ผ่าน · E2E ระดับ API → ไม่เปิดเบราว์เซอร์ · G5 ไม่มีแถวของจอนี้ ซึ่ง**คือ B-443 ที่กำลังแก้อยู่พอดี**
+
+**บั๊กชั้นที่สอง — B-446: ผมแก้แล้วประกาศว่า "ทำงานแล้ว" ทั้งที่กราฟยังผิด**
+
+- gate 4.5 ไม่ได้อ่านโค้ดผม มัน**สุ่มพิกเซลจากไฟล์ baseline ที่ผมกำลังจะให้ Wei รับ** แล้วพบว่าวงแหวนเป็น `(0,0,0)` ทั้ง 18 มุม
+- สาเหตุคือ**เส้นแบ่ง DOM/canvas**: `STATUS_TONE` เก็บ `var(--ok)` แล้วมีผู้ใช้สองที่ — legend (DOM resolve ได้) กับ dataset ของโดนัท (canvas resolve ไม่ได้) · `ctx.fillStyle = "var(--ok)"` เป็น invalid assignment ที่ canvas **กลืนเงียบ** · ไม่มีอะไร throw จึงไม่มี console error และ legend ข้าง ๆ ก็ถูกทุกสี
+- **`var()` ไหลเข้า canvas ทางอ้อมผ่านตาราง** — grep หา `backgroundColor:.*var\(` บนบรรทัดนั้นไม่เจออะไร guard จึงต้องเป็นเชิงพฤติกรรม ไม่ใช่ scan ข้อความ นี่คือเหตุผลที่ผมเขียนเทสต์แทนที่จะเขียน lint rule
+- **บทเรียนที่แพงที่สุดของรอบ: B-445 ย้าย defect จาก "มองไม่เห็นจากทุกด่าน" มาเป็น "กำลังจะถูกด่านที่มีตารับรอง" ซึ่งแย่กว่าเดิม** — พอ Wei รับ NEW-REF แล้ว การเรนเดอร์ที่ถูกต้องจะกลายเป็น G5 regression ที่ต้องขอ re-baseline sacred อีกรอบ · ผมประกาศ "WORKING" จากการวัด `bodyChars` กับ console error **จริงทั้งคู่ ไม่พอทั้งคู่** · **การวัดที่ตื้นกว่าคำกล่าวอ้าง คือวิธีที่คำกล่าวอ้างผิดกลายเป็นของที่ถูกรับรอง**
+- ตัวเลข "ทุกใบ 90–210 KB" ที่ผมเขียนก็ผิดเช่นกัน (จริง: 75,808–398,125) — gate 4.5 วัดจับได้ **คำกล่าวอ้างที่เป็นตัวเลขจะถูกตรวจเสมอ ให้เขียนเฉพาะตัวเลขที่วัดมาแล้ว**
+
+**สิ่งที่ปิดไปด้วยและเป็นของแถมที่มีค่าที่สุด**
+
+- guard ตัวแรกของผมตรวจแค่ **controller** · gate 4.5 พิสูจน์ด้วยมิวแทนต์ว่าถอด `ArcElement` อย่างเดียว (คง controller ไว้) **เขียวทั้ง 3 ข้อทั้งที่จอยังว่าง** เพราะ chart.js โยน `arc is not a registered element` คนละที่ · **การลงทะเบียนครึ่งเดียว = หน้าว่างเท่ากับไม่ลงทะเบียนเลย** ตอนนี้ guard ไล่ `dataElementType` ต่อด้วย
+- แก้เป็น **ตารางเดียวสองการสะกด** — สถานะที่เพิ่มในลิสต์เดียวกลายเป็น compile error ไม่ใช่ wedge สีดำ
+- **สัดส่วนส่วนโค้งยืนยันข้อมูลด้วยตัวมันเอง**: สุ่ม 36 มุมได้ 58/17/11/8/6% เทียบยูนิตที่ seed 48/16/9/6/5 จาก 84 = 57/19/11/7/6% — เป็นการตรวจที่ไม่ต้องเชื่อทั้งโค้ดและทั้ง baseline
+
+**ความผิดพลาดของผมเองในรอบนี้ สามอย่าง บันทึกไว้เพราะ output มันหลอก**
+
+1. รอบแรกลืม `pnpm install` ใน clone → container ไปดึง playwright **1.62.1** แทน **1.61.1** ที่ lockfile ปัก — คลาสเดียวกับ B-413 ที่ต้องปิดก่อนตัวเลข G5 จะเชื่อได้
+2. สคริปต์ cache "manifest ฉบับเต็ม" จาก working copy → รันรอบสองจะ cache ฉบับที่ถูกตัดแล้วเป็นฉบับเต็ม · แก้เป็นดึงจาก `git show HEAD:` ทุกครั้ง · **แล้วผมก็ทำพลาดแบบเดียวกันซ้ำที่ step 7** (append แถวที่ commit ไปแล้ว → 105 แถวมีตัวซ้ำ → playwright ปฏิเสธ test title ซ้ำก่อนเทียบอะไรเลย) — แก้ idempotency ที่เดียวไม่พอ ต้องไล่ทุกที่ที่มีรูปแบบเดียวกัน
+3. มิวแทนต์ `ArcElement` ครั้งแรกลบแบบ first-match ไปโดน**บรรทัด import** → `register()` ได้ `undefined` → โมดูลพังตอนโหลด → vitest พิมพ์ `"no tests"` · **`"no tests"` ไม่ใช่ guard ทำงาน** ต้องอ่านให้ออกว่ามิวแทนต์ตัวนั้นไม่ได้ทดสอบอะไรเลย
