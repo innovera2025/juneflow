@@ -124,10 +124,43 @@ export interface BaseChartOverrides {
  * Common themed tooltip/legend/scale defaults (charts.jsx:46-77). Pure function —
  * returns a fresh options object, merging the caller's tooltip/scales/root overrides.
  */
+/**
+ * Does this browser ask for reduced motion?
+ *
+ * WHY A CHART READS THIS. Chart.js animates on mount, so a screenshot taken while
+ * the animation is still running captures an intermediate frame. Measured at the G5
+ * gate: two captures of the same screen on the SAME stack differed by 684 px on
+ * alloc (the top edge of six bars) and 7,221 px on timeline (the whole S-curve and
+ * its point markers) — one pixel of bar height, one frame of easing. A screen that
+ * cannot be captured twice the same way cannot be a regression anchor.
+ *
+ * The fix is the setting that already means "do not animate at me", not a test-only
+ * branch: the gate captures with reducedMotion 'reduce' (the visual playwright
+ * config) and a real user who sets it gets the same still chart. Everyone else keeps
+ * the animation the prototype has.
+ *
+ * The try/catch is the whole guard, and it is load-bearing rather than decorative:
+ * matchMedia is ABSENT in the node test environment, so calling it throws, and a
+ * chart that threw there would take the whole suite with it. A separate typeof check
+ * was written here first and removed — a mutation run showed it changed no outcome,
+ * because the catch already covers the same case, and two mechanisms for one guard
+ * is one more than can be kept true.
+ */
+export function prefersReducedMotion(): boolean {
+  try {
+    return globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
 export function baseChartOpts(t: ChartTheme, opts: BaseChartOverrides = {}): ChartOptions {
   return {
     responsive: true,
     maintainAspectRatio: false,
+    // See prefersReducedMotion above: false stills the chart, `undefined` leaves
+    // Chart.js's own default alone rather than re-specifying it here.
+    animation: prefersReducedMotion() ? false : undefined,
     plugins: {
       legend: { display: false },
       tooltip: {
