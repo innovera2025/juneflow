@@ -52,8 +52,11 @@ vi.mock("../../shell/page", () => ({
 
 // Chart.js needs a canvas; capture the config instead of drawing it.
 vi.mock("../../ui/chart", () => ({
-  // baseChartOpts is echoed rather than stubbed to {} so the assertions below can read
-  // what the screen actually asked for — the animation flag in particular.
+  // baseChartOpts echoes the caller's overrides back rather than being stubbed to {},
+  // so a test can read exactly what this screen asked the shared helper to CHANGE —
+  // and, by what is absent, prove it delegates the rest instead of hand-rolling it.
+  // What this cannot observe is anything the real baseChartOpts adds (the animation
+  // flag included); that runs in chart.test.tsx against the real function.
   baseChartOpts: (_t: unknown, opts: Record<string, unknown>) => opts,
   ChartCanvas: ({ build }: {
     build: (t: Record<string, string>) => {
@@ -107,6 +110,25 @@ describe("the backed content", () => {
   it("feeds the chart the same served categories", () => {
     render();
     expect(h.chartLabels).toEqual(["Site Preparation", "Structural Works"]);
+  });
+
+  it("delegates every chart default to baseChartOpts and overrides only its own scales", () => {
+    render();
+    // The mock hands back exactly the overrides the screen passed, so this object IS
+    // alloc's whole request. One key means everything else — responsive,
+    // maintainAspectRatio, legend, tooltip, and the animation flag B-431 added — comes
+    // from the shared helper. Revert alloc.tsx to the hand-rolled options object and
+    // those keys reappear here, so this line goes red.
+    expect(Object.keys(h.chartOptions)).toEqual(["scales"]);
+
+    const scales = h.chartOptions.scales as {
+      x: { ticks: { color: string } };
+      y: { beginAtZero: boolean; grid: { color: string } };
+    };
+    // Bound to the theme the screen was handed, not to literals of its own.
+    expect(scales.x.ticks.color).toBe("#t");
+    expect(scales.y.grid.color).toBe("#g");
+    expect(scales.y.beginAtZero).toBe(true);
   });
 
   it("totals the columns and shows the overall percentage", () => {
