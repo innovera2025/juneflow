@@ -27,9 +27,11 @@ import {
   Chart,
   BarController,
   LineController,
+  DoughnutController,
   BarElement,
   LineElement,
   PointElement,
+  ArcElement,
   LinearScale,
   CategoryScale,
   Tooltip,
@@ -40,13 +42,25 @@ import {
 } from "chart.js";
 
 // Scoped registration (module load) — only the controllers/elements/scales/plugins
-// the composed bar+line dashboard chart needs. chart.js dedups repeat registration.
+// the app's charts actually need. chart.js dedups repeat registration.
+//
+// SCOPED REGISTRATION HAS A COST, AND B-445 IS WHAT IT LOOKS LIKE. Registering a
+// subset keeps the bundle small, but a screen that asks for an UNREGISTERED type
+// does not degrade — Chart.js throws `"doughnut" is not a registered controller`
+// during render and React unmounts the whole screen. sales.dashboard shipped that
+// way and rendered a 32-character body in the real browser while every gate stayed
+// green: the unit tests mock ChartCanvas, E2E is API-level, and G5 had no row for
+// it. So a new chart TYPE is a change to this list, not only to the screen —
+// chart-registry.enforce.test.ts is what makes that mechanical instead of
+// remembered.
 Chart.register(
   BarController,
   LineController,
+  DoughnutController,
   BarElement,
   LineElement,
   PointElement,
+  ArcElement,
   LinearScale,
   CategoryScale,
   Tooltip,

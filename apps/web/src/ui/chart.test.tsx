@@ -19,13 +19,22 @@ const hoisted = vi.hoisted(() => {
   return { destroy, ctor };
 });
 
+// This factory must list every symbol chart.tsx imports: an absent one arrives as
+// undefined and the module fails at load, taking the whole file with it ("no tests"
+// rather than a failed assertion). That is how adding DoughnutController/ArcElement
+// for B-445 surfaced here — worth knowing, because the error names chart.tsx's import
+// line and reads like a defect in the source rather than in this list.
+// The registry itself is enforced against real chart.js in chart-registry.enforce.test.ts,
+// which does NOT mock it — these stubs would happily "register" anything.
 vi.mock("chart.js", () => ({
   Chart: Object.assign(hoisted.ctor, { register: vi.fn() }),
   BarController: {},
   LineController: {},
+  DoughnutController: {},
   BarElement: {},
   LineElement: {},
   PointElement: {},
+  ArcElement: {},
   LinearScale: {},
   CategoryScale: {},
   Tooltip: {},
