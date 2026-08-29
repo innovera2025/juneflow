@@ -81,6 +81,8 @@ export interface ChartTheme {
   accent: string;
   ok: string;
   warn: string;
+  /** --info. Added for B-446 — the doughnut's "sold" segment needs it RESOLVED. */
+  info: string;
   danger: string;
   surface: string;
   border: string;
@@ -115,6 +117,7 @@ export function chartTheme(): ChartTheme {
     accent: cs.getPropertyValue("--accent").trim() || "#0F766E",
     ok: cs.getPropertyValue("--ok").trim() || "#15803D",
     warn: cs.getPropertyValue("--warn").trim() || "#B45309",
+    info: cs.getPropertyValue("--info").trim() || "#3B6FB0",
     danger: cs.getPropertyValue("--danger").trim() || "#B91C1C",
     surface: cs.getPropertyValue("--surface").trim() || "#FFFFFF",
     border: cs.getPropertyValue("--border").trim() || "#E4E8EC",
@@ -126,6 +129,18 @@ export function chartTheme(): ChartTheme {
     radius: px("--r-md", 8),
   };
 }
+
+/**
+ * The COLOUR fields of ChartTheme — the ones safe to hand to a canvas.
+ *
+ * Exists so a screen can key a lookup table by theme field (see sales-dashboard's
+ * STATUS_TOKEN) and have the compiler reject `font`, `fsTable`, `fsTh` or `radius`,
+ * which are a font stack and three numbers and would be nonsense as a fill colour.
+ */
+export type ChartColorKey = Exclude<
+  { [K in keyof ChartTheme]: ChartTheme[K] extends string ? K : never }[keyof ChartTheme],
+  "font"
+>;
 
 /** Per-call overrides merged by baseChartOpts (charts.jsx:46 `opts`). */
 export interface BaseChartOverrides {

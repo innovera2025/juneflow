@@ -42,7 +42,7 @@ import type { PhraseKey } from "@juneflow/i18n";
 import { Card } from "../../ui/card";
 import { Btn } from "../../ui/button";
 import { Icon } from "../../ui/icon";
-import { ChartCanvas, baseChartOpts } from "../../ui/chart";
+import { ChartCanvas, baseChartOpts, type ChartTheme, type ChartColorKey } from "../../ui/chart";
 import { Page } from "../../shell/page";
 import {
   awaitingTransfer,
@@ -74,14 +74,37 @@ const DASH = "—";
 
 const P = (k: keyof typeof strings): PhraseKey => strings[k] as PhraseKey;
 
-/** The prototype's own colour per unit status (sales-crm.jsx L74-78), as tokens. */
-const STATUS_TONE: Record<UnitStatus, string> = {
-  soldBuilt: "var(--ok)",
-  sold: "var(--info)",
-  booked: "var(--warn)",
-  built: "var(--accent)",
-  empty: "var(--surface-3)",
+/**
+ * The prototype's own colour per unit status (sales-crm.jsx L74-78), as tokens.
+ *
+ * TWO SPELLINGS OF ONE TABLE, AND B-446 IS WHY THERE ARE TWO. The legend swatches are
+ * DOM nodes, where `var(--ok)` resolves. The doughnut is a CANVAS, where it does not:
+ * `fillStyle = "var(--ok)"` is an invalid assignment, canvas silently ignores it, and
+ * the segment keeps its initial black. The screen shipped that way and the first G5
+ * capture caught it — a chart with five solid-black arcs beside a legend showing the
+ * five correct colours, with no console error anywhere, because nothing threw.
+ *
+ * So the canvas gets values already resolved by chartTheme(). Keeping ONE table keyed
+ * by token name and deriving both spellings from it is the point: a future status
+ * added to one list and not the other is a compile error, not a black wedge.
+ */
+const STATUS_TOKEN: Record<UnitStatus, { css: string; theme: ChartColorKey }> = {
+  soldBuilt: { css: "--ok", theme: "ok" },
+  sold: { css: "--info", theme: "info" },
+  booked: { css: "--warn", theme: "warn" },
+  built: { css: "--accent", theme: "accent" },
+  empty: { css: "--surface-3", theme: "grid" },
 };
+
+/** DOM spelling — legend swatches, where CSS custom properties resolve. */
+const STATUS_TONE: Record<UnitStatus, string> = Object.fromEntries(
+  (Object.keys(STATUS_TOKEN) as UnitStatus[]).map((s) => [s, `var(${STATUS_TOKEN[s].css})`]),
+) as Record<UnitStatus, string>;
+
+/** Canvas spelling — resolved through the same token read every other chart uses. */
+export function statusChartTone(theme: ChartTheme, s: UnitStatus): string {
+  return theme[STATUS_TOKEN[s].theme];
+}
 
 /** The prototype's own colour per funnel stage (sales-crm.jsx L100-105). */
 const STAGE_TONE: Record<string, string> = {
@@ -229,7 +252,8 @@ export function SalesDashboard() {
                   datasets: [
                     {
                       data: UNIT_STATUS_ORDER.map((s) => statusCounts[s]),
-                      backgroundColor: UNIT_STATUS_ORDER.map((s) => STATUS_TONE[s]),
+                      // Resolved, NOT `var(--…)` — see STATUS_TOKEN above (B-446).
+                      backgroundColor: UNIT_STATUS_ORDER.map((s) => statusChartTone(theme, s)),
                       borderWidth: 0,
                     },
                   ],

@@ -340,6 +340,7 @@ describe("buildBudgetActualConfig", () => {
     brandSoft: "#E8EEF6",
     accent: "#0F766E",
     ok: "#15803D",
+    info: "#3B6FB0",
     warn: "#B45309",
     danger: "#B91C1C",
     surface: "#FFFFFF",

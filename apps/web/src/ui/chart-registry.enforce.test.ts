@@ -101,4 +101,28 @@ describe("every chart type a screen asks for is registered (B-445)", () => {
   it("doughnut specifically resolves — the one B-445 shipped broken", () => {
     expect(() => Chart.registry.getController("doughnut")).not.toThrow();
   });
+
+  it("resolves each type's ELEMENT too — a controller alone is not enough", () => {
+    // GATE 4.5 FOUND THIS HOLE BY MUTATION, and it is worth stating precisely:
+    // dropping ONLY `ArcElement` while keeping DoughnutController left all the
+    // controller assertions green, and the screen still rendered blank — chart.js
+    // throws `arc is not a registered element` from registry.getElement() at dataset
+    // init. Half a registration is the same blank page as none of it, so the guard
+    // has to walk the second half too.
+    const missing: string[] = [];
+    for (const type of new Set(requested.map((r) => r.type))) {
+      const ctrl = Chart.registry.getController(type) as unknown as {
+        defaults?: { dataElementType?: string | { id?: string } };
+      };
+      const el = ctrl.defaults?.dataElementType;
+      const id = typeof el === "string" ? el : el?.id;
+      if (!id) continue; // a controller that declares no element type has nothing to check
+      try {
+        Chart.registry.getElement(id);
+      } catch {
+        missing.push(`${id} (needed by "${type}")`);
+      }
+    }
+    expect(missing, `unregistered chart elements: ${missing.join(" · ")}`).toEqual([]);
+  });
 });
