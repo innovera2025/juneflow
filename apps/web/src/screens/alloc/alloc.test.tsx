@@ -57,7 +57,13 @@ vi.mock("../../ui/chart", () => ({
   // and, by what is absent, prove it delegates the rest instead of hand-rolling it.
   // What this cannot observe is anything the real baseChartOpts adds (the animation
   // flag included); that runs in chart.test.tsx against the real function.
-  baseChartOpts: (_t: unknown, opts: Record<string, unknown>) => opts,
+  //
+  // __viaHelper is a sentinel only this mock can produce, so its presence proves the
+  // helper was CALLED. Without it the key-count assertion catches a revert to the old
+  // hand-rolled block but not a hand-rolled `{scales}` — one key, right values, no
+  // call — which silently drops animation:false and brings back the 684 px capture
+  // nondeterminism this whole branch exists to remove.
+  baseChartOpts: (_t: unknown, opts: Record<string, unknown>) => ({ ...opts, __viaHelper: true }),
   ChartCanvas: ({ build }: {
     build: (t: Record<string, string>) => {
       data: { labels: string[] };
@@ -114,12 +120,13 @@ describe("the backed content", () => {
 
   it("delegates every chart default to baseChartOpts and overrides only its own scales", () => {
     render();
-    // The mock hands back exactly the overrides the screen passed, so this object IS
-    // alloc's whole request. One key means everything else — responsive,
-    // maintainAspectRatio, legend, tooltip, and the animation flag B-431 added — comes
-    // from the shared helper. Revert alloc.tsx to the hand-rolled options object and
-    // those keys reappear here, so this line goes red.
-    expect(Object.keys(h.chartOptions)).toEqual(["scales"]);
+    // Two independent facts about alloc.tsx, neither of them a property of the mock.
+    // __viaHelper can only come from baseChartOpts, so it proves the call HAPPENED;
+    // "scales" being the only other key proves everything else — responsive,
+    // maintainAspectRatio, legend, tooltip, and the animation flag B-431 added — is
+    // delegated rather than spelled out on the screen. Revert to the hand-rolled block
+    // and the extra keys reappear; hand-roll just `{scales}` and the sentinel vanishes.
+    expect(Object.keys(h.chartOptions).sort()).toEqual(["__viaHelper", "scales"]);
 
     const scales = h.chartOptions.scales as {
       x: { ticks: { color: string } };

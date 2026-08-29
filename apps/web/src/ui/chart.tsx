@@ -121,10 +121,6 @@ export interface BaseChartOverrides {
 }
 
 /**
- * Common themed tooltip/legend/scale defaults (charts.jsx:46-77). Pure function —
- * returns a fresh options object, merging the caller's tooltip/scales/root overrides.
- */
-/**
  * Does this browser ask for reduced motion?
  *
  * WHY A CHART READS THIS. Chart.js animates on mount, so a screenshot taken while
@@ -154,6 +150,10 @@ export function prefersReducedMotion(): boolean {
   }
 }
 
+/**
+ * Common themed tooltip/legend/scale defaults (charts.jsx:46-77). Pure function —
+ * returns a fresh options object, merging the caller's tooltip/scales/root overrides.
+ */
 export function baseChartOpts(t: ChartTheme, opts: BaseChartOverrides = {}): ChartOptions {
   return {
     responsive: true,
