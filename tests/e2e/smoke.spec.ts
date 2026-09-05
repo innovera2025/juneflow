@@ -14,6 +14,74 @@ import { test, expect, request } from "@playwright/test";
 
 const API_URL = process.env.E2E_API_URL ?? "http://localhost:3000";
 
+// --- attachment redaction --------------------------------------------------
+// Responses are attached verbatim on purpose: the default artefact shows only
+// Expected/Received, which cannot tell "wrong process on the port" from "api
+// down". But POST /auth/login answers with a LIVE bearer credential (apps/api
+// routes/auth.ts `token: signedIn.token` — the very string the bundle then
+// sends as `Authorization: Bearer`), and an attachment outlives the run once a
+// runner copies test-results out. With E2E_LOGIN_EMAIL/E2E_LOGIN_PASSWORD
+// pointed at a real environment, that would be a usable account token sitting
+// in a CI artefact — so the credential is removed before it is attached, and
+// the diagnostic value (status, headers, body shape) is kept.
+//
+// Two independent nets, because the mint shape is not fixed (compose answers an
+// opaque 32-char better-auth token; a JWT elsewhere) and neither alone covers:
+//   1. any STRING under a credential-shaped key, at any depth — `token`, a
+//      relocated `data.session.accessToken`, a `set-cookie` header;
+//   2. anything JWT-shaped anywhere in the text — a token under a key this list
+//      does not know, and one inside a body that is not JSON at all (a proxy
+//      page, a truncated body), where net 1 cannot reach.
+// Deliberately NOT redacted: non-string values under those keys. `"token": null`
+// (or absent) is exactly what the "did not mint" assertion reports, and a null
+// is not a credential. A blob with nothing to redact is attached byte-identical.
+const CREDENTIAL_KEY =
+  /token|password|passwd|secret|credential|authorization|cookie|api[-_]?key|passphrase/i;
+const JWT_SHAPED = /\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]+)?/g;
+
+/** Replace string leaves under credential-shaped keys, keeping type + length. */
+function redactCredentialStrings(value: unknown, underCredentialKey: boolean): unknown {
+  if (typeof value === "string") {
+    return underCredentialKey ? `[redacted string(${value.length})]` : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactCredentialStrings(item, underCredentialKey));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        redactCredentialStrings(item, CREDENTIAL_KEY.test(key)),
+      ]),
+    );
+  }
+  return value;
+}
+
+/** A response body (or header blob) with any live credential removed. */
+function redactSecrets(text: string): string {
+  let out = text;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const redacted = JSON.stringify(redactCredentialStrings(parsed, false));
+    // Swap only when something actually changed, so a credential-free blob — an
+    // Error envelope, an HTML fallback — reaches the report untouched.
+    if (redacted !== JSON.stringify(parsed)) out = redacted;
+  } catch {
+    /* not JSON (SPA fallback HTML / a foreign listener's page) — net 2 only */
+  }
+  return out.replace(JWT_SHAPED, "[redacted jwt]");
+}
+
+/** The attachment shape used below: status + headers + body head, redacted. */
+function responseDigest(
+  status: number,
+  headers: Record<string, string>,
+  body: string,
+): string {
+  return `${status} ${redactSecrets(JSON.stringify(headers))}\n${redactSecrets(body).slice(0, 300)}`;
+}
+
 test.describe("smoke: compose dev reachability (G4)", () => {
   test("web root serves 200 and Playwright loads the document", async ({ page }) => {
     // baseURL comes from playwright.config.ts (E2E_BASE_URL, default :5173).
@@ -34,7 +102,7 @@ test.describe("smoke: compose dev reachability (G4)", () => {
       const body = await res.text();
       await test.info().attach("health-response", {
         contentType: "text/plain",
-        body: `${res.status()} ${JSON.stringify(res.headers())}\n${body.slice(0, 300)}`,
+        body: responseDigest(res.status(), res.headers(), body),
       });
       expect(res.status()).toBe(200);
       expect(
@@ -216,7 +284,7 @@ test.describe("smoke: SPA ↔ api wiring through the web origin (G4 default mode
       const body = await res.text();
       await test.info().attach("me-unauthenticated-response", {
         contentType: "text/plain",
-        body: `${res.status()} ${JSON.stringify(res.headers())}\n${body.slice(0, 300)}`,
+        body: responseDigest(res.status(), res.headers(), body),
       });
       expect(
         res.status(),
@@ -247,13 +315,15 @@ test.describe("smoke: SPA ↔ api wiring through the web origin (G4 default mode
         data: { email: LOGIN_EMAIL, password: LOGIN_PASSWORD },
       });
       const body = await login.text();
+      // Redacted: this body carries the live bearer credential (see
+      // redactSecrets above) — everything else about it stays readable.
       await test.info().attach("login-response", {
         contentType: "text/plain",
-        body: `${login.status()} ${JSON.stringify(login.headers())}\n${body.slice(0, 300)}`,
+        body: responseDigest(login.status(), login.headers(), body),
       });
       expect(
         login.status(),
-        `POST ${baseURL}/api/v1/auth/login returned ${login.status()} (expected 200) for ${LOGIN_EMAIL} — 401 = that credential is not in auth_account (seed packages/db/src/seed/index.ts:1131-1145 · B-419 rehash? set E2E_LOGIN_EMAIL/E2E_LOGIN_PASSWORD) · 405/200-with-HTML = the SPA fallback answered the API (B-304) · 5xx = api/DB failure (S4-P0). Body: ${body.slice(0, 200)}`,
+        `POST ${baseURL}/api/v1/auth/login returned ${login.status()} (expected 200) for ${LOGIN_EMAIL} — 401 = that credential is not in auth_account (seed packages/db/src/seed/index.ts:1131-1145 · B-419 rehash? set E2E_LOGIN_EMAIL/E2E_LOGIN_PASSWORD) · 405/200-with-HTML = the SPA fallback answered the API (B-304) · 5xx = api/DB failure (S4-P0). Body: ${redactSecrets(body).slice(0, 200)}`,
       ).toBe(200);
       expect(
         login.headers()["content-type"],
