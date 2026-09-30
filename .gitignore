@@ -58,3 +58,14 @@ BLOCKERS 2.md
 *state.json
 *storage-state.json
 *auth-state.json
+
+# --- credential-bearing test material (2026-09-07) -----------------------------
+# The hand-test manual and its workbook now carry the LIVE staging login for all
+# 12 seed accounts, because a tester needs to read one row and sign in. This repo
+# is public, so a single `git add -A` would publish that password to GitHub — the
+# exact shape of B-419, which cost a rotation on a box that was already on the
+# internet. Ignore the material, not just these two names: anything under the
+# recon folder that is a manual or a workbook is assumed to carry credentials.
+/agents/orch-b-recon/user-test-manual.md
+/agents/orch-b-recon/*-manual.md
+/agents/orch-b-recon/*.xlsx
